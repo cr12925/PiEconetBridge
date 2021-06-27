@@ -71,6 +71,7 @@ struct econet_hosts {							// what we we need to find a beeb?
 	char serverparam[1024];
 	int pind; /* Index into pset for this host, if it has a socket */
 	unsigned long seq;
+	int fileserver_index;
 };
 
 struct econet_hosts network[65536]; // Hosts we know about / listen for / bridge for
@@ -108,7 +109,7 @@ struct printjob {
 struct printjob printjobs[MAXPRINTJOBS];
 
 // Local bridge query status
-int bridge_query = 1;
+int bridge_query = 0; // Disabled temporarily - the code has a bug
 
 void econet_readconfig(void) 
 {
@@ -672,8 +673,11 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 	}
 	else if (a->p.aun_ttype == ECONET_AUN_DATA) // Data packet
 	{
-		// We really only handle print serving at the moment
-		if ((a->p.port == 0x9f) && ((network[d_ptr].servertype) & ECONET_SERVER_PRINT) && (!strncmp((const char *)&(a->p.data), "PRINT", 5)))
+		if ((a->p.port == 0x99) && ((network[d_ptr].servertype) & ECONET_SERVER_FILE)))
+		{
+			handle_fs_traffic (network[d_ptr].fileserver_index, a->p.srcnet, a->p.srcstn, a->p.ctrl, &(a->p.data), packlen-12);
+		}
+		else if ((a->p.port == 0x9f) && ((network[d_ptr].servertype) & ECONET_SERVER_PRINT) && (!strncmp((const char *)&(a->p.data), "PRINT", 5)))
 		{
 			int count, found;; 
 		
