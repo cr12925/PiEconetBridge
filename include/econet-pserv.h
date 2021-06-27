@@ -17,6 +17,7 @@
 #ifndef __ECONETPSERV_H__
 #define __ECONETPSERV_H__
 
+#define MAILCMDSPEC "/usr/sbin/sendmail %s < %s"
 #define PRINTCMDSPEC "/usr/bin/lp -s -o sides=two-sided-long-edge -d %s %s"
 #define SPOOLFILESPEC "/tmp/econet-gpio-printjob-%d"
 #define PRINTHEADER "*** Pi Econet AUN Bridge Print Server***\n\r*** Print job from station %d.%d ***\n\n\r"
