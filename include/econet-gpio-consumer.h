@@ -130,7 +130,8 @@ struct __econet_packet_udp {
 #define ECONETGPIO_IOC_AVAIL		_IOR(ECONETGPIO_MAGIC, 2, int) /* Read size of next available packet, or -1 if nothing available  */
 #define ECONETGPIO_IOC_FLAGFILL		_IOW(ECONETGPIO_MAGIC, 4, int) /* Set or clear Flag Fill */
 #define ECONETGPIO_IOC_SET_STATIONS	_IOW(ECONETGPIO_MAGIC, 5, unsigned char*) /* Bitmap for stations we are interested in on AUN */
-#define ECONETGPIO_IOC_AUNMODE		_IOW(ECONETGPIO_MAGIC, 6, int) /* Bitmap for stations we are interested in on AUN */
+#define ECONETGPIO_IOC_AUNMODE		_IOW(ECONETGPIO_MAGIC, 6, int) /* Turn AUN mode (4-way handshake) on / off */
+#define ECONETGPIO_IOC_IMMSPOOF		_IOW(ECONETGPIO_MAGIC, 7, int) /* Turn in-kernel immediate spoofing for wire stations on/off  */
 
 /* The following are for debugging and testing only, and only with interrupts off */
 #define ECONETGPIO_IOC_SETA		_IOW(ECONETGPIO_MAGIC, 100, int) /* bit0 is A0, bit1 is A1 */

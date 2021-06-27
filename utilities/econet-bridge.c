@@ -70,6 +70,7 @@ struct econet_hosts {							// what we we need to find a beeb?
 	short servertype;
 	char serverparam[1024];
 	int pind; /* Index into pset for this host, if it has a socket */
+	unsigned long seq;
 };
 
 struct econet_hosts network[65536]; // Hosts we know about / listen for / bridge for
@@ -333,6 +334,7 @@ void econet_readconfig(void)
 
 			network[networkp].type = ECONET_HOSTTYPE_LOCAL_AUN;
 			network[networkp].servertype = servertype;
+			network[networkp].seq = 0x00004000;
 
 			strcpy(network[networkp].serverparam, datastring);
 
@@ -431,6 +433,7 @@ void econet_readconfig(void)
                         }
 
                         network[networkp].pind = pmax;
+			network[networkp].seq = 0x00004000;
 
                         fd_ptr[network[networkp].listensocket] = networkp; // Create the index to find a station from its FD
 
@@ -630,7 +633,8 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 		if (a->p.ctrl == 0x88) // Machinepeek
 		{
 			a->p.aun_ttype = ECONET_AUN_IMMREP;
-			a->p.seq = (local_seq += 4);
+			//a->p.seq = (local_seq += 4);
+			a->p.seq = (network[d_ptr].seq += 4);
 			a->p.data[0] = ADVERTISED_MACHINETYPE & 0xff;
 			a->p.data[1] = (ADVERTISED_MACHINETYPE & 0xff00) >> 8;
 			a->p.data[2] = ADVERTISED_VERSION & 0xff;
@@ -641,11 +645,29 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 	}
 	else if (a->p.aun_ttype == ECONET_AUN_BCAST) // Broadcast - See if we need to do a bridge query reply
 	{
-		if (bridge_query && (a->p.port == 0x9c) && (!strncmp("BRIDGE", (const char *) a->p.data, 6)))
+		if (bridge_query && (a->p.port == 0x9c) && (!strncmp("BRIDGE", (const char *) a->p.data, 6)) && bridge_query && localnet)
 		{
+			short query_net, reply_port;
+			struct __econet_packet_udp reply;
+
+			reply_port = a->p.data[6];
+			query_net = a->p.data[7];
+	
 			if (pkt_debug)
-				fprintf (stderr, "LOC  : BRIDGE     from %3d.%3d\n", a->p.srcnet, a->p.srcstn);
-			// Process bridge query here
+				fprintf (stderr, "LOC  : BRIDGE     from %3d.%3d, query 0x%02x, reply port 0x%02x, query net %d\n", a->p.srcnet, a->p.srcstn, a->p.ctrl, reply_port, query_net);
+
+			if (a->p.ctrl == 0x82 || (a->p.ctrl == 0x83 && (ip_networklist[query_net] == 0xff))) // Either a local network number query, or a query for a network in our known distant list
+			{
+				reply.p.ptype = ECONET_AUN_DATA;
+				reply.p.port = reply_port;
+				reply.p.ctrl = a->p.ctrl;
+				reply.p.pad = 0x00;
+				reply.p.seq = (local_seq += 4); // local_seq now used for bridge responses
+				reply.p.data[0] = (a->p.ctrl == 0x82) ? localnet : query_net;
+				reply.p.data[1] = 0x20; // Fake version number
+				aun_send (&reply, 10, network[d_ptr].network, network[d_ptr].station, network[s_ptr].network, network[s_ptr].station); // We're replying, so we pick up the destination of the original packet as source.
+			}
+	
 		}
 	}
 	else if (a->p.aun_ttype == ECONET_AUN_DATA) // Data packet
@@ -680,7 +702,8 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 				reply.p.port = 0x9e;
 				reply.p.ctrl = 0x80;
 				reply.p.pad = 0x00;
-				reply.p.seq = (local_seq += 4);
+				//reply.p.seq = (local_seq += 4);
+				reply.p.seq = (network[d_ptr].seq += 4);
 				reply.p.data[0] = 0x00;
 
 				aun_send (&reply, 9, network[d_ptr].network, network[d_ptr].station, network[s_ptr].network, network[s_ptr].station); // We're replying, so we pick up the destination of the original packet as source.
@@ -697,6 +720,11 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 				else
 				{
 					fprintf (stderr, "PRINT: Starting spooler job for %d.%d - %s\n", a->p.srcnet, a->p.srcstn, network[d_ptr].serverparam);
+					if (strstr(network[d_ptr].serverparam, "@")) // Email print job, not send to printer
+					{
+						fprintf(printjobs[count].spoolfile, "To: %s\n", network[d_ptr].serverparam);
+						fprintf(printjobs[count].spoolfile, "Subject: Econet print job from station %d.%d\n\n", a->p.srcnet, a->p.srcstn);
+					}
 					fprintf (printjobs[count].spoolfile, PRINTHEADER, a->p.srcnet, a->p.srcstn);
 				}
 				
@@ -727,7 +755,8 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 				printjobs[count].ctrl ^= 0x01;
 
 				reply.p.pad = 0x00;
-				reply.p.seq = (local_seq += 4);
+				//reply.p.seq = (local_seq += 4);
+				reply.p.seq = (network[d_ptr].seq += 4);
 
 				switch (a->p.ctrl)
 				{
@@ -759,7 +788,10 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 						fclose(printjobs[count].spoolfile);
 						sprintf(filename_string, SPOOLFILESPEC, found);
 						
-						sprintf(command_string, PRINTCMDSPEC, network[d_ptr].serverparam, filename_string);
+						if (strstr(network[d_ptr].serverparam, "@")) // Email address not printername
+							sprintf(command_string, MAILCMDSPEC, network[d_ptr].serverparam, filename_string);
+						else
+							sprintf(command_string, PRINTCMDSPEC, network[d_ptr].serverparam, filename_string);
 
 						fprintf (stderr, "PRINT: Sending print job with %s\n", command_string);
 						
@@ -845,27 +877,45 @@ int aun_send (struct __econet_packet_udp *p, int len, short srcnet, short srcstn
 		{
 
 			struct pollfd ack;
+			short acknowledged = 0;
+			short count = 0;
 
-			n.sin_family = AF_INET;
-			n.sin_port = htons(network[d].port);
-			n.sin_addr = network[d].s_addr;
-			
-			p->p.ctrl &= 0x7f; // Strip high bit from control - apparently that happens on UDP
-
-			if (w.p.aun_ttype != ECONET_AUN_BCAST) // Need to work on sending broadcasts on AUN
-				result = sendto(network[s].listensocket, p, len, MSG_DONTWAIT, (struct sockaddr *)&n, sizeof(n));
-
-			// Wait for Ack here
-
-			ack.fd = network[s].listensocket;
-			ack.events = POLLIN;
-
-			if ((poll(&ack, 1, 300)) && (ack.revents & POLLIN))
+			while (count < 3 && !acknowledged)
 			{
-				char data[100];
+				n.sin_family = AF_INET;
+				n.sin_port = htons(network[d].port);
+				n.sin_addr = network[d].s_addr;
+			
+				p->p.ctrl &= 0x7f; // Strip high bit from control - apparently that happens on UDP
 
-				read(network[s].listensocket, &data, 100);
+				if (w.p.aun_ttype != ECONET_AUN_BCAST) // Need to work on sending broadcasts on AUN
+					result = sendto(network[s].listensocket, p, len, MSG_DONTWAIT, (struct sockaddr *)&n, sizeof(n));
+
+				// Wait for Ack here if it was a data packet
+	
+				if (w.p.aun_ttype == ECONET_AUN_DATA)
+				{
+					ack.fd = network[s].listensocket;
+					ack.events = POLLIN;
+
+					if ((poll(&ack, 1, 300)) && (ack.revents & POLLIN))
+					{
+						struct __econet_packet_udp data;
+
+						read(network[s].listensocket, &data, 100);
+			
+						if (data.p.ptype == ECONET_AUN_ACK && data.p.seq == w.p.seq)
+							acknowledged = 1;
+					}
+				}
+				else	acknowledged = 1; // Fake this to get out of the loop
+	
+				count++;
+
 			}
+
+	
+			if (!acknowledged) fprintf(stderr, "ERROR: to %3d.%3d from %3d.%3d - No AUN acknowledment received\n", dstnet, dststn, srcnet, srcstn);
 		
 				
 		}
@@ -1020,6 +1070,7 @@ Options:\n\
 	}
 
 	ioctl(econet_fd, ECONETGPIO_IOC_SET_STATIONS, &econet_stations);
+	ioctl(econet_fd, ECONETGPIO_IOC_IMMSPOOF, 1);
 	
 	pset[pmax].fd = econet_fd;
 
@@ -1046,6 +1097,7 @@ Options:\n\
 				if (s < 12)
 					fprintf(stderr, "Runt packet length %d received off Econet wire\n", s);
 	
+				rx.p.seq = (network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].seq += 4);
 				aun_send((struct __econet_packet_udp *)&(rx.raw[4]), s-4, rx.p.srcnet, rx.p.srcstn, rx.p.dstnet, rx.p.dststn); // Deals with sending to local hosts
 			}
 		}

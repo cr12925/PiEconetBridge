@@ -266,6 +266,32 @@ void econet_gpio_release_pins(void)
 
 }
 
+/* Probe the hardware, once GPIOs obtained */
+int econet_probe_adapter(void)
+{
+	// put CS low, high and then low again and on each occasion
+	// check that the matching signal comes back on the /CS return line
+	// thus showing that there is a D-Type there with a working clock
+
+	econet_set_cs(0);
+	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
+	if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
+		return 0;
+
+	econet_set_cs(1);
+	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
+	if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) == 0)
+		return 0;
+
+	econet_set_cs(0);
+	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
+	if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
+		return 0;
+
+	return 1;
+
+}
+
 /* Set up GPIO region */
 
 unsigned short econet_gpio_init(void)
@@ -327,17 +353,8 @@ unsigned short econet_gpio_init(void)
 
 	gpio_direction_input(econet_gpio_pins[EGP_IRQ]);
 
-	econet_data->irq = gpio_to_irq(econet_gpio_pins[EGP_IRQ]);
-
-	if ((econet_data->irq < 0) || ((err = request_irq(econet_data->irq, econet_irq, IRQF_SHARED | IRQF_TRIGGER_FALLING, THIS_MODULE->name, THIS_MODULE->name)) != 0))
-	{
-		printk (KERN_INFO "ECONET-GPIO: Failed to request IRQ on pin BCM %d\n", econet_gpio_pins[EGP_IRQ]);
-		econet_gpio_release_pins();
-		return err;
-	}
 
 	econet_data->irq_state = 1;
-	econet_irq_mode(0);
 
 #ifdef ECONET_GPIO_DEBUG_SETUP
 	printk (KERN_INFO "ECONET-GPIO: IRQ Successfully set up - IRQ %d\n", econet_data->irq);
@@ -358,24 +375,6 @@ unsigned short econet_gpio_init(void)
 		return 0;
 	}
 
-/*
-	request_region(GPIO_CLK_BASE, GPIO_CLK_RANGE, DEVICE_NAME);
-	GPIO_CLK = ioremap(GPIO_CLK_BASE, GPIO_CLK_RANGE);
-
-	if (GPIO_CLK)
-	{
-#ifdef ECONET_GPIO_DEBUG_SETUP
-		printk (KERN_INFO "ECONET-GPIO: GPIO Clock base remapped to 0x%08lx\n", (unsigned long) GPIO_CLK);
-#endif
-	}
-	else
-	{
-		printk (KERN_INFO "ECONET-GPIO: GPIO Clock base remap failed.\n");
-		release_region(GPIO_PERI_BASE, GPIO_RANGE);
-		return 0;
-	}
-*/
-	
 	/* Set up the pins */
 
         t = (readl(GPIO_PORT) & ~(0x707)) | 0x401;
@@ -412,41 +411,22 @@ unsigned short econet_gpio_init(void)
 
 	INP_GPIO(ECONET_GPIO_PIN_CSRETURN);
 
-	/* See if we can set up a clock... */
+	if (!econet_probe_adapter())
+	{
+		printk (KERN_ERR "ECONET-GPIO: Hardware not found.\n");
+		return -1;
+	}
 
-/* We don't bother doing this - there's a clock in the hardware now
-	fsel = (ECONET_GPIO_PIN_CLK) / 10;
-	reg = ECONET_GPIO_CLK_ALT_FUNCTION << ((ECONET_GPIO_PIN_CLK % 10) * 3); 
-	reg_mask = 0x07 << ((ECONET_GPIO_PIN_CLK % 10) * 3);
+	econet_data->irq = gpio_to_irq(econet_gpio_pins[EGP_IRQ]);
 
-#ifdef ECONET_GPIO_DEBUG_SETUP
-	printk (KERN_INFO "ECONET-GPIO: Clock fsel = %08lx, Reg = %08lx, Reg_Mask = %08lx\n", fsel, reg, reg_mask);
-#endif
-	t = (readl(GPIO_PORT + fsel) & ~reg_mask) | reg;
-	writel(t, GPIO_PORT + fsel);	
+	if ((econet_data->irq < 0) || ((err = request_irq(econet_data->irq, econet_irq, IRQF_SHARED | IRQF_TRIGGER_FALLING, THIS_MODULE->name, THIS_MODULE->name)) != 0))
+	{
+		printk (KERN_INFO "ECONET-GPIO: Failed to request IRQ on pin BCM %d\n", econet_gpio_pins[EGP_IRQ]);
+		econet_gpio_release_pins();
+		return err;
+	}
 
-	t = GPIOCLKPASSWD | GPIOCLKKILL;
-	writel(t, GPIO_CLK + GPIOCLK_GP0CTL); // Kill the clock
-
-	while (readl(GPIO_CLK + GPIOCLK_GP0CTL) & GPIOCLKBUSY)
-		udelay(10);
-
-	t = GPIOCLKPASSWD | ECONET_GPIO_CLOCKIDIV | ECONET_GPIO_CLOCKFDIV;
-	writel(t, GPIO_CLK + GPIOCLK_GP0DIV);
-
-#ifdef ECONET_GPIO_DEBUG_SETUP
-	printk (KERN_INFO "ECONET-GPIO: Wrote %08lx to %08lx\n", t, (GPIO_CLK + GPIOCLK_GP0DIV));
-#endif
-
-	udelay(10);
-
-	t = GPIOCLKPASSWD | GPIOCLKSRC_PLLD;
-	writel(t, GPIO_CLK + GPIOCLK_GP0CTL);
-
-	udelay(10);
-
-	writel(readl(GPIO_CLK + GPIOCLK_GP0CTL) | GPIOCLKPASSWD | GPIOCLKENABLE, (GPIO_CLK + GPIOCLK_GP0CTL));
-*/
+	econet_irq_mode(0);
 
 	return 1;
 }
@@ -454,11 +434,8 @@ unsigned short econet_gpio_init(void)
 void econet_gpio_release(void)
 {
 	iounmap(GPIO_PORT);
-	iounmap(GPIO_CLK);
-	//release_region(GPIO_PERI_BASE, GPIO_RANGE);
-	//release_region(GPIO_CLK_BASE, GPIO_CLK_RANGE);
+
 	GPIO_PORT = 0;
-	GPIO_CLK = 0;
 
 	/* IRQs off */
 
@@ -802,7 +779,8 @@ next_byte:
 				econet_pkt_tx.length = 0;
 				// Commented out to see if this is what causes the kernel panic
 				econet_data->tx_status = -ECONET_TX_UNDERRUN;
-				econet_data->aun_state = EA_IDLE; // Abort AUN transaction if there is one
+				econet_set_aunstate(EA_IDLE);
+				//econet_data->aun_state = EA_IDLE; // Abort AUN transaction if there is one
 				// Set up to read again
 				econet_set_read_mode();
 				return;
@@ -831,7 +809,8 @@ next_byte:
 				printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): TDRA not available on IRQ - SR1 = 0x%02x, SR2 = 0x%02x, ptr = %d, loopcount = %d - abort transmission\n", sr1, sr2, econet_pkt_tx.ptr, loopcount);
 				econet_pkt_tx.length = 0;
 				econet_data->tx_status = -ECONET_TX_TDRAFULL;
-				econet_data->aun_state = EA_IDLE; // Abort AUN transaction if there is one
+				econet_set_aunstate(EA_IDLE);
+				//econet_data->aun_state = EA_IDLE; // Abort AUN transaction if there is one
 				//spin_unlock(&econet_pkt_spin);
 				econet_set_read_mode();
 				return;
@@ -949,7 +928,8 @@ recv_more:
 				if (((ktime_get_ns() - econet_data->aun_last_tx) > 800000000) && (econet_data->aun_state != EA_IDLE)) // If not in IDLE state and last TX was a long time ago, go back to idle
 				{
 					printk (KERN_INFO "ECONET-GPIO: Last TX was too long ago. Moving back to AUN IDLE state.\n");
-					econet_data->aun_state = EA_IDLE;
+					econet_set_aunstate(EA_IDLE);
+					//econet_data->aun_state = EA_IDLE;
 				}
 
 				// Set up the bones of a reply just in case
@@ -976,79 +956,114 @@ recv_more:
 #ifdef ECONET_GPIO_DEBUG_AUN
 							printk (KERN_INFO "ECONET-GPIO: Immediate received from %d.%d, Ctrl 0x%02x\n", econet_pkt_rx.d.p.srcnet, econet_pkt_rx.d.p.srcstn, econet_pkt_rx.d.p.ctrl);
 #endif
-							switch (econet_pkt_rx.d.p.ctrl) // What sort of immediate?
+
+							// Are we spoofing immediate replies to wire stations? If not, flagfill and deliver to userspace
+							if (!(econet_data->spoof_immediate))
 							{
-								case 0x81: // Memory peek - Can probably return some garbage just to be nice
-								{
-									printk (KERN_INFO "ECONET-GPIO: Ignoring remote peek from %d.%d\n", econet_pkt_tx.d.p.dstnet, econet_pkt_tx.d.p.dststn);
-								}
-								break;
 
-								case 0x82: // Memory poke - definitely won't be doing that.
-								{
-									printk (KERN_INFO "ECONET-GPIO: Ignoring remote poke from %d.%d\n", econet_pkt_tx.d.p.dstnet, econet_pkt_tx.d.p.dststn);
-								}
-								break;
-
-								case 0x83: // Remote JSR - definitely won't want to be implementing this
-								{
-									printk (KERN_INFO "ECONET-GPIO: Ignoring remote JSR from %d.%d\n", econet_pkt_tx.d.p.dstnet, econet_pkt_tx.d.p.dststn);
-								}
-								break;
-
-								case 0x84: // User procedure call - definitely won't want to be implementing this
-								{
-									printk (KERN_INFO "ECONET-GPIO: Ignoring remote user procedure call from %d.%d\n", econet_pkt_tx.d.p.dstnet, econet_pkt_tx.d.p.dststn);
-								}
-								break;
-
-								case 0x86: // HALT - definitely won't want to be implementing this, but we can reply nicely I suppose
-								{
-									econet_flagfill();
-									econet_pkt_tx.ptr = 0;
-									econet_pkt_tx.length = 4;
-									
-									econet_data->aun_state = EA_I_WRITEREPLY;
-									econet_set_chipstate(EM_WRITE);
-									econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2);
-									printk (KERN_INFO "ECONET-GPIO: Ignored, but acknowledged, HALT from %d.%d\n", econet_pkt_tx.d.p.dstnet, econet_pkt_tx.d.p.dststn);
-								}
-								break;
-
-								case 0x87: // CONTINUE - definitely won't want to be implementing this, but we can reply nicely I suppose
-								{
-									econet_flagfill();
-									econet_pkt_tx.ptr = 0;
-									econet_pkt_tx.length = 4;
-									
-									econet_data->aun_state = EA_I_WRITEREPLY;
-									econet_set_chipstate(EM_WRITE);
-									econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2);
-									printk (KERN_INFO "ECONET-GPIO: Ignored, but acknowledged, CONTINUE from %d.%d\n", econet_pkt_tx.d.p.dstnet, econet_pkt_tx.d.p.dststn);
-								}
-								break;
-
-								case 0x88: // MachinePeek (which is actually the only thing implemented officially on AUN apparently)
-								{
-
-									econet_flagfill();
-									econet_pkt_tx.d.p.ctrl = (ADVERTISED_MACHINETYPE & 0xff);
-									econet_pkt_tx.d.p.port = (ADVERTISED_MACHINETYPE & 0xff00) >> 8;
-									econet_pkt_tx.d.p.data[0] = (ADVERTISED_VERSION & 0xff);
-									econet_pkt_tx.d.p.data[1] = (ADVERTISED_VERSION & 0xff00) >> 8;
-
-									econet_pkt_tx.ptr = 0;
-									econet_pkt_tx.length = 8;
-
-									econet_data->aun_state = EA_I_WRITEREPLY;
-									econet_set_chipstate(EM_WRITE);
-									econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2);
-#ifdef ECONET_GPIO_DEBUG_AUNIMM
-									printk (KERN_INFO "ECONET-GPIO: Responding to Machine Peek from %d.%d\n", econet_pkt_tx.d.p.dstnet, econet_pkt_tx.d.p.dststn);
+								memcpy (&aun_rx, &econet_pkt_rx, 4); // Copy the addresses
+								aun_rx.d.p.srcstn = econet_pkt_rx.d.p.srcstn;
+								aun_rx.d.p.srcnet = econet_pkt_rx.d.p.srcnet;
+								aun_rx.d.p.dststn = econet_pkt_rx.d.p.dststn;
+								aun_rx.d.p.dstnet = econet_pkt_rx.d.p.dstnet;
+								aun_rx.d.p.port = econet_pkt_rx.d.p.port;
+								aun_rx.d.p.ctrl = econet_pkt_rx.d.p.ctrl; // We don't strip the high bit for the bridge code. It can do it itself
+								aun_rx.d.p.aun_ttype = ECONET_AUN_IMM;
+								aun_rx.d.p.seq = (econet_data->aun_seq += 4);
+								aun_rx.d.p.padding = 0x00;
+								if (econet_pkt_rx.length > 6)
+									memcpy (&(aun_rx.d.p.data), &(econet_pkt_rx.d.p.data), econet_pkt_rx.length - 6);
+								aun_rx.length = econet_pkt_rx.length + 6; // AUN packets have 12 bytes before the data, econet packets have 6 (on a broadcast or immediate, anyway).
+				
+								// Put it on the FIFO
+								copied_to_fifo = kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
+								wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
+#ifdef ECONET_GPIO_DEBUG_AUN
+								printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): Valid frame received, length %04x, %04x AUN bytes copied to kernel FIFO\n", econet_pkt_rx.ptr, copied_to_fifo);
 #endif
-								}
-								break;
-							}	
+								econet_flagfill();
+								econet_set_aunstate(EA_IDLE); // Wait and see what turns up next - probably an immediate reply
+								econet_set_chipstate(EM_FLAGFILL);
+							}
+							else
+							{
+								switch (econet_pkt_rx.d.p.ctrl) // What sort of immediate?
+								{
+									case 0x81: // Memory peek - Can probably return some garbage just to be nice
+									{
+										printk (KERN_INFO "ECONET-GPIO: Ignoring remote peek from %d.%d\n", econet_pkt_tx.d.p.dstnet, econet_pkt_tx.d.p.dststn);
+									}
+									break;
+	
+									case 0x82: // Memory poke - definitely won't be doing that.
+									{
+										printk (KERN_INFO "ECONET-GPIO: Ignoring remote poke from %d.%d\n", econet_pkt_tx.d.p.dstnet, econet_pkt_tx.d.p.dststn);
+									}
+									break;
+	
+									case 0x83: // Remote JSR - definitely won't want to be implementing this
+									{
+										printk (KERN_INFO "ECONET-GPIO: Ignoring remote JSR from %d.%d\n", econet_pkt_tx.d.p.dstnet, econet_pkt_tx.d.p.dststn);
+									}
+									break;
+	
+									case 0x84: // User procedure call - definitely won't want to be implementing this
+									{
+										printk (KERN_INFO "ECONET-GPIO: Ignoring remote user procedure call from %d.%d\n", econet_pkt_tx.d.p.dstnet, econet_pkt_tx.d.p.dststn);
+									}
+									break;
+	
+									case 0x86: // HALT - definitely won't want to be implementing this, but we can reply nicely I suppose
+									{
+										econet_flagfill();
+										econet_pkt_tx.ptr = 0;
+										econet_pkt_tx.length = 4;
+										
+										econet_set_aunstate(EA_I_WRITEREPLY);
+										//econet_data->aun_state = EA_I_WRITEREPLY;
+										econet_set_chipstate(EM_WRITE);
+										econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2);
+										printk (KERN_INFO "ECONET-GPIO: Ignored, but acknowledged, HALT from %d.%d\n", econet_pkt_tx.d.p.dstnet, econet_pkt_tx.d.p.dststn);
+									}
+									break;
+	
+									case 0x87: // CONTINUE - definitely won't want to be implementing this, but we can reply nicely I suppose
+									{
+										econet_flagfill();
+										econet_pkt_tx.ptr = 0;
+										econet_pkt_tx.length = 4;
+										
+										econet_set_aunstate(EA_I_WRITEREPLY);
+										//econet_data->aun_state = EA_I_WRITEREPLY;
+										econet_set_chipstate(EM_WRITE);
+										econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2);
+										printk (KERN_INFO "ECONET-GPIO: Ignored, but acknowledged, CONTINUE from %d.%d\n", econet_pkt_tx.d.p.dstnet, econet_pkt_tx.d.p.dststn);
+									}
+									break;
+	
+									case 0x88: // MachinePeek (which is actually the only thing implemented officially on AUN apparently)
+									{
+	
+										econet_flagfill();
+										econet_pkt_tx.d.p.ctrl = (ADVERTISED_MACHINETYPE & 0xff);
+										econet_pkt_tx.d.p.port = (ADVERTISED_MACHINETYPE & 0xff00) >> 8;
+										econet_pkt_tx.d.p.data[0] = (ADVERTISED_VERSION & 0xff);
+										econet_pkt_tx.d.p.data[1] = (ADVERTISED_VERSION & 0xff00) >> 8;
+	
+										econet_pkt_tx.ptr = 0;
+										econet_pkt_tx.length = 8;
+										
+										econet_set_aunstate(EA_I_WRITEREPLY);	
+										//econet_data->aun_state = EA_I_WRITEREPLY;
+										econet_set_chipstate(EM_WRITE);
+										econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2);
+	#ifdef ECONET_GPIO_DEBUG_AUNIMM
+										printk (KERN_INFO "ECONET-GPIO: Responding to Machine Peek from %d.%d\n", econet_pkt_tx.d.p.dstnet, econet_pkt_tx.d.p.dststn);
+	#endif
+									}
+									break;
+								}	
+							}
 						}
 						else if ((econet_pkt_rx.d.p.dststn == 0xff) && (econet_pkt_rx.d.p.dstnet == 0xff)) // Broadcast - dump to userspace
 						{
@@ -1083,7 +1098,8 @@ recv_more:
 							// Should be 6 bytes long. If not, drop it and go back to IDLE - we are obviously out of sequence.
 							if (econet_pkt_rx.ptr != 6)
 							{
-								econet_data->aun_state = EA_IDLE;
+								econet_set_aunstate(EA_IDLE);
+								//econet_data->aun_state = EA_IDLE;
 								printk (KERN_ERR "ECONET-GPIO: econet_irq_read(): AUN: Valid frame received, length %04x, but was expecting Scout and this wasn't\n", econet_pkt_rx.ptr);
 								econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // See if this fixes the crashes
 								econet_write_cr(ECONET_GPIO_CR2, C2_READ);
@@ -1108,7 +1124,8 @@ recv_more:
 								econet_pkt_tx.ptr = 0;
 								econet_pkt_tx.length = 4;
 	
-								econet_data->aun_state = EA_R_WRITEFIRSTACK;	
+								econet_set_aunstate(EA_R_WRITEFIRSTACK);
+								//econet_data->aun_state = EA_R_WRITEFIRSTACK;	
 	
 								econet_flagfill();
 								econet_set_chipstate(EM_WRITE);
@@ -1136,7 +1153,8 @@ recv_more:
 						)
 						{
 							printk (KERN_ERR "ECONET-GPIO: econet_irq_read(): AUN: Valid frame received, length %04x, but was expecting first ACK from %d.%d - got packet from %d.%d to %d.%d %02x %02x %02x %02x\n", econet_pkt_rx.ptr, aun_tx.d.p.dstnet, aun_tx.d.p.dststn, econet_pkt_rx.d.p.srcnet, econet_pkt_rx.d.p.srcstn, econet_pkt_rx.d.p.dstnet, econet_pkt_rx.d.p.dststn, econet_pkt_rx.d.p.data[0], econet_pkt_rx.d.p.data[1], econet_pkt_rx.d.p.data[2], econet_pkt_rx.d.p.data[3]);
-							econet_data->aun_state = EA_IDLE;
+							econet_set_aunstate(EA_IDLE);
+							//econet_data->aun_state = EA_IDLE;
 							econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // See if this fixes the crashes
 							econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 							econet_write_cr(ECONET_GPIO_CR1, C1_READ);
@@ -1150,7 +1168,8 @@ recv_more:
 							econet_pkt_tx.ptr = 0;
 							econet_pkt_tx.length = 4 + (aun_tx.length - 12); // Data starts at byte 4 in a data packet to econet
 
-							econet_data->aun_state = EA_W_WRITEDATA;	
+							econet_set_aunstate(EA_W_WRITEDATA);
+							//econet_data->aun_state = EA_W_WRITEDATA;	
 
 							econet_set_chipstate(EM_WRITE);
 							econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2);
@@ -1178,7 +1197,8 @@ recv_more:
 						)
 						{
 							printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): Valid frame received, length %04x, but was expecting first ACK from %d.%d\n", econet_pkt_rx.ptr, aun_tx.d.p.dstnet, aun_tx.d.p.dststn);
-							econet_data->aun_state = EA_IDLE;
+							econet_set_aunstate(EA_IDLE);
+							//econet_data->aun_state = EA_IDLE;
 						}
 						else // It was an ACK from where we expected, so flag completion to writefd
 						{
@@ -1195,7 +1215,8 @@ recv_more:
 						econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 						econet_write_cr(ECONET_GPIO_CR1, C1_READ);
 						econet_set_chipstate(EM_IDLE);
-						econet_data->aun_state = EA_IDLE;
+						econet_set_aunstate(EA_IDLE);
+						//econet_data->aun_state = EA_IDLE;
 					}
 					break;
 
@@ -1223,7 +1244,8 @@ recv_more:
 							econet_pkt_tx.ptr = 0;
 							econet_pkt_tx.length = 4;
 
-							econet_data->aun_state = EA_R_WRITEFINALACK;	
+							econet_set_aunstate(EA_R_WRITEFINALACK);
+							//econet_data->aun_state = EA_R_WRITEFINALACK;	
 
 							econet_set_chipstate(EM_WRITE);
 							econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2);
@@ -1235,7 +1257,8 @@ recv_more:
 							econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 							econet_write_cr(ECONET_GPIO_CR1, C1_READ);
 							econet_set_chipstate(EM_IDLE);
-							econet_data->aun_state = EA_IDLE;
+							econet_set_aunstate(EA_IDLE);
+							//econet_data->aun_state = EA_IDLE;
 						}
 					}
 					break;
@@ -1273,7 +1296,8 @@ recv_more:
 						econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 						econet_write_cr(ECONET_GPIO_CR1, C1_READ);
 						econet_set_chipstate(EM_IDLE);
-						econet_data->aun_state = EA_IDLE;
+						econet_set_aunstate(EA_IDLE);
+						//econet_data->aun_state = EA_IDLE;
 
 					}
 					break;	
@@ -1407,7 +1431,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 				// First, the states when we are writing a data packet from userspace
 				case EA_W_WRITESCOUT: // We've just written the Scout successfully
 				{
-					econet_data->aun_state = EA_W_READFIRSTACK;
+					econet_set_aunstate(EA_W_READFIRSTACK);
+					//econet_data->aun_state = EA_W_READFIRSTACK;
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "ECONET-GPIO: econet_irq(): AUN: Written Scout to %d.%d, waiting for first ACK\n", aun_tx.d.p.dstnet, aun_tx.d.p.dststn);
 #endif
@@ -1415,7 +1440,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 				}
 				case EA_W_WRITEDATA: // We've just written the data packet
 				{
-					econet_data->aun_state = EA_W_READFINALACK;
+					econet_set_aunstate(EA_W_READFINALACK);
+					//econet_data->aun_state = EA_W_READFINALACK;
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "ECONET-GPIO: econet_irq(): AUN: Written data, waiting for final ACK\n");
 #endif
@@ -1423,7 +1449,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 				}	
 				case EA_W_WRITEBCAST: // We've successfully put a broadcast on the wire
 				{
-					econet_data->aun_state = EA_IDLE;
+					econet_set_aunstate(EA_IDLE);
+					//econet_data->aun_state = EA_IDLE;
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "ECONET-GPIO: econet_irq(): AUN: Written broadcast, signalling packet complete\n");
 #endif
@@ -1438,7 +1465,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 #ifdef ECONET_GPIO_DEBUG_AUN	
 					printk (KERN_INFO "ECONET-GPIO: econet_irq(): AUN: Scout ACK written to %d.%d, waiting for data\n", aun_rx.d.p.srcnet, aun_rx.d.p.srcstn);
 #endif
-					econet_data->aun_state = EA_R_READDATA;
+					econet_set_aunstate(EA_R_READDATA);
+					//econet_data->aun_state = EA_R_READDATA;
 					break;
 				}
 				case EA_R_WRITEFINALACK: // Just written final ACK after a data packet - go back to IDLE & dump received packet to userspace
@@ -1446,7 +1474,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 					
 					kfifo_in(&econet_rx_queue, &aun_rx, aun_rx.length); 
 					wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
-					econet_data->aun_state = EA_IDLE;
+					econet_set_aunstate(EA_IDLE);
+					//econet_data->aun_state = EA_IDLE;
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "ECONET-GPIO: econet_irq(): AUN: Final ACK to %d.%d, packet delivered to userspace\n", aun_rx.d.p.srcnet, aun_rx.d.p.srcstn);
 #endif
@@ -1457,7 +1486,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 				case EA_I_WRITEIMM: // We receive an immediate from userspace and have just written it to the wire, so need to wait for the reply
 				{
-					econet_data->aun_state = EA_I_READREPLY;
+					econet_set_aunstate(EA_I_READREPLY);
+					//econet_data->aun_state = EA_I_READREPLY;
 					// Because this is an immediate, we need to flag transmit success to the tx user space
 					econet_data->tx_status = ECONET_TX_SUCCESS;
 #ifdef ECONET_GPIO_DEBUG_AUN
@@ -1469,7 +1499,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 				{
 					// We don't update tx_status here because the immediate reply will have been generated in-kernel
 					econet_data->tx_status = ECONET_TX_SUCCESS;
-					econet_data->aun_state = EA_IDLE;
+					econet_set_aunstate(EA_IDLE);
+					//econet_data->aun_state = EA_IDLE;
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "ECONET-GPIO: econet_irq(): AUN: Written immediate reply. Signal TX success. Return to IDLE\n");
 #endif
@@ -1480,7 +1511,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "ECONET-GPIO: econet_irq(): AUN: Default reached on write state machine. Return to IDLE. AUN state = %d\n", econet_data->aun_state);
 #endif
-					econet_data->aun_state = EA_IDLE;
+					econet_set_aunstate(EA_IDLE);
+					//econet_data->aun_state = EA_IDLE;
 					break;
 				}
 						
@@ -1645,7 +1677,8 @@ void econet_aun_tx_statemachine(void)
 				if (aun_tx.length > 12) // Otherwise there's no data to copy (AUN format packet has 12 header bytes incl. the sequence
 					memcpy (&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data), (aun_tx.length - 12));
 				econet_pkt_tx_prepare.length = 6 + (aun_tx.length > 12 ? (aun_tx.length -6) : 0); // i.e. up to the port byte and then any data that's around
-				econet_data->aun_state = EA_W_WRITEBCAST;
+				econet_set_aunstate(EA_W_WRITEBCAST);
+				//econet_data->aun_state = EA_W_WRITEBCAST;
 			}
 			else if (aun_tx.d.p.aun_ttype == ECONET_AUN_IMM) // Immediate
 			{
@@ -1655,7 +1688,8 @@ void econet_aun_tx_statemachine(void)
 				if (aun_tx.length > 12) // Otherwise there's no data to copy (AUN format packet has 12 header bytes incl. the sequence
 					memcpy (&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data), (aun_tx.length - 12));
 				econet_pkt_tx_prepare.length = 6 + (aun_tx.length > 12 ? (aun_tx.length - 12) : 0); // i.e. up to the port byte and then any data that's around
-				econet_data->aun_state = EA_I_WRITEIMM;	
+				econet_set_aunstate(EA_I_WRITEIMM);
+				//econet_data->aun_state = EA_I_WRITEIMM;	
 			}	
 			else if (aun_tx.d.p.aun_ttype == ECONET_AUN_DATA) // Data
 			{
@@ -1664,7 +1698,17 @@ void econet_aun_tx_statemachine(void)
 				econet_pkt_tx_prepare.d.p.ctrl = aun_tx.d.p.ctrl | 0x80;
 				econet_pkt_tx_prepare.length = 6;
 				econet_pkt_tx_prepare.ptr = 0;
-				econet_data->aun_state = EA_W_WRITESCOUT;
+				econet_set_aunstate(EA_W_WRITESCOUT);
+				//econet_data->aun_state = EA_W_WRITESCOUT;
+			}
+			else if (aun_tx.d.p.aun_ttype == ECONET_AUN_IMMREP) // Reply to an immediate we presumably collected off the wire & send to userspace some time ago
+			{
+				econet_pkt_tx_prepare.d.p.port = aun_tx.d.p.port;
+				econet_pkt_tx_prepare.d.p.ctrl = aun_tx.d.p.ctrl | 0x80;
+				if (aun_tx.length > 12) // Otherwise there's no data to copy (AUN format packet has 12 header bytes incl. the sequence
+					memcpy (&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data), (aun_tx.length - 12));
+				econet_pkt_tx_prepare.length = 6 + (aun_tx.length > 12 ? (aun_tx.length - 12) : 0); // i.e. up to the port byte and then any data that's around
+				econet_set_aunstate(EA_I_WRITEREPLY);
 			}
 		}
 		break;
@@ -1730,7 +1774,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 #endif
 
 	if (econet_data->aun_mode)
-		timer = ktime_get_ns() + 500000000; // Longer wait time if in AUN mode - need to wait for the AUN state machine, potentially
+		timer = ktime_get_ns() + 750000000; // Longer wait time if in AUN mode - need to wait for the AUN state machine, potentially
 	else
 		timer = ktime_get_ns() + 250000000; // 250ms timeout (was half a second in testing!)
 
@@ -1746,6 +1790,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	do
 	{
 		status = econet_data->mode; 
+		
 		aun_status = econet_data->aun_state;
 
 		if ((status == EM_IDLE || status == EM_IDLEINIT || status == EM_FLAGFILL) && ((econet_data->aun_mode && econet_data->aun_state == EA_IDLE) || (!econet_data->aun_mode))) // If we are in AUN mode, the AUN state machine also needs to be IDLE
@@ -1931,7 +1976,8 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 			}
                         printk(KERN_INFO "ECONET-GPIO: Station set updated - Switching on AUN mode\n");
 			econet_data->aun_mode = 1; // Turn this on if we get a station set
-			econet_data->aun_state = EA_IDLE; // Initialize the state machine
+			econet_set_aunstate(EA_IDLE);
+			//econet_data->aun_state = EA_IDLE; // Initialize the state machine
                         break;
                 case ECONETGPIO_IOC_AVAIL:
 #ifdef ECONET_GPIO_DEBUG_IOCTL
@@ -1985,6 +2031,10 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 			printk (KERN_INFO "ECONET-GPIO: AUN mode disabled\n");
 			econet_data->aun_mode = arg;
 			break;
+		case ECONETGPIO_IOC_IMMSPOOF:
+			printk (KERN_INFO "ECONET-GPIO: Changing immediate spoof mode to %s\n", arg ? "ON" : "OFF");
+			econet_data->spoof_immediate = arg ? 1 : 0;
+			break;
 		case ECONETGPIO_IOC_TESTPACKET: /* Send test packet */
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "ECONET-GPIO: ioctl(test packet) called\n");
@@ -2017,32 +2067,6 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
         }
 
         return 0;
-
-}
-
-/* Probe the hardware, once GPIOs obtained */
-int econet_probe_adapter(void)
-{
-	// put CS low, high and then low again and on each occasion
-	// check that the matching signal comes back on the /CS return line
-	// thus showing that there is a D-Type there with a working clock
-
-	econet_set_cs(0);
-	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
-	if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
-		return 0;
-
-	econet_set_cs(1);
-	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
-	if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) == 0)
-		return 0;
-
-	econet_set_cs(0);
-	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
-	if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
-		return 0;
-
-	return 1;
 
 }
 
@@ -2094,7 +2118,9 @@ static int __init econet_init(void)
 	econet_data->aun_mode = 0;
 	econet_data->aun_seq = 0x4000;
 	econet_data->aun_last_tx = 0;
-	econet_data->aun_state = EA_IDLE;
+	econet_set_aunstate(EA_IDLE);
+	//econet_data->aun_state = EA_IDLE;
+	econet_data->spoof_immediate = 0;
 
 	econet_data->major=register_chrdev(0, DEVICE_NAME, &econet_fops);
 	if (econet_data->major < 0)
@@ -2141,12 +2167,6 @@ static int __init econet_init(void)
 		unregister_chrdev(econet_data->major, DEVICE_NAME);
 		kfree(econet_data);
 		return err;
-	}
-
-	if (!econet_probe_adapter())
-	{
-		printk (KERN_ERR "ECONET-GPIO: Hardware not found.\n");
-		return -1;
 	}
 
 	econet_reset(); // Does the station array clear

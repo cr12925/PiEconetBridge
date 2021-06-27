@@ -130,6 +130,7 @@ enum econet_aunstate {
 	EA_I_WRITEREPLY, // We've read an immediate from the wire; we are now writing out the response to the wire
 	EA_I_WRITEIMM, // We got an immediate from userspace and are putting it on the wire
 	EA_I_READREPLY, // We've written an immediate to the wire, we are now waiting for the response from the wire
+	EA_I_IMMSENTTOAUN, // We've received an immediate off the wire and sent it to userspace. We are waiting for a reply to come back and will then transmit it
 	EA_W_WRITEBCAST // Writing a broadcast. Don't hang about for a reply
 };
 
@@ -149,8 +150,10 @@ struct __econet_data {
 	short tx_status;
 	short aun_mode;
 	short aun_state;
+	short spoof_immediate;
 	long aun_seq;
 	u64 aun_last_tx;
+	u64 aun_last_statechange;
 };
 
 struct __econet_pkt_buffer {
@@ -164,5 +167,10 @@ struct __aun_pkt_buffer {
 	struct __econet_packet_aun d;
 	unsigned int length;
 };
+
+#define econet_set_aunstate(x) { \
+	econet_data->aun_state = (x); \
+	econet_data->aun_last_statechange = ktime_get_ns(); \
+}
 
 #endif
