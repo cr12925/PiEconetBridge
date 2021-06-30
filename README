@@ -357,11 +357,13 @@ The reverse also works - logging into a real BBC fileserver (or potentially SJ R
 TO DO
 -----
 
+- Implement device tree so that the GPIO pins are defined outside the code
 - Use better routines to access GPIOs in kernel
 - Make the kernel module use ..._probe instead of ..._init
 - Implement fileserver in the bridge code (for the present, aund might be usable separately - not tried it)
-- Implement device tree so that the GPIO pins are defined outside the code
 - Fix potential bug where the kernel module gets stuck in a non-IDLE AUN state. Probably just need a timeout somewhere.
+- Add ability for bridge to use a single IP:port combination to send whole networks over, with network number translation, so
+  that individual remote stations need not be inidivually configured.
 
 THE END
 -------
