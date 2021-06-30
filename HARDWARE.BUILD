@@ -79,12 +79,13 @@ On the following arrangement, the pins connect as follows:
 
 ADF10 from top left of board		DIN socket from LEFT to RIGHT, 
 					looking at REAR of socket
+					(DIN numbering in brackets)
 
-1 (Clock+ ?)				4
-2 (Clock- ?)				5
-3 (Ground)				3 - Centre - Ground
-4 (Data-)				2
-5 (Data+)				1
+5 (Clock-)				5 (3)
+4 (Clock+)				4 (5)
+3 (Ground)				3 - Centre - Ground (2)
+2 (Data-)				2 (4)
+1 (Data+)				1 (1)
 
 If you have more than one socket, connect the sockets in parallel. You will
 need a terminator either in the last socket or on the board somewhere near it.
