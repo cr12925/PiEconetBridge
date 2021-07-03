@@ -673,11 +673,13 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 	}
 	else if (a->p.aun_ttype == ECONET_AUN_DATA) // Data packet
 	{
-		if ((a->p.port == 0x99) && ((network[d_ptr].servertype) & ECONET_SERVER_FILE)))
+/*
+		if ((a->p.port == 0x99) && ((network[d_ptr].servertype) & ECONET_SERVER_FILE))
 		{
 			handle_fs_traffic (network[d_ptr].fileserver_index, a->p.srcnet, a->p.srcstn, a->p.ctrl, &(a->p.data), packlen-12);
 		}
-		else if ((a->p.port == 0x9f) && ((network[d_ptr].servertype) & ECONET_SERVER_PRINT) && (!strncmp((const char *)&(a->p.data), "PRINT", 5)))
+*/
+		/* else */ if ((a->p.port == 0x9f) && ((network[d_ptr].servertype) & ECONET_SERVER_PRINT) && (!strncmp((const char *)&(a->p.data), "PRINT", 5)))
 		{
 			int count, found;; 
 		
