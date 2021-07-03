@@ -37,7 +37,8 @@ You will need:
     chain on my breadboard and it has worked - but these instructions do not
     include that.)
 
-1 x GPIO extension board (see photo - takes the 40-pin GPIO connector via ribbon    cable to a T-shaped board on the breadboard)
+1 x GPIO extension board (see photo - takes the 40-pin GPIO connector via ribbon
+cable to a T-shaped board on the breadboard)
 
 2 x 74LVC245AN level shifters (run at 3.3V)
 
@@ -55,6 +56,12 @@ Many x various lengths of breadboard wire
 Before proceeding, read the rest of these instructions to ensure you understand 
 how the parts will be used in case there is any confusion over what you need
 to buy.
+
+NOTE: for reasons which are presently unclear, this only really works on a
+Pi 4B as the host. Pi Zero does very little; Pi 3B tends to produce 
+repeated bytes in received packets. It is on the list to investigate and
+fix!
+
 
 Stage 1 - Install the ADF10 on the breadboard
 ---------------------------------------------
