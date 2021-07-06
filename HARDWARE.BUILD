@@ -38,7 +38,7 @@ You will need:
     include that.)
 
 1 x GPIO extension board (see photo - takes the 40-pin GPIO connector via ribbon
-cable to a T-shaped board on the breadboard)
+    cable to a T-shaped board on the breadboard)
 
 2 x 74LVC245AN level shifters (run at 3.3V)
 
@@ -247,8 +247,19 @@ Data bus level shifter pin number	Pi GPIO number (broadcom numbering)
 Stage 9 - Connect the ADF10's /RST, A0, A1 and R/W pins to the GPIO
 -------------------------------------------------------------------
 
-These connections are all one way: from the Pi to the ADF10. The 3.3v outputs of the Pi are sufficient for the ADLC to register
-a '1', so no level shifter is required. Connect as follows - again, pin numbers are described in stage 8 above.
+These connections are all one way: from the Pi to the ADF10. The 3.3v outputs
+of the Pi are sufficient for the ADLC to register a '1', so no level shifter is 
+required. Connect as follows - again, pin numbers are described in stage 8
+above.
+
+** @KenLowe's version of the board routes these connections through
+   the secondary level shifter to provide additional protection for the RPi's
+   GPIO pins. Obviously these signals run in the opposite direction to those
+   on the secondary level shifter, so you need to connect the Pi side to the
+   spare 'A' pins (and make sure you don't also ground the pins you use), and
+   then take the corresponding 'B' output to the ADF10. @KenLowe's valuable
+   input in this regard is acknowledged.
+**
 
 ADF10 pin	Function	RPi GPIO number (Broadcom numbering - usually printed on the expander)
 15		/RST		19
@@ -310,21 +321,21 @@ data bus. However, that signal will be a 5V signal as it comes out of the 5V
 D-Type. We therefore have to run it through the second level shifter to get it
 down to 3.3V for the Pi.
 
-Here, references to 74LS74 are to the /secondary/ level shifter - the first one
-is full of the data bus.
+Here, references to 74LVC245 are to the /secondary/ level shifter - the first
+one is full of the data bus.
 
 - Connect pin 5 of the 74LS74 to pin 8 ('A7' in the data sheet) on the second
   level shifter. This is in addition to pin 5 on the 74LS74 being connected to
   the ADF10 as above. 
 
-- Connect pin 12 of the 74LS74 to the Pi's GPIO 18. 
+- Connect pin 12 of the 74LVC245 to the Pi's GPIO 18. 
 
 Next we need to wire up the /IRQ output of the ADF10. This, too, is a 5V
 signal, so it needs to go through the secondary level shifter.
 
-Connect ADF10 pin 1 to pin 9 ('A8') on the 74LS74.
+Connect ADF10 pin 1 to pin 9 ('A8') on the 74LVC245.
 
-Connect pin 11 of the 74LS74 (bottom right, 'B8') to GPIO 17 on the Pi.
+Connect pin 11 of the 74LVC245 (bottom right, 'B8') to GPIO 17 on the Pi.
 
 Stage 13 - Omitted for superstitious reasons
 --------------------------------------------
@@ -335,9 +346,9 @@ Stage 14 - Ground the remaining inputs of the return level shifter
 As we are not using 6 of the inputs on the return/secondary level shifter, they
 need to be grounded becaues the data sheet says so.
 
-Connect pins 2 to 7 on the secondary 74LS74 to 0V. I did this by connecting pin
-2 to GND, and then using little tiny connector jumpers to go from 2 to 3, 3 to
-4 and so on. Saves lots of wire hanging around the place.
+Connect pins 2 to 7 on the secondary 74LVC245 to 0V. I did this by connecting
+pin 2 to GND, and then using little tiny connector jumpers to go from 2 to 3,
+3 to 4 and so on. Saves lots of wire hanging around the place.
 
 It is not necessary to do this on the other side of this level shifter because
 it will be fixed in one direction (A to B).
@@ -445,5 +456,5 @@ Enjoy!
 
 
 CR, June 2021
-
+Updated July 2021
 
