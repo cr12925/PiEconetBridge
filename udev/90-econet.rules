@@ -1,0 +1,1 @@
+KERNEL=="econet-gpio", GROUP="econet", MODE="0660"
