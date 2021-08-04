@@ -1,6 +1,6 @@
 all:	econet-bridge econet-monitor econet-imm econet-test
 
-econet-bridge: econet-bridge.o
+econet-bridge: econet-bridge.o fs.o
 
 econet-monitor: econet-monitor.o
 
@@ -8,8 +8,9 @@ econet-imm: econet-imm.o
 
 econet-test: econet-test.o
 
-econet-bridge.o: econet-bridge.c ../include/econet-gpio-consumer.h
+econet-bridge.o: econet-bridge.c fs.c ../include/econet-gpio-consumer.h
 	cc -c econet-bridge.c -Wall
+	cc -c fs.c -Wall -Wno-pointer-sign 
 
 econet-monitor.o: econet-monitor.c ../include/econet-gpio-consumer.h
 
