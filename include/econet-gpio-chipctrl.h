@@ -69,12 +69,16 @@ void econet_flagfill(void);
 					while (ktime_get_ns() < p);\
 				}
 
-#define econet_wait_pin_low(p,t)	{ \
+#ifndef ECONET_NO_NDELAY
+	#define econet_wait_pin_low(p,t)	{ \
 					u64 timer; \
 					\
 					timer = ktime_get_ns() + t; \
 					while ( (ktime_get_ns() < timer) && (readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)));\
 				}
+#else
+	#define econet_wait_pin_low(p,t)	while (readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN))
+#endif
 					
 #define econet_get_sr()	{ \
 		sr1 = econet_read_sr(1); \

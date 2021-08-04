@@ -40,9 +40,8 @@
 
 #include "../include/econet-gpio.h"
 
-#define ECONET_GPIO_CLOCK_SPEED 1000000      /* In Hz */
 #define ECONET_GPIO_CLOCK_DUTY_CYCLE  1000   /* In nanoseconds - 2MHz clock is 500 ns duty cycle, 1MHz is 1us, or 1000ns */
-#define ECONET_GPIO_CLOCK_RW_WAIT  950   /* Time delay whilst waggling /CS low on bus write - at 1MHz clock, this should give us just over a cycle. We tried 500, 700 but it was unreliable.  */
+#define ECONET_GPIO_CLOCK_US_DUTY_CYCLE	1	/* In uSecs - 1us is the cycle time on a 1MHz clock, which is what the existing hardware has built on */
 
 unsigned long *GPIO_PORT;
 unsigned GPIO_RANGE = 0x40;
@@ -170,7 +169,11 @@ unsigned char econet_write_bus (unsigned char d)
 	writel((~gpioset_val) & ECONET_GPIO_CLRMASK_DATA, GPIO_PORT + GPCLR0);
 
 	// Let it settle
+#ifndef ECONET_NO_NDELAY
 	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
+#else
+	udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
+#endif
 
 	// Turn on chip select
 	econet_set_cs(ECONET_GPIO_CS_ON);
@@ -180,12 +183,18 @@ unsigned char econet_write_bus (unsigned char d)
 	// Turn off chip select
 	econet_set_cs(ECONET_GPIO_CS_OFF);
 
-	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE); // Just put some delay in here in case the chip needs to settle
+	        // Just put some delay in here in case the chip needs to settle
 		// We put the line above in because sometimes we got a duplicate - i.e.
 		// two bytes the same, and the second was in place of another byte that ought to have
 		// been transmitted instead, as opposed to an *inserted extra* byte, which was the original
 		// Problem. So this "overwrite" condition may be because the chip is trying to read the bus again
 		// too quickkly, so we put a delay in.
+
+#ifndef ECONET_NO_NDELAY
+	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
+#else
+	udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
+#endif
 
 	return d;
 
@@ -202,12 +211,20 @@ unsigned char econet_read_bus(void)
 
 	econet_set_dir(ECONET_GPIO_READ);
 	econet_set_cs(ECONET_GPIO_CS_ON);
-	//Oldeconet_ndelay(ECONET_GPIO_CLOCK_RW_WAIT * 2); // Make sure the data is actually on the bus */
-	// New ---
+
 	econet_wait_pin_low(ECONET_GPIO_PIN_CSRETURN, (ECONET_GPIO_CLOCK_DUTY_CYCLE));
 	econet_set_cs(ECONET_GPIO_CS_OFF); // Put this inactive again once we know the D-Type has clocked it to the 68B54
+#ifndef ECONET_NO_NDELAY
 	econet_ndelay(100); // Max wait time before data settles on bus according to chip spec, less a bit (180ns is what the spec says) // Was 100
-	// --
+#else
+	__asm__ ("nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; "
+		"nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; "
+		"nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; "
+		"nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; "
+		"nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; ");
+#endif
+
+
 	d = (readl(GPIO_PORT + GPLEV0) & ECONET_GPIO_CLRMASK_DATA) >> ECONET_GPIO_PIN_DATA;
 
 #ifdef ECONET_GPIO_DEBUG_BUS
@@ -274,17 +291,29 @@ int econet_probe_adapter(void)
 	// thus showing that there is a D-Type there with a working clock
 
 	econet_set_cs(0);
+#ifndef ECONET_NO_NDELAY
 	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
+#else
+	udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
+#endif
 	if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
 		return 0;
 
 	econet_set_cs(1);
+#ifndef ECONET_NO_NDELAY
 	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
+#else
+	udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
+#endif
 	if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) == 0)
 		return 0;
 
 	econet_set_cs(0);
+#ifndef ECONET_NO_NDELAY
 	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
+#else
+	udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
+#endif
 	if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
 		return 0;
 
@@ -747,6 +776,9 @@ void econet_irq_write(void)
 
 	//spin_lock(&econet_pkt_spin);
 
+	// Added 25.07.21 - Mark transmission even if not successful otherwise the reset timer gets stuck
+	econet_data->aun_last_tx = ktime_get_ns(); // Used to check if we have fallen out of bed on receiving a packet
+
 	if (econet_pkt_tx.length < 4) // Runt
 	{
 		printk(KERN_INFO "ECONET-GPIO: Attempt to transmit runt frame (len = %d). Not bothering\n", econet_pkt_tx.length);
@@ -925,7 +957,7 @@ recv_more:
 
 				// If our last transmission was more than 0.8s ago, go back to EA_IDLE
 				
-				if (((ktime_get_ns() - econet_data->aun_last_tx) > 800000000) && (econet_data->aun_state != EA_IDLE)) // If not in IDLE state and last TX was a long time ago, go back to idle
+				if (((ktime_get_ns() - econet_data->aun_last_tx) > ECONET_4WAY_TIMEOUT) && (econet_data->aun_state != EA_IDLE)) // If not in IDLE state and last TX was a long time ago, go back to idle because what we've just received must be something new - i.e. a new broadcast / immediate / scout
 				{
 					printk (KERN_INFO "ECONET-GPIO: Last TX was too long ago. Moving back to AUN IDLE state.\n");
 					econet_set_aunstate(EA_IDLE);
@@ -951,7 +983,7 @@ recv_more:
 					case EA_IDLE: // First in a sequence - see what it is.
 					{
 						// Is it an immediate?
-						if (econet_pkt_rx.d.p.port == 0)
+						if (econet_pkt_rx.d.p.port == 0 && econet_pkt_rx.d.p.ctrl != 0x85) // Ctrl 0x85 appears, from all the traffic sniffing, to in fact be done as a 4-way handshake even though it's port 0. It's used for notify, remote, view, etc.
 						{
 #ifdef ECONET_GPIO_DEBUG_AUN
 							printk (KERN_INFO "ECONET-GPIO: Immediate received from %d.%d, Ctrl 0x%02x\n", econet_pkt_rx.d.p.srcnet, econet_pkt_rx.d.p.srcstn, econet_pkt_rx.d.p.ctrl);
@@ -1096,7 +1128,7 @@ recv_more:
 						{
 
 							// Should be 6 bytes long. If not, drop it and go back to IDLE - we are obviously out of sequence.
-							if (econet_pkt_rx.ptr != 6)
+							if (econet_pkt_rx.ptr != 6 && !(econet_pkt_rx.d.p.port == 0 && econet_pkt_rx.d.p.ctrl == 0x85)) // Immediate ctrl 0x85 packets are done as 4-way handshakes, BUT there are 4 data bytes on the opening scout
 							{
 								econet_set_aunstate(EA_IDLE);
 								//econet_data->aun_state = EA_IDLE;
@@ -1120,6 +1152,10 @@ recv_more:
 								aun_rx.d.p.dstnet = econet_pkt_rx.d.p.dstnet;
 								aun_rx.d.p.port = econet_pkt_rx.d.p.port;
 								aun_rx.d.p.ctrl = econet_pkt_rx.d.p.ctrl;
+
+								// Is it immediate ctrl &85, which is done as a 4-way with 4 data bytes on the first Scout?
+								if (aun_rx.d.p.port == 0 && aun_rx.d.p.ctrl == 0x85) // Copy the four data bytes onto the start of the aun_rx data buffer
+									memcpy(&(aun_rx.d.p.data), &(econet_pkt_rx.d.p.data), 4);
 
 								econet_pkt_tx.ptr = 0;
 								econet_pkt_tx.length = 4;
@@ -1163,11 +1199,18 @@ recv_more:
 						else // It was an ACK from where we expected, so line up the data packet	
 						{
 							econet_flagfill();
-							memcpy (&(econet_pkt_tx.d.p.ctrl), &(aun_tx.d.p.data), aun_tx.length-12); // Strip off the header - note, ctrl byte is first on the econet wire, and is where the data portion of a data packet starts
-								
-							econet_pkt_tx.ptr = 0;
-							econet_pkt_tx.length = 4 + (aun_tx.length - 12); // Data starts at byte 4 in a data packet to econet
+							if (aun_tx.d.p.port != 0x00 || aun_tx.d.p.ctrl != 0x85) // Not one of those 0x85 immediate specials that in fact does a 4-way handshake
+							{
+								memcpy (&(econet_pkt_tx.d.p.ctrl), &(aun_tx.d.p.data), aun_tx.length-12); // Strip off the header - note, ctrl byte is first on the econet wire, and is where the data portion of a data packet starts
+								econet_pkt_tx.length = 4 + (aun_tx.length - 12); // Data starts at byte 4 in a data packet to econet
+							} // Else it WAS one of those Immediate 0x85 specials which had 4 data bytes on the "Scout", so we only copy n-4 data bytes into the data packet
+							else // Else it WAS one of those Immediate 0x85 specials which had 4 data bytes on the "Scout", so we only copy n-4 data bytes into the data packet
+							{
+								memcpy (&(econet_pkt_tx.d.p.ctrl), &(aun_tx.d.p.data[4]), aun_tx.length-16); // Strip off the header - note, ctrl byte is first on the econet wire, and is where the data portion of a data packet starts
+								econet_pkt_tx.length = 4 + (aun_tx.length - 16); // Data starts at byte 4 in a data packet to econet
+							}
 
+							econet_pkt_tx.ptr = 0;
 							econet_set_aunstate(EA_W_WRITEDATA);
 							//econet_data->aun_state = EA_W_WRITEDATA;	
 
@@ -1196,7 +1239,7 @@ recv_more:
 							(econet_pkt_rx.ptr != 4)	
 						)
 						{
-							printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): Valid frame received, length %04x, but was expecting first ACK from %d.%d\n", econet_pkt_rx.ptr, aun_tx.d.p.dstnet, aun_tx.d.p.dststn);
+							printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): Valid frame received, length %04x, but was expecting final ACK from %d.%d\n", econet_pkt_rx.ptr, aun_tx.d.p.dstnet, aun_tx.d.p.dststn);
 							econet_set_aunstate(EA_IDLE);
 							//econet_data->aun_state = EA_IDLE;
 						}
@@ -1232,10 +1275,13 @@ recv_more:
 #ifdef ECONET_GPIO_DEBUG_AUN
 							printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): AUN: Data received from %d.%d, length wire %d - Sending final ack.\n", aun_rx.d.p.srcnet, aun_rx.d.p.srcstn, econet_pkt_rx.ptr);
 #endif
-							memcpy(&aun_rx.d.p.data, &(econet_pkt_rx.d.data[4]), econet_pkt_rx.ptr - 4); // We copy from the raw data in the rx packet because at [4] is where the reply data actually is, but we copy to the ACTUAL data area in the AUN packet
+							if (aun_rx.d.p.port == 0 && aun_rx.d.p.ctrl == 0x85) // Immediate 0x85 special four way. There will have been four important bytes on the Quasi-'Scout' which will have been put into the aun_rx data area already, so we copy to byte 5 onward
+								memcpy(&(aun_rx.d.p.data[4]), &(econet_pkt_rx.d.data[4]), econet_pkt_rx.ptr - 4);
+							else
+								memcpy(&aun_rx.d.p.data, &(econet_pkt_rx.d.data[4]), econet_pkt_rx.ptr - 4); // We copy from the raw data in the rx packet because at [4] is where the reply data actually is, but we copy to the ACTUAL data area in the AUN packet
 							aun_rx.d.p.seq = (econet_data->aun_seq += 4);
 							aun_rx.d.p.aun_ttype = ECONET_AUN_DATA;
-							aun_rx.length = (econet_pkt_rx.ptr - 4 + 12);
+							aun_rx.length = (econet_pkt_rx.ptr - 4 + 12) + ((aun_rx.d.p.port == 0 && aun_rx.d.p.ctrl == 0x85) ? 4 : 0);
 
 							econet_flagfill();
 
@@ -1424,7 +1470,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 	{
 		if (econet_data->aun_mode) // What state are we in - do we need to move state?
 		{
-			econet_data->aun_last_tx = ktime_get_ns(); // Used to check if we have fallen out of bed on receiving a packet
+			// Commented 25.07.21
+			//econet_data->aun_last_tx = ktime_get_ns(); // Used to check if we have fallen out of bed on receiving a packet
 
 			switch (econet_data->aun_state)
 			{
@@ -1673,7 +1720,7 @@ void econet_aun_tx_statemachine(void)
 			if (aun_tx.d.p.aun_ttype == ECONET_AUN_BCAST) // Broadcast
 			{
 				econet_pkt_tx_prepare.d.p.dstnet = econet_pkt_tx_prepare.d.p.srcnet = 0xff;
-				econet_pkt_tx_prepare.d.p.ctrl = aun_tx.d.p.ctrl | 0x80; // Set high bit. It is apparently always clear in UDP space	
+				econet_pkt_tx_prepare.d.p.ctrl = aun_tx.d.p.ctrl; // IMMEDIATE MOD | 0x80; // Set high bit. It is apparently always clear in UDP space	
 				if (aun_tx.length > 12) // Otherwise there's no data to copy (AUN format packet has 12 header bytes incl. the sequence
 					memcpy (&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data), (aun_tx.length - 12));
 				econet_pkt_tx_prepare.length = 6 + (aun_tx.length > 12 ? (aun_tx.length -6) : 0); // i.e. up to the port byte and then any data that's around
@@ -1684,19 +1731,36 @@ void econet_aun_tx_statemachine(void)
 			{
 				// Send the packet and move to EA_I_WRITEIMM
 				econet_pkt_tx_prepare.d.p.port = aun_tx.d.p.port;
-				econet_pkt_tx_prepare.d.p.ctrl = aun_tx.d.p.ctrl | 0x80;
+				econet_pkt_tx_prepare.d.p.ctrl = aun_tx.d.p.ctrl; // IMMEDIATE MOD | 0x80; // Set high bit. It is apparently always clear in UDP space	
 				if (aun_tx.length > 12) // Otherwise there's no data to copy (AUN format packet has 12 header bytes incl. the sequence
 					memcpy (&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data), (aun_tx.length - 12));
 				econet_pkt_tx_prepare.length = 6 + (aun_tx.length > 12 ? (aun_tx.length - 12) : 0); // i.e. up to the port byte and then any data that's around
 				econet_set_aunstate(EA_I_WRITEIMM);
 				//econet_data->aun_state = EA_I_WRITEIMM;	
 			}	
-			else if (aun_tx.d.p.aun_ttype == ECONET_AUN_DATA) // Data
+			else if (aun_tx.d.p.aun_ttype == ECONET_AUN_DATA) // Data -- NB this will also be used for the "special" port 0 ctrl 0x85 "4-way immediate" for things like Notify, etc.
 			{
 				// Send a scout
 				econet_pkt_tx_prepare.d.p.port = aun_tx.d.p.port;
-				econet_pkt_tx_prepare.d.p.ctrl = aun_tx.d.p.ctrl | 0x80;
-				econet_pkt_tx_prepare.length = 6;
+				econet_pkt_tx_prepare.d.p.ctrl = aun_tx.d.p.ctrl; // IMMEDIATE MOD | 0x80; // Set high bit. It is apparently always clear in UDP space	
+				if (!(aun_tx.d.p.port == 0x00 && aun_tx.d.p.ctrl == 0x85)) // Not one of the 0x85 Immediate "specials"
+					econet_pkt_tx_prepare.length = 6;
+				else // "Scout" on an 0x85 immediate special has 4 data bytes on the end of it
+				{
+					econet_pkt_tx_prepare.length = 10;
+					memcpy(&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data), 4);
+/*
+					printk (KERN_INFO "ECONET-GPIO: Preparing 0x85 10-byte Special Scout with port %02x ctrl %02x data %02x %02x %02x %02x\n", 
+						econet_pkt_tx_prepare.d.p.port, econet_pkt_tx_prepare.d.p.ctrl,
+						econet_pkt_tx_prepare.d.p.data[0],
+						econet_pkt_tx_prepare.d.p.data[1],
+						econet_pkt_tx_prepare.d.p.data[2],
+						econet_pkt_tx_prepare.d.p.data[3]);
+*/
+				}
+
+				// Set up to transmit
+
 				econet_pkt_tx_prepare.ptr = 0;
 				econet_set_aunstate(EA_W_WRITESCOUT);
 				//econet_data->aun_state = EA_W_WRITESCOUT;
@@ -1704,7 +1768,7 @@ void econet_aun_tx_statemachine(void)
 			else if (aun_tx.d.p.aun_ttype == ECONET_AUN_IMMREP) // Reply to an immediate we presumably collected off the wire & send to userspace some time ago
 			{
 				econet_pkt_tx_prepare.d.p.port = aun_tx.d.p.port;
-				econet_pkt_tx_prepare.d.p.ctrl = aun_tx.d.p.ctrl | 0x80;
+				econet_pkt_tx_prepare.d.p.ctrl = aun_tx.d.p.ctrl; // IMMEDIATE MOD | 0x80; // Set high bit. It is apparently always clear in UDP space	
 				if (aun_tx.length > 12) // Otherwise there's no data to copy (AUN format packet has 12 header bytes incl. the sequence
 					memcpy (&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data), (aun_tx.length - 12));
 				econet_pkt_tx_prepare.length = 6 + (aun_tx.length > 12 ? (aun_tx.length - 12) : 0); // i.e. up to the port byte and then any data that's around
@@ -1714,9 +1778,45 @@ void econet_aun_tx_statemachine(void)
 		break;
 		case EA_W_WRITEDATA: // We've already sent a scout for a data packet, and got the ACK. Now send the actual data...
 		{
+
+			// BIG NOTE HERE: THIS CODE NEVER GETS EXECUTED. LOOKS LIKE THE STATE MACHINE IS ONLY EVER RUN ON A FRESH PACKET.
+			// CODE ELSEWHERE (ON RECEIPT OF FIRST ACK) SETS UP THE DATA PACKET FOR TRANSMISSION, NOT THIS BIT!
+
 			// A data packet on the wire has the data starting at byte 4 (where the control byte normally is)
-			memcpy (&(econet_pkt_tx_prepare.d.data), &(aun_tx.d.raw), aun_tx.length - 12); // AUN buffers have 12 bytes on the front (4 address, port, ctrl, pad, type, 4 byte seq)
-			econet_pkt_tx_prepare.length = (aun_tx.length - 12 + 4);
+			//if (aun_tx.d.p.port == 0 && aun_tx.d.p.ctrl == 0x85) // Special Immediate &85 4-way thingy - the "data" for the data packet starts at 5th byte of the AUN packet
+				//memcpy (&(econet_pkt_tx_prepare.d.data), &(aun_tx.d.raw[4]), aun_tx.length - 16);
+			//else
+				//memcpy (&(econet_pkt_tx_prepare.d.data), &(aun_tx.d.raw), aun_tx.length - 12); // AUN buffers have 12 bytes on the front (4 address, port, ctrl, pad, type, 4 byte seq)
+			// The above must be wrong, surely - it's copying from the start of the station number bit (d.raw, not d.p.data), to the start of the station number bit in the prepare packet (d.data, not d.p.data). Try the below instead
+
+			// Copy addressing data
+			memcpy (&(econet_pkt_tx_prepare.d.data), &(aun_tx.d.raw), 4); // Note this copies to d.data, not d.p.data - so it's writing over the addressing bytes on the prepared packets, and it's copying them from the incoming AUN packet (with our special 4 byte address block on the start)
+
+			printk (KERN_INFO "ECONET-GPIO: Preparing to write 4-way data packet to %d.%d from %d.%d\n", aun_tx.d.p.dstnet, aun_tx.d.p.dststn, aun_tx.d.p.srcnet, aun_tx.d.p.srcstn);
+
+			if (!(aun_tx.d.p.port == 0x00 && aun_tx.d.p.ctrl == 0x85)) // Not an immediate 0x85 special (4 way handshake job with 4 data bytes on the scout - used for Notify, Remote, View)
+			{
+				econet_pkt_tx_prepare.length = (aun_tx.length - 12 + 4); // The wire packet is the AUN data portion, so drop off the 12 byte AUN header (8 normal AUN header plus our special 4 for source/dest net/stn), and add the 4 byte Econet wire source/destination length
+				memcpy (&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data), aun_tx.length - 12); // AUN buffers have 12 bytes on the front (4 address, port, ctrl, pad, type, 4 byte seq) 
+			}
+			else // Immediate 0x85 Special - we will have sent the first 4 data bytes on the Quasi-"Scout", so only want whatever is left in this packet
+			{
+				econet_pkt_tx_prepare.length = (aun_tx.length -4 - 12 + 4); // The wire packet is the AUN data portion, so drop off the 12 byte AUN header (8 normal AUN header plus our special 4 for source/dest net/stn), and add the 4 byte Econet wire source/destination length
+				// And copy all but the first four data bytes into our data area, if any
+				if (aun_tx.length > 16)
+					memcpy (&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data[4]), aun_tx.length - 16); // AUN buffers have 12 bytes on the front (4 address, port, ctrl, pad, type, 4 byte seq) . Deduct 16 here because we will already have sent 4 data bytes that we are not copying
+
+				printk (KERN_INFO "ECONET-GPIO: Prepared Immediate 0x85 special data packet length %04x First data byte %02x\n", aun_tx.length, econet_pkt_tx_prepare.d.p.data[0]);
+			}
+/*
+			if (aun_tx.d.p.port == 0 && aun_tx.d.p.ctrl == 0x85 && aun_tx.length > 16) // Special Immediate &85 4-way thingy - the "data" for the data packet starts at 5th byte of the AUN packet
+				memcpy (&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data[4]), aun_tx.length - 16);
+			else
+				memcpy (&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data), aun_tx.length - 12); // AUN buffers have 12 bytes on the front (4 address, port, ctrl, pad, type, 4 byte seq)
+			econet_pkt_tx_prepare.length = (aun_tx.length - 12 + 4 - ((aun_tx.d.p.port == 0 && aun_tx.d.p.ctrl == 0x85) ? 4 : 0));
+*/
+
+			printk (KERN_INFO "ECONET-GPIO: EA_W_WRITEDATA Port %02x Ctrl %02x Length %04x\n", econet_pkt_tx_prepare.d.p.port, econet_pkt_tx_prepare.d.p.ctrl, econet_pkt_tx_prepare.length);
 		}
 		break;
 		case EA_R_WRITEFIRSTACK: // We got a scout, we are now writing the first ACK. The read routine should have lined our packet up for us
@@ -1757,7 +1857,8 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	{
 		econet_pkt.ptr = econet_pkt.length = 0; // Empty the packet 
 		printk (KERN_ERR "ECONET-GPIO: econet_writefd() Failed to copy %d bytes from userspace", c);
-		return  -ECONET_TX_NOCOPY;
+		econet_data->last_tx_user_error = ECONET_TX_NOCOPY;
+		return  -1;
 	}
 
 	if (econet_data->aun_mode) // AUN Mode - this is an AUN format packet from userspace, put it in aun_tx
@@ -1785,6 +1886,17 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		econet_set_chipstate(EM_IDLEINIT);
 		econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 	}
+
+	// If in AUN mode and we are part way through a 4-way handshake, or immediate exchange, which has clearly stalled, give up and reset the AUN state machine back to IDLE
+
+	//printk (KERN_INFO "ECONET-GPIO: AUN State %d, Chip state %d, last tx %lld, now %lld\n", econet_data->aun_state, econet_data->mode, econet_data->aun_last_tx, ktime_get_ns());
+
+	if (econet_data->aun_mode && 
+		(econet_data->mode == EM_IDLEINIT || econet_data->mode == EM_IDLE) && 
+		(econet_data->aun_state == EA_W_READFIRSTACK || econet_data->aun_state == EA_W_READFINALACK || econet_data->aun_state == EA_R_READDATA || econet_data->aun_state == EA_I_READREPLY) && 
+		(econet_data->aun_last_tx < (ktime_get_ns() - ECONET_4WAY_TIMEOUT))
+	) // 4-way handshake has failed previously - abandon and go back to idle - i.e. we are being asked to write something but we were stuck in the 4-way waiting to read the next phase and nothing had arrived within the timeout period
+		econet_set_aunstate(EA_IDLE);
 
 	// Wait for IDLE state, and if we don't get it after a while then forcibly put the chip there
 	do
@@ -1819,7 +1931,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 				econet_set_write_mode(&econet_pkt, len); // Trigger TX
 			}
 
-#define ECONET_TX_WAIT_PERIOD 1000000000 // 1 Second should be long enough for most packets
+#define ECONET_TX_WAIT_PERIOD 500000000 // 0.5s should be long enough for most packets
 
 			timer2 = ktime_get_ns() + ((unsigned long long) ECONET_TX_WAIT_PERIOD); 
 
@@ -1843,7 +1955,8 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 #endif
 
 				econet_set_read_mode();
-				return -ECONET_TX_NOTSTART;
+				econet_data->last_tx_user_error = ECONET_TX_HANDSHAKEFAIL;
+				return -1;
 			}	
 			if (tx_success == ECONET_TX_SUCCESS)
 			{
@@ -1859,6 +1972,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 				printk (KERN_INFO "ECONET-GPIO: econet_writefd(): AUN: Transmit success - returning %d (data portion %d) to userspace\n", len, len-12);
 #endif
 				econet_set_read_mode();
+				econet_data->last_tx_user_error = 0;
 				return len;
 			}
 			else 
@@ -1876,7 +1990,9 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 #ifdef ECONET_GPIO_DEBUG_AUN
 				printk (KERN_INFO "ECONET-GPIO: econet_writefd(): AUN: Transmit failure - returning %d to userspace\n", tx_success);
 #endif
+				//printk (KERN_INFO "ECONET-GPIO: econet_writefd(): Returning error %d\n", tx_success);
 				econet_set_read_mode();
+				econet_data->last_tx_user_error =  -tx_success;
 				return tx_success;
 			}
 			
@@ -1893,6 +2009,9 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 				udelay(200);
 			else // Shorter delay if we are just waiting for the chip
 				udelay(1); // Wait a bit and see what happens
+
+			// Added 25.07.21
+			econet_set_chipstate(EM_IDLE);
 		}
 	} while (status != EM_IDLE && status != EM_IDLEINIT && status != EM_FLAGFILL && (ktime_get_ns() < timer));
 
@@ -1905,7 +2024,8 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 #endif
 	printk (KERN_INFO "ECONET-GPIO: econet_writefd(): failed to get EM_IDLE state. Chip state = %d, aun state = %d\n", status, aun_status);
 
-	return -EBUSY;
+	econet_data->last_tx_user_error = EBUSY;
+	return -1;
 
 }
 
@@ -2019,6 +2139,13 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
                         //econet_data->mode = EM_TEST;
                         econet_irq_mode(0);
                         break;
+		case ECONETGPIO_IOC_TXERR:
+
+#ifdef ECONET_GPIO_DEBUG_IOCTL
+			printk (KERN_INFO "ECONET-GPIO: ioctl(get last tx error) called\n");
+#endif
+			return (econet_data->last_tx_user_error);
+			break;
                 case ECONETGPIO_IOC_FLAGFILL: /* Go into flag fill */
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "ECONET-GPIO: ioctl(set flag fill) called\n");
@@ -2081,6 +2208,11 @@ static int __init econet_init(void)
 
 	/* Initialize some debug instrumentation */
 	tx_packets = 0; 
+
+	/* See if our ancient econet_ndelay code is disabled */
+#ifdef ECONET_NO_NDELAY
+	printk (KERN_INFO "ECONET-GPIO: Old econet_ndelay() code disabled. This is Good.\n");
+#endif
 
 	/* Iniialize kfifos */
 

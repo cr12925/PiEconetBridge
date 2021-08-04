@@ -45,6 +45,12 @@
 #include "econet-gpio-consumer.h"
 #include "econet-gpio-chipctrl.h"
 
+// Defining this turns off the old ktime_ns() wait routine.
+// Implemented to try and make this work better on non-Pi4B. 
+// If you remove this define, the code will ONLY work properly
+// on a Pi4B.
+//#define ECONET_NO_NDELAY
+
 /* Set our device name */
 #define DEVICE_NAME "econet-gpio"
 
@@ -71,6 +77,9 @@
 
 /* Various defs */
 #define ECONET_MAXQUEUE 10 /* max number of packets we can queue, in or outbound */
+
+/* Timeouts for 4-way handshake */
+#define ECONET_4WAY_TIMEOUT 300000000 /* 0.3s (in ns) - timeout beyond which we will decide that our last transmission as part of a 4-way handshake was so long ago that the data we just received cannot be part of it and must be a new incoming exchange */
 
 /* Internal functions */
 
@@ -154,6 +163,7 @@ struct __econet_data {
 	long aun_seq;
 	u64 aun_last_tx;
 	u64 aun_last_statechange;
+	short last_tx_user_error;
 };
 
 struct __econet_pkt_buffer {

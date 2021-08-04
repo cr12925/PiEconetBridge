@@ -100,7 +100,11 @@ struct __econet_packet_aun {
 			unsigned char port;
 			unsigned char ctrl; // Internally, this will have high bit set. On the UDP packet it is stripped off
 			unsigned char padding;
+#ifdef ECONET_64BIT
+			unsigned int seq;
+#else
 			unsigned long seq;
+#endif
 			unsigned char data[ECONET_MAX_PACKET_SIZE-9];
 		} p;
 		unsigned char raw[ECONET_MAX_PACKET_SIZE];
@@ -115,7 +119,11 @@ struct __econet_packet_udp {
                         unsigned char port; /* Yes, port first on AUN; it's CB first on the Econet wire! */
                         unsigned char ctrl;
                         unsigned char pad;
-                        unsigned long seq;
+#ifdef ECONET_64BIT
+			unsigned int seq;
+#else
+			unsigned long seq;
+#endif
 			unsigned char data[ECONET_MAX_PACKET_SIZE-4];
                 } p;
         };
@@ -132,6 +140,7 @@ struct __econet_packet_udp {
 #define ECONETGPIO_IOC_SET_STATIONS	_IOW(ECONETGPIO_MAGIC, 5, unsigned char*) /* Bitmap for stations we are interested in on AUN */
 #define ECONETGPIO_IOC_AUNMODE		_IOW(ECONETGPIO_MAGIC, 6, int) /* Turn AUN mode (4-way handshake) on / off */
 #define ECONETGPIO_IOC_IMMSPOOF		_IOW(ECONETGPIO_MAGIC, 7, int) /* Turn in-kernel immediate spoofing for wire stations on/off  */
+#define ECONETGPIO_IOC_TXERR		_IOR(ECONETGPIO_MAGIC, 8, int) /* Read last tx error number  */
 
 /* The following are for debugging and testing only, and only with interrupts off */
 #define ECONETGPIO_IOC_SETA		_IOW(ECONETGPIO_MAGIC, 100, int) /* bit0 is A0, bit1 is A1 */

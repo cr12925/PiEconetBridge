@@ -18,6 +18,51 @@ AUN to Econet Bridge
 
 */
 
+Introduction
+------------
+
+The combination of this hardware and software is intended to provide a
+bridge between a real BBC Econet and the AUN world of BeebEm (and probably
+other things which use AUN). It contains also contains a relatively operable
+Level3-ish fileserver, and an emulation of an Acorn print server, capable
+of use by both BeebEm and real BBCs.
+
+It is possible to put two (or more) of these bridges 'back to back' and join
+two real BBC Econets together over the IP network, including the Internet,
+providing the correct ports are opened. The necessary ports are the ones you
+configure in the configuration file.
+
+It is unnecessary for the two networks in a 'back to back' configuration such
+as that to have discrete Econet network numbers. Properly configured, all
+stations can be on the same network number, including 0.
+
+What is more, if you are connecting to your friends' Econets and some of them
+use the same network number as you, you can configure their networks to 
+have a different number in your config and it should all work, thus the
+overlapping network numbers no longer matter.
+
+At the moment, each individual host on each individual network must be 
+individually configured. There is a work in progress to provide a 'trunk'
+system (with network number address translation). Examination of the code may
+show you how the configuration can be done - but in this version, whilst the
+configuration lines are read and understood by the bridge, in fact there is
+*no code* implementing that functionality at all - so don't bother trying.
+
+What is is NOT
+--------------
+
+Whilst called a 'Bridge', do *not* mistake this for a direct substitute for
+an Acorn(R) Econet bridge, which will join two real BBC networks together
+with different network numbers. You *can* do that with this software and
+its associated hardware, but you need TWO sets to do it, and the 'bridge'
+is performed over AUN over IP in between the two bridges.
+
+Caveat: The bridge query handling code in this software is a work in progress.
+It doesn't do very much, and (for example) it does not broadcast known
+'bridgeable' networks to other bridges yet. This is because I cannot test it
+with a real Acorn bridge because I do not have one! However, that does *not*
+appear to stop stations communicating with distant network numbers.
+
 Prerequisites
 -------------
 
@@ -25,6 +70,7 @@ The system will require:
 	- Raspberry Pi 4B (anything less and timing issues mean it won't work
           at the moment, but I am working on it!)
 	- No other GPIO usage on the system
+	- Do NOT install the Pi desktop - or if you do, don't run it.
 	- The hardware (see Hardware.pdf), which in turn requires a Master 128
           Econet board
 	- Your installation of PiOS having the kernel headers installed (see
@@ -377,6 +423,30 @@ You must:
   speak to the AUN world.
 - Use different port numbers for each such entry. E.g. 32768, 32769, etc.
 
+A word on port numbers
+----------------------
+
+Each Econet *wire* host or locally emulated station must have a *different*
+port number because all of those stations are listened for on all IP addresses
+on the local machine.
+
+*Distant* machines - AUN hosts - e.g. BeebEm, or another bridge - can use
+port numbers which appear to overlap with wire or local stations. That works
+because in fact they do not overlap: the port is being listened for on the
+*distant* machine, not the local bridge. 
+
+E.g. the following configuration is perfectly good:
+
+W 0 1 32768
+W 0 2 32769
+A 0 3 distant.example.com 32768
+A 0 4 another.example.com 32768
+
+... Whilst the port numbers on the 'A' lines are the same as for station 0.1,
+they work because those 'A' systems are distant - they're on another machine
+on the IP network. So the fact that they listen on 32768 just like we do for
+station 0.1 is no problem.
+
 A n s host p
 ------------
 
@@ -467,13 +537,274 @@ TO DO
 - Implement device tree so that the GPIO pins are defined outside the code
 - Use better routines to access GPIOs in kernel
 - Make the kernel module use ..._probe instead of ..._init
-- Implement fileserver in the bridge code (for the present, aund might be
-   usable separately - not tried it)
-- Fix potential bug where the kernel module gets stuck in a non-IDLE AUN state.
-  Probably just need a timeout somewhere.
 - Add ability for bridge to use a single IP:port combination to send whole
   networks over, with network number translation, so that individual remote
   stations need not be inidivually configured.
+
+KNOWN BUGS
+----------
+
+- Kernel module occasionally needs reloading because the AUN state machine
+  gets stuck. Seems to be rare thesedays though. YMMV.
+
+PRINT & FILE SERVERS
+--------------------
+
+See below. It is possible to:
+
+a) 	Run more than one file or print server within the same bridge.
+b) 	Run the File and Print servers on the same emulated station. 
+
+In case (b), the port number used will be ignored when the second station
+definition is used.
+
+Example:
+
+F 0 254 32768 /econet
+P 0 254 37000 matrix
+
+Will create one fileserver rooted at /econet, and a print server, both on
+station 0.254. However, the listener will be on 32768 - because by the time 
+the print server config is read, station 0.254 already exists and has a 
+listener on 32768, so the 37000 port number is *ignored*.
+
+Equally, you can have two fileservers, but they must be on *different*
+emulated stations, e.g.:
+
+F 0 254 32768 /econet
+F 0 253 32767 /filestore
+
+THE PRINT SERVER
+----------------
+
+There is a rough and ready print server built into the bridge utility which
+is usable by Econet stations (including on AUN) whether logged in or not.
+
+Configuration line syntax is:
+
+P n s port printer
+
+... where:
+
+n, s are network and station number. (The kernel module will listen for
+traffic on the Econet wire.)
+port is the UDP port to listen on for AUN traffic for this emulated service
+printer is *either*
+
+1.	The name of a printer queue configured with 'lpadmin' (as to which
+	see its manual page
+
+OR
+
+2.	An email address. You will need a configured, working sendmail
+	implementation on your Pi, with suitable mail routing/smart host.
+
+
+If there is an @ symbol in the printer name, the bridge will assume it is an
+email address. Avoid printer queues with @ symbols in them...
+
+Example:
+
+P 0 251 32768 matrix    
+... will send received print jobs, with a header, to the 'matrix' queue, and
+
+P 0 251 32768 user@example.com
+... will email them in plain text to the given address
+
+THE FILESERVER
+--------------
+
+The bridge code now includes what appears to be a relatively stable Level3-ish
+fileserver. It implements most functions. THERE MAY STILL BE BUGS. YOU MAY
+GET CORRUPTED FILES. YOU HAVE BEEN WARNED.
+
+FURTHER IMPORTANT NOTE: No Library, Welcome or Utilities are provided with
+this software. You will need your own and you will need to copy them onto
+the system using something like COPYF. If you search the various enthusiast
+sites, I am sure you will find them. COPYF should work to copy them to a 
+newly created Library directory as SYST once you get the server up and running.
+
+One function not implemented is user quotas. READFREE will return something,
+but it will be erroneous. SETFREE will appear to complete but achieve nothing.
+
+Configuration file syntax:
+
+F n s port dir
+
+Where:
+
+n, s are network and station number to emulate
+port is the port to listen on for AUN traffic
+dir is the top level directory for the server.
+
+WITHIN 'dir' you MUST create at least one directory whose name is of the
+format nNAME, where 'n' is a single digit 0-9 (which will become the disc
+number in Econet world) and 'NAME' is the (up to 16 character) disc name
+in Econet world
+
+All those folders MUST be owned by the user that runs the bridge utility.
+
+E.g. If you configure
+
+F 0 254 32768 /econet
+
+You would then:
+
+mkdir /econet
+mkdir /econet/0ECONET
+mkdir /econet/1STORAGE
+
+chown -R pi /econet
+
+Start the bridge, and you should see it initialize the fileserver. 
+
+The password file will NOT be visible on the main discs. It is stored in the
+top level directory - in the example, /econet/Passwords
+
+On first execution, if Passwords does not exist it will be created with one
+user 'SYST' with a blank password.
+
+All the Econet files are then stored in the Linux filesystem. Filenames are
+subject to conversion of '/' (which is permissible in a BBC filename) to ':'
+(which is not) so that individual filenames do not attempt to straddle Linux
+directories. 
+
+Load, Execute and Econet owner are stored as extended attributes, so you need
+to make sure your filesystem supports them. Ext4 does by default on the
+standard Pi installation. 
+
+You can mount each disc as a separate filesystem if you wish. The FS code will
+ignore the lost+found directory.
+
+Most things work. There is some weird problem with the Get Object Info
+FS function which, it would appear, is actually used to SET load/execute
+in certain circumstances, but I have not figured out how to tell when that is
+so. The "COPYF" utility appears to do this, for example.
+
+Wildcards
+---------
+
+I have implemented the * and # BBC wildcards best I can. I think they work.
+If you get odd results, please post somewhere and if I get to hear about it
+I will try to investigate when I can.
+
+Permissions
+-----------
+
+More complex than Level 3. Directories can have WR attributes as well,
+and a lack of write access to a directory ought to prevent creation of 
+a new file / directory therein.
+
+There is an 'H' attribute which hides the file from directory listings for
+all but the owner & system users.
+
+The 'L' attribute does what the Acorn one does. However, if you use the
+*LINK functionality (see below), the FS will automatically set the L attribute
+in the hope that it will remind you that one of the apparently identical files
+is the *actual* unix file because if you delete that one, things will go 
+haywire. (There is a need for some sanity checking there - be prepared for
+seg faults if you push this too hard.)
+
+CLI commands implemented in the server
+--------------------------------------
+
+Non-privileged commands:
+
+*ACCESS <filespec> <attr>
+	- Change attributes on <filespec> which can be wildcard
+	- attr must contain LHWR before the /, and only WR after (or some
+	  subset of each).
+	- If no / provided, all attr letters presumed to relate to owner.
+	- Letters after the '/' are for non-owner (public) access.
+	
+*BYE
+	- Log out
+
+*CDIR <dirname>
+	- Create new directory
+
+*CHOWN <filename>
+	- Take ownership of <filename> if you own the directory it's in
+	  or are a system user
+
+*COPY <source> <destination>
+	- Source can be wildcard. If it resolves to more than one file, then
+	  <destination> *must* be a directory
+	- Done inside the server - does not use network time.
+
+*DELETE <filespec>
+	- Delete files matching wildcard specification given
+	- Will refuse to delete locked files, and directories which are not
+	  empty.
+
+*DIR <directory>
+	- Change current working directory
+
+*I AM (<station>) <username> (<password>)
+	- Log in
+
+*INFO <filename>
+	- Show load, execute, length & system internal name for one file
+	- Abbreviated to *I.
+
+*LIB <directory>
+	- Temporarily change library directory
+
+*LOGIN
+	- As * I AM
+
+*OWNER <filename>
+	- Display owner name as an error
+
+*PASS <old password> <: or new password>
+	- Change password
+
+*RENAME <old filename> <new filename>
+	- Does what it says on the tin.
+	- Can be abbreviated to *REN.
+
+*SDISC <discname>
+	- Select different fileserver disc.
+	- (The library utility *DISCS should show a list)
+
+*SETLIB <dir>
+	- Set your library directory. Effective from next login.
+
+Privileged commands:
+
+*FLOG <station>
+	- Force log a station off
+
+*NEWUSER <username>
+	- Create new user.
+	- Will also create & set ownership on home directory on disc 0.
+	- If home already exists, expect problems.
+	- To delete a user, see *PRIV
+
+*LINK <source> <destination>
+	- Create symlink in the filesystem. <destination> will be the identical
+	  file to source.
+	- Note that the system will automatically set the L attribute on the
+	  original file to remind you not to delete it, but it will show on 
+	  all the linked copies too. Take care - if you remove the underlying
+	  file, you will likely get a Seg fault when accessing any of the links.
+	- This is all rather experimental.
+	- Also, the file interlocks (which are implemented!) will not notice
+	  one user opening the original file for writing and another opening
+	  a link for writing.
+
+*PRIV <user> <priv>
+	- Set user privilege. Applicable privileges are:
+		D - Deleted - user cannot log in, password entry will be reused
+		L - Locked user - cannot log in
+		N - Unlocked (normal) user, but cannot change password
+		S - System user
+		U - Unlocked (normal) user
+		
+*SETHOME <directory>
+	- Permanently set replacement home directory (effective next login)
+	- Only works for the executing user. Probably need to make that more
+	  useful.
 
 THE END
 -------
