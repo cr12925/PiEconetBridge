@@ -247,25 +247,24 @@ Data bus level shifter pin number	Pi GPIO number (broadcom numbering)
 Stage 9 - Connect the ADF10's /RST, A0, A1 and R/W pins to the GPIO
 -------------------------------------------------------------------
 
-These connections are all one way: from the Pi to the ADF10. The 3.3v outputs
-of the Pi are sufficient for the ADLC to register a '1', so no level shifter is 
-required. Connect as follows - again, pin numbers are described in stage 8
-above.
+Connect as follows - again, pin numbers are described in stage 8 above.
 
-** @KenLowe's version of the board routes these connections through
-   the secondary level shifter to provide additional protection for the RPi's
-   GPIO pins. Obviously these signals run in the opposite direction to those
-   on the secondary level shifter, so you need to connect the Pi side to the
-   spare 'A' pins (and make sure you don't also ground the pins you use), and
-   then take the corresponding 'B' output to the ADF10. @KenLowe's valuable
-   input in this regard is acknowledged.
-**
+Connect RPi GPIO pins through the secondary level shifter as follows:
 
-ADF10 pin	Function	RPi GPIO number (Broadcom numbering - usually printed on the expander)
-15		/RST		19
-6		A1		13
-5		A0		12
-2		R /W		6
+GPIO	IC4 pin
+6	16 (Econet R/W)
+12	15 (Econet A0)
+13	14 (Econet A1)
+19	13 (Econet /RST)
+
+Then connect the corresponding A side of IC4 to the ADF10 so that
+the outputs from the RPi are buffered:
+
+IC4 pin		ADF10 pin
+4		Econet R/W (2)
+5		Econet A0 (5)
+6		Econet A1 (6)
+7		Econet /RST (15)
 
 Stage 10 - Connect up the clock chip to the D-Type, and the delay line, and
 then onto the ADF10
@@ -324,18 +323,18 @@ down to 3.3V for the Pi.
 Here, references to 74LVC245 are to the /secondary/ level shifter - the first
 one is full of the data bus.
 
-- Connect pin 5 of the 74LS74 to pin 8 ('A7' in the data sheet) on the second
+- Connect pin 5 of the 74LS74 to pin 17 ('B2' in the data sheet) on the second
   level shifter. This is in addition to pin 5 on the 74LS74 being connected to
   the ADF10 as above. 
 
-- Connect pin 12 of the 74LVC245 to the Pi's GPIO 18. 
+- Connect pin 3 of the 74LVC245 to the Pi's GPIO 18. 
 
 Next we need to wire up the /IRQ output of the ADF10. This, too, is a 5V
 signal, so it needs to go through the secondary level shifter.
 
-Connect ADF10 pin 1 to pin 9 ('A8') on the 74LVC245.
+Connect ADF10 pin 1 to pin 18 ('B1') on the 74LVC245.
 
-Connect pin 11 of the 74LVC245 (bottom right, 'B8') to GPIO 17 on the Pi.
+Connect pin 2 ('A1') of the 74LVC245 to GPIO 17 on the Pi.
 
 Stage 13 - Omitted for superstitious reasons
 --------------------------------------------
@@ -343,30 +342,28 @@ Stage 13 - Omitted for superstitious reasons
 Stage 14 - Ground the remaining inputs of the return level shifter
 ------------------------------------------------------------------
 
-As we are not using 6 of the inputs on the return/secondary level shifter, they
+As we are not using 2 of the inputs on the return/secondary level shifter, they
 need to be grounded becaues the data sheet says so.
 
-Connect pins 2 to 7 on the secondary 74LVC245 to 0V. I did this by connecting
-pin 2 to GND, and then using little tiny connector jumpers to go from 2 to 3,
-3 to 4 and so on. Saves lots of wire hanging around the place.
+Connect pins 11 & 12 on the secondary 74LVC245 to 0V. 
 
 It is not necessary to do this on the other side of this level shifter because
 it will be fixed in one direction (A to B).
 
-Stage 15 - Connect the DIR output of the Pi GPIO to the data bus level shifter
-------------------------------------------------------------------------------
+Stage 15 - Connect the R/W signal to the data bus level shifter
+---------------------------------------------------------------
 
 The data bus level shifter has to be told which direction to shift the data
-in - we can read or write through it. The Pi has an output just for this
-purpose.
+in - we can read or write through it. This is the same polarity as the
+ADF10's RnW signal:
 
-Connect pin 1 of the data bus level shifter to Pi GPIO 16.
+Connect pin 4 of the secondary bus level shifter to pin 1 of the primary (IC3). 
 
 Stage 16 - Fix the direction of the return level shifter
 --------------------------------------------------------
 
-The secondary level shifter only ever goes in one direction - A to B. So we can
-wire its pin 1 (DIR) input to 3.3V to achieve that.
+The secondary level shifter only ever goes in one direction - B to A. So we can
+wire its pin 1 (DIR) input to 0V to achieve that.
 
 Stage 17 - Fix the /OE (output enable) input on each level shifter to GND to
 have output enabled all the time
