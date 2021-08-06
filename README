@@ -69,6 +69,9 @@ Prerequisites
 The system will require:
 	- Raspberry Pi 4B (anything less and timing issues mean it won't work
           at the moment, but I am working on it!)
+	- A proper RPi 4 PSU. Experimentation shows that the Econet hardware
+          has quite a current draw and an underpowered PSU can lead to
+          rx/tx problems
 	- No other GPIO usage on the system
 	- Do NOT install the Pi desktop - or if you do, don't run it.
 	- The hardware (see Hardware.pdf), which in turn requires a Master 128

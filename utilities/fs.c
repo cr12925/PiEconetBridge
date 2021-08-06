@@ -20,7 +20,6 @@
    at https://github.com/stardot/ArduinoFilestore
    The author of that code's efforts are acknowledged herein.
    In particular, what has been useful has been the insight into
-   the various different server calls to the filestore, and the
    format of those calls and the necessary replies. Without that,
    this code would have taken significantly longer to create.
 
@@ -59,6 +58,8 @@ extern unsigned int local_seq;
 extern unsigned long local_seq;
 #endif
 
+int fs_sevenbitbodge = 1; // Whether to use the spare 3 bits in the day byte for extra year information
+
 short fs_open_interlock(int, unsigned char *, unsigned short, unsigned short);
 void fs_close_interlock(int, unsigned short, unsigned short);
 
@@ -96,7 +97,7 @@ struct {
 	char padding[9]; // Makes up to 256 bytes per user
 } users[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_USERS];
 
-#define FS_MAX_OPEN_FILES 17 // Really 16 because we don't use entry 0
+#define FS_MAX_OPEN_FILES 33 // Really 32 because we don't use entry 0
 
 struct {
 	unsigned char net, stn;
@@ -113,6 +114,8 @@ struct {
 		unsigned short mode; // 1 = read, 2 = openup, 3 = openout
 		unsigned char sequence; // Oscillates 0-1-0-1... allows FS to detect retransmissions
 		unsigned short pasteof; // Signals when there has already been one attempt to read past EOF and if there's another we need to generate an error
+		unsigned short is_dir; // Looks like Acorn systems can OPENIN() a directory so there has to be a single set of handles between dirs & files. So if this is non-zero, the handle element is a pointer into fs_dirs, not fs_files.
+		char acornfullpath[1024]; // Full Acorn path, used for calculating relative paths
 	} fhandles[FS_MAX_OPEN_FILES];
 	struct {
 		short handle; // Pointer into fs_dirs
@@ -211,6 +214,7 @@ struct path {
 	unsigned long internal; // System internal name for file. (aka inode number for us)
 	struct objattr attr; // Not yet in use generally
 	unsigned char unixpath[1024]; // Full unix path from / in the filesystem (done because Econet is case insensitive)
+	unsigned char acornfullpath[1024]; // Full acorn path within this server, including disc name
 	unsigned char unixfname[15]; // As stored on disc, in case different case to what was requested
 	unsigned char day; // day of month last written
 	unsigned char monthyear; // Top 4 bits years since 1981; bottom four are month (Not very y2k...)
@@ -222,6 +226,62 @@ regex_t r_pathname, r_wildcard;
 int fs_count = 0;
 
 unsigned short fs_quiet = 0;
+
+// Convert d/m/y to Acorn 2-byte format
+void fs_date_to_two_bytes(unsigned short day, unsigned short month, unsigned short year, unsigned char *monthyear, unsigned char *dday)
+{
+	unsigned char year_internal;
+
+	*dday = (unsigned char) (day & 0x1f);
+
+	*monthyear = (unsigned char) (month & 0x0f);
+
+	year_internal = year;
+
+	if (year_internal >= 1900) year_internal -=1900;
+
+	year_internal = year  - 81;
+
+	if (!fs_sevenbitbodge)
+	{
+		year_internal -= 40;
+		year_internal = year_internal << 4;
+		*monthyear |= (year_internal & 0x0f);
+	}
+	else // use top three bits of day as low three bits of year
+	{
+		*dday |= ((year_internal & 0x07) << 5);
+		*monthyear |= (((year_internal & 0x78) << 1) & 0xf0);
+		//fprintf (stderr, "Converted %02d/%02d/%04d to MY=%02X, D=%02X\n", day, month, year, *monthyear, *dday);
+	}
+
+}
+
+unsigned short fs_year_from_two_bytes(unsigned char day, unsigned char monthyear)
+{
+
+	unsigned short r;
+
+	if (!fs_sevenbitbodge)
+		r = ((((monthyear & 0xf0) >> 4) + 81) % 100);
+	else
+		r = ((( ((monthyear & 0xf0) >> 1) | ((day & 0xe0) >> 5) ) + 81) % 100);
+
+	//fprintf (stderr, "year_from2byte (%02x, %02x) = %02d\n", day, monthyear, r);
+
+	return r;
+
+}
+
+unsigned short fs_month_from_two_bytes(unsigned char day, unsigned char monthyear)
+{
+	return (monthyear & 0x0f);
+}
+
+unsigned short fs_day_from_two_bytes(unsigned char day, unsigned char monthyear)
+{
+	return (day & 0x1f);
+}
 
 // Used with scandir
 int fs_alphacasesort(const struct dirent **d1, const struct dirent **d2)
@@ -328,6 +388,8 @@ unsigned short fs_allocate_user_file_channel(int server, unsigned int active_id)
 
 	if (count == FS_MAX_OPEN_FILES) return 0; // No handle available
 
+	active[server][active_id].fhandles[count].is_dir = 0;
+
 	return count;
 
 }
@@ -335,6 +397,10 @@ unsigned short fs_allocate_user_file_channel(int server, unsigned int active_id)
 // Deallocate a file handle for a user
 void fs_deallocate_user_file_channel(int server, unsigned int active_id, unsigned short channel)
 {
+	// Do nothing if it's actually a directory handle
+
+	if (active[server][active_id].fhandles[channel].is_dir) return;
+
 	active[server][active_id].fhandles[channel].handle = -1;
 	
 	return;
@@ -347,13 +413,16 @@ unsigned short fs_allocate_user_dir_channel(int server, unsigned int active_id, 
 
 	count = 1; // Don't want to feed the user a directory handle 0
 
-	while (active[server][active_id].dhandles[count].handle != -1 && count < FS_MAX_OPEN_FILES)
+// All references to dhandles changed to fhandle so there is a single set of user handles
+
+	while (active[server][active_id].fhandles[count].handle != -1 && count < FS_MAX_OPEN_FILES)
 		count++;
 
 	if (count == FS_MAX_OPEN_FILES) return -1; // No handle available
 
-	active[server][active_id].dhandles[count].handle = d;
-	active[server][active_id].dhandles[count].cursor = 0;
+	active[server][active_id].fhandles[count].handle = d;
+	active[server][active_id].fhandles[count].cursor = 0;
+	active[server][active_id].fhandles[count].is_dir = 1;
 
 	return count;
 
@@ -362,10 +431,15 @@ unsigned short fs_allocate_user_dir_channel(int server, unsigned int active_id, 
 // Deallocate a directory handle for a user
 void fs_deallocate_user_dir_channel(int server, unsigned int active_id, unsigned short channel)
 {
-	if (active[server][active_id].dhandles[channel].handle != -1)
-		fs_close_dir_handle(server, active[server][active_id].dhandles[channel].handle);
 
-	active[server][active_id].dhandles[channel].handle = -1;
+	// If it's not a directory handle, do nothing. ALl refs herein changed from dhandles to fhandles
+
+	if (active[server][active_id].fhandles[channel].is_dir == 0) return;
+
+	if (active[server][active_id].fhandles[channel].handle != -1)
+		fs_close_dir_handle(server, active[server][active_id].fhandles[channel].handle);
+
+	active[server][active_id].fhandles[channel].handle = -1;
 	
 	return;
 }
@@ -715,8 +789,11 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 
 		localtime_r(&(statbuf.st_mtime), &ct);
 
+		fs_date_to_two_bytes (ct.tm_mday, ct.tm_mon+1, ct.tm_year, &(p->monthyear), &(p->day));	
+		/*
 		p->day = ct.tm_mday;
 		p->monthyear = (((ct.tm_year - 40 - 81) & 0x0f) << 4) | ((ct.tm_mon+1) & 0x0f); // Top four bits are year since 1981, so we deduct 40 from the actual year so that 2021 = 1981; then we OR-in the month
+		*/
 
 		p->internal = statbuf.st_ino;
 		strncpy(p->ownername, users[server][p->owner].username, 10);
@@ -738,12 +815,14 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 
 // If wildcard = 0, the system will assume no wildcards. Otherwise wildcards enabled.
 
+// We need to amend this to return -1 if it's a bad path so the calling routine can distinguish between no entries and bad pathname
+
 int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short relative_to, struct path *result, unsigned short wildcard)
 {
 
 	int ptr = 2;
 	regmatch_t matches[20];
-	unsigned char adjusted[1024];
+	unsigned char adjusted[1048];
 	unsigned char path_internal[1024];
 	unsigned char unix_segment[20];
 	short normalize_debug = 0;
@@ -811,15 +890,16 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 
 		result->disc = count;
 	}
+	else if (*path == '.') // Bad path - can't start with a .
+	{
+		return 0;
+	}
 	else	
 	{
 		strcpy ((char * ) path_internal, (const char * ) path);
 	}
 
 	strcpy ((char * ) adjusted, (const char * ) "");
-
-	if (normalize_debug) fprintf (stderr, "disc selected = %d, %s\n", result->disc, (result->disc != -1) ? (char *) fs_discs[server][result->disc].name : (char *) "");
-	if (normalize_debug) fprintf (stderr, "path_internal = %s (len %d)\n", path_internal, (int) strlen(path_internal));
 
 /*
 	if (path_internal[0] == '&') // Must exclude if selected disc is not our home disc - or treat as $ if it is not home disc // NB - Econet clients don't send this - they send a relative handle
@@ -839,7 +919,11 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 		else return 0; // Specification relative to home on a disc not containing our home directory
 	}
 */
-	/* else */ if (path_internal[0] == '$')
+
+	if (normalize_debug) fprintf (stderr, "Normalize relative to handle %d, which has full acorn path %s\n", relative_to, active[server][user].fhandles[relative_to].acornfullpath);
+
+/* OLD RELATIVE ADJUSTMENT CODE 
+	if (path_internal[0] == '$')
 	{
 		if (normalize_debug) fprintf (stderr, "Found $ specifier with %02x as next character\n", path_internal[1]);
 		switch (path_internal[1])
@@ -875,20 +959,63 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 		// IF there is a disc found, then the path is taken to be realtive to $ anyway
 	}
 
-	if (normalize_debug) fprintf (stderr, "Adjusted = %s / ptr = %d / path_internal = %s\n", adjusted, ptr, path_internal);
-
 	strcat (adjusted, path_internal + ptr);
 
-	strcpy ((char * ) result->path_from_root, (const char * ) adjusted);
+*/
 
-	if (normalize_debug) fprintf (stderr, "Adjusted = %s\n", adjusted);
+	// New relative adjustment code
 
+	if (path_internal[0] == '$') // Absolute path given
+	{
+		if (normalize_debug) fprintf (stderr, "Found $ specifier with %02x as next character\n", path_internal[1]);
+		switch (path_internal[1])
+		{
+			case '.': ptr = 2; break; 
+			case 0: ptr = 1; break; // next routine will find an empty path
+			default: return 0; break; //Anything else is invalid
+		}
+		// Set up 'adjusted' accordingly
+		strcpy(adjusted, path_internal + ptr);
+	}
+	else // relative path given - so give it relative to the relevant handle
+	{
+		unsigned short fp_ptr = 0;
+
+		while (active[server][user].fhandles[relative_to].acornfullpath[fp_ptr] != '.') fp_ptr++;
+		// Now at end of disc name
+		// Skip the '.$'
+		fp_ptr += 2;
+		if (active[server][user].fhandles[relative_to].acornfullpath[fp_ptr] == '.') // Path longer than just :DISC.$
+			fp_ptr++;
+
+		if (fp_ptr < strlen(active[server][user].fhandles[relative_to].acornfullpath))
+		{
+			sprintf(adjusted, "%s", active[server][user].fhandles[relative_to].acornfullpath + fp_ptr);
+			if (strlen(path_internal) > 0) strcat(adjusted, ".");
+		}
+		else	strcpy(adjusted, "");
+
+		strcat(adjusted, path_internal);
+
+	}
+	
 	if (result->disc == -1)
 	{
 		result->disc = active[server][user].current_disc; // Replace the rogue if we are not selecting a specific disc
 		strcpy ((char * ) result->discname, (const char * ) fs_discs[server][result->disc].name);
 		if (normalize_debug) fprintf (stderr, "No disc specified, choosing current disc: %d - %s\n", active[server][user].current_disc, fs_discs[server][result->disc].name);
 	}
+
+	if (normalize_debug) fprintf (stderr, "disc selected = %d, %s\n", result->disc, (result->disc != -1) ? (char *) fs_discs[server][result->disc].name : (char *) "");
+	if (normalize_debug) fprintf (stderr, "path_internal = %s (len %d)\n", path_internal, (int) strlen(path_internal));
+
+	sprintf (result->acornfullpath, ":%s.$", fs_discs[server][result->disc].name);
+
+	if (normalize_debug) fprintf (stderr, "Adjusted = %s / ptr = %d / path_internal = %s\n", adjusted, ptr, path_internal);
+
+	strcpy ((char * ) result->path_from_root, (const char * ) adjusted);
+
+	if (normalize_debug) fprintf (stderr, "Adjusted = %s\n", adjusted);
 
 	ptr = 0;
 
@@ -974,8 +1101,11 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 		stat(result->unixpath, &s);
 		localtime_r(&(s.st_mtime), &t);
 
-		result->day = t.tm_mday;
-		result->monthyear = (((t.tm_year - 40 - 81) & 0x0f) << 4) | ((t.tm_mon+1) & 0x0f); // Top four bits are year since 1981, so we deduct 40 from the actual year so that 2021 = 1981; then we OR-in the month
+		fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->day), &(result->monthyear));
+
+		//result->day = t.tm_mday;
+		
+		//result->monthyear = (((t.tm_year - 40 - 81) & 0x0f) << 4) | ((t.tm_mon+1) & 0x0f); // Top four bits are year since 1981, so we deduct 40 from the actual year so that 2021 = 1981; then we OR-in the month
 	}
 
 	if (wildcard)
@@ -994,7 +1124,6 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 		while (result->npath > 0 && (count < result->npath))
 		{
 
-
 			strcpy(acorn_path, result->path[count]); // Preserve result->path[count] as is, otherwise fs_get_wildcard_entries will convert it to unix, which we don't want
 			if (normalize_debug) fprintf(stderr, "Processing path element %d - %s (Acorn: %s) in directory %s\n", count, result->path[count], acorn_path, result->unixpath);
 
@@ -1004,7 +1133,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 
 			if (normalize_debug)
 			{
-				fprintf (stderr, "Wildcard search returned %d entries:\n", num_entries);
+				fprintf (stderr, "Wildcard search returned %d entries (result->paths = %8p):\n", num_entries, result->paths);
 				p = result->paths;
 				while (p != NULL)
 				{
@@ -1013,7 +1142,10 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 						p->perm, p->parent_perm, p->my_perm,
 						p->load, p->exec, p->length, p->internal,
 						p->unixpath, p->unixfname, p->acornname,
-						p->day, p->monthyear & 0x0f, ((p->monthyear & 0xf0) >> 4) + 81);
+						fs_day_from_two_bytes(p->day, p->monthyear),
+						fs_month_from_two_bytes(p->day, p->monthyear),
+						fs_year_from_two_bytes(p->day, p->monthyear));
+						//p->day, p->monthyear & 0x0f, ((!fs_sevenbitbodge) ? (p->monthyear & 0xf0) >> 4) + 81 : (((((p->monthyear & 0xf0) << 1) | ((p->day & 0xe0) >> 5))+81) % 100));
 					p = p->next;
 				}
 			}
@@ -1021,7 +1153,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 			found = (num_entries > 0 ? 1 : 0);
 
 			// If not on last leg, add first entry to path from root
-			if (count != result->npath-1)
+			if (found && (count != result->npath-1))
 			{
 				if (strlen(result->path_from_root) != 0)
 					strcat(result->path_from_root, ".");
@@ -1037,7 +1169,10 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 				// searched for wasn't there so that it can be written to. Obviously if it did contain wildcards then it can't be so we
 				// return 0
 
-				if (count == result->npath-1 && (strchr(result->path[count], '*') == NULL) && (strchr(result->path[count], '#') == NULL))
+				if (normalize_debug) fprintf (stderr, "Work out whether to return 1 or 0 when nothing found: count = %d, result->npath-1=%d, search for wildcards is %s\n", count, result->npath-1, (strchr(result->path[count], '*') == NULL && strchr(result->path[count], '#') == NULL) ? "in vain" : "successful");
+				if ((count == result->npath-1)  
+					// && ((strchr(result->path[count], '*') == NULL) && (strchr(result->path[count], '#') == NULL))
+				) // Only give a hard fail if we are not in last path segment
 					return 1;
 
 				return 0; // If not on last segment, this is a hard fail.
@@ -1068,6 +1203,12 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 			strncpy (result->acornname, result->paths->acornname, 10);
 			result->acornname[10] = '\0';
 
+			if (count < result->npath-1) // Add path to acornfullpath. When in wildcard mode, the caller is expected to add whichever element of paths[] they want to the acornpath to get the full path.
+			{
+				strcat(result->acornfullpath, ".");
+				strcat(result->acornfullpath, result->paths->acornname);
+			}
+
 			strcpy (result->unixpath, result->paths->unixpath); // Always copy first entry to unixpath - means that our next npath entry will look in the first thing we found on the last wildcard search. That means, e.g. :ECONET.$.A*.WOMBAT.DR* will match the first thing in $ beginning 'A'.
 
 			strncpy (result->unixfname, result->paths->unixfname, 10);
@@ -1081,6 +1222,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 
 			count++;
 		}
+
+		if (normalize_debug) fprintf (stderr, "Returning full acorn path (wildcard - last path element to be added by caller) %s\n", result->acornfullpath);
 
 		return 1;
 	}
@@ -1182,6 +1325,10 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 		strcat(result->unixpath, "/");
 		strcat(result->unixpath, unix_segment);
 
+		// Add it to full acorn path
+		strcat(result->acornfullpath, ".");
+		strcat(result->acornfullpath, path_segment);
+
 		if (normalize_debug) fprintf (stderr, "Attempting to stat %s\n", result->unixpath);
 
 		if (!stat(result->unixpath, &s)) // Successful stat
@@ -1250,8 +1397,9 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 
 				localtime_r(&(s.st_mtime), &t);
 
-				result->day = t.tm_mday;
-				result->monthyear = (((t.tm_year - 81 - 40) & 0x0f) << 4) | ((t.tm_mon+1) & 0x0f); // Top four bits are year since 1981, so we deduct 40 from the actual year so that 2021 = 1981; then we OR-in the month
+				fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->monthyear), &(result->day));
+				//result->day = t.tm_mday;
+				//result->monthyear = (((t.tm_year - 81 - 40) & 0x0f) << 4) | ((t.tm_mon+1) & 0x0f); // Top four bits are year since 1981, so we deduct 40 from the actual year so that 2021 = 1981; then we OR-in the month
 				
 				if (active[server][user].priv & FS_PRIV_SYSTEM)
 					result->my_perm = 0xff;
@@ -1275,6 +1423,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 
 	}
 	
+	if (normalize_debug) fprintf (stderr, "Returning full acorn path (non-wildcard) %s\n", result->acornfullpath);
+
 	strncpy((char * ) result->ownername, (const char * ) users[server][result->owner].username, 10); // Populate readable owner name
 	result->ownername[10] = '\0';
 
@@ -1326,6 +1476,20 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 	int portcount;
 	char regex[256];
 
+
+// Seven bit bodge test harness
+
+/*
+	{
+		unsigned char monthyear, day;
+
+		fs_date_to_two_bytes(5, 8, 2021, &monthyear, &day);
+
+		fprintf (stderr, "fs_date_to_two_bytes(5/8/2021) gave MY=%02X, D=%02X\n", monthyear, day);
+
+	}
+
+*/
 
 // WILDCARD TEST HARNESS
 
@@ -1541,7 +1705,8 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 
 		fprintf (stderr, "Normalize :ECONET.$.R*.WOBBLE* returned %d and FTYPE %d\n", result, p.ftype);
 
-		/* End of Wildcard test harness */
+		// End of Wildcard test harness 
+*/
 
 		if (!fs_quiet) fprintf (stderr, "   FS: Server %d successfully initialized\n", old_fs_count);
 		return old_fs_count; // The index of the newly initialized server
@@ -1657,7 +1822,7 @@ void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned ch
 	count = 1;
 	while (count < FS_MAX_OPEN_FILES)
 	{
-		if (active[server][active_id].dhandles[count].handle != -1)
+		if (active[server][active_id].fhandles[count].handle != -1 && active[server][active_id].fhandles[count].is_dir)
 			fs_deallocate_user_dir_channel(server, active_id, count);
 		count++;
 	}
@@ -1665,7 +1830,7 @@ void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned ch
 	count = 1;
 	while (count < FS_MAX_OPEN_FILES)
 	{
-		if (active[server][active_id].fhandles[count].handle != -1)
+		if (active[server][active_id].fhandles[count].handle != -1 && (active[server][active_id].fhandles[count].is_dir == 0))
 		{
 			fs_close_interlock(server, active[server][active_id].fhandles[count].handle, active[server][active_id].fhandles[count].mode);
 			fs_deallocate_user_file_channel(server, active_id, count);
@@ -1940,6 +2105,8 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
 				}
 
+				strcpy(active[server][usercount].fhandles[active[server][usercount].root].acornfullpath, p.acornfullpath);
+
 				strncpy((char * ) active[server][usercount].root_dir, (const char * ) "", 11);
 				strncpy((char * ) active[server][usercount].root_dir_tail, (const char * ) "$         ", 11);
 	
@@ -1976,6 +2143,8 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 					// Don't close the dir - it hasn't been clocked as open internally by another reader because fs_alloc... failed.
 				}
 
+				strcpy(active[server][usercount].fhandles[active[server][usercount].current].acornfullpath, p.acornfullpath);
+
 				strncpy((char * ) active[server][usercount].current_dir, (const char * ) p.path_from_root, 255); // Current starts at home
 				if (p.npath == 0)	sprintf(active[server][usercount].current_dir_tail, "$         ");
 				else			sprintf(active[server][usercount].current_dir_tail, "%-10s", p.path[p.npath-1]);
@@ -1987,7 +2156,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 				lib[96] = '\0';
 				for (count = 0; count < 96; count++) if (lib[count] == 0x20) lib[count] = '\0'; // Remove spaces and null terminate
 
-				if (!fs_normalize_path(server, usercount, lib, -1, &p)) // NOTE: because fs_normalize might look up current or home directory, home must be a complete path from $
+				if (!fs_normalize_path(server, usercount, lib, -1, &p) || p.ftype != FS_FTYPE_DIR) // NOTE: because fs_normalize might look up current or home directory, home must be a complete path from $
 				{
 
 					if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Login attempt - cannot find lib dir %s\n", "", net, stn, lib);
@@ -2018,6 +2187,8 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
 				}
 	
+				strcpy(active[server][usercount].fhandles[active[server][usercount].lib].acornfullpath, p.acornfullpath);
+
 				strncpy((char * ) active[server][usercount].lib_dir, (const char * ) p.path_from_root, 255);
 				if (p.npath == 0)
 					strcpy((char * ) active[server][usercount].lib_dir_tail, (const char * ) "$         ");
@@ -2094,10 +2265,11 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 	struct __econet_packet_udp r;
 	int replylen;
 	unsigned short examined, dirsize;
-	DIR *d;
-	struct dirent *entry;
-	struct objattr attr;
-	char unixpath[1024];
+	// Next 4 lines only used in the old non-wildcard code
+	//DIR *d;
+	//struct dirent *entry;
+	//struct objattr attr;
+	//char unixpath[1024];
 	char acornpathfromroot[1024];
 
 	relative_to = *(data+3);
@@ -2129,7 +2301,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 	if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Examine %s relative to %d, start %d, extent %d, arg = %d\n", "", net, stn, path,
 		relative_to, start, n, arg);
 
-	if (!fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1) || p.ftype == FS_FTYPE_NOTFOUND)
+	if (!fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1)) // || p.ftype == FS_FTYPE_NOTFOUND)
 	{
 
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
@@ -2179,7 +2351,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 	strcat(acornpathfromroot, "*"); // It should already have $ on it if root.
 
 	// Wildcard renormalize
-	if (!fs_normalize_path_wildcard(server, active_id, acornpathfromroot, relative_to, &p, 1) || p.ftype == FS_FTYPE_NOTFOUND)
+	if (!fs_normalize_path_wildcard(server, active_id, acornpathfromroot, relative_to, &p, 1)) // || p.ftype == FS_FTYPE_NOTFOUND)
 	{
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
 		return;
@@ -2231,7 +2403,9 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 					sprintf (tmp, "%-10s %08lX %08lX   %06lX   %4s/%-2s     %02d/%02d/%02d %06lX", e->acornname,
 						e->load, e->exec, e->length,
 						permstring_l, permstring_r,
-						e->day, e->monthyear & 0x0f, ((e->monthyear & 0xf0) >> 4) + 81,
+						fs_day_from_two_bytes(e->day, e->monthyear),
+						fs_month_from_two_bytes(e->day, e->monthyear),
+						fs_year_from_two_bytes(e->day, e->monthyear),
 						e->internal
 						);
 						
@@ -2593,6 +2767,7 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 	
 	unsigned long loadexec;
 
+	unsigned short norm_return;
 	char path[1024];
 		
 	struct path p;
@@ -2626,10 +2801,20 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		loadexec += (*(data+8) & 0xff) << 24;
 	}
 
-	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Get Object Info %s relative to %s, command %d\n", "", net, stn, path, relative_to == active[server][active_id].root ? "Root" : relative_to == active[server][active_id].lib ? "Library" : "Current", command);
+	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Get Object Info %s relative to %02X, command %d\n", "", net, stn, path, relative_to, command);
 	
 
-	if (!fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1) || p.ftype == FS_FTYPE_NOTFOUND)
+	norm_return = fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1);
+
+	fs_free_wildcard_list(&p); // Not interested in anything but first entry, which will be in main struct
+
+	if (!norm_return)
+	{
+		fs_error(server, reply_port, net, stn, 0xcc, "Bad filename");
+		return;
+	}
+
+	if (norm_return && p.ftype == FS_FTYPE_NOTFOUND)
 	{
 		struct __econet_packet_udp reply;
 	
@@ -2641,8 +2826,6 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		fs_aun_send(&reply, server, 3, net, stn);
 		return;
 	}
-
-	fs_free_wildcard_list(&p); // Not interested in anything but first entry, which will be in main struct
 
 	if (command == 3)
 	{
@@ -2684,8 +2867,8 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 
 	if (command == 4 || command == 5)
 	{
-		r.p.data[replylen++] = p.my_perm;
-		//if (p.my_perm & FS_PERM_OWN_R) r.p.data[replylen++] = 0xff; else r.p.data[replylen++] = 0x00;
+		//r.p.data[replylen++] = p.my_perm;
+		if (p.my_perm & FS_PERM_OWN_R) r.p.data[replylen++] = 0xff; else r.p.data[replylen++] = 0x00;
 	}
 
 	if (command == 1 || command == 5)
@@ -2805,8 +2988,9 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 							if (!stat((const char * ) p.unixpath, &s))
 							{
 								localtime_r(&(s.st_mtime), &t);
-								day = t.tm_mday;
-								monthyear = (((t.tm_year - 81 - 40) & 0x0f) << 4) | ((t.tm_mon+1) & 0x0f);	
+								fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(monthyear), &(day));
+								//day = t.tm_mday;
+								//monthyear = (((t.tm_year - 81 - 40) & 0x0f) << 4) | ((t.tm_mon+1) & 0x0f);	
 							}	
 								
 							fs_close_interlock(server, internal_handle, 3);
@@ -3937,7 +4121,11 @@ void fs_info(int server, unsigned short reply_port, int active_id, unsigned char
 			if (p.perm & FS_PERM_OTH_W) strcat (permstring, "W");
 			if (p.perm & FS_PERM_OTH_R) strcat (permstring, "R");
 
-			sprintf(reply_string, "%-10s %08lX %08lX   %06lX   %-7s    %02d/%02d/%02d %06lX%c%c",	p.path[p.npath-1], p.load, p.exec, p.length, permstring, p.day, (p.monthyear & 0x0f), ((p.monthyear & 0x0f) >> 4)+81, p.internal, 0x0d, 0x80);
+			sprintf(reply_string, "%-10s %08lX %08lX   %06lX    %-7s   %02d/%02d/%02d %06lX%c%c",	p.path[p.npath-1], p.load, p.exec, p.length, permstring, 
+					fs_day_from_two_bytes(p.day, p.monthyear),
+					fs_month_from_two_bytes(p.day, p.monthyear),
+					fs_year_from_two_bytes(p.day, p.monthyear),
+					p.internal, 0x0d, 0x80);
 
 			strcpy(&(r.p.data[2]), reply_string);
 	
@@ -4126,21 +4314,22 @@ void fs_read_time(int server, unsigned short reply_port, unsigned char net, unsi
 
 	struct tm t;
 	time_t now;
-	unsigned char monthyear;
+	unsigned char monthyear, day;
 
 	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Read FS time\n", "", net, stn);
 
 	now = time(NULL);
 	t = *localtime(&now);
 
-	monthyear = (((t.tm_year - 81 - 40) & 0x0f) << 4) | ((t.tm_mon+1) & 0x0f);	
+	fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &monthyear, &day);
+	//monthyear = (((t.tm_year - 81 - 40) & 0x0f) << 4) | ((t.tm_mon+1) & 0x0f);	
 	
 	r.p.ptype = ECONET_AUN_DATA;
 	r.p.port = reply_port;
 	r.p.ctrl = 0x80;
 	r.p.data[0] = r.p.data[1] = 0;
 
-	r.p.data[2] = t.tm_mday;
+	r.p.data[2] = day;
 	r.p.data[3] = monthyear;
 	r.p.data[4] = t.tm_hour;
 	r.p.data[5] = t.tm_min;
@@ -4422,15 +4611,19 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		r.p.ctrl = 0x80;
 		r.p.port = data_port;
 
+		// short delay to keep certain stations happy
+		usleep(180000);
+
 		while (!feof(f))
 		{
 			collected = fread(&(r.p.data), 1, 1280, f);
 			if (!fs_aun_send(&r, server, collected, net, stn))
 				return; // We failed in some way.
+			// short delay to keep certain stations happy
+			//usleep(200000);
 
 		}
 		
-	 	usleep(100000); // Short delay
 		// Send the tail end packet
 	
 		r.p.data[0] = r.p.data[1] = 0x00;
@@ -4743,8 +4936,8 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 	txport = *(data+2);
 	offsetstatus = *(data+6);
-	bytes = (((*(data+7)) << 16) + ((*(data+8)) << 8) + (*(data+9)));
-	offset = (((*(data+10)) << 16) + ((*(data+11)) << 8) + (*(data+12)));
+	bytes = (((*(data+7))) + ((*(data+8)) << 8) + (*(data+9) << 16));
+	offset = (((*(data+10))) + ((*(data+11)) << 8) + (*(data+12) << 16));
 
 	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() %ld from offset %ld by user %04x on handle %02x\n", "", net, stn, bytes, offset, active[server][active_id].userid, handle);
 
@@ -4800,6 +4993,8 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 			}
 		}
 
+		if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() read %04x bytes off disc\n", "", net, stn, received);
+
 		if (received > 0) // Send what we did get
 		{
 			r.p.ptype = ECONET_AUN_DATA;
@@ -4807,17 +5002,21 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 			r.p.ctrl = 0x80;
 			memcpy(&(r.p.data), readbuffer, received);	
 	
-			usleep(100000); // Some clients get upset
+			if (received < bytes) // Pad rest of data
+				memset (&(r.p.data[received]), 0, bytes - received);
 
-			fs_aun_send(&r, server, received, net, stn);
+			// The real FS pads a short packet to the length requested, but then sends a completion message (below) indicating how many bytes were actually valid
+
+			fs_aun_send(&r, server, bytes, net, stn);
 
 			sent += received;
 		}
 
-		if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() read %04x bytes off disc\n", "", net, stn, received);
 			
 	}
 	
+	//usleep(100000);
+
 	active[server][active_id].fhandles[handle].cursor = ftell(fs_files[server][internal_handle].handle);
 
 	if (fserroronread)
@@ -4834,7 +5033,6 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 		r.p.data[4] = ((sent & 0xff00) >> 8);
 		r.p.data[5] = ((sent & 0xff0000) >> 16);
 
-		usleep(100000); // Short delay
 		fs_aun_send(&r, server, 6, net, stn);
 	}
 	
@@ -4857,8 +5055,9 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	now = time(NULL);
 	t = *localtime(&now);
 
-	day = t.tm_mday;
-	monthyear = (((t.tm_year - 81 - 40) & 0x0f) << 4) | ((t.tm_mon+1) & 0x0f);	
+	fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &monthyear, &day);
+	//day = t.tm_mday;
+	//monthyear = (((t.tm_year - 81 - 40) & 0x0f) << 4) | ((t.tm_mon+1) & 0x0f);	
 								
 	txport = *(data+2);
 	offsetstatus = *(data+6);
@@ -4972,8 +5171,13 @@ void fs_close_handle(int server, unsigned char reply_port, unsigned char net, un
 		fs_error(server, reply_port, net, stn, 222, "Channel ?");
 	else
 	{
-		fs_close_interlock(server, active[server][active_id].fhandles[handle].handle, active[server][active_id].fhandles[handle].mode);	
-		fs_deallocate_user_file_channel(server, active_id, handle);
+		if (active[server][active_id].fhandles[handle].is_dir)
+			fs_deallocate_user_dir_channel (server, active_id, handle);
+		else
+		{
+			fs_close_interlock(server, active[server][active_id].fhandles[handle].handle, active[server][active_id].fhandles[handle].mode);	
+			fs_deallocate_user_file_channel(server, active_id, handle);
+		}
 	}
 }
 
@@ -4981,6 +5185,14 @@ void fs_close(int server, unsigned char reply_port, unsigned char net, unsigned 
 {
 
 	unsigned short count;
+
+	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Close handle %d\n", "", net, stn, handle);
+
+	if (active[server][active_id].fhandles[handle].handle == -1) // Handle not open
+	{
+		fs_error(server, reply_port, net, stn, 222, "Channel ?");
+		return;
+	}
 
 	count = 1;
 
@@ -5030,7 +5242,7 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 
 	fs_copy_to_cr(filename, data+start, 1023);
 
-	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Open %s\n", "", net, stn, filename);
+	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Open %s readonly %s, must exist? %s\n", "", net, stn, filename, (readonly ? "yes" : "no"), (existingfile ? "yes" : "no"));
 
 	result = fs_normalize_path(server, active_id, filename, active[server][active_id].current, &p);
 
@@ -5049,8 +5261,8 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 	}
 	else if ((p.ftype == FS_FTYPE_FILE) && !readonly && ((p.my_perm & FS_PERM_OWN_W) == 0))
 		fs_error(server, reply_port, net, stn, 0xbd, "Insufficient access");
-	else if (existingfile && p.ftype != FS_FTYPE_FILE)
-		fs_error(server, reply_port, net, stn, 0xBE, "Is not a file");
+	//else if (existingfile && p.ftype != FS_FTYPE_FILE) // Cope with weird FS3 behaviour where you can open a directory but not actually read or write from/to it
+		//fs_error(server, reply_port, net, stn, 0xBE, "Is not a file");
 	else if (!readonly && (p.perm & FS_PERM_L)) // File locked
 		fs_error(server, reply_port, net, stn, 0xC3, "Locked");
 	else if (!readonly && (p.ftype == FS_FTYPE_NOTFOUND) && 
@@ -5096,12 +5308,14 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 				active[server][active_id].fhandles[userhandle].cursor = 0;	
 				active[server][active_id].fhandles[userhandle].sequence = 2; // Initialize - should only be 0, or 1 so 2 means first input always treated as non-duplicate
 				active[server][active_id].fhandles[userhandle].pasteof = 0; // Not past EOF yet
+				strcpy(active[server][active_id].fhandles[userhandle].acornfullpath, p.acornfullpath);
 				reply.p.ptype = ECONET_AUN_DATA;
 				reply.p.port = reply_port;
 				reply.p.ctrl = 0x80;
 				reply.p.data[0] = reply.p.data[1] = 0;
 				reply.p.data[2] = (unsigned char) (userhandle & 0xff);
 	
+				if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Opened handle %d\n", "", net, stn, userhandle);
 				fs_aun_send(&reply, server, 3, net, stn);
 			}
 		}
@@ -5189,8 +5403,9 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 			now = time(NULL);
 			t = *localtime(&now);
 
-			day = t.tm_mday;
-			monthyear = (((t.tm_year - 81 - 40) & 0x0f) << 4) | ((t.tm_mon+1) & 0x0f);	
+			fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &monthyear, &day);
+			//day = t.tm_mday;
+			//monthyear = (((t.tm_year - 81 - 40) & 0x0f) << 4) | ((t.tm_mon+1) & 0x0f);	
 								
 			r.p.port = fs_bulk_ports[server][port].reply_port;
 			r.p.ctrl = fs_bulk_ports[server][port].rx_ctrl;
@@ -5400,6 +5615,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								else			sprintf(active[server][active_id].lib_dir_tail, "%-10s", p.path[p.npath-1]);
 								
 								active[server][active_id].lib_disc = p.disc;
+								strcpy(active[server][active_id].fhandles[n_handle].acornfullpath, p.acornfullpath);
 
 								if (old > 0) fs_deallocate_user_dir_channel(server, active_id, old);
 
@@ -5448,6 +5664,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								else			sprintf(active[server][active_id].current_dir_tail, "%-10s", p.path[p.npath-1]);
 								
 								active[server][active_id].current_disc = p.disc;
+								strcpy(active[server][active_id].fhandles[n_handle].acornfullpath, p.acornfullpath);
 								if (old > 0) fs_deallocate_user_dir_channel(server, active_id, old);
 								r.p.ptype = ECONET_AUN_DATA;
 								r.p.port = reply_port;
@@ -5730,6 +5947,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			break;
 		case 0x07: // Close file
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_close(server, reply_port, net, stn, active_id, *(data+5)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+			// Experimentation with *Findlib reveals that the handle sought to be closed is actually at data+4 not data+5. Not sure what data+5 is then. Except that sometimes it IS in byte data+5. Maybe if it's a directory, it's in data+4 and a file is in data+5...
+			//if (fs_stn_logged_in(server, net, stn) >= 0) fs_close(server, reply_port, net, stn, active_id, *(data+4)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x08: // Get byte
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_getbyte(server, reply_port, net, stn, active_id, *(data+2), ctrl); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");

@@ -41,6 +41,7 @@ extern void handle_fs_traffic(int, unsigned char, unsigned char, unsigned char, 
 extern void handle_fs_bulk_traffic(int, unsigned char, unsigned char, unsigned char, unsigned char, unsigned char *, unsigned int);
 extern void fs_garbage_collect(int);
 extern unsigned short fs_quiet;
+extern int fs_sevenbitbodge;
 
 #define ECONET_HOSTTYPE_TDIS 0x02
 #define ECONET_HOSTTYPE_TWIRE 0x04
@@ -52,7 +53,7 @@ extern unsigned short fs_quiet;
 #define ECONET_SERVER_SOCKET 0x04
 
 // AUN Ack wait time in ms - a remote bridge will only Ack a packet going to the wire if it successfully transmits onto the wire, so this may need to be a while
-#define ECONET_AUN_ACK_WAIT_TIME 100
+#define ECONET_AUN_ACK_WAIT_TIME 300
 // Delay in us before sending AUN ACK. Helps to smooth traffic flow to remote bridges - otherwise they tend to get their underwear tangled on transmit. Doesn't need to be very long.
 // Note this value is MICROseconds, the wait time above is MILLIseconds
 #define ECONET_AUN_ACK_DELAY 100 
@@ -75,6 +76,8 @@ int pkt_debug = 0;
 int dumpmode_brief = 0;
 int wire_enabled = 1;
 int spoof_immediate = 1;
+
+int start_fd = 0; // Which index number do we start looking for UDP traffic from after poll returns? We do this cyclicly so we give all stations an even chance
 
 unsigned short numtrunks;
 
@@ -979,7 +982,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 	{
 		if ((a->p.port == 0x99) && (network[d_ptr].servertype & ECONET_SERVER_FILE) && (network[d_ptr].fileserver_index >= 0))
 			handle_fs_traffic(network[d_ptr].fileserver_index, a->p.srcnet, a->p.srcstn, a->p.ctrl, a->p.data, packlen-12);
-		else if ((a->p.port == 0x9f) && ((network[d_ptr].servertype) & ECONET_SERVER_PRINT) && (!strncmp((const char *)&(a->p.data), "PRINT", 5)))
+		else if ((a->p.port == 0x9f) && ((network[d_ptr].servertype) & ECONET_SERVER_PRINT) && (!strncmp((const char *)&(a->p.data), "PRINT", 5))) // Looks like only ANFS does this...
 		{
 			int count, found;; 
 		
@@ -1051,6 +1054,50 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 				    printjobs[count].stn == a->p.srcstn)
 					found = count;
 				else count++;
+			}
+
+			if (found == -1) // BBC B starting new job ?
+			{
+				char filename[100];
+
+				count = 0;
+
+				// Move this to a function at some stage
+				while (count < MAXPRINTJOBS && found == -1)
+				{
+					if (printjobs[count].net == 0 && printjobs[count].stn == 0) // Found one
+						found = count;
+					else	count++;
+				}
+	
+				if (found != -1)
+				{
+
+					printjobs[found].stn = a->p.srcstn;
+					printjobs[found].net = a->p.srcnet;
+					printjobs[found].ctrl = 0x80; 
+					sprintf(filename, SPOOLFILESPEC, found);
+	
+					printjobs[found].spoolfile = fopen(filename, "w");
+	
+					if (!printjobs[found].spoolfile)
+					{
+						printjobs[count].net = printjobs[count].stn = 0;  // Free this up - couldn't open file	
+						fprintf (stderr, "Unable to open spool file for print job from station %d.%d\n", a->p.srcnet, a->p.srcstn);
+					}
+					else
+					{
+						fprintf (stderr, "PRINT: Starting spooler job for %d.%d - %s\n", a->p.srcnet, a->p.srcstn, network[d_ptr].print_serverparam);
+						if (strstr(network[d_ptr].print_serverparam, "@")) // Email print job, not send to printer
+						{
+							fprintf(printjobs[count].spoolfile, "To: %s\n", network[d_ptr].print_serverparam);
+							fprintf(printjobs[count].spoolfile, "Subject: Econet print job from station %d.%d\n\n", a->p.srcnet, a->p.srcstn);
+						}
+						fprintf (printjobs[count].spoolfile, PRINTHEADER, a->p.srcnet, a->p.srcstn);
+					}
+
+				}
+
 			}
 
 			if (found != -1)
@@ -1262,18 +1309,20 @@ int aun_send (struct __econet_packet_udp *p, int len, short srcnet, short srcstn
 	
 				if (w.p.aun_ttype == ECONET_AUN_DATA)
 				{
-					ack.fd = network[s].listensocket;
-					ack.events = POLLIN;
+				//	unsigned short ack_counter = 0;
 
-					if ((poll(&ack, 1, ECONET_AUN_ACK_WAIT_TIME)) && (ack.revents & POLLIN))
-					{
-						struct __econet_packet_udp data;
-
-						read(network[s].listensocket, &data, 100);
-			
-						if (data.p.ptype == ECONET_AUN_ACK && data.p.seq == w.p.seq)
-							acknowledged = 1;
-					}
+						ack.fd = network[s].listensocket;
+						ack.events = POLLIN;
+						
+						if ((poll(&ack, 1, ECONET_AUN_ACK_WAIT_TIME)) && (ack.revents & POLLIN))
+						{
+							struct __econet_packet_udp data;
+	
+							read(network[s].listensocket, &data, 100);
+								
+							if (data.p.ptype == ECONET_AUN_ACK && data.p.seq == w.p.seq)
+								acknowledged = 1;
+						}
 				}
 				else if (w.p.aun_ttype == ECONET_AUN_IMM && spoof_immediate == 0) // No immediate spoofing, so we might get immediates off the wire in userspace. In which case, wait to see if we get a response and put it back on the wire
 				{
@@ -1400,6 +1449,7 @@ int main(int argc, char **argv)
 	int s;
 	int opt;
 	int dump_station_table = 0;
+	int new_start_fd;
 
 	struct __econet_packet_aun rx;
 
@@ -1426,6 +1476,7 @@ int main(int argc, char **argv)
 				bridge_query = 0;
 				break;
 			case 's': dump_station_table = 1; break;
+			case '7': fs_sevenbitbodge = 0; break;
 			case 'h':	
 				fprintf(stderr, " \n\
 Copyright (c) 2021 Chris Royle\n\
@@ -1443,6 +1494,7 @@ Options:\n\
 \t-l\tLocal only - do not connect to kernel module (uses /dev/null instead)\n\
 \t-q\tDisable bridge query responses (DISABLED IN CODE)\n\
 \t-s\tDump station table on startup\n\
+\t-7\tDisable fileserver 7 bit bodge\n\
 \n\
 \
 ", argv[0]);
@@ -1597,9 +1649,16 @@ Options:\n\
 
 		/* See if anything turned up on UDP */
 
+		s = start_fd;
+		new_start_fd = -1; // -1 rogue - means we haven't found a receipt from UDP from anywhere yet, so when we do, we'll update the start_fd to start at the next one next time round
+		
 		for (s = 0; s < pmax; s++) /* not the last fd - which is the econet hardware */
 		{
-			if (pset[s].revents & POLLIN) 
+			int realfd;
+	
+			realfd = (s + start_fd) % pmax; // Offset our start to "start_fd"
+
+			if (pset[realfd].revents & POLLIN) 
 			{
 				/* Read packet off UDP here */
 				int  r;
@@ -1608,7 +1667,13 @@ Options:\n\
 				int count;
 				unsigned short from_found, to_found;
 
-				r = udp_receive(pset[s].fd, (void *) &udp_pkt, sizeof(udp_pkt), (struct sockaddr * restrict) &src_address);
+				if (new_start_fd == -1)
+				{
+					new_start_fd = ((realfd + 1) % pmax); // Update start_fd to start at next FD next time, clamped to within pmax, so that the first station we received from is last in line next time round
+					//fprintf (stderr, "Updated start_fd to %d\n", new_start_fd);
+				}
+
+				r = udp_receive(pset[realfd].fd, (void *) &udp_pkt, sizeof(udp_pkt), (struct sockaddr * restrict) &src_address);
 
 				if (r< 0) continue; // Debut produced in udp_receive
 
@@ -1631,7 +1696,7 @@ Options:\n\
 
 				/* Now where did was it going /to/ ? We can find that by the listening socket number */
 	
-				to_found = fd_ptr[pset[s].fd];
+				to_found = fd_ptr[pset[realfd].fd];
 
 				if ((from_found != 0xffff) && (to_found != 0xffff))
 				{
@@ -1648,7 +1713,7 @@ Options:\n\
 						if (!((udp_pkt.p.ptype == ECONET_AUN_ACK) || 
 					   		(udp_pkt.p.ptype == ECONET_AUN_NAK) ) ) // Ignore those sorts of packets - we don't care
 						{
-							int written;
+							//int written;
 
 							if ((udp_pkt.p.ptype == ECONET_AUN_DATA) && (network[from_found].type == ECONET_HOSTTYPE_DIS_AUN)) // Only bother sending ACKs to UDP stations - We tried only acking after transmission on to the wire and it took too long
 							{
@@ -1658,7 +1723,7 @@ Options:\n\
 
 							if (udp_pkt.p.ptype != ECONET_AUN_DATA || udp_pkt.p.seq > network[from_found].last_seq_ack) // If this packet is not a duplicate - i.e., it wasn't the last one we acknowledged to this host, or it isn't a data packet
 							{
-								written = aun_send(&udp_pkt, r, srcnet, srcstn, dstnet, dststn);
+								/* written = */ aun_send(&udp_pkt, r, srcnet, srcstn, dstnet, dststn);
 								network[from_found].last_seq_ack = udp_pkt.p.seq;
 							}
 
@@ -1668,13 +1733,16 @@ Options:\n\
 					}
 					else 
 					{
-						fprintf (stderr, "UDP from FD %d. Known src/dst but can't bridge - to/from index %d, %d; to_type = 0x%02x, from_type = 0x%02x\n", pset[s].fd, to_found, from_found, network[to_found].type, network[from_found].type);
+						fprintf (stderr, "UDP from FD %d. Known src/dst but can't bridge - to/from index %d, %d; to_type = 0x%02x, from_type = 0x%02x\n", pset[realfd].fd, to_found, from_found, network[to_found].type, network[from_found].type);
 					}
 				}
-				else	fprintf (stderr, "UDP packet received on FD %d; From%s found, To%s found (pointer = %08x)\n", pset[s].fd, ((from_found != 0xffff) ? "" : " not"), ((to_found != 0xffff) ? "" : " not"), to_found);
+				else	fprintf (stderr, "UDP packet received on FD %d; From%s found, To%s found (pointer = %08x)\n", pset[realfd].fd, ((from_found != 0xffff) ? "" : " not"), ((to_found != 0xffff) ? "" : " not"), to_found);
 			}
-
+	
 		}
+
+		if (new_start_fd != -1)
+			start_fd = new_start_fd;
 
 		// Reset our poll structure
 		for (s = 0; s <= pmax; s++)
