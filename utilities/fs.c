@@ -4624,6 +4624,8 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 
 		}
 		
+		usleep (100000); // See if this keeps the BBC Micro happy
+
 		// Send the tail end packet
 	
 		r.p.data[0] = r.p.data[1] = 0x00;
@@ -5015,7 +5017,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 			
 	}
 	
-	//usleep(100000);
+	usleep(100000);
 
 	active[server][active_id].fhandles[handle].cursor = ftell(fs_files[server][internal_handle].handle);
 
