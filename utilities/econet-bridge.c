@@ -41,7 +41,7 @@ extern void handle_fs_traffic(int, unsigned char, unsigned char, unsigned char, 
 extern void handle_fs_bulk_traffic(int, unsigned char, unsigned char, unsigned char, unsigned char, unsigned char *, unsigned int);
 extern void fs_garbage_collect(int);
 extern unsigned short fs_quiet;
-extern int fs_sevenbitbodge;
+extern short fs_sevenbitbodge;
 
 #define ECONET_HOSTTYPE_TDIS 0x02
 #define ECONET_HOSTTYPE_TWIRE 0x04
@@ -1216,36 +1216,32 @@ int aun_send (struct __econet_packet_udp *p, int len, short srcnet, short srcstn
 	if (srcnet == localnet && srcstn == 0 && network[d].type & ECONET_HOSTTYPE_TWIRE) // This is a bridge query response - for now, only send to the wire and only if it came from the wire
 	{
 	
-		int attempts, written;
+		int attempts, written, err, outercount;
 		struct timespec now;
 
-		written = -1;
-		attempts = 0;
-		
 		dump_udp_pkt_aun(len - 8, 2, &w, srcnet, srcstn, dstnet, dststn);
 
+		outercount = 0;
 		
-		clock_gettime(CLOCK_MONOTONIC, &now);
-		
-		if ( ( ((int64_t) (now.tv_sec - network[d].last_tx_time.tv_sec) * 1000000000UL) + 
-			((now.tv_sec == network[d].last_tx_time.tv_sec) ? (now.tv_nsec - network[d].last_tx_time.tv_nsec) : (1000000000UL - network[d].last_tx_time.tv_nsec) + now.tv_sec)
-		) < 500000 ) // If less than 500us since last transmission to this host, delay.
-		{
-			//usleep(1000); // 1ms Inserted 25.07.21 to see if this cures the bulk transmission problem - maybe the server is not quite ready for BeebEm's speedy traffic?
-			// 26.07.21 it wasn't. The problem was elsewhere.
-		}
+try_again:
+		attempts = 0;
+		written = -1;
 
-		// Reset last tx time for comparison next time
-		clock_gettime(CLOCK_MONOTONIC, &(network[d].last_tx_time));
 		while (attempts++ < 3 && written < 0)
 			written = write(econet_fd, &w, len+4);
 			
+		err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
+		
 		if (written < 0)
 		{
-			int err;
-			err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
 			fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - %s (%02x)\n", dstnet, dststn, srcnet, srcstn, econet_strtxerr(err), err);	
+			if (err == 0x41 && (outercount++ < 3)) // Handshake failure
+			{
+				usleep (100000);
+				goto try_again;
+			}
 		}
+
 		if (written < (len+4) && written >= 0)
 			fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - only %d of %d bytes written\n", dstnet, dststn, srcnet, srcstn, written, (len+4));	
 
@@ -1459,7 +1455,9 @@ int main(int argc, char **argv)
 
 	seq = 0x46; /* Random number */
 
-	while ((opt = getopt(argc, argv, "bc:dfilqsh")) != -1)
+	fs_sevenbitbodge = 1; // On by default
+
+	while ((opt = getopt(argc, argv, "bc:dfilqsh7")) != -1)
 	{
 		switch (opt) {
 			case 'b': dumpmode_brief = 1; break;

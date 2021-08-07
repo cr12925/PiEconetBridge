@@ -58,7 +58,7 @@ extern unsigned int local_seq;
 extern unsigned long local_seq;
 #endif
 
-int fs_sevenbitbodge = 1; // Whether to use the spare 3 bits in the day byte for extra year information
+short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for extra year information
 
 short fs_open_interlock(int, unsigned char *, unsigned short, unsigned short);
 void fs_close_interlock(int, unsigned short, unsigned short);
@@ -195,7 +195,14 @@ struct path_entry {
 	void *next, *parent;
 };
 
+#define FS_PATH_ERR_NODIR 0x01 // Path searched for had a directory that did not exist
+#define FS_PATH_ERR_FORMAT 0x02 // Path searched for contained invalid material (e.g. started with a '.')
+#define FS_PATH_ERR_NODISC 0x03 // Selected disc does not exist
+#define FS_PATH_ERR_TYPE 0x04 // What we found was neither file nor directory (even on following a symlink)
+#define FS_PATH_ERR_LENGTH 0x05 // Path provided was too long or too short
+
 struct path {
+	unsigned short error; // One of FS_PATH_ERR* - only valid if function returns 0
 	short ftype; // ECONET_FTYPE_DIR, ECONET_FTYPE_FILE
 	// If ftype == NOTFOUND, the rest of the fields are invalid
 	unsigned char discname[30]; // Actually max 10 chars. This is just safety.
@@ -242,11 +249,13 @@ void fs_date_to_two_bytes(unsigned short day, unsigned short month, unsigned sho
 
 	year_internal = year  - 81;
 
+	//fprintf (stderr, "7 bit bodge is %s\n", (fs_sevenbitbodge ? "on" : "off"));
 	if (!fs_sevenbitbodge)
 	{
 		year_internal -= 40;
 		year_internal = year_internal << 4;
 		*monthyear |= (year_internal & 0x0f);
+		//fprintf (stderr, "Converted %02d/%02d/%02d to MY=%02X, D=%02X\n", day, month, year, *monthyear, *dday);
 	}
 	else // use top three bits of day as low three bits of year
 	{
@@ -839,7 +848,15 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 
 	result->disc = -1; // Rogue so that we can tell if there was a discspec in the path
 
-	if (normalize_debug) fprintf (stderr, "Path provided: %s\n", path);
+	if (normalize_debug) fprintf (stderr, "Path provided: '%s'\n", path);
+
+	// Truncate any path provided that has spaces in it
+	count = 0; 
+	while (count < strlen(path))
+	{
+		if (path[count] == 0x20) path[count] = '\0';
+		count++;
+	}
 
 	memset(path_internal, 0, 1024);
 
@@ -869,11 +886,14 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 			}
 			ptr = 0; // We have put the residual path at the start of path
 		}
-		else	return 0; // Couldn't recognize disc name - bad path
+		else	{ result->error = FS_PATH_ERR_NODISC; return 0; } // Couldn't recognize disc name - bad path
 
 		
 		if ( (*(path + strlen((const char *) result->discname) + 1) != '.') && (*(path + strlen((const char *) result->discname) + 1) != '\0') ) // We had neither a '.' nor end of line after the disc name - probably bad. If end of line, then path_internal will have a $ on the front of it - see above.
+		{
+			result->error = FS_PATH_ERR_FORMAT;
 			return 0; // Must be a '.' after the disc name. Was probably attempt at disc name longer than 10 chars.
+		}
 
 		// Now see if we know the disc name in our store...
 
@@ -886,12 +906,16 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 		}
 
 		if (!found)
+		{
+			result->error = FS_PATH_ERR_NODISC;
 			return 0; // Bad path - no such disc
+		}
 
 		result->disc = count;
 	}
 	else if (*path == '.') // Bad path - can't start with a .
 	{
+		result->error = FS_PATH_ERR_FORMAT;
 		return 0;
 	}
 	else	
@@ -901,26 +925,13 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 
 	strcpy ((char * ) adjusted, (const char * ) "");
 
-/*
-	if (path_internal[0] == '&') // Must exclude if selected disc is not our home disc - or treat as $ if it is not home disc // NB - Econet clients don't send this - they send a relative handle
+	if (normalize_debug) 
 	{
-
-		if (result->disc == users[server][active[server][user].userid].home_disc || active[server][user].current_disc == users[server][active[server][user].userid].home_disc) // Disc was found - only copy home dir if it is our home disc or current disc is home disc
-		{
-			strcpy((char * ) adjusted, (const char * ) active[server][user].home_dir); // path to home
-
-			switch (path_internal[1])
-			{
-				case '.': ptr = 2; strcat(adjusted, "."); break;
-				case 0: ptr = 1; break; // Next routine will find an empty string
-				default: return 0; break; // Anything else after & is invalid
-			}
-		}
-		else return 0; // Specification relative to home on a disc not containing our home directory
+		if (relative_to > 0)
+			fprintf (stderr, "Normalize relative to handle %d, which has full acorn path %s\n", relative_to, active[server][user].fhandles[relative_to].acornfullpath);
+		else	
+			fprintf (stderr, "Normalize relative to nowhere.\n");
 	}
-*/
-
-	if (normalize_debug) fprintf (stderr, "Normalize relative to handle %d, which has full acorn path %s\n", relative_to, active[server][user].fhandles[relative_to].acornfullpath);
 
 /* OLD RELATIVE ADJUSTMENT CODE 
 	if (path_internal[0] == '$')
@@ -972,7 +983,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 		{
 			case '.': ptr = 2; break; 
 			case 0: ptr = 1; break; // next routine will find an empty path
-			default: return 0; break; //Anything else is invalid
+			default: result->error = FS_PATH_ERR_FORMAT; return 0; break; //Anything else is invalid
 		}
 		// Set up 'adjusted' accordingly
 		strcpy(adjusted, path_internal + ptr);
@@ -981,19 +992,24 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 	{
 		unsigned short fp_ptr = 0;
 
-		while (active[server][user].fhandles[relative_to].acornfullpath[fp_ptr] != '.') fp_ptr++;
-		// Now at end of disc name
-		// Skip the '.$'
-		fp_ptr += 2;
-		if (active[server][user].fhandles[relative_to].acornfullpath[fp_ptr] == '.') // Path longer than just :DISC.$
-			fp_ptr++;
-
-		if (fp_ptr < strlen(active[server][user].fhandles[relative_to].acornfullpath))
+		if (relative_to < 1) // Relative to nowhere
+			strcpy(adjusted, "");
+		else
 		{
-			sprintf(adjusted, "%s", active[server][user].fhandles[relative_to].acornfullpath + fp_ptr);
-			if (strlen(path_internal) > 0) strcat(adjusted, ".");
+			while (active[server][user].fhandles[relative_to].acornfullpath[fp_ptr] != '.') fp_ptr++;
+			// Now at end of disc name
+			// Skip the '.$'
+			fp_ptr += 2;
+			if (active[server][user].fhandles[relative_to].acornfullpath[fp_ptr] == '.') // Path longer than just :DISC.$
+				fp_ptr++;
+	
+			if (fp_ptr < strlen(active[server][user].fhandles[relative_to].acornfullpath))
+			{
+				sprintf(adjusted, "%s", active[server][user].fhandles[relative_to].acornfullpath + fp_ptr);
+				if (strlen(path_internal) > 0) strcat(adjusted, ".");
+			}
+			else	strcpy(adjusted, "");
 		}
-		else	strcpy(adjusted, "");
 
 		strcat(adjusted, path_internal);
 
@@ -1022,24 +1038,47 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 	while (result->npath < 30 && ptr < strlen((const char *) adjusted))
 	{
 
-		if (regexec(&r_pathname, adjusted + ptr, 1, matches, 0) == 0)
+		if ((*(adjusted + ptr) == '^'))
 		{
-			strncpy((char * ) result->path[result->npath], (const char * ) adjusted + ptr, matches[0].rm_eo - matches[0].rm_so);
-			*(result->path[result->npath++] + matches[0].rm_eo - matches[0].rm_so) = '\0';
-			ptr += (matches[0].rm_eo - matches[0].rm_so);
+			if (result->npath > 0) result->npath--;
+			ptr++;
+			if (*(adjusted + ptr) == '.') ptr++; // Skip any . that may be there
 		}
 		else
-			return 0; // bad path	
+		{
+			if (regexec(&r_pathname, adjusted + ptr, 1, matches, 0) == 0)
+			{
+				strncpy((char * ) result->path[result->npath], (const char * ) adjusted + ptr, matches[0].rm_eo - matches[0].rm_so);
+				*(result->path[result->npath++] + matches[0].rm_eo - matches[0].rm_so) = '\0';
+				ptr += (matches[0].rm_eo - matches[0].rm_so);
+			}
+			else
+			{
+				result->error = FS_PATH_ERR_FORMAT;
+				return 0; // bad path	
+			}
+	
+			if (ptr != strlen((const char *) adjusted) && *(adjusted + ptr) != '.') // Bad path - must have a dot next, otherwise the path element must be more than ten characters
+			{
+				result->error = FS_PATH_ERR_FORMAT;
+				return 0;
+			}
+			else if (ptr != strlen((const char *) adjusted) && strlen((const char *) adjusted) == (ptr + 1)) // the '.' was at the end
+			{
+				result->error = FS_PATH_ERR_FORMAT;
+				return 0;
+			}
+			else 	ptr++; // Move to start of next portion of path
+		}
 
-		if (ptr != strlen((const char *) adjusted) && *(adjusted + ptr) != '.') // Bad path - must have a dot next, otherwise the path element must be more than ten characters
-			return 0;
-		else if (ptr != strlen((const char *) adjusted) && strlen((const char *) adjusted) == (ptr + 1)) // the '.' was at the end
-			return 0;
-		else 	ptr++; // Move to start of next portion of path
+	
 	}
 
 	if (ptr < strlen((const char *) adjusted))
+	{
+		result->error = FS_PATH_ERR_LENGTH;
 		return 0; // Path too long!
+	}
 
 	/* See if the file exists, in a case insensitive manner, figure out its Unix path, and load its attributes.
 	   If no attributes, or some of them are missing, fill them in with appropriate defaults if the file exists */
@@ -1175,6 +1214,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 				) // Only give a hard fail if we are not in last path segment
 					return 1;
 
+				result->error = FS_PATH_ERR_NODIR;
 				return 0; // If not on last segment, this is a hard fail.
 			}
 				
@@ -1318,7 +1358,11 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 				result->parent_owner = parent_owner; // Otherwise this doesn't get properly updated
 				return 1;
 			}
-			else	return 0; // Fatal not found
+			else	
+			{
+				result->error = FS_PATH_ERR_NODIR;
+				return 0; // Fatal not found
+			}
 		}
 
 		if (normalize_debug) fprintf (stderr, "Found path segment %s in unix world = %s\n", path_segment, unix_segment);
@@ -1344,7 +1388,10 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 			}
 
 			if ((S_ISDIR(s.st_mode) == 0) && (S_ISREG(s.st_mode) == 0)) // Soemthing is wrong
+			{
+				result->error = FS_PATH_ERR_TYPE;
 				return 0; // Should either be file or directory - not block device etc.
+			}
 
 			// Next, set internal name from inode number
 
@@ -2790,17 +2837,6 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 
 	path[replylen] = '\0'; // Null terminate instead of 0x0d in the packet
 
-	// Looks like on commands 2 & 3 at least, there are four bytes before the filename which seem to be intended to 
-	// be both load & exec and need to be set
-
-	if (command == 3)
-	{
-		loadexec = *(data+6) & 0xff;
-		loadexec += (*(data+7) & 0xff) << 8;
-		loadexec += (*(data+8) & 0xff) << 16;
-		loadexec += (*(data+8) & 0xff) << 24;
-	}
-
 	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Get Object Info %s relative to %02X, command %d\n", "", net, stn, path, relative_to, command);
 	
 
@@ -2808,13 +2844,13 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 
 	fs_free_wildcard_list(&p); // Not interested in anything but first entry, which will be in main struct
 
-	if (!norm_return)
+	if (!norm_return && (p.error != FS_PATH_ERR_NODIR))
 	{
 		fs_error(server, reply_port, net, stn, 0xcc, "Bad filename");
 		return;
 	}
 
-	if (norm_return && p.ftype == FS_FTYPE_NOTFOUND)
+	if ((!norm_return && p.error == FS_PATH_ERR_NODIR) || (norm_return && p.ftype == FS_FTYPE_NOTFOUND))
 	{
 		struct __econet_packet_udp reply;
 	
@@ -3633,7 +3669,9 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 		return;
 	}
 
-	//if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom%3d.%3d Successfully mapped new root\n", "", net, stn);
+	strcpy(active[server][active_id].fhandles[root].acornfullpath, p_root.acornfullpath);
+
+	if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom%3d.%3d Successfully mapped new root - handle %02X, full path %s\n", "", net, stn, root, active[server][active_id].fhandles[root].acornfullpath);
 
 	sprintf(tmppath, ":%s.%s", discname, home_dir);
 	if (!fs_quiet) fprintf(stderr, "   FS%12s from %3d.%3d Attempting to find home dir %s\n", "", net, stn, tmppath);
@@ -3672,7 +3710,9 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
        	       	return;
 	}
         
-	//if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom%3d.%3d Successfully mapped new CWD\n", "", net, stn);
+	strcpy(active[server][active_id].fhandles[cur].acornfullpath, p_home.acornfullpath);
+
+	if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom%3d.%3d Successfully mapped new CWD - handle %02X, full path %s\n", "", net, stn, cur, active[server][active_id].fhandles[cur].acornfullpath);
 
 	sprintf(tmppath, ":%s.%s", discname, lib_dir);
 
@@ -3706,7 +3746,9 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
                 return;
         }
 
-	//if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Successfully mapped new library\n", "", net, stn);
+	if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom%3d.%3d Successfully mapped new Library - handle %02X, full path %s\n", "", net, stn, lib, active[server][active_id].fhandles[lib].acornfullpath);
+
+	strcpy(active[server][active_id].fhandles[lib].acornfullpath, p_lib.acornfullpath);
 
 	// Got here, so new disc selection has worked - TODO - release old handles and update active structure, including tail entries.
 
@@ -5986,7 +6028,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_get_object_info(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x13: // Set object info
-			if (fs_stn_logged_in(server, net, stn) >= 0) fs_get_object_info(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+			if (fs_stn_logged_in(server, net, stn) >= 0) fs_set_object_info(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x14: // Delete object
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_delete(server, reply_port, active_id, net, stn, active[server][active_id].current, (data+5)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
