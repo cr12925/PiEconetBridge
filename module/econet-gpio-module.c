@@ -1852,7 +1852,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	// First wait until we are IDLE
 
 	u64 timer, timer2;
-	unsigned short status, aun_status;
+	unsigned short status, aun_status, reset_counter;
 	int c;
 	int tx_success, status_on_entry;
 	u64 ts_entry, ts_tx_start, ts_tx_end, ts_return;
@@ -1862,6 +1862,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	ts_entry = ktime_get_ns();
 	status_on_entry = econet_data->mode;
+	reset_counter = 0;
 
 #ifdef ECONET_GPIO_DEBUG_TX
 	printk (KERN_INFO "ECONET-GPIO: Adapter mode on entry to writefd() = %d\n", status_on_entry);
@@ -1875,6 +1876,8 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		econet_data->last_tx_user_error = ECONET_TX_NOCOPY;
 		return  -1;
 	}
+
+outer_reset_loop:
 
 	if (econet_data->aun_mode) // AUN Mode - this is an AUN format packet from userspace, put it in aun_tx
 	{
@@ -2040,6 +2043,12 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 							(ts_tx_end - ts_entry), (ts_return - ts_entry));
 #endif
 	printk (KERN_INFO "ECONET-GPIO: econet_writefd(): failed to get EM_IDLE state. Chip state = %d, aun state = %d\n", status, aun_status);
+
+	if (econet_data->aun_mode && (econet_data->mode == 6 || econet_data->mode == 7) && reset_counter++ < 4) // AUN mode but chip is idle
+	{
+		econet_set_aunstate(EA_IDLE);
+		goto outer_reset_loop;
+	}
 
 	econet_data->last_tx_user_error = EBUSY;
 	return -1;
