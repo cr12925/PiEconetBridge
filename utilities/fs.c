@@ -2812,7 +2812,6 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 
 	unsigned short command;
 	
-	unsigned long loadexec;
 
 	unsigned short norm_return;
 	char path[1024];
@@ -2861,18 +2860,6 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 	
 		fs_aun_send(&reply, server, 3, net, stn);
 		return;
-	}
-
-	if (command == 3)
-	{
-		char str[20];
-
-		sprintf (str, "%08lX", loadexec);
-
-		// Actually, 2 will is either load/exec, 3 will be the other one - but not sure which is which...
-		// Set load & exec from those first four bytes - seems odd on a GET operation, but there we go
-		setxattr(p.unixpath, "user.econet_load", str, 8, 0);
-		setxattr(p.unixpath, "user.econet_exec", str, 8, 0);
 	}
 
 	replylen = 0; // Reset after temporary use above
@@ -4135,7 +4122,8 @@ void fs_info(int server, unsigned short reply_port, int active_id, unsigned char
 
 	relative_to = active[server][active_id].current;
 
-	r.p.data[0] = relative_to;
+	//r.p.data[0] = relative_to; Maybe this is a permissions thing?
+	r.p.data[0] = 0x04; // Anything else and we get weird results. 0x05, for example, causes the client machine to *RUN the file immediately after getting the answer...
 	r.p.data[1] = 0;
 
 	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d *INFO %s\n", "", net, stn, path);
