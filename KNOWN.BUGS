@@ -1,3 +1,4 @@
 Known bugs as follows
 
-1. Fileserver. *INFO on a relative path will get byte 1 of its reply wrong. It appears it is intended to be a directory handle, but it is not clear how to choose that byte. This will stop a Master 128 with *opt5,1 set from logging in.
+1. Sending traffic through the bridge to a heavily congested Econet will not work very well. Work in progress.
+
