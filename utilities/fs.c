@@ -234,6 +234,28 @@ int fs_count = 0;
 
 unsigned short fs_quiet = 0;
 
+// Convert our perm storage to Acorn / MDFS format
+unsigned char fs_perm_to_acorn(unsigned char fs_perm, unsigned char ftype)
+{
+	unsigned char r;
+
+	r = fs_perm & FS_PERM_H; // High bit
+
+	if (ftype == FS_FTYPE_DIR)
+		r |= 0x20;
+
+	if (fs_perm & FS_PERM_L)
+		r |= 0x10;
+
+	r |= ((fs_perm & (FS_PERM_OWN_R | FS_PERM_OWN_W)) << 2);
+	r |= ((fs_perm & (FS_PERM_OTH_R | FS_PERM_OTH_W)) >> 4);
+	
+	//if (!fs_quiet) fprintf (stderr, "Converted perms %02X (ftype %02d) to Acorn %02X\n", fs_perm, ftype, r);
+	return r;
+	
+
+}
+
 // Convert d/m/y to Acorn 2-byte format
 void fs_date_to_two_bytes(unsigned short day, unsigned short month, unsigned short year, unsigned char *monthyear, unsigned char *dday)
 {
@@ -796,6 +818,9 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 			p->ftype = FS_FTYPE_DIR;
 		else	p->ftype = FS_FTYPE_SPECIAL;
 
+		if (!(S_ISREG(statbuf.st_mode)))
+			p->load = p->exec = 0;
+	
 		localtime_r(&(statbuf.st_mtime), &ct);
 
 		fs_date_to_two_bytes (ct.tm_mday, ct.tm_mon+1, ct.tm_year, &(p->monthyear), &(p->day));	
@@ -2885,19 +2910,21 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		r.p.data[replylen++] = (p.length & 0xff);
 		r.p.data[replylen++] = (p.length & 0xff00) >> 8;
 		r.p.data[replylen++] = (p.length & 0xff0000) >> 16;
-		//r.p.data[replylen++] = (p.length & 0xff000000) >> 24;
 	}
 
 	if (command == 4 || command == 5)
 	{
-		//r.p.data[replylen++] = p.my_perm;
-		if (p.my_perm & FS_PERM_OWN_R) r.p.data[replylen++] = 0xff; else r.p.data[replylen++] = 0x00;
+		r.p.data[replylen++] = fs_perm_to_acorn(p.perm, p.ftype);
+		//if (p.my_perm & FS_PERM_OWN_R) r.p.data[replylen++] = 0xff; else r.p.data[replylen++] = 0x00;
+		r.p.data[replylen++] = (active[server][active_id].userid == p.owner) ? 0x00 : 0xff; 
 	}
 
 	if (command == 1 || command == 5)
 	{
-		r.p.data[replylen++] = p.monthyear & 0x0f;
-		r.p.data[replylen++] = p.monthyear >> 8;
+		//r.p.data[replylen++] = p.monthyear & 0x0f;
+		//r.p.data[replylen++] = p.monthyear >> 8;
+		r.p.data[replylen++] = p.day;
+		r.p.data[replylen++] = p.monthyear;
 	}
 
 	if (command == 6)
@@ -3789,7 +3816,7 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	r.p.ptype = ECONET_AUN_DATA;
 	r.p.port = reply_port;
 	r.p.ctrl = 0x80;
-	r.p.data[0] = 0x05; // ?? 0x05 ??
+	r.p.data[0] = 0x06; // SDisc return, according to MDFS manual
 	r.p.data[1] = 0x00;
 	r.p.data[2] = root;
 	r.p.data[3] = cur;

@@ -1235,9 +1235,9 @@ try_again:
 		if (written < 0)
 		{
 			fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - %s (%02x)\n", dstnet, dststn, srcnet, srcstn, econet_strtxerr(err), err);	
-			if (err == 0x41 && (outercount++ < 3)) // Handshake failure
+			if ((err == ECONET_TX_HANDSHAKEFAIL || err == ECONET_TX_UNDERRUN || err == ECONET_TX_TDRAFULL || err == ECONET_TX_NOIRQ || err == ECONET_TX_COLLISION || err == ECONET_TX_NOTSTART) && (outercount++ < 10)) // Handshake failure
 			{
-				usleep (100000);
+				usleep(10^outercount); // Exponential backoff
 				goto try_again;
 			}
 		}

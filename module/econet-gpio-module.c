@@ -1439,6 +1439,21 @@ recv_more:
 		printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): Unhandled state - SR1 = 0x%02x, SR1 = 0x%02x\n", sr1, sr2);
 #endif
 	}
+
+	// Detect packets we are not interested in and discontinue them
+	if (econet_data->aun_mode && econet_pkt_rx.ptr > 1) // If not in AUN mode, we receive everything and dump to userspace. Need ptr > 1 because that will mean destination address is in bytes 0, 1 of the received packet
+	{
+		if (!ECONET_DEV_STATION(econet_stations, econet_pkt_rx.d.p.dstnet, econet_pkt_rx.d.p.dststn)) // Not a station we are interested in
+		{
+			econet_pkt_rx.length = econet_pkt_rx.ptr = 0;
+			econet_set_chipstate(EM_IDLE);
+			econet_write_cr(ECONET_GPIO_CR2, C2_READ);
+			econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_DISC | ECONET_GPIO_C1_RX_RESET); // Discontinue reception
+			econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+		}
+
+	}
+
 	return;
 
 }
@@ -1931,7 +1946,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 				econet_set_write_mode(&econet_pkt, len); // Trigger TX
 			}
 
-#define ECONET_TX_WAIT_PERIOD 500000000 // 0.5s should be long enough for most packets
+#define ECONET_TX_WAIT_PERIOD 750000000 // 0.5s should be long enough for most packets
 
 			timer2 = ktime_get_ns() + ((unsigned long long) ECONET_TX_WAIT_PERIOD); 
 
@@ -1953,6 +1968,8 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 #ifdef ECONET_GPIO_DEBUG_AUN
 				printk (KERN_INFO "ECONET-GPIO: econet_writefd(): AUN: Timeout waiting for transmission to complete. Returning TX_NOTSTART\n");
 #endif
+				if (econet_data->aun_mode) // If we are giving up, and in AUN mode, gop back to IDLE
+					econet_set_aunstate(EA_IDLE);
 
 				econet_set_read_mode();
 				econet_data->last_tx_user_error = ECONET_TX_HANDSHAKEFAIL;
