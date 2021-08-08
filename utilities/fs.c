@@ -105,7 +105,7 @@ struct {
 	unsigned char net, stn;
 	unsigned int userid; // Index into users[n][]
 	unsigned char root, current, lib; // Handles
-	char root_dir[256], current_dir[256], lib_dir[256]; // Paths relative to root
+	char root_dir[261], current_dir[258], lib_dir[258]; // Paths relative to root
 	char root_dir_tail[15], lib_dir_tail[15], current_dir_tail[15]; // Just the last element of path, or $
 	unsigned int home_disc, current_disc, lib_disc; // Currently selected disc for each of the three handles
 	unsigned char bootopt;
@@ -326,14 +326,15 @@ int fs_alphacasesort(const struct dirent **d1, const struct dirent **d2)
 // Often Econet clients send strings which are terminated with 0x0d. This copies them so we don't repeat the routine.
 void fs_copy_to_cr(unsigned char *dest, unsigned char *src, unsigned short len)
 {
-	unsigned short count;
+	unsigned short count, srccount;
 
-	count = 0;
+	srccount = count = 0;
 
 	while (count < len && *(src+count) != 0x0d)
 	{
-		*(dest+count) = *(src+count);
-		count++;
+		if (*(src+srccount) != ' ') // Skip space
+			*(dest+count++) = *(src+srccount);
+		srccount++;
 	}
 
 	*(dest+count) = '\0';	
@@ -1914,7 +1915,8 @@ void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned ch
 
 	//fprintf (stderr, "FS doing memset(%8p, 0, %d)\n", &(active[fs_stn_logged_in(server, net, stn)]), sizeof(active)/ECONET_MAX_FS_SERVERS);
 	//fprintf (stderr, "FS bulk ports array at %8p\n", fs_bulk_ports[server]);
-	memset(&(active[fs_stn_logged_in(server, net, stn)]), 0, sizeof(active) / ECONET_MAX_FS_SERVERS);
+	//memset(&(active[fs_stn_logged_in(server, net, stn)]), 0, sizeof(active) / ECONET_MAX_FS_SERVERS);
+	active[server][active_id].stn = active[server][active_id].net = 0; // Flag unused
 	
 	reply.p.port = reply_port;
 	reply.p.ctrl = 0x80;
@@ -2150,9 +2152,9 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 				home[96] = '\0';
 				for (count = 0; count < 96; count++) if (home[count] == 0x20) home[count] = '\0'; // Remove spaces and null terminate
 
-				// First, root
+				// First, user root
 
-				if (!fs_normalize_path(server, usercount, "$", -1, &p)) // NOTE: because fs_normalize might look up current or home directory, home must be a complete path from $
+				if (!fs_normalize_path(server, usercount, home, -1, &p)) // NOTE: because fs_normalize might look up current or home directory, home must be a complete path from $
 				{
 
 					if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Login attempt - cannot find root dir %s\n", "", net, stn, home);
@@ -2181,8 +2183,13 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 
 				strcpy(active[server][usercount].fhandles[active[server][usercount].root].acornfullpath, p.acornfullpath);
 
-				strncpy((char * ) active[server][usercount].root_dir, (const char * ) "", 11);
-				strncpy((char * ) active[server][usercount].root_dir_tail, (const char * ) "$         ", 11);
+				//strncpy((char * ) active[server][usercount].root_dir, (const char * ) "", 11);
+				//strncpy((char * ) active[server][usercount].root_dir_tail, (const char * ) "$         ", 11);
+				
+				snprintf(active[server][usercount].root_dir, 260, "$.%s", p.path_from_root);
+
+				if (p.npath == 0)	sprintf(active[server][usercount].root_dir_tail, "$         ");
+				else			sprintf(active[server][usercount].root_dir_tail, "%-10s", p.path[p.npath-1]);
 	
 				// Next, CWD, which starts as home	
 				
@@ -2192,7 +2199,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 					if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Login attempt - cannot find home dir %s\n", "", net, stn, home);
 					if (!fs_normalize_path(server, usercount, "$", -1, &p)) // Use root as home directory instead
 					{
-						fs_error (server, reply_port, net, stn, 0xA8, "Unable to map home.");
+						fs_error (server, reply_port, net, stn, 0xA8, "Unable to map CWD.");
 						active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
 					}
 
@@ -2269,7 +2276,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 				else
 					sprintf(active[server][usercount].lib_dir_tail, "%-10s", p.path[p.npath-1]);
 
-				if (!fs_quiet) fprintf (stderr, "   FS:            from %3d.%3d Login as %s, index %d, id %d, disc %d, root %s, priv 0x%02x\n", net, stn, username, usercount, active[server][usercount].userid, active[server][usercount].current_disc, active[server][usercount].root_dir, active[server][usercount].priv);
+				if (!fs_quiet) fprintf (stderr, "   FS:            from %3d.%3d Login as %s, index %d, id %d, disc %d, URD %s, CWD %s, LIB %s, priv 0x%02x\n", net, stn, username, usercount, active[server][usercount].userid, active[server][usercount].current_disc, home, home, lib, active[server][usercount].priv);
 
 				// Tell the station
 			
@@ -5765,14 +5772,31 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				}
 				else	fs_error(server, reply_port, net, stn, 0xFE, "Not found");
 			}
-			else if (!strncasecmp("DIR ", (const char *) command, 4)) // Change library directory
+			//else if (!strncasecmp("DIR ", (const char *) command, 4) || (!strncasecmp("DIR", (const char *) command, 3) && (*(command + 3) == 0x0d))) // Change working directory
+			else if (!strncasecmp("DIR", (const char *) command, 3) && (*(command + 3) == '\0' || *(command + 3) == ' ')) // The code above has already null terminated the command
 			{
 				int found;
 				struct path p;
 				unsigned short l, n_handle;
+				unsigned char dirname[1024];
 
-				if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d DIR %s\n", "", net, stn, command+4);
-				if ((found = fs_normalize_path(server, active_id, command+4, *(data+3), &p)) && (p.ftype != FS_FTYPE_NOTFOUND)) // Successful path traverse
+				if (*(command + 3) == '\0')	strcpy(dirname, "");
+				else	strcpy (dirname, command+4);
+
+				if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d DIR %s\n", "", net, stn, dirname);
+			
+				if (!strcmp(dirname, "")) // Empty string
+				{
+					//int counter;
+					fprintf (stderr, "Setting CWD to %s\n", active[server][active_id].root_dir);
+					strcpy (dirname, active[server][active_id].root_dir);
+					//counter = 0;
+					//while (counter < FS_DEFAULT_NAMELEN && dirname[counter] != ' ')	counter++;
+					//dirname[counter] = '\0'; // null terminate on space or max length
+				}
+					
+
+				if ((found = fs_normalize_path(server, active_id, dirname, *(data+3), &p)) && (p.ftype != FS_FTYPE_NOTFOUND)) // Successful path traverse
 				{
 					if (p.ftype != FS_FTYPE_DIR)
 						fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
