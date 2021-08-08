@@ -18,6 +18,21 @@ AUN to Econet Bridge
 
 */
 
+THANKS
+------
+
+Two individuals, KL and IW (you know who you are) did extensive testing
+of both the hardware and software involved in this project (aka trying
+quite hard to break it!) in July and August 2021. I am very grateful to
+them for their efforts.
+
+The fileserver code in this repository would not have been possible to
+develop without sight of the code at github.com/stardot/ArduinoFilestore
+
+I don't know who wrote it, but whoever it was I am very grateful. If
+anyone does know who wrote it, let me know and I will update this
+README.
+
 Introduction
 ------------
 

@@ -4166,6 +4166,8 @@ void fs_cdir(int server, unsigned short reply_port, int active_id, unsigned char
 
 	fs_copy_to_cr(path, command + count, 1023);
 
+	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d CDIR %s relative to %02X (%s)\n", "", net, stn, path, relative_to, active[server][active_id].fhandles[relative_to].acornfullpath);
+
 	if (!fs_normalize_path(server, active_id, path, relative_to, &p))
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
 	else
@@ -5789,7 +5791,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				if (!strcmp(dirname, "")) // Empty string
 				{
 					//int counter;
-					fprintf (stderr, "Setting CWD to %s\n", active[server][active_id].root_dir);
 					strcpy (dirname, active[server][active_id].root_dir);
 					//counter = 0;
 					//while (counter < FS_DEFAULT_NAMELEN && dirname[counter] != ' ')	counter++;
@@ -5945,7 +5946,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							users[server][id].home_disc = 0;
 							users[server][id].priv = FS_PRIV_USER;
 							sprintf((char * ) homepath, "%s/%1x%s/%s", fs_stations[server].directory, 0, fs_discs[server][0].name, username);
-							if (mkdir((const char *) homepath, 0644) != 0)
+							if (mkdir((const char *) homepath, 0770) != 0)
 								fs_error(server, reply_port, net, stn, 0xff, "Unable to create home directory");
 							else
 							{
@@ -6165,7 +6166,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_free(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x1b: // Create directory ??
-			if (fs_stn_logged_in(server, net, stn) >= 0) fs_cdir(server, reply_port, active_id, net, stn, *(data+5), (data+6)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+			if (fs_stn_logged_in(server, net, stn) >= 0) fs_cdir(server, reply_port, active_id, net, stn, *(data+3), (data+6)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		// According to the excellent Arduino Filestore code, 28 is set FS clock, 29 is create file, 30 read user free space, 31 set user free space, 32 read client id, 33 read current users extended, 34 read user information extended,
 		// 35 reserved, 36 "manager interface", 37 reserved.
