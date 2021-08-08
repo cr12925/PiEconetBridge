@@ -477,33 +477,19 @@ void econet_gpio_release(void)
 
 }
 
-/* Chip reset function - Leaves us in test mode with IRQs off */
-
-void econet_reset(void)
+/* Function just to clear the ADLC down - may help when we get repeated collisions */
+void econet_adlc_cleardown(unsigned short in_irq)
 {
 
-#ifdef ECONET_GPIO_DEBUG_SETUP
-	printk (KERN_INFO "ECONET-GPIO: econet_reset() called\n");
-#endif
-
-	/* Clear the kernel FIFOs */
-	kfifo_reset(&econet_rx_queue);
-	kfifo_reset(&econet_tx_queue);
-
-	/* Make sure packet buffer appears to be empty */
-
-	econet_pkt_rx.length = 0;
-	econet_pkt_tx.length = 0;
-
-	/* Turn IRQs off */
-	econet_irq_mode(0);
-
-	/* Clear station map */
-	ECONET_INIT_STATIONS(econet_stations);
+	printk (KERN_INFO "ECONET-GPIO: Performing ADLC chip reset\n");
 
 	/* Hold RST low for 100ms */
 	econet_set_rst(ECONET_GPIO_RST_RST);
-	msleep(100);
+	if (in_irq)
+		mdelay(100);
+	else
+		msleep(100);
+
 	econet_set_rst(ECONET_GPIO_RST_CLR);
 
 	/* Chip is now fully re-set. Set up the one-time registers */
@@ -530,6 +516,35 @@ void econet_reset(void)
 	econet_write_cr(ECONET_GPIO_CR1, 0);
 
 	econet_set_dir(ECONET_GPIO_READ);
+
+
+}
+
+/* Chip reset function - Leaves us in test mode with IRQs off */
+
+void econet_reset(void)
+{
+
+#ifdef ECONET_GPIO_DEBUG_SETUP
+	printk (KERN_INFO "ECONET-GPIO: econet_reset() called\n");
+#endif
+
+	/* Clear the kernel FIFOs */
+	kfifo_reset(&econet_rx_queue);
+	kfifo_reset(&econet_tx_queue);
+
+	/* Make sure packet buffer appears to be empty */
+
+	econet_pkt_rx.length = 0;
+	econet_pkt_tx.length = 0;
+
+	/* Turn IRQs off */
+	econet_irq_mode(0);
+
+	/* Clear station map */
+	ECONET_INIT_STATIONS(econet_stations);
+
+	econet_adlc_cleardown(0); // 0 = not in IRQ context
 
 	//printk (KERN_INFO "ECONET-GPIO: econet_reset() finishing. Setting chip state to EM_TEST.\n");
 	//econet_set_chipstate(EM_TEST);
@@ -845,6 +860,8 @@ next_byte:
 				{
 					printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): /CTS - Collision? TDRA unavailable on IRQ - SR1 - 0x%02X, SR2 = 0x%02X, ptr = %d, loopcount = %d - abort tx\n", sr1, sr2, econet_pkt_tx.ptr, loopcount);
 					econet_data->tx_status = -ECONET_TX_COLLISION;
+					// See if clearing the ADLC down helps here
+					econet_adlc_cleardown(1); // 1 = in IRQ context, so use mdelay not msleep
 				}
 				else	
 				{
