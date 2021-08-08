@@ -794,6 +794,8 @@ void econet_irq_write(void)
 
 		byte_counter = 0;
 
+		econet_data->tx_status = 0xfe; // Flag transmission has started
+
 		//while (byte_counter < 2)
 		while (byte_counter < 1)
 		{
@@ -838,11 +840,19 @@ next_byte:
 			if (!tdra_flag)
 			{
 				// ANFS 4.25 checks TDRA on IRQ. If not available, it clears RX & TX status and waits for another IRQ
-				printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): TDRA not available on IRQ - SR1 = 0x%02x, SR2 = 0x%02x, ptr = %d, loopcount = %d - abort transmission\n", sr1, sr2, econet_pkt_tx.ptr, loopcount);
+
+				if (sr1 & ECONET_GPIO_S1_CTS) // Collision?
+				{
+					printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): Collision? TDRA unavailable on IRQ - SR1 - 0x%02X, SR2 = 0x%02X, ptr = %d, loopcount = %d - abort tx\n", sr1, sr2, econet_pkt_tx.ptr, loopcount);
+					econet_data->tx_status = -ECONET_TX_COLLISION;
+				}
+				else	
+				{
+					printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): TDRA not available on IRQ - SR1 = 0x%02x, SR2 = 0x%02x, ptr = %d, loopcount = %d - abort transmission\n", sr1, sr2, econet_pkt_tx.ptr, loopcount);
+					econet_data->tx_status = -ECONET_TX_TDRAFULL;
+				}
 				econet_pkt_tx.length = 0;
-				econet_data->tx_status = -ECONET_TX_TDRAFULL;
 				econet_set_aunstate(EA_IDLE);
-				//econet_data->aun_state = EA_IDLE; // Abort AUN transaction if there is one
 				//spin_unlock(&econet_pkt_spin);
 				econet_set_read_mode();
 				return;
@@ -961,7 +971,6 @@ recv_more:
 				{
 					printk (KERN_INFO "ECONET-GPIO: Last TX was too long ago. Moving back to AUN IDLE state.\n");
 					econet_set_aunstate(EA_IDLE);
-					//econet_data->aun_state = EA_IDLE;
 				}
 
 				// Set up the bones of a reply just in case
@@ -976,7 +985,6 @@ recv_more:
 #ifdef ECONET_GPIO_DEBUG_AUN
 				//printk (KERN_INFO "ECONET-GPIO: AUN debug - packet from %d.%d, length = 0x%08x, Port %02x, Ctrl %02x\n", econet_pkt_rx.d.p.srcnet, econet_pkt_rx.d.p.srcstn, econet_pkt_rx.length, econet_pkt_rx.d.p.port, econet_pkt_rx.d.p.ctrl);
 #endif
-
 				switch (econet_data->aun_state)
 				{
 
@@ -1259,7 +1267,6 @@ recv_more:
 						econet_write_cr(ECONET_GPIO_CR1, C1_READ);
 						econet_set_chipstate(EM_IDLE);
 						econet_set_aunstate(EA_IDLE);
-						//econet_data->aun_state = EA_IDLE;
 					}
 					break;
 
@@ -1926,6 +1933,8 @@ outer_reset_loop:
 		if ((status == EM_IDLE || status == EM_IDLEINIT || status == EM_FLAGFILL) && ((econet_data->aun_mode && econet_data->aun_state == EA_IDLE) || (!econet_data->aun_mode))) // If we are in AUN mode, the AUN state machine also needs to be IDLE
 		{
 
+			unsigned short starter_counter = 0;
+
 			// Instrumentation
 			ts_tx_end = ts_tx_start = ktime_get_ns();
 
@@ -1937,6 +1946,7 @@ outer_reset_loop:
 			printk (KERN_INFO "ECONET_GPIO: econet_writefd(): TX Packet no. %lu\n", tx_packets);
 #endif
 
+restart_tx:
 			if (econet_data->aun_mode)
 			{
 				econet_aun_tx_statemachine(); // Work out the initial packet and set it up to be transmitted
@@ -1949,16 +1959,46 @@ outer_reset_loop:
 				econet_set_write_mode(&econet_pkt, len); // Trigger TX
 			}
 
+			if (econet_data->tx_status == -ECONET_TX_NOIRQ && (starter_counter++ < 10)) // econet_set_write_mode didn't get an IRQ in time - have another go, up to a limit
+				goto restart_tx;
+
+			if (econet_data->tx_status == -ECONET_TX_NOIRQ)
+			{
+				if (econet_data->aun_mode) // If we are giving up, and in AUN mode, gop back to IDLE
+					econet_set_aunstate(EA_IDLE);
+
+				econet_set_read_mode();
+				return -1;	
+			}
+			
+			// Wait for TX to start 50ms
+#define ECONET_TX_START_WAIT_PERIOD 50000000
+#define ECONET_TX_MAXSTARTS 50
+		
+			timer2 = ktime_get_ns() + ((unsigned long long) ECONET_TX_START_WAIT_PERIOD);
+
+			while ((econet_data->tx_status == 0xff) && (ktime_get_ns() < timer2)); // Wait to see if TX starts or errors in the start wait period
+
+			if (econet_data->tx_status == 0xff && (starter_counter++ < ECONET_TX_MAXSTARTS)) // not started, have another go
+				goto restart_tx;
+
 #define ECONET_TX_WAIT_PERIOD 750000000 // 0.5s should be long enough for most packets
+
+			if (starter_counter > 0)
+				printk (KERN_INFO "ECONET-GPIO: Needed %d attempts before transmission started within 50ms. Is your Econet busy?\n", starter_counter+1);
+
+			//printk (KERN_INFO "ECONET-GPIO: TX status after 50ms = %02X\n", econet_data->tx_status);
 
 			timer2 = ktime_get_ns() + ((unsigned long long) ECONET_TX_WAIT_PERIOD); 
 
 			// Probably should acquire pkt spin lock each time here...
 
-			while (((tx_success = econet_data->tx_status) == 0xff) && ((ts_tx_end = ktime_get_ns()) < timer2));
-
+			//while (((tx_success = econet_data->tx_status) == 0xff) && ((ts_tx_end = ktime_get_ns()) < timer2));
+			// Wait for end of transmission
+		
+			while (((tx_success = econet_data->tx_status) == 0xfe) && ((ts_tx_end = ktime_get_ns()) < timer2));
 			//if (ts_tx_end >= timer2) // Timed out
-			if (tx_success == 0xff)
+			if (tx_success == 0xff || tx_success == 0xfe) // Never started or didn't finish in time
 			{
 				ts_return = ktime_get_ns();
 #ifdef ECONET_WRITE_INSTRUMENTATION
@@ -1978,6 +2018,7 @@ outer_reset_loop:
 				econet_data->last_tx_user_error = ECONET_TX_HANDSHAKEFAIL;
 				return -1;
 			}	
+
 			if (tx_success == ECONET_TX_SUCCESS)
 			{
 				ts_return = ktime_get_ns();
@@ -1995,6 +2036,8 @@ outer_reset_loop:
 				econet_data->last_tx_user_error = 0;
 				return len;
 			}
+			else if ((starter_counter++ < ECONET_TX_MAXSTARTS) && (tx_success == ECONET_TX_HANDSHAKEFAIL || tx_success == ECONET_TX_UNDERRUN || tx_success == ECONET_TX_TDRAFULL || tx_success == ECONET_TX_NOTSTART || tx_success == ECONET_TX_COLLISION)) // We've had less than 10 gos and have a non-fatal error, have another go
+				goto restart_tx;
 			else 
 			{
 				// Note that in this block, tx_success in fact contains an error code.

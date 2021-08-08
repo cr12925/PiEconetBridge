@@ -778,12 +778,6 @@ Privileged commands:
 *FLOG <station>
 	- Force log a station off
 
-*NEWUSER <username>
-	- Create new user.
-	- Will also create & set ownership on home directory on disc 0.
-	- If home already exists, expect problems.
-	- To delete a user, see *PRIV
-
 *LINK <source> <destination>
 	- Create symlink in the filesystem. <destination> will be the identical
 	  file to source.
@@ -795,6 +789,12 @@ Privileged commands:
 	- Also, the file interlocks (which are implemented!) will not notice
 	  one user opening the original file for writing and another opening
 	  a link for writing.
+
+*NEWUSER <username>
+	- Create new user.
+	- Will also create & set ownership on home directory on disc 0.
+	- If home already exists, expect problems.
+	- To delete a user, see *PRIV
 
 *PRIV <user> <priv>
 	- Set user privilege. Applicable privileges are:
@@ -808,6 +808,9 @@ Privileged commands:
 	- Permanently set replacement home directory (effective next login)
 	- Only works for the executing user. Probably need to make that more
 	  useful.
+
+*UNLINK <link>
+	- Removes a symlink created with *LINK
 
 THE END
 -------

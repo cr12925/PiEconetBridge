@@ -65,6 +65,8 @@ void fs_close_interlock(int, unsigned short, unsigned short);
 
 #define FS_VERSION_STRING "6.0a"
 
+#define FS_DEFAULT_NAMELEN 10
+
 // Implements basic AUN fileserver within the econet bridge
 
 #define ECONET_MAX_FS_SERVERS 4
@@ -2962,7 +2964,7 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 
 	unsigned char incoming_port, ack_port;
 	unsigned long load, exec, length;
-	char filename[12];
+	char filename[1024];
 
 	struct __econet_packet_udp r;
 
@@ -2970,7 +2972,7 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 	
 	// Anyone know what the bytes at data+3, 4 are?
 
-	fs_copy_to_cr(filename, data+16, 10);
+	fs_copy_to_cr(filename, data+16, 1023);
 
 	load = 	(*(data+5)) + ((*(data+6)) << 8) + ((*(data+7)) << 16) + ((*(data+8)) << 24);
 
@@ -3627,6 +3629,53 @@ void fs_link(int server, unsigned short reply_port, int active_id, unsigned char
 
 }
 
+// System command to remove a symlink
+void fs_unlink(int server, unsigned short reply_port, int active_id, unsigned char net, unsigned char stn, unsigned char *command)
+{
+
+	char link[1024];
+	struct stat s;
+	struct path p;
+
+	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d UNLINK %s\n", "", net, stn, command);
+	if (sscanf(command, "%s", link) != 1)
+	{
+		fs_error(server, reply_port, net, stn, 0xFF, "Bad parameters");
+		return;
+	}
+
+	if (!fs_normalize_path(server, active_id, link, active[server][active_id].current, &p) || (p.ftype == FS_FTYPE_NOTFOUND))
+	{
+		fs_error(server, reply_port, net, stn, 0xDC, "Not found");
+		return;
+	}
+	
+	// Is it a link?
+
+	if (lstat(p.unixpath, &s) != 0) // Stat error
+	{
+		fs_error(server, reply_port, net, stn, 0xFF, "FS Error");
+		return;
+	}
+
+	if (S_ISLNK(s.st_mode & S_IFMT))
+	{
+		if (unlink(p.unixpath) != 0) // Error
+		{
+			fs_error(server, reply_port, net, stn, 0xFF, "Cannot remove link");
+			return;
+		}
+	}
+	else
+	{
+		fs_error(server, reply_port, net, stn, 0xFF, "Not a link");
+		return;
+	}
+		
+	fs_reply_ok(server, reply_port, net, stn);
+
+}
+
 // Select other disc
 void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned char net, unsigned char stn, unsigned char *command)
 {
@@ -4199,6 +4248,7 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 {
 
 	struct path p;
+	struct path_entry *e;
 	unsigned char path[1024];
 	unsigned char perm;
 	unsigned short path_ptr;
@@ -4289,28 +4339,48 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 			
 	// Normalize the path
 
-	if (!fs_normalize_path(server, active_id, path, active[server][active_id].current, &p))
+	if (!fs_normalize_path_wildcard(server, active_id, path, active[server][active_id].current, &p, 1))
 	{
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
 		return;
 	}
 	
-	if (p.ftype == FS_FTYPE_NOTFOUND)
+	if (p.paths == NULL)
 	{
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
 		return;
 	}
 
-	if (p.attr.owner == active[server][active_id].userid || (p.parent_owner == active[server][active_id].userid && (p.parent_perm & FS_PERM_OWN_W)) || (users[server][active[server][active_id].userid].priv & FS_PRIV_SYSTEM)) // Must own the file, own the parent and have write access, or be system
+	e = p.paths;
+
+	// First, check we have permission on everything we need
+	while (e != NULL)
 	{
-		p.attr.perm = perm;
-	
-		fs_write_xattr(p.unixpath, p.attr.owner, p.attr.perm, p.attr.load, p.attr.exec);
-	
-		fs_reply_success(server, reply_port, net, stn, 0, 0);
+		if (e->owner == active[server][active_id].userid || (e->parent_owner == active[server][active_id].userid && (e->parent_perm & FS_PERM_OWN_W)) || (users[server][active[server][active_id].userid].priv & FS_PRIV_SYSTEM)) // Must own the file, own the parent and have write access, or be system
+			e = e->next;
+		else
+		{
+			fs_free_wildcard_list(&p); // Free up the mallocs
+			fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
+		}
 	}
-	else
-		fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
+
+	// If we get here, we have permission on everything so crack on
+
+	e = p.paths;
+
+	while (e != NULL)
+	{
+		fs_write_xattr(e->unixpath, e->owner, perm, e->load, e->exec); // 'perm' because that's the *new* permission
+		e = e->next;
+	
+	}
+
+	fs_free_wildcard_list(&p); // Free up the mallocs
+
+	// Give the station the thumbs up
+
+	fs_reply_success(server, reply_port, net, stn, 0, 0);
 }
 
 // Read discs
@@ -4674,7 +4744,7 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		while (!feof(f))
 		{
 			collected = fread(&(r.p.data), 1, 1280, f);
-			if (!fs_aun_send(&r, server, collected, net, stn))
+			if (collected > 0 && !fs_aun_send(&r, server, collected, net, stn))
 				return; // We failed in some way.
 			// short delay to keep certain stations happy
 			//usleep(200000);
@@ -5054,8 +5124,9 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 		if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() read %04x bytes off disc\n", "", net, stn, received);
 
-		if (received > 0) // Send what we did get
-		{
+		// Always send a packet which has the same amount of data the station requested, otherwise it barfs, even if all the data is past EOF (because the station works that out from the closing packet)
+		//if (received > 0) // Send what we did get
+		//{
 			r.p.ptype = ECONET_AUN_DATA;
 			r.p.port = txport;
 			r.p.ctrl = 0x80;
@@ -5069,7 +5140,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 			fs_aun_send(&r, server, bytes, net, stn);
 
 			sent += received;
-		}
+		//}
 
 			
 	}
@@ -5775,6 +5846,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				}
 				else if (!strncasecmp("LINK ", (const char *) command, 5))
 					fs_link(server, reply_port, active_id, net, stn, command+5);
+				else if (!strncasecmp("UNLINK ", (const char *) command, 7))
+					fs_unlink(server, reply_port, active_id, net, stn, command+7);
 				else if (!strncasecmp("FLOG ", (const char *) command, 5)) // Force log user off
 				{
 					char parameter[20];
