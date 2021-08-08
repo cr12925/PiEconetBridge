@@ -1227,19 +1227,22 @@ try_again:
 		attempts = 0;
 		written = -1;
 
-		while (attempts++ < 3 && written < 0)
+		while (attempts++ < 8 && written < 0)
 			written = write(econet_fd, &w, len+4);
 			
 		err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
 		
 		if (written < 0)
 		{
-			fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - %s (%02x)\n", dstnet, dststn, srcnet, srcstn, econet_strtxerr(err), err);	
-			if ((err == ECONET_TX_HANDSHAKEFAIL || err == ECONET_TX_UNDERRUN || err == ECONET_TX_TDRAFULL || err == ECONET_TX_NOIRQ || err == ECONET_TX_COLLISION || err == ECONET_TX_NOTSTART) && (outercount++ < 10)) // Handshake failure
+			if ((err == ECONET_TX_HANDSHAKEFAIL || err == ECONET_TX_UNDERRUN || err == ECONET_TX_TDRAFULL || err == ECONET_TX_NOIRQ || err == ECONET_TX_COLLISION || err == ECONET_TX_NOTSTART) && (outercount++ < 50)) // Non-fatal failure
 			{
-				usleep(10^outercount); // Exponential backoff
+				usleep(((int) (srcstn/10)^outercount); // Exponential backoff
+				//usleep(100);
 				goto try_again;
 			}
+
+			// If we've expired our chances, print the error
+			fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - %s (%02X) - after %d tries\n", dstnet, dststn, srcnet, srcstn, econet_strtxerr(err), err, outercount+1);	
 		}
 
 		if (written < (len+4) && written >= 0)
@@ -1336,6 +1339,7 @@ try_again:
 						if (data.p.ptype == ECONET_AUN_IMMREP) // && data.p.seq == w.p.seq) At the moment, the sequence number coming back from other bridges on immedaite reply will not match. Need to fix that.
 						{
 							struct __econet_packet_aun ir;
+							int err;
 
 							ir.p.dststn = srcstn; // Because we are replying
 							ir.p.dstnet = srcnet;
@@ -1353,12 +1357,16 @@ try_again:
 							written = -1;
 
 							dump_udp_pkt_aun(len - 8, dir, &ir, dstnet, dststn, srcnet, srcstn);
-							while ((attempts < 3) && (written < 0))
+							while ((attempts < 25) && (written < 0))
 							{
 								written = write(econet_fd, &ir, 12 + (len-8));
+								err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
 								attempts++;	
+								if (written < 0 && (err == ECONET_TX_JAMMED || err == ECONET_TX_NOCLOCK || err == ECONET_TX_NOCOPY)) // Fatal errors
+									break;
 							}	
 
+							fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - %s (%02x) - after %d attempts at sending immediate reply\n", dstnet, dststn, srcnet, srcstn, econet_strtxerr(err), err, attempts);	
 							if (written < 0)
 							{
 								int err;
@@ -1407,20 +1415,25 @@ try_again:
 				((network[s].type & ECONET_HOSTTYPE_TWIRE) == 0) // Source isn't wire
 			)
 			{
-				int attempts;
+				int attempts, err;
 
 				written = -1;
 				attempts = 0;
 				
-				while (attempts++ < 3 && written < 0)
+				while ((attempts < 25) && (written < 0))
+				{
 					written = write(econet_fd, &w, len+4);
+					err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
+					attempts++;	
+					if (written < 0 && (err == ECONET_TX_JAMMED || err == ECONET_TX_NOCLOCK || err == ECONET_TX_NOCOPY)) // Fatal errors
+						break;
+				}	
+
+				//while (attempts++ < 3 && written < 0)
+					//written = write(econet_fd, &w, len+4);
 					
 				if (written < 0)
-				{
-					int err;
-					err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
-					fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - %s (%02x)\n", dstnet, dststn, srcnet, srcstn, econet_strtxerr(err), err);	
-				}
+					fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - %s (%02x) - after %d attempts\n", dstnet, dststn, srcnet, srcstn, econet_strtxerr(err), err, attempts);	
 				else if (written < (len+4) && written >= 0)
 					fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - only %d of %d bytes written\n", dstnet, dststn, srcnet, srcstn, written, (len+4));	
 				else

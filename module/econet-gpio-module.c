@@ -843,7 +843,7 @@ next_byte:
 
 				if (sr1 & ECONET_GPIO_S1_CTS) // Collision?
 				{
-					printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): Collision? TDRA unavailable on IRQ - SR1 - 0x%02X, SR2 = 0x%02X, ptr = %d, loopcount = %d - abort tx\n", sr1, sr2, econet_pkt_tx.ptr, loopcount);
+					printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): /CTS - Collision? TDRA unavailable on IRQ - SR1 - 0x%02X, SR2 = 0x%02X, ptr = %d, loopcount = %d - abort tx\n", sr1, sr2, econet_pkt_tx.ptr, loopcount);
 					econet_data->tx_status = -ECONET_TX_COLLISION;
 				}
 				else	
