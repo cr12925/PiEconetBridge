@@ -1227,7 +1227,7 @@ try_again:
 		attempts = 0;
 		written = -1;
 
-		while (attempts++ < 8 && written < 0)
+		while (attempts++ < 3 && written < 0)
 			written = write(econet_fd, &w, len+4);
 			
 		err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
@@ -1357,7 +1357,7 @@ try_again:
 							written = -1;
 
 							dump_udp_pkt_aun(len - 8, dir, &ir, dstnet, dststn, srcnet, srcstn);
-							while ((attempts < 25) && (written < 0))
+							while ((attempts < 3) && (written < 0))
 							{
 								written = write(econet_fd, &ir, 12 + (len-8));
 								err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
@@ -1420,7 +1420,7 @@ try_again:
 				written = -1;
 				attempts = 0;
 				
-				while ((attempts < 25) && (written < 0))
+				while ((attempts < 3) && (written < 0))
 				{
 					written = write(econet_fd, &w, len+4);
 					err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
