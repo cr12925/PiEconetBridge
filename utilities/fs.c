@@ -4769,6 +4769,7 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 
 	}
 	
+	fclose(f);
 }
 
 // Get byte from current cursor position
