@@ -1,0 +1,14 @@
+[Unit]
+Description=Econet filestore
+After=network.target
+ConditionPathExists=/etc/econet-gpio/econet.cfg
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+Restart=on-failure
+ExecStart=/home/pi/PiEconetBridge/utilities/econet-bridge -f
+
+[Install]
+WantedBy=multi-user.target
