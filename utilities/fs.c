@@ -58,12 +58,18 @@ extern unsigned int local_seq;
 extern unsigned long local_seq;
 #endif
 
+#ifdef ECONET_64BIT
+extern unsigned int get_local_seq(unsigned char, unsigned char);
+#else
+extern unsigned long get_local_seq(unsigned char, unsigned char);
+#endif
+
 short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for extra year information
 
 short fs_open_interlock(int, unsigned char *, unsigned short, unsigned short);
 void fs_close_interlock(int, unsigned short, unsigned short);
 
-#define FS_VERSION_STRING "6.0a"
+#define FS_VERSION_STRING "PiEconetBridge FS 0.9A"
 
 #define FS_DEFAULT_NAMELEN 10
 
@@ -114,7 +120,7 @@ struct {
 		short handle; // Pointer into fs_files
 		unsigned long cursor; // Our pointer into the file
 		unsigned short mode; // 1 = read, 2 = openup, 3 = openout
-		unsigned char sequence; // Oscillates 0-1-0-1... allows FS to detect retransmissions
+		//unsigned char sequence; // Oscillates 0-1-0-1... allows FS to detect retransmissions -- NOW DISUSED AND DONE GLOBALLY
 		unsigned short pasteof; // Signals when there has already been one attempt to read past EOF and if there's another we need to generate an error
 		unsigned short is_dir; // Looks like Acorn systems can OPENIN() a directory so there has to be a single set of handles between dirs & files. So if this is non-zero, the handle element is a pointer into fs_dirs, not fs_files.
 		char acornfullpath[1024]; // Full Acorn path, used for calculating relative paths
@@ -123,6 +129,7 @@ struct {
 		short handle; // Pointer into fs_dirs
 		unsigned long cursor; // ftell() cursor
 	} dhandles[FS_MAX_OPEN_FILES];
+	unsigned char sequence; // Used to detect duplicate transmissions on putbyte - oscillates 0-1-0-1 - low bit of ctrl byte in packet. Gets re-set whenever there is an operation which is not a putbyte, so that successive putbytes get the tracker, but anything else in the way resets it
 } active[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_USERS];
 
 struct {
@@ -130,6 +137,7 @@ struct {
 	unsigned char stn; // Station number of this server
 	unsigned char directory[256]; // Root directory
 	unsigned int total_users; // How many entries in users[][]?
+	// Local sequence number now disused. Held centrally in the network[] structure in econet-bridge.c
 #ifdef ECONET_64BIT
 	unsigned int seq;
 #else
@@ -343,7 +351,8 @@ void fs_copy_to_cr(unsigned char *dest, unsigned char *src, unsigned short len)
 int fs_aun_send(struct __econet_packet_udp *p, int server, int len, unsigned short net, unsigned short stn)
 {
 	p->p.pad = 0x00;
-	p->p.seq = (fs_stations[server].seq += 4);
+	//p->p.seq = (fs_stations[server].seq += 4);
+	p->p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
 	return aun_send (p, 8+len, fs_stations[server].net, fs_stations[server].stn, net, stn);
 }
 
@@ -488,7 +497,8 @@ int fs_reply_success(int server, unsigned short reply_port, unsigned short net, 
 	reply.p.port = reply_port;
 	reply.p.ctrl = 0x80;
 	reply.p.pad = 0x00;
-	reply.p.seq = (fs_stations[server].seq += 4);
+	//reply.p.seq = (fs_stations[server].seq += 4);
+	reply.p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
 	reply.p.data[0] = command;
 	reply.p.data[1] = result;
 
@@ -1820,7 +1830,8 @@ void fs_reply_ok(int server, unsigned char reply_port, unsigned char net, unsign
 
 	reply.p.port = reply_port;
 	reply.p.ctrl = 0x80;
-	reply.p.seq = (fs_stations[server].seq += 4);
+	//reply.p.seq = (fs_stations[server].seq += 4);
+	reply.p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
 	reply.p.pad = 0x00;
 	reply.p.ptype = ECONET_AUN_DATA;
 	reply.p.data[0] = 0x00;
@@ -1880,7 +1891,7 @@ int fs_stn_logged_in(int server, unsigned char net, unsigned char stn)
 	return -1;	
 }
 
-void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned char stn)
+void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned char stn, unsigned short do_reply)
 {
 
 	struct __econet_packet_udp reply;
@@ -1918,11 +1929,15 @@ void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned ch
 	//memset(&(active[fs_stn_logged_in(server, net, stn)]), 0, sizeof(active) / ECONET_MAX_FS_SERVERS);
 	active[server][active_id].stn = active[server][active_id].net = 0; // Flag unused
 	
-	reply.p.port = reply_port;
-	reply.p.ctrl = 0x80;
-	reply.p.data[0] = reply.p.data[1] = 0;
 
-	fs_aun_send(&reply, server, 2, net, stn);
+	if (do_reply) // != 0 if we need to send a reply (i.e. user initiated bye) as opposed to 0 if this is an internal cleardown of a user
+	{
+		reply.p.port = reply_port;
+		reply.p.ctrl = 0x80;
+		reply.p.data[0] = reply.p.data[1] = 0;
+
+		fs_aun_send(&reply, server, 2, net, stn);
+	}
 }
 
 void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, unsigned short net, unsigned short stn, unsigned char *params)
@@ -2135,7 +2150,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 				struct __econet_packet_udp reply;
 
 				if (fs_stn_logged_in(server, net, stn) != -1) // do a bye first
-					fs_bye(server, reply_port, net, stn);
+					fs_bye(server, reply_port, net, stn, 0);
 
 				active[server][usercount].net = net;
 				active[server][usercount].stn = stn;
@@ -2284,7 +2299,8 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 				reply.p.port = reply_port;
 				reply.p.ctrl = 0x80;
 				reply.p.pad = 0x00;
-				reply.p.seq = (fs_stations[server].seq += 4);
+				//reply.p.seq = (fs_stations[server].seq += 4);
+				reply.p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
 				reply.p.data[0] = 0x05;
 				reply.p.data[1] = 0x00;
 				reply.p.data[2] = active[server][usercount].root;
@@ -3460,7 +3476,7 @@ void fs_copy(int server, unsigned short reply_port, int active_id, unsigned char
 
 	while (e != NULL)
 	{
-		if (e->ftype == FS_FTYPE_FILE && (e->my_perm & FS_PERM_OWN_R)) all_files++;
+		if (e->ftype == FS_FTYPE_FILE && (users[server][active[server][active_id].userid].priv == FS_PRIV_SYSTEM || e->my_perm & FS_PERM_OWN_R)) all_files++;
 		to_copy++;
 		e = e->next;
 	}
@@ -4594,7 +4610,7 @@ void fs_read_version(int server, unsigned short reply_port, unsigned char net, u
 	r.p.ctrl = 0x80;
 
 	r.p.data[0] = r.p.data[1] = 0;
-	sprintf((char * ) &(r.p.data[2]), "%s%d", FS_VERSION_STRING, 0x0d);
+	sprintf((char * ) &(r.p.data[2]), "%s%c", FS_VERSION_STRING, 0x0d);
 
 	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Read FS version\n", "", net, stn);
 
@@ -4790,6 +4806,22 @@ void fs_getbyte(int server, unsigned char reply_port, unsigned char net, unsigne
 
 		h = fs_files[server][active[server][active_id].fhandles[handle].handle].handle;
 
+		if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Get byte on channel %02x, cursor %04lX\n", "", net, stn, handle, active[server][active_id].fhandles[handle].cursor);
+
+		if (active[server][active_id].fhandles[handle].is_dir) // Directory handle
+		{
+			r.p.ptype = ECONET_AUN_DATA;
+			r.p.port = reply_port;
+			r.p.ctrl = ctrl;
+			r.p.data[0] = r.p.data[1] = 0;
+			r.p.data[2] = 0xfe; // Always flag EOF
+			r.p.data[3] = 0xc0;
+		
+			fs_aun_send(&r, server, 4, net, stn);
+		
+			return;
+		}
+
 		if (fstat(fileno(h), &statbuf)) // Non-zero = error
 		{
 			fs_error_ctrl(server, reply_port, net, stn, ctrl, 0xFF, "FS Error on read");
@@ -4819,6 +4851,8 @@ void fs_getbyte(int server, unsigned char reply_port, unsigned char net, unsigne
 		}
 
 		active[server][active_id].fhandles[handle].cursor = ftell(h);
+		//active[server][active_id].fhandles[handle].sequence = 0; // Re-set the putbyte sequence tracker
+	
 	
 		r.p.ptype = ECONET_AUN_DATA;
 		r.p.port = reply_port;
@@ -4852,7 +4886,7 @@ void fs_putbyte(int server, unsigned char reply_port, unsigned char net, unsigne
 
 		h = fs_files[server][active[server][active_id].fhandles[handle].handle].handle;
 
-		if ((ctrl & 0x01) != active[server][active_id].fhandles[handle].sequence) // Not a duplicate
+		if ((ctrl & 0x01) != active[server][active_id].sequence) // Not a duplicate
 		{
 
 			unsigned char buffer[2];
@@ -4863,6 +4897,8 @@ void fs_putbyte(int server, unsigned char reply_port, unsigned char net, unsigne
 
 			clearerr(h);
 			fseek(h, active[server][active_id].fhandles[handle].cursor, SEEK_SET);
+
+			if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Put byte %02X on channel %02x, cursor %06lX\n", "", net, stn, b, handle, active[server][active_id].fhandles[handle].cursor);
 
 			if (fwrite(buffer, 1, 1, h) != 1)
 			{
@@ -4875,10 +4911,11 @@ void fs_putbyte(int server, unsigned char reply_port, unsigned char net, unsigne
 			// Update cursor
 	
 			active[server][active_id].fhandles[handle].cursor = ftell(h);
+			if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Put byte %02X on channel %02x, updated cursor %06lX\n", "", net, stn, b, handle, active[server][active_id].fhandles[handle].cursor);
 
 		}
 	
-		active[server][active_id].fhandles[handle].sequence = (ctrl & 0x01);
+		active[server][active_id].sequence = (ctrl & 0x01);
 
 		r.p.ptype = ECONET_AUN_DATA;
 		r.p.port = reply_port;
@@ -4908,12 +4945,15 @@ void fs_get_random_access_info(int server, unsigned char reply_port, unsigned ch
 	r.p.ptype = ECONET_AUN_DATA;
 	r.p.data[0] = r.p.data[1] = 0;
 
+	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Get random access info on handle %02X, function %02X\n", "", net, stn, handle, function);
+
 	switch (function) 
 	{
 		case 0: // Cursor position
 			r.p.data[2] = (active[server][active_id].fhandles[handle].cursor & 0xff);
 			r.p.data[3] = (active[server][active_id].fhandles[handle].cursor & 0xff00) >> 8;
 			r.p.data[4] = (active[server][active_id].fhandles[handle].cursor & 0xff00) >> 16;
+			if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d  - cursor %06lX\n", "", net, stn, active[server][active_id].fhandles[handle].cursor);
 			break;
 		case 1: // Fall through extent / allocation - going to assume this is file size but might be wrong
 		case 2:
@@ -4926,6 +4966,8 @@ void fs_get_random_access_info(int server, unsigned char reply_port, unsigned ch
 				return;
 			}
 		
+			if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d  - extent %06lX\n", "", net, stn, s.st_size);
+
 			r.p.data[2] = s.st_size & 0xff;
 			r.p.data[3] = (s.st_size & 0xff00) >> 8;
 			r.p.data[4] = (s.st_size & 0xff0000) >> 16;
@@ -4983,7 +5025,9 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 	{
 		case 0: // Set pointer
 		{
-			if (value > extent) // Need to expand file				
+
+			if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Set file pointer on channel %02X to %06lX, current extent %06lX%s\n", "", net, stn, handle, value, extent, (value > extent) ? " which is beyond EOF" : "");
+			if (value > extent) // Need to expand file
 			{
 				unsigned char buffer[4096];
 				unsigned long to_write, written;
@@ -5006,15 +5050,24 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 						fs_error(server, reply_port, net, stn, 0xFF, "FS Error extending file");
 						return;
 					}
+					
+					if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d  - tried to write %06X bytes, actually wrote %06lX\n", "", net, stn, chunk, written);
 					to_write -= written;
 				}
+
+				fflush(f);
 			}
 
-			active[server][active_id].fhandles[handle].cursor = value;
+			active[server][active_id].fhandles[handle].cursor = value; // (value <= extent ? value : extent);
+		
+			// This didn't seem to work!
+			//if (value > extent) r.p.data[1] = 0xC0;
+			//if (value == extent) r.p.data[1] = 0x00;
 		}
 		break;
 		case 1: // Set file extent
 		{
+			if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Set file extent on channel %02X to %06lX, current extent %06lX%s\n", "", net, stn, handle, value, extent, (value > extent) ? " so adding bytes to end of file" : "");
 			if (value > extent)
                         {
                                 unsigned char buffer[4096];
@@ -5041,6 +5094,7 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 
 			if (value < extent)
 			{
+				if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom%3d.%3d   - Truncating file accordingly\n", "", net, stn);
 				if (ftruncate(fileno(f), value)) // Error if non-zero
 				{
                                         fs_error(server, reply_port, net, stn, 0xFF, "FS Error truncating file");
@@ -5065,7 +5119,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 	unsigned long bytes, offset;
 	unsigned char txport, offsetstatus;
-	unsigned long sent;
+	long sent, length;
 	unsigned short internal_handle;
 	unsigned short eofreached, fserroronread;
 
@@ -5078,7 +5132,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	bytes = (((*(data+7))) + ((*(data+8)) << 8) + (*(data+9) << 16));
 	offset = (((*(data+10))) + ((*(data+11)) << 8) + (*(data+12) << 16));
 
-	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() %ld from offset %ld by user %04x on handle %02x\n", "", net, stn, bytes, offset, active[server][active_id].userid, handle);
+	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX by user %04x on handle %02x\n", "", net, stn, bytes, offset, active[server][active_id].userid, handle);
 
 	if (active[server][active_id].fhandles[handle].handle == -1) // Invalid handle
 	{
@@ -5097,13 +5151,22 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	if (offsetstatus) // Read from current position
 		offset = active[server][active_id].fhandles[handle].cursor;
 
-	if (offset > ftell(fs_files[server][internal_handle].handle)) // Beyond EOF
+	// Seek to end to detect end of file
+	fseek(fs_files[server][internal_handle].handle, 0, SEEK_END);
+	
+	length = ftell(fs_files[server][internal_handle].handle);
+
+	if (offset > length) // Beyond EOF
 		eofreached = 1;
 	else
 		eofreached = 0;
 
+	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() offset %04lX, file length %04lX, beyond EOF %s\n", "", net, stn, offset, length, (eofreached ? "Yes" : "No"));
+
 	fseek(fs_files[server][internal_handle].handle, offset, SEEK_SET);
 	
+	active[server][active_id].fhandles[handle].cursor = offset;
+
 	// Send acknowledge
 	r.p.ptype = ECONET_AUN_DATA;
 	r.p.port = reply_port;
@@ -5118,11 +5181,17 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	while (sent < bytes && (!eofreached) && (!fserroronread))
 	{
 		unsigned short readlen;
-		unsigned short received;
+		int received;
 
 		readlen = ((bytes - sent) > sizeof(readbuffer) ? sizeof(readbuffer) : (bytes - sent));
 
-		if ((received = fread(readbuffer, 1, readlen, fs_files[server][internal_handle].handle)) != readlen) // Either FEOF or error
+		if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() bytes required %04lX, bytes already sent %04lX, buffer size %04X, bytes to read %04X\n", "", net, stn, bytes, sent, sizeof(readbuffer), readlen);
+
+		received = fread(readbuffer, 1, readlen, fs_files[server][internal_handle].handle);
+
+		if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() read %04x bytes off disc\n", "", net, stn, received);
+
+		if (received != readlen) // Either FEOF or error
 		{
 			if (feof(fs_files[server][internal_handle].handle)) eofreached = 1;
 			else
@@ -5131,8 +5200,6 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 				fserroronread = 1;
 			}
 		}
-
-		if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() read %04x bytes off disc\n", "", net, stn, received);
 
 		// Always send a packet which has the same amount of data the station requested, otherwise it barfs, even if all the data is past EOF (because the station works that out from the closing packet)
 		//if (received > 0) // Send what we did get
@@ -5157,7 +5224,8 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	
 	usleep(100000);
 
-	active[server][active_id].fhandles[handle].cursor = ftell(fs_files[server][internal_handle].handle);
+	//active[server][active_id].fhandles[handle].cursor = ftell(fs_files[server][internal_handle].handle);
+	active[server][active_id].fhandles[handle].cursor += sent;
 
 	if (fserroronread)
 		fs_error(server, reply_port, net, stn, 0xFF, "FS Error on read");
@@ -5165,6 +5233,8 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	{
 		// Send a completion message
 	
+		if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() Acknowledging %04lX tx bytes, cursor now %06lX\n", "", net, stn, sent, active[server][active_id].fhandles[handle].cursor);
+
 		r.p.port = reply_port;
 		r.p.ctrl = 0x80;
 		r.p.data[0] = r.p.data[1] = 0;
@@ -5181,7 +5251,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsigned char stn, unsigned int active_id, unsigned short handle, unsigned char ctrl, unsigned char *data, unsigned short datalen)
 {
 
-	unsigned long bytes, offset;
+	unsigned long bytes, offset, length;
 	unsigned char txport, offsetstatus;
 	unsigned short internal_handle;
 	unsigned char incoming_port;
@@ -5218,12 +5288,23 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 		return;
 	}
 
-	if (offsetstatus) // Read from current position
+	fseek(fs_files[server][internal_handle].handle, 0, SEEK_END);
+	length = ftell(fs_files[server][internal_handle].handle);
+
+	if (offsetstatus) // write to current position
 		offset = active[server][active_id].fhandles[handle].cursor;
 
-	if (offset > ftell(fs_files[server][internal_handle].handle)) // Beyond EOF
+	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d fs_putbytes() %06lX at offset %06lX by user %04X on handle %02d\n",
+			"", net, stn,
+			bytes, offset, active[server][active_id].userid, handle);
+
+	if (offset > length) // Beyond EOF
 	{
-		// TODO
+		unsigned long count;
+		fseek(fs_files[server][internal_handle].handle, 0, SEEK_END);
+
+		while (count++ < (offset-length))
+			fputc('\0', fs_files[server][internal_handle].handle);
 	}
 
 	fseek(fs_files[server][internal_handle].handle, offset, SEEK_SET);
@@ -5326,10 +5407,11 @@ void fs_close(int server, unsigned char reply_port, unsigned char net, unsigned 
 
 	unsigned short count;
 
-	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Close handle %d\n", "", net, stn, handle);
+	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Close handle %d ", "", net, stn, handle);
 
-	if (active[server][active_id].fhandles[handle].handle == -1) // Handle not open
+	if (handle !=0 && active[server][active_id].fhandles[handle].handle == -1) // Handle not open
 	{
+		if (!fs_quiet) fprintf (stderr, "- unknown\n");
 		fs_error(server, reply_port, net, stn, 222, "Channel ?");
 		return;
 	}
@@ -5340,13 +5422,19 @@ void fs_close(int server, unsigned char reply_port, unsigned char net, unsigned 
 		fs_close_handle(server, reply_port, net, stn, active_id, handle);
 	else // User wants to close everything
 	{
+		if (!fs_quiet) fprintf (stderr, "closing ");
 		while (count < FS_MAX_OPEN_FILES)
 		{	
-			if (active[server][active_id].fhandles[count].handle != -1)
+			if (active[server][active_id].fhandles[count].handle != -1 && !(active[server][active_id].fhandles[count].is_dir)) // Close it only if it's open and not a directory handle
+			{
+				if (!fs_quiet) fprintf (stderr, "%d ", count);
 				fs_close_handle(server, reply_port, net, stn, active_id, count);
+			}
 			count++;
 		}
 	}
+
+	fprintf (stderr, "\n");
 
 	fs_reply_success(server, reply_port, net, stn, 0, 0);
 
@@ -5446,7 +5534,6 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 				active[server][active_id].fhandles[userhandle].handle = handle;
 				active[server][active_id].fhandles[userhandle].mode = mode;
 				active[server][active_id].fhandles[userhandle].cursor = 0;	
-				active[server][active_id].fhandles[userhandle].sequence = 2; // Initialize - should only be 0, or 1 so 2 means first input always treated as non-duplicate
 				active[server][active_id].fhandles[userhandle].pasteof = 0; // Not past EOF yet
 				strcpy(active[server][active_id].fhandles[userhandle].acornfullpath, p.acornfullpath);
 				reply.p.ptype = ECONET_AUN_DATA;
@@ -5520,15 +5607,30 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 			(fs_bulk_ports[server][port].stn == stn) 
 	)
 	{
+		int writeable, remaining;
+
 		// We can deal with this data
 	
-		fwrite(data, 1, datalen, fs_files[server][fs_bulk_ports[server][port].handle].handle);
+		remaining = fs_bulk_ports[server][port].length - fs_bulk_ports[server][port].received; // How much more are we expecting?
+
+		writeable = (remaining > datalen ? datalen : remaining);
+ 
+		if (fs_bulk_ports[server][port].user_handle != 0) // This is a putbytes transfer not a fs_save; in the latter there is no user handle. Seek to correct point in file
+			fseek(fs_files[server][fs_bulk_ports[server][port].handle].handle, SEEK_SET, active[server][fs_bulk_ports[server][port].active_id].fhandles[fs_bulk_ports[server][port].user_handle].cursor);
+
+		//fwrite(data, 1, writeable, fs_files[server][fs_bulk_ports[server][port].handle].handle);
+		fwrite(data, writeable, 1, fs_files[server][fs_bulk_ports[server][port].handle].handle);
+
+		fflush(fs_files[server][fs_bulk_ports[server][port].handle].handle);
 	
 		fs_bulk_ports[server][port].received += datalen;
 
 		if (fs_bulk_ports[server][port].user_handle != 0) // This is a putbytes transfer not a fs_save; in the latter there is no user handle
-			active[server][fs_bulk_ports[server][port].active_id].fhandles[fs_bulk_ports[server][port].user_handle].cursor += datalen;
+			active[server][fs_bulk_ports[server][port].active_id].fhandles[fs_bulk_ports[server][port].user_handle].cursor += writeable;
 	
+		if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Bulk transfer in on port %02X data length &%04X, expected total length &%04lX, writeable &%04X\n", "", net, stn, port, datalen, fs_bulk_ports[server][port].length, writeable
+				);
+
 		fs_bulk_ports[server][port].last_receive = (unsigned long long) time(NULL);
 
 		if (fs_bulk_ports[server][port].received == fs_bulk_ports[server][port].length) // Finished
@@ -5648,6 +5750,9 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		return;
 	}
 
+	if (fsop != 0x09) // Not a putbyte
+		active[server][active_id].sequence = 2; // Reset so that next putbyte will be taken to be in sequence.
+
 	userid = fs_find_userid(server, net, stn);
 
 	if (userid < 0)
@@ -5673,7 +5778,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			else if (!strncasecmp("IAM ", (const char *) command, 4)) fs_login(server, reply_port, net, stn, command + 4);
 			else if (fs_stn_logged_in(server, net, stn) < 0)
 				fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
-			else if (!strncasecmp("BYE", (const char *) command, 3)) fs_bye(server, reply_port, net, stn);
+			else if (!strncasecmp("BYE", (const char *) command, 3)) fs_bye(server, reply_port, net, stn, 1);
 			else if (!strncasecmp("SETLIB ", (const char *) command, 7))
 			{ // Permanently set library directory
 				unsigned char libdir[96];
@@ -6154,7 +6259,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_set_bootopt(server, reply_port, userid, net, stn, data); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x17: // BYE
-			if (fs_stn_logged_in(server, net, stn) >= 0) fs_bye(server, reply_port, net, stn); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+			if (fs_stn_logged_in(server, net, stn) >= 0) fs_bye(server, reply_port, net, stn, 1); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x18: // Read user info
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_user_info(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");

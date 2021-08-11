@@ -37,7 +37,9 @@
 #include "../include/econet-pserv.h"
 
 extern int fs_initialize(unsigned char, unsigned char, char *);
+extern int sks_initialize(unsigned char, unsigned char, char *);
 extern void handle_fs_traffic(int, unsigned char, unsigned char, unsigned char, unsigned char *, unsigned int);
+extern void sks_handle_traffic(int, unsigned char, unsigned char, unsigned char, unsigned char *, unsigned int);
 extern void handle_fs_bulk_traffic(int, unsigned char, unsigned char, unsigned char, unsigned char, unsigned char *, unsigned int);
 extern void fs_garbage_collect(int);
 extern unsigned short fs_quiet;
@@ -107,7 +109,7 @@ struct econet_hosts {							// what we we need to find a beeb?
 	unsigned int last_seq_ack; // The last sequence number which was acknowledged to this host if it is AUN. If we have already acknoweldged a given sequence number, we *don't* attempt to re-transmit the data onto the Econet Wire, but we do acknowledge the packet again
 #endif
 	unsigned char last_imm_ctrl, last_imm_net, last_imm_stn; // Designed to try and avoid adding high bit back on where it's an immediate transmitting a characer for *NOTIFY - net & stn are source net & stn of the last immediate going to this host
-	int fileserver_index;
+	int fileserver_index, sks_index;
 	struct timespec last_wire_tx;
 };
 
@@ -458,6 +460,16 @@ void econet_readconfig(void)
 				else f = -1;
 			}
 
+			if (servertype & ECONET_SERVER_SOCKET)
+			{
+				int f;
+
+				f = sks_initialize(net, stn, (char *) &datastring);
+				if (f >= 0)
+					network[(entry == -1 ? networkp : entry)].sks_index = f;
+				else f = -1;
+			}
+
                         // Set up the listener
 
 			if (entry == -1) // Doesn't presently exist
@@ -762,6 +774,27 @@ void econet_readconfig(void)
 		
 } 
 
+short fs_get_server_id(unsigned char net, unsigned char stn)
+{
+	short result = -1;
+
+	if (network[econet_ptr[net][stn]].fileserver_index != -1)
+		result = network[econet_ptr[net][stn]].fileserver_index;
+
+	return result;
+}
+
+// Returns local/wire machine sequence number and increments it
+#ifdef ECONET_64BIT
+unsigned int get_local_seq(unsigned char net, unsigned char stn)
+#else
+unsigned long get_local_seq(unsigned char net, unsigned char stn)
+#endif
+{
+
+	return (network[econet_ptr[net][stn]].seq += 4);
+
+}
 
 void dump_pkt_data(unsigned char *a, int len, unsigned long start_index)
 {
@@ -1011,7 +1044,6 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 				reply.p.port = 0x9e;
 				reply.p.ctrl = 0x80;
 				reply.p.pad = 0x00;
-				//reply.p.seq = (local_seq += 4);
 				reply.p.seq = (network[d_ptr].seq += 4);
 				reply.p.data[0] = 0x00;
 
@@ -1108,7 +1140,6 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 				printjobs[count].ctrl ^= 0x01;
 
 				reply.p.pad = 0x00;
-				//reply.p.seq = (local_seq += 4);
 				reply.p.seq = (network[d_ptr].seq += 4);
 
 				// The control low bit alternation is to avoid duplicated packets. Need to implement a check... TODO.
@@ -1170,6 +1201,8 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 				fprintf (stderr, "PRINT: Spooler not found for print request from %d.%d\n", network[s_ptr].network, network[s_ptr].station);
 			
 		}
+		else if ((a->p.port == 0xdf) && (network[d_ptr].servertype & ECONET_SERVER_SOCKET) && (network[d_ptr].sks_index >= 0))
+			sks_handle_traffic(network[d_ptr].sks_index, a->p.srcnet, a->p.srcstn, a->p.ctrl, a->p.data, packlen-12);
 		else if ((network[d_ptr].servertype & ECONET_SERVER_FILE) && (network[d_ptr].fileserver_index >= 0)) // Could be fileserver bulk transfer traffic
 			handle_fs_bulk_traffic(network[d_ptr].fileserver_index, a->p.srcnet, a->p.srcstn, a->p.port, a->p.ctrl, a->p.data, packlen-12);
 		else
@@ -1227,7 +1260,7 @@ try_again:
 		attempts = 0;
 		written = -1;
 
-		while (attempts++ < 3 && written < 0)
+		while (attempts++ < 5 && written < 0)
 			written = write(econet_fd, &w, len+4);
 			
 		err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
@@ -1357,7 +1390,7 @@ try_again:
 							written = -1;
 
 							dump_udp_pkt_aun(len - 8, dir, &ir, dstnet, dststn, srcnet, srcstn);
-							while ((attempts < 3) && (written < 0))
+							while ((attempts < 5) && (written < 0))
 							{
 								written = write(econet_fd, &ir, 12 + (len-8));
 								err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
@@ -1420,7 +1453,7 @@ try_again:
 				written = -1;
 				attempts = 0;
 				
-				while ((attempts < 3) && (written < 0))
+				while ((attempts < 5) && (written < 0))
 				{
 					written = write(econet_fd, &w, len+4);
 					err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
@@ -1635,28 +1668,37 @@ Options:\n\
 	while (poll((struct pollfd *)&pset, pmax+1, -1))
 	{
 	
-		/* Check Econet wire first */
-		if (pset[pmax].revents & POLLIN)
-		{
+		//int econet_sequence;
 
-			// Collect the packet
-			s = read(econet_fd, &rx, ECONET_MAX_PACKET_SIZE);
+		//econet_sequence = rand() % pmax; // Gives us a random number in the range 0...pmax-1 (i.e. the set of other descriptors)
 
-			if (s > 0) // Ding dong, traffic arriving off the wire 
+			//if (realfd == econet_sequence) // If this is the wire's turn, process a wire packet
 			{
-				if (s < 12)
-					fprintf(stderr, "Runt packet length %d received off Econet wire\n", s);
-	
-				rx.p.seq = (network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].seq += 4);
-				if (rx.p.aun_ttype == ECONET_AUN_IMMREP)
-					rx.p.seq = network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_imm_seq_sent;
-				// Fudge the AUN type on port 0 ctrl 0x85, which is done as some sort of weird special 4 way handshake with 4 data bytes on the Scout - done as "data" and the kernel module works out that the first 4 bytes in the packet go on the scout and the rest go in the 3rd packet in the 4-way
-				if (rx.p.aun_ttype == ECONET_AUN_IMM && rx.p.ctrl == 0x85)
-					rx.p.aun_ttype = ECONET_AUN_DATA;
 
-				aun_send((struct __econet_packet_udp *)&(rx.raw[4]), s-4, rx.p.srcnet, rx.p.srcstn, rx.p.dstnet, rx.p.dststn); // Deals with sending to local hosts
+				if (pset[pmax].revents & POLLIN)
+				{
+
+					int r;
+					// Collect the packet
+					r = read(econet_fd, &rx, ECONET_MAX_PACKET_SIZE);
+
+					if (r > 0) // Ding dong, traffic arriving off the wire 
+					{
+						if (r < 12)
+							fprintf(stderr, "Runt packet length %d received off Econet wire\n", r);
+	
+						rx.p.seq = (network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].seq += 4);
+						if (rx.p.aun_ttype == ECONET_AUN_IMMREP)
+							rx.p.seq = network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_imm_seq_sent;
+						// Fudge the AUN type on port 0 ctrl 0x85, which is done as some sort of weird special 4 way handshake with 4 data bytes on the Scout - done as "data" and the kernel module works out that the first 4 bytes in the packet go on the scout and the rest go in the 3rd packet in the 4-way
+						if (rx.p.aun_ttype == ECONET_AUN_IMM && rx.p.ctrl == 0x85)
+							rx.p.aun_ttype = ECONET_AUN_DATA;
+
+						aun_send((struct __econet_packet_udp *)&(rx.raw[4]), r-4, rx.p.srcnet, rx.p.srcstn, rx.p.dstnet, rx.p.dststn); // Deals with sending to local hosts
+					}
+				}
+
 			}
-		}
 
 		/* See if anything turned up on UDP */
 
@@ -1680,7 +1722,7 @@ Options:\n\
 
 				if (new_start_fd == -1)
 				{
-					new_start_fd = ((realfd + 1) % pmax); // Update start_fd to start at next FD next time, clamped to within pmax, so that the first station we received from is last in line next time round
+					//new_start_fd = ((realfd + 1) % pmax); // Update start_fd to start at next FD next time, clamped to within pmax, so that the first station we received from is last in line next time round
 					//fprintf (stderr, "Updated start_fd to %d\n", new_start_fd);
 				}
 
@@ -1752,8 +1794,12 @@ Options:\n\
 	
 		}
 
+/*
 		if (new_start_fd != -1)
 			start_fd = new_start_fd;
+*/
+
+		start_fd = (start_fd + 1) % pmax;
 
 		// Reset our poll structure
 		for (s = 0; s <= pmax; s++)
