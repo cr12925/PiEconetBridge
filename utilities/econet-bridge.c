@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <fcntl.h>
 #include <sys/types.h>
 #include <resolv.h>
@@ -277,6 +278,16 @@ void econet_readconfig(void)
 	{
 		if (fgets(linebuf, 255, configfile) == NULL) break;
 		linebuf[strlen(linebuf)-1] = 0x00; // Drop the linefeed
+
+		// Strip off trailing whitespace
+		char *end = linebuf + strlen(linebuf) - 1;
+  		while(end >= linebuf && isspace((unsigned char)*end))
+			end--;
+		end[1]=0x00;
+
+		// Skip the line if it is empty
+		if (strlen(linebuf) == 0)
+			continue;	
 
 		// Blank off the server parameters
 
