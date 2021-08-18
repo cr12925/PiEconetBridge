@@ -440,6 +440,10 @@ You must:
 - Have one such entry for every station on your local Econet which needs to
   speak to the AUN world.
 - Use different port numbers for each such entry. E.g. 32768, 32769, etc.
+- If you use the word AUTO for the port number then it will automatically
+  be calculated as 10000+network*256+port.  So, for example
+    W 0 100 AUTO would result in port 10100 (10000+0*256+100)
+    W 5 200 AUTO would result in port 11480 (10000+5*256+200)
 
 A word on port numbers
 ----------------------

@@ -249,7 +249,7 @@ void econet_readconfig(void)
 		exit(EXIT_FAILURE);
 	}
 
-        if (regcomp(&r_entry_wire, "^\\s*([Ww])\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{4,5})\\s*$", REG_EXTENDED) != 0)
+        if (regcomp(&r_entry_wire, "^\\s*([Ww])\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{4,5}|AUTO)\\s*$", REG_EXTENDED) != 0)
         {
                 fprintf(stderr, "Unable to compile full wire station regex.\n");
                 exit(EXIT_FAILURE);
@@ -539,7 +539,17 @@ void econet_readconfig(void)
                                                 network[networkp].station = atoi(tmp);
                                                 break;
                                         case 4:
-                                                network[networkp].port = atoi(tmp);
+						if (!strcmp(tmp,"AUTO"))
+						{
+							if (network[networkp].network > 127)
+							{
+								fprintf(stderr, "Network must be under 128 for AUTO to work: %s\n",linebuf);
+								exit(EXIT_FAILURE);
+							}
+                                                	network[networkp].port = 10000+network[networkp].network*256+network[networkp].station;
+						}
+                                                else
+                                                	network[networkp].port = atoi(tmp);
                                                 break;
                                 }
                         }
