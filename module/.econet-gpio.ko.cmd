@@ -1,1 +1,0 @@
-cmd_/home/pi/econet-onefile/module/econet-gpio.ko := ld -r  -EL  --build-id=sha1  -T scripts/module.lds -o /home/pi/econet-onefile/module/econet-gpio.ko /home/pi/econet-onefile/module/econet-gpio.o /home/pi/econet-onefile/module/econet-gpio.mod.o;  true
