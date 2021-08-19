@@ -27,11 +27,9 @@ quite hard to break it!) in July and August 2021. I am very grateful to
 them for their efforts.
 
 The fileserver code in this repository would not have been possible to
-develop without sight of the code at github.com/stardot/ArduinoFilestore
-
-I don't know who wrote it, but whoever it was I am very grateful. If
-anyone does know who wrote it, let me know and I will update this
-README.
+develop without sight of the code at github.com/stardot/ArduinoFilestore.
+I am told it is stardot.org.uk user @gazzaD - well, @gazzaD, thank you -
+I could not have done it without you.
 
 Introduction
 ------------
