@@ -1,1 +1,0 @@
-cmd_/home/pi/econet-onefile/module/Module.symvers := sed 's/ko$$/o/' /home/pi/econet-onefile/module/modules.order | scripts/mod/modpost -m -a   -o /home/pi/econet-onefile/module/Module.symvers -e -i Module.symvers   -T -
