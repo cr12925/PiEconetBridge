@@ -1,0 +1,11 @@
+*.o
+*.ko
+module/modules.order
+module/Module.symvers
+module/econet-gpio.mod
+module/econet-gpio.mod.c
+module/.*
+utilities/econet-bridge
+utilities/econet-imm
+utilities/econet-monitor
+utilities/econet-test
