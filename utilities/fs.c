@@ -23,9 +23,8 @@
    format of those calls and the necessary replies. Without that,
    this code would have taken significantly longer to create.
 
-   Sadly the identity of the author of that code has not yet
-   become apparent to me, but if anybody knows I will gladly 
-   acknowledge them by name.
+   I am told the author of that code is stardot.org.uk user
+   @gazzaD - to whom I am very grateful.
 */
 
 #include <stdio.h>
@@ -124,6 +123,7 @@ struct {
 		unsigned short pasteof; // Signals when there has already been one attempt to read past EOF and if there's another we need to generate an error
 		unsigned short is_dir; // Looks like Acorn systems can OPENIN() a directory so there has to be a single set of handles between dirs & files. So if this is non-zero, the handle element is a pointer into fs_dirs, not fs_files.
 		char acornfullpath[1024]; // Full Acorn path, used for calculating relative paths
+		char acorntailpath[FS_DEFAULT_NAMELEN+1];
 	} fhandles[FS_MAX_OPEN_FILES];
 	struct {
 		short handle; // Pointer into fs_dirs
@@ -243,6 +243,18 @@ regex_t r_pathname, r_wildcard;
 int fs_count = 0;
 
 unsigned short fs_quiet = 0;
+
+// Find the tail end entry on path2 and store in path1. If path2 empty, store "$".
+void fs_store_tail_path(char *path1, char *path2)
+{
+	char *pos;
+
+	if ((pos = strrchr(path2, '.'))) //  found
+		strcpy(path1, (pos + 1));
+	else
+		strcpy (path1, "$");
+}
+
 
 // Convert our perm storage to Acorn / MDFS format
 unsigned char fs_perm_to_acorn(unsigned char fs_perm, unsigned char ftype)
@@ -1905,6 +1917,7 @@ void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned ch
 	// Close active files / handles
 
 	
+/*
 	count = 1;
 	while (count < FS_MAX_OPEN_FILES)
 	{
@@ -1912,11 +1925,12 @@ void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned ch
 			fs_deallocate_user_dir_channel(server, active_id, count);
 		count++;
 	}
+*/
 
 	count = 1;
 	while (count < FS_MAX_OPEN_FILES)
 	{
-		if (active[server][active_id].fhandles[count].handle != -1 && (active[server][active_id].fhandles[count].is_dir == 0))
+		if (active[server][active_id].fhandles[count].handle != -1 /* && (active[server][active_id].fhandles[count].is_dir == 0) */)
 		{
 			fs_close_interlock(server, active[server][active_id].fhandles[count].handle, active[server][active_id].fhandles[count].mode);
 			fs_deallocate_user_file_channel(server, active_id, count);
@@ -2058,9 +2072,10 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 	if (isdigit(*command))
 	{
 		while ((*(command+stringptr) != ' ') && (stringptr < strlen(command))) stringptr++;
-		// Now skip any spaces
-		while ((*(command+stringptr) == ' ') && (stringptr < strlen(command))) stringptr++;
 	}
+
+	// Now skip any spaces
+	while ((*(command+stringptr) == ' ') && (stringptr < strlen(command))) stringptr++;
 
 	if (stringptr == strlen(command)) // Garbled *IAM
 	{
@@ -2183,68 +2198,42 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
 				}
 					
-				if ((internal_handle = fs_get_dir_handle(server, usercount, p.unixpath)) == -1)
-				{
-					fs_error (server, reply_port, net, stn, 0xA8, "Root directory inaccessible!");
-					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
-				}
+				internal_handle = fs_open_interlock(server, p.unixpath, 1, active[server][usercount].userid);
 
 				if ((active[server][usercount].root = fs_allocate_user_dir_channel(server, usercount, internal_handle)) == -1) // Can't allocate
 				{
 					fs_error (server, reply_port, net, stn, 0xDE, "Root directory channel ?");
-					fs_close_dir_handle(server, internal_handle);
+					fs_close_interlock(server, internal_handle, 1);
 					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
 				}
 
 				strcpy(active[server][usercount].fhandles[active[server][usercount].root].acornfullpath, p.acornfullpath);
+				fs_store_tail_path(active[server][usercount].fhandles[active[server][usercount].root].acorntailpath, p.acornfullpath);
+				active[server][usercount].fhandles[active[server][usercount].root].mode = 1;
 
-				//strncpy((char * ) active[server][usercount].root_dir, (const char * ) "", 11);
-				//strncpy((char * ) active[server][usercount].root_dir_tail, (const char * ) "$         ", 11);
-				
 				snprintf(active[server][usercount].root_dir, 260, "$.%s", p.path_from_root);
 
 				if (p.npath == 0)	sprintf(active[server][usercount].root_dir_tail, "$         ");
 				else			sprintf(active[server][usercount].root_dir_tail, "%-10s", p.path[p.npath-1]);
-	
-				// Next, CWD, which starts as home	
-				
-				if (!fs_normalize_path(server, usercount, home, -1, &p)) // NOTE: because fs_normalize might look up current or home directory, home must be a complete path from $
+
+				// Just set CWD to URD
+
+				internal_handle = fs_open_interlock(server, p.unixpath, 1, active[server][usercount].userid);
+
+				if ((active[server][usercount].current = fs_allocate_user_dir_channel(server, usercount, internal_handle)) == -1) // Can't allocate a second handle for CWD on the root internal_handle
 				{
 
-					if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Login attempt - cannot find home dir %s\n", "", net, stn, home);
-					if (!fs_normalize_path(server, usercount, "$", -1, &p)) // Use root as home directory instead
-					{
-						fs_error (server, reply_port, net, stn, 0xA8, "Unable to map CWD.");
-						active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
-					}
-
-				}
-						
-				if (p.ftype != FS_FTYPE_DIR) // Homedir wasn't a directory!
-				{
-					fs_error (server, reply_port, net, stn, 0xA8, "Bad home directory.");
+					fs_error (server, reply_port, net, stn, 0xA8, "Can't map CWD!");
 					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
-				}
-					
-				if ((internal_handle = fs_get_dir_handle(server, usercount, p.unixpath)) == -1)
-				{
-					fs_error (server, reply_port, net, stn, 0xA8, "Home directory not found");
-					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
-				}
-
-				if ((active[server][usercount].current = fs_allocate_user_dir_channel(server, usercount, internal_handle)) == -1) // Can't allocate
-				{
-					fs_error (server, reply_port, net, stn, 0xDE, "Current dir channel ?");
-					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
-					// Don't close the dir - it hasn't been clocked as open internally by another reader because fs_alloc... failed.
+					fs_close_interlock(server, active[server][usercount].fhandles[active[server][usercount].root].handle, 1); // Close the old root directory
+					fs_close_interlock(server, internal_handle, 1); // Close the CWD handle
+					fs_deallocate_user_dir_channel(server, usercount, active[server][usercount].root);
+					return;
 				}
 
 				strcpy(active[server][usercount].fhandles[active[server][usercount].current].acornfullpath, p.acornfullpath);
-
-				strncpy((char * ) active[server][usercount].current_dir, (const char * ) p.path_from_root, 255); // Current starts at home
-				if (p.npath == 0)	sprintf(active[server][usercount].current_dir_tail, "$         ");
-				else			sprintf(active[server][usercount].current_dir_tail, "%-10s", p.path[p.npath-1]);
-
+				fs_store_tail_path(active[server][usercount].fhandles[active[server][usercount].current].acorntailpath, p.acornfullpath);
+				active[server][usercount].fhandles[active[server][usercount].current].mode = 1;
 
 				// Next, Library
 
@@ -2270,20 +2259,23 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
 				}
 					
-				if ((internal_handle = fs_get_dir_handle(server, usercount, p.unixpath)) == -1)
-				{
-					fs_error (server, reply_port, net, stn, 0xA8, "Library directory not found");
-					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
-				}
+				internal_handle = fs_open_interlock(server, p.unixpath, 1, active[server][usercount].userid);
 
 				if ((active[server][usercount].lib = fs_allocate_user_dir_channel(server, usercount, internal_handle)) == -1) // Can't allocate
 				{
 					fs_error (server, reply_port, net, stn, 0xDE, "Library dir channel ?");
-					fs_close_dir_handle(server, internal_handle);
+					//fs_close_dir_handle(server, internal_handle);
+					fs_close_interlock(server, internal_handle, 1);
+					fs_close_interlock(server, active[server][usercount].fhandles[active[server][usercount].root].handle, 1);
+					fs_close_interlock(server, active[server][usercount].fhandles[active[server][usercount].current].handle, 1);
+					fs_deallocate_user_dir_channel(server, usercount, active[server][usercount].root);	
+					fs_deallocate_user_dir_channel(server, usercount, active[server][usercount].current);	
 					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
 				}
-	
+
 				strcpy(active[server][usercount].fhandles[active[server][usercount].lib].acornfullpath, p.acornfullpath);
+				fs_store_tail_path(active[server][usercount].fhandles[active[server][usercount].lib].acorntailpath, p.acornfullpath);
+				active[server][usercount].fhandles[active[server][usercount].lib].mode = 1;
 
 				strncpy((char * ) active[server][usercount].lib_dir, (const char * ) p.path_from_root, 255);
 				if (p.npath == 0)
@@ -2337,16 +2329,31 @@ void fs_read_user_env(int server, unsigned short reply_port, unsigned char net, 
 	r.p.data[replylen++] = 0;
 	r.p.data[replylen++] = 0;
 
+	// If either current or library handle is invalid, barf massively.
+
+	//fprintf (stderr, "Current.is_dir = %d, handle = %d, Lib.is_dir = %d, handle = %d\n", active[server][active_id].fhandles[active[server][active_id].current].is_dir, active[server][active_id].fhandles[active[server][active_id].current].handle, active[server][active_id].fhandles[active[server][active_id].lib].is_dir, active[server][active_id].fhandles[active[server][active_id].lib].handle);
+
+	if (!(active[server][active_id].fhandles[active[server][active_id].current].is_dir) ||
+	    !(active[server][active_id].fhandles[active[server][active_id].lib].is_dir) ||
+	    (active[server][active_id].fhandles[active[server][active_id].current].handle == -1) ||
+	    (active[server][active_id].fhandles[active[server][active_id].lib].handle == -1))
+	{
+		fs_error(server, reply_port, net, stn, 0xDE, "Channel ?");
+		return;
+	}
+
 	disclen = r.p.data[replylen++] = 16; // strlen(fs_discs[server][active[server][active_id].disc].name);
 
 	sprintf (&(r.p.data[replylen]), "%-16s", fs_discs[server][active[server][active_id].current_disc].name);
 
 	replylen += disclen;
 
-	sprintf (&(r.p.data[replylen]), "%-10s", active[server][active_id].current_dir_tail);
+	sprintf (&(r.p.data[replylen]), "%-10s", active[server][active_id].fhandles[active[server][active_id].current].acorntailpath);
+	//sprintf (&(r.p.data[replylen]), "%-10s", active[server][active_id].current_dir_tail);
 	replylen += 10;
 
-	sprintf (&(r.p.data[replylen]), "%-10s", active[server][active_id].lib_dir_tail);
+	sprintf (&(r.p.data[replylen]), "%-10s", active[server][active_id].fhandles[active[server][active_id].lib].acorntailpath);
+	//sprintf (&(r.p.data[replylen]), "%-10s", active[server][active_id].lib_dir_tail);
 	replylen += 10;
 
 	fs_aun_send (&r, server, replylen, net, stn);
@@ -2398,7 +2405,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 	if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Examine %s relative to %d, start %d, extent %d, arg = %d\n", "", net, stn, path,
 		relative_to, start, n, arg);
 
-	if (!fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1)) // || p.ftype == FS_FTYPE_NOTFOUND)
+	if (!fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1) || p.ftype == FS_FTYPE_NOTFOUND)
 	{
 
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
@@ -2899,16 +2906,23 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		return;
 	}
 
-	if ((!norm_return && p.error == FS_PATH_ERR_NODIR) || (norm_return && p.ftype == FS_FTYPE_NOTFOUND))
+	if ((!norm_return && p.error == FS_PATH_ERR_NODIR) || (/* norm_return && */ p.ftype == FS_FTYPE_NOTFOUND))
 	{
 		struct __econet_packet_udp reply;
 	
 		reply.p.ptype = ECONET_AUN_DATA;
 		reply.p.port = reply_port;
 		reply.p.ctrl = 0x80;
-		reply.p.data[0] = reply.p.data[1] = reply.p.data[2] = 0; // This is apparently how you flag not found on an examine...
-	
-		fs_aun_send(&reply, server, 3, net, stn);
+		reply.p.data[0] = reply.p.data[1] = 0; // This is apparently how you flag not found on an examine...
+		if (command == 6) // Longer error block
+		{
+			memset(&(reply.p.data[2]), 0x20, 10);
+			reply.p.data[12] = 0xFF;
+			reply.p.data[13] = 0;
+			fs_aun_send(&reply, server, 14, net, stn);
+		}
+		else
+			fs_aun_send(&reply, server, 3, net, stn);
 		return;
 	}
 
@@ -3370,6 +3384,7 @@ short fs_open_interlock(int server, unsigned char *path, unsigned short mode, un
 				if (fs_files[server][count].writers == 0) // We can open this existing handle for reading
 				{
 					fs_files[server][count].readers++;
+					if (!fs_quiet) fprintf (stderr, "   FS:%12sInterlock opened internal dup handle %d, mode %d. Readers = %d, Writers = %d, path %s\n", "", count, mode, fs_files[server][count].readers, fs_files[server][count].writers, fs_files[server][count].name);
 					return count; // Return the index into fs_files
 				}
 				else // We can't open for reading because someone else has it open for writing
@@ -3398,6 +3413,7 @@ short fs_open_interlock(int server, unsigned char *path, unsigned short mode, un
 			if (mode == 3) // Take ownereship on OPENOUT
 				fs_write_xattr(path, userid, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0);
 	
+			if (!fs_quiet) fprintf (stderr, "   FS:%12sInterlock opened internal handle %d, mode %d. Readers = %d, Writers = %d, path %s\n", "", count, mode, fs_files[server][count].readers, fs_files[server][count].writers, fs_files[server][count].name);
 			return count;
 		}
 		else count++;
@@ -3416,8 +3432,11 @@ void fs_close_interlock(int server, unsigned short index, unsigned short mode)
 		fs_files[server][index].readers--;
 	else	fs_files[server][index].writers--;
 
+	if (!fs_quiet) fprintf (stderr, "   FS:%12sInterlock close internal handle %d, mode %d. Readers now = %d, Writers now = %d, path %s\n", "", index, mode, fs_files[server][index].readers, fs_files[server][index].writers, fs_files[server][index].name);
+
 	if (fs_files[server][index].readers <= 0 && fs_files[server][index].writers <= 0)
 	{
+		if (!fs_quiet) fprintf (stderr, "   FS:%12sInterlock closing internal handle %d in operating system\n", "", index);
 		fclose(fs_files[server][index].handle);
 		fs_files[server][index].handle = NULL; // Flag unused
 	}
@@ -3706,9 +3725,9 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	// Collect new directory handles, and only if they're all good are we going to switch discs
 
 	int root, cur, lib;
-	struct path p_root, p_home, p_lib;
+	struct path p_root, /* p_home, */ p_lib;
 	char discname[20];
-	char tmppath[1024];
+	char tmppath[1024], tmppath2[1024];
 	int internal_root_handle, internal_cur_handle, internal_lib_handle;
 	unsigned char home_dir[100], lib_dir[100];
 
@@ -3724,25 +3743,40 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	strncpy((char *) lib_dir, (const char *) users[server][active[server][active_id].userid].lib, 96);
 	lib_dir[96] = '\0';
 
-	// Root directory first
+	// URD first
 
-	sprintf(tmppath, ":%s.$", discname);
+	sprintf(tmppath, ":%s.%s", discname, home_dir);
+	sprintf(tmppath2, ":%s.$", discname);
 
 	if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Change disc to %s\n", "", net, stn, discname);
 
 	if (!fs_normalize_path(server, active_id, tmppath, -1, &p_root))
 	{
-		fs_error(server, reply_port, net, stn, 0xFF, "Cannot map root directory on new disc");
-		return;
+		if (!fs_normalize_path(server, active_id, tmppath2, -1, &p_root))
+		{
+			if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Failed to map URD on %s, even %s\n", "", net, stn, discname, tmppath2);
+			fs_error(server, reply_port, net, stn, 0xFF, "Cannot map root directory on new disc");
+			return;
+		}
+	}
+
+	if (p_root.ftype == FS_FTYPE_NOTFOUND && !fs_normalize_path(server, active_id, tmppath2, -1, &p_root))
+	{
+		if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Failed to map URD on %s, even %s\n", "", net, stn, discname, tmppath2);
+                fs_error(server, reply_port, net, stn, 0xFF, "Cannot map root directory on new disc");
+                return;
+
 	}
 
 	if (p_root.ftype != FS_FTYPE_DIR)
 	{
+		if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d URD on %s, even %s, is not a dir!\n", "", net, stn, discname, tmppath2);
 		fs_error(server, reply_port, net, stn, 0xFF, "Cannot map root directory on new disc");
 		return;
 	}
 
-	if ((internal_root_handle = fs_get_dir_handle(server, active_id, p_root.unixpath)) == -1)
+	//if ((internal_root_handle = fs_get_dir_handle(server, active_id, p_root.unixpath)) == -1)
+	if ((internal_root_handle = fs_open_interlock(server, p_root.unixpath, 1, active[server][active_id].userid)) == -1)
 	{
 		fs_error(server, reply_port, net, stn, 0xFF, "Root directory inaccessible!");
 		return;
@@ -3751,98 +3785,111 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	if ((root = fs_allocate_user_dir_channel(server, active_id, internal_root_handle)) == -1) // Can't allocate handle
 	{
 		fs_error(server, reply_port, net, stn, 0xFF, "Root directory channel ?");
-		fs_close_dir_handle(server, internal_root_handle);
+		//fs_close_dir_handle(server, internal_root_handle);
+		fs_close_interlock(server, internal_root_handle, 1);
+		return;
+	}
+
+	if ((internal_cur_handle = fs_open_interlock(server, p_root.unixpath, 1, active[server][active_id].userid)) == -1)
+	{
+		fs_error(server, reply_port, net, stn, 0xFF, "CWD inaccessible!");
+		return;
+	}
+
+	if ((cur = fs_allocate_user_dir_channel(server, active_id, internal_cur_handle)) == -1) // Can't allocate handle
+	{
+		fs_error(server, reply_port, net, stn, 0xFF, "CWD channel ?");
+		fs_deallocate_user_dir_channel (server, active_id, root);
+		fs_close_interlock(server, internal_root_handle, 1);
+		fs_close_interlock(server, internal_cur_handle, 1);
 		return;
 	}
 
 	strcpy(active[server][active_id].fhandles[root].acornfullpath, p_root.acornfullpath);
+	fs_store_tail_path(active[server][active_id].fhandles[root].acorntailpath, p_root.acornfullpath);
+	active[server][active_id].fhandles[root].mode = 1;
 
-	if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom%3d.%3d Successfully mapped new root - handle %02X, full path %s\n", "", net, stn, root, active[server][active_id].fhandles[root].acornfullpath);
+	if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Successfully mapped new URD - uHandle %02X, full path %s\n", "", net, stn, root, active[server][active_id].fhandles[root].acornfullpath);
 
-	sprintf(tmppath, ":%s.%s", discname, home_dir);
-	if (!fs_quiet) fprintf(stderr, "   FS%12s from %3d.%3d Attempting to find home dir %s\n", "", net, stn, tmppath);
+        strcpy(active[server][active_id].fhandles[cur].acornfullpath, p_root.acornfullpath);
+        fs_store_tail_path(active[server][active_id].fhandles[cur].acorntailpath, p_root.acornfullpath);
+        active[server][active_id].fhandles[cur].mode = 1;
 
-        if (!fs_normalize_path(server, active_id, tmppath, -1, &p_home))
-        {
-		internal_cur_handle = internal_root_handle;
-        }
-	else if (p_home.ftype == FS_FTYPE_NOTFOUND || p_home.disc != users[server][active[server][active_id].userid].home_disc) // Not on home disc - use root as CWD
-	{
-		//fprintf (stderr, "p_home.disc = %d, home disc = %d\n", p_home.disc, users[server][active[server][active_id].userid].home_disc);
-		internal_cur_handle = internal_root_handle;
-	}
-	else
-	{
-        	if (p_home.ftype != FS_FTYPE_DIR)
-        	{
-                	fs_error(server, reply_port, net, stn, 0xFF, "Cannot map home directory on new disc");
-                	return;
-        	}
-	
-        	if ((internal_cur_handle = fs_get_dir_handle(server, active_id, p_home.unixpath)) == -1)
-        	{
-                	fs_error(server, reply_port, net, stn, 0xFF, "Home directory inaccessible!");
-                	return;
-        	}
-	
-		fprintf(stderr, "New home internal handle %d\n", internal_cur_handle);
-	}
-
-       	if ((cur = fs_allocate_user_dir_channel(server, active_id, internal_cur_handle)) == -1) // Can't allocate handle
-       	{
-               	fs_error(server, reply_port, net, stn, 0xFF, "Home directory channel ?");
-		fs_deallocate_user_dir_channel(server, active_id, root);
-               	fs_close_dir_handle(server, internal_cur_handle);
-       	       	return;
-	}
-        
-	strcpy(active[server][active_id].fhandles[cur].acornfullpath, p_home.acornfullpath);
-
-	if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom%3d.%3d Successfully mapped new CWD - handle %02X, full path %s\n", "", net, stn, cur, active[server][active_id].fhandles[cur].acornfullpath);
+	if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Successfully mapped new CWD - uHandle %02X, full path %s\n", "", net, stn, cur, active[server][active_id].fhandles[cur].acornfullpath);
 
 	sprintf(tmppath, ":%s.%s", discname, lib_dir);
 
         if (!fs_normalize_path(server, active_id, tmppath, -1, &p_lib) || p_lib.ftype == FS_FTYPE_NOTFOUND)
         {
-                // Map lib to root!
-		internal_lib_handle = internal_root_handle;
-        }
-        else
-        {
-                if (p_lib.ftype != FS_FTYPE_DIR)
-                {
-                        fs_error(server, reply_port, net, stn, 0xFF, "Cannot map library directory on new disc");
-                        return;
-                }
+		sprintf(tmppath, ":%s.$", discname);
 
-                if ((internal_lib_handle = fs_get_dir_handle(server, active_id, p_lib.unixpath)) == -1)
+		if (!fs_normalize_path(server, active_id, tmppath, -1, &p_lib) || p_lib.ftype == FS_FTYPE_NOTFOUND)
+		{
+			// Serious problem - can't find $!
+			fs_deallocate_user_dir_channel(server, active_id, root);
+			fs_deallocate_user_dir_channel(server, active_id, cur);
+			fs_close_interlock(server, internal_root_handle, 1);
+			fs_close_interlock(server, internal_cur_handle, 1);
+			fs_error(server, reply_port, net, stn, 0xFF, "Cannot map LIB to $!");
+			return;
+		}
+        }
+
+        if (p_lib.ftype != FS_FTYPE_DIR)
+        {
+                fs_error(server, reply_port, net, stn, 0xFF, "Cannot map library directory on new disc");
+                return;
+        }
+
+		if ((internal_lib_handle = fs_open_interlock(server, p_lib.unixpath, 1, active[server][active_id].userid)) == -1)
                 {
                         fs_error(server, reply_port, net, stn, 0xFF, "Library directory inaccessible!");
+                        fs_deallocate_user_dir_channel(server, active_id, root);
+                        fs_deallocate_user_dir_channel(server, active_id, cur);
+                        fs_close_interlock(server, internal_root_handle, 1);
+                        fs_close_interlock(server, internal_cur_handle, 1);
                         return;
                 }
-
-	}
 
         if ((lib = fs_allocate_user_dir_channel(server, active_id, internal_lib_handle)) == -1) // Can't allocate handle
         {
                 fs_error(server, reply_port, net, stn, 0xFF, "Library directory channel ?");
-		fs_deallocate_user_dir_channel(server, active_id, root);
-		fs_deallocate_user_dir_channel(server, active_id, cur);
-                fs_close_dir_handle(server, internal_lib_handle);
+                       fs_error(server, reply_port, net, stn, 0xFF, "Library directory inaccessible!");
+                        fs_deallocate_user_dir_channel(server, active_id, root);
+                        fs_deallocate_user_dir_channel(server, active_id, cur);
+                        fs_close_interlock(server, internal_root_handle, 1);
+                        fs_close_interlock(server, internal_cur_handle, 1);
+			fs_close_interlock(server, internal_lib_handle, 1);
                 return;
         }
 
-	if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom%3d.%3d Successfully mapped new Library - handle %02X, full path %s\n", "", net, stn, lib, active[server][active_id].fhandles[lib].acornfullpath);
+	else
 
-	strcpy(active[server][active_id].fhandles[lib].acornfullpath, p_lib.acornfullpath);
+	{
+		strcpy(active[server][active_id].fhandles[lib].acornfullpath, p_lib.acornfullpath);
+		fs_store_tail_path(active[server][active_id].fhandles[lib].acorntailpath, p_lib.acornfullpath);
+		active[server][active_id].fhandles[lib].mode = 1;
+	}
+
+	if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Successfully mapped new Library - uHandle %02X, full path %s\n", "", net, stn, lib, active[server][active_id].fhandles[lib].acornfullpath);
 
 	// Got here, so new disc selection has worked - TODO - release old handles and update active structure, including tail entries.
 
-	//if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom%3d.%3d Attempting to deallocate handles %d, %d, %d\n", "", net, stn, active[server][active_id].root, active[server][active_id].current, active[server][active_id].lib);
+	//if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Attempting to deallocate handles %d, %d, %d\n", "", net, stn, active[server][active_id].root, active[server][active_id].current, active[server][active_id].lib);
 	
-	fs_deallocate_user_dir_channel(server, active_id, active[server][active_id].lib);
+	fs_close_interlock(server, active[server][active_id].fhandles[active[server][active_id].root].handle, active[server][active_id].fhandles[active[server][active_id].root].mode);
 	fs_deallocate_user_dir_channel(server, active_id, active[server][active_id].root);
-	fs_deallocate_user_dir_channel(server, active_id, active[server][active_id].current);
+	//if (active[server][active_id].current != active[server][active_id].root && active[server][active_id].current != active[server][active_id].lib)
+	//{
+		fs_close_interlock(server, active[server][active_id].fhandles[active[server][active_id].current].handle, active[server][active_id].fhandles[active[server][active_id].current].mode);
+		fs_deallocate_user_dir_channel(server, active_id, active[server][active_id].current);
+	//}
+
+	//if (active[server][active_id].lib != active[server][active_id].root && active[server][active_id].lib != active[server][active_id].current)
+	//{
+		fs_close_interlock(server, active[server][active_id].fhandles[active[server][active_id].lib].handle, active[server][active_id].fhandles[active[server][active_id].lib].mode);
+		fs_deallocate_user_dir_channel(server, active_id, active[server][active_id].lib);
+	//}
 	
 	active[server][active_id].lib = lib;
 	active[server][active_id].current = cur;
@@ -3852,6 +3899,7 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	strncpy((char *) active[server][active_id].root_dir, (const char *) "", 11);
 	strncpy((char *) active[server][active_id].root_dir_tail, (const char *) "$         ", 11);
 
+/*
 	if (internal_cur_handle != internal_root_handle)
 	{
 		strncpy((char *) active[server][active_id].current_dir, (const char *) p_home.path_from_root, 255);
@@ -3883,7 +3931,12 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	active[server][active_id].current_dir_tail[10] = '\0';
 	active[server][active_id].root_dir_tail[10] = '\0';
 
-	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d New (root, current, lib) = (%s, %s, %s)\n", "", net, stn, active[server][active_id].root_dir, active[server][active_id].current_dir, active[server][active_id].lib_dir);
+*/
+
+	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d New (URD, CUR, LIB) = (%s, %s, %s)\n", "", net, stn, 
+		active[server][active_id].fhandles[root].acorntailpath, 
+		active[server][active_id].fhandles[cur].acorntailpath, 
+		active[server][active_id].fhandles[lib].acorntailpath);
 
 	r.p.ptype = ECONET_AUN_DATA;
 	r.p.port = reply_port;
@@ -4542,7 +4595,7 @@ void fs_read_logged_on_users(int server, unsigned short reply_port, unsigned cha
 				sprintf((char * ) &(r.p.data[ptr]), "%c%c%-10s%c", 
 					active[server][active_ptr].stn, active[server][active_ptr].net,
 					username,
-					(active[server][active_ptr].priv & FS_PRIV_SYSTEM ? 1 : 0) );
+					((active[server][active_ptr].priv & FS_PRIV_SYSTEM) ? 1 : 0) );
 
 				ptr +=13;
 			}
@@ -4671,6 +4724,7 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 	unsigned char relative_to = *(data+3);
 		
 	unsigned short result;
+	short internal_handle;
 
 	fs_copy_to_cr(command, data+5, 256);
 
@@ -4724,14 +4778,18 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		return;
 	}
 
+/*
 	// Use interlock function here
 	if (!(f = fopen((const char * ) p.unixpath, "r")))
+*/
+	if ((internal_handle = fs_open_interlock(server, p.unixpath, 1, active[server][active_id].userid)) < 0)	
 	{
-		fs_error(server, reply_port, net, stn, 0xFE, "Cannot open file");
+		fs_error(server, reply_port, net, stn, 0xFE, "Already open");
 		return;
 	}
-
 	
+	f = fs_files[server][internal_handle].handle;
+
 	r.p.port = reply_port;
 	r.p.ctrl = rxctrl;
 	r.p.ptype = ECONET_AUN_DATA;
@@ -4764,7 +4822,8 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		r.p.port = data_port;
 
 		// short delay to keep certain stations happy
-		usleep(180000);
+		// 20210815 Commented
+		//usleep(180000);
 
 		while (!feof(f))
 		{
@@ -4776,7 +4835,8 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 
 		}
 		
-		usleep (100000); // See if this keeps the BBC Micro happy
+		// 20210815 Commented
+		//usleep (100000); // See if this keeps the BBC Micro happy
 
 		// Send the tail end packet
 	
@@ -4787,7 +4847,9 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 
 	}
 	
-	fclose(f);
+	/* fclose(f); */
+	
+	fs_close_interlock(server, internal_handle, 1);
 }
 
 // Get byte from current cursor position
@@ -5122,8 +5184,9 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	long sent, length;
 	unsigned short internal_handle;
 	unsigned short eofreached, fserroronread;
+	int received;
 
-	unsigned char readbuffer[256];
+	//unsigned char readbuffer[256];
 
 	struct __econet_packet_udp r;
 
@@ -5178,10 +5241,10 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	fserroronread = 0;
 	sent = 0;
 
+/* Old loop code
 	while (sent < bytes && (!eofreached) && (!fserroronread))
 	{
 		unsigned short readlen;
-		int received;
 
 		readlen = ((bytes - sent) > sizeof(readbuffer) ? sizeof(readbuffer) : (bytes - sent));
 
@@ -5221,11 +5284,40 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 			
 	}
-	
-	usleep(100000);
+*/	
+
+	// New single pass code
+
+	if (bytes > 0)
+	{
+
+		received = fread(&(r.p.data), 1, (bytes > (ECONET_MAX_PACKET_SIZE) ? ECONET_MAX_PACKET_SIZE : bytes), fs_files[server][internal_handle].handle);
+
+		if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() bytes required %06lX, max size %06X, read from disc %06X\n", "", net, stn, bytes, ECONET_MAX_PACKET_SIZE-4, received);
+
+		if (feof(fs_files[server][internal_handle].handle)) eofreached = 1;
+		else if (received != bytes)
+			fserroronread = 1;
+
+
+		r.p.ptype = ECONET_AUN_DATA;
+		r.p.port = txport;
+		r.p.ctrl = 0x80;
+		fs_aun_send (&r, server, bytes, net, stn);
+
+	}
+	else	received = 0;
+
+	sent = received;
+
+	// End of new single pass code
+
+	//usleep(100000);
+	//usleep(10000);
 
 	//active[server][active_id].fhandles[handle].cursor = ftell(fs_files[server][internal_handle].handle);
-	active[server][active_id].fhandles[handle].cursor += sent;
+	//active[server][active_id].fhandles[handle].cursor += sent;
+	active[server][active_id].fhandles[handle].cursor += received;
 
 	if (fserroronread)
 		fs_error(server, reply_port, net, stn, 0xFF, "FS Error on read");
@@ -5535,7 +5627,10 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 				active[server][active_id].fhandles[userhandle].mode = mode;
 				active[server][active_id].fhandles[userhandle].cursor = 0;	
 				active[server][active_id].fhandles[userhandle].pasteof = 0; // Not past EOF yet
+				active[server][active_id].fhandles[userhandle].is_dir = (p.ftype == FS_FTYPE_DIR ? 1 : 0);
+
 				strcpy(active[server][active_id].fhandles[userhandle].acornfullpath, p.acornfullpath);
+				fs_store_tail_path(active[server][active_id].fhandles[userhandle].acorntailpath, p.acornfullpath);
 				reply.p.ptype = ECONET_AUN_DATA;
 				reply.p.port = reply_port;
 				reply.p.ctrl = 0x80;
@@ -5711,11 +5806,37 @@ void fs_garbage_collect(int server)
 
 				fs_close_interlock(server, fs_bulk_ports[server][count].handle, fs_bulk_ports[server][count].mode);
 
-				if (fs_bulk_ports[server][count].active_id != 0) // No user handle - this was a SAVE operation
+				if (fs_bulk_ports[server][count].active_id != 0) // No user handle = this was a SAVE operation
 					fs_deallocate_user_file_channel(server, fs_bulk_ports[server][count].active_id, fs_bulk_ports[server][count].user_handle);
 			}
 
 		}
+
+	}
+
+}
+
+// Find any servers this station is logged into and eject them in case the station is dynamically reallocated
+void fs_eject_station(unsigned char net, unsigned char stn)
+{
+	int count = 0; // Fileservers
+
+
+	if (!fs_quiet) fprintf (stderr, "   FS:%12s             Ejecting station %3d.%3d\n", "", net, stn);
+
+	while (count < fs_count)
+	{
+		int user = 0;
+
+		while (user < ECONET_MAX_FS_USERS)
+		{
+			if (active[count][user].net == net && active[count][user].stn == stn)
+				fs_bye(count, 0, net, stn, 0); // Silent bye
+			user++;
+
+		}
+
+		count++;
 
 	}
 
@@ -5758,6 +5879,13 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 	if (userid < 0)
 		fs_error(server, reply_port, net, stn, 0xBC, "User not known");
 
+	if (active_id >= 0) // If logged in, update handles from the incoming packet
+	{
+		active[server][active_id].root = *(data+2);
+		active[server][active_id].current = *(data+3);
+		active[server][active_id].lib = *(data+4);
+	}
+
 	switch (fsop)
 	{
 		case 0: // OSCLI
@@ -5776,6 +5904,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			if (!strncasecmp("I AM ", (const char *) command, 5)) fs_login(server, reply_port, net, stn, command + 5);
 			else if (!strncasecmp("LOGIN ", (const char *) command, 6)) fs_login(server, reply_port, net, stn, command + 6);
 			else if (!strncasecmp("IAM ", (const char *) command, 4)) fs_login(server, reply_port, net, stn, command + 4);
+			else if (!strncasecmp("I .", (const char *) command, 3)) fs_login(server, reply_port, net, stn, command + 3);
 			else if (fs_stn_logged_in(server, net, stn) < 0)
 				fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			else if (!strncasecmp("BYE", (const char *) command, 3)) fs_bye(server, reply_port, net, stn, 1);
@@ -5841,9 +5970,12 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				{
 					if (p.ftype != FS_FTYPE_DIR)
 						fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
+					if (p.disc != active[server][active_id].current_disc)
+						fs_error(server, reply_port, net, stn, 0xFF, "Not on current disc");
 					else
 					{	
-						l = fs_get_dir_handle(server, active_id, p.unixpath);
+						/* l = fs_get_dir_handle(server, active_id, p.unixpath); */
+						l = fs_open_interlock(server, p.unixpath, 1, active[server][active_id].userid);
 						if (l != -1) // Found
 						{
 							n_handle = fs_allocate_user_dir_channel(server, active_id, l);
@@ -5859,10 +5991,15 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								if (p.npath == 0)	strcpy((char * ) active[server][active_id].lib_dir_tail, (const char * ) "$         ");
 								else			sprintf(active[server][active_id].lib_dir_tail, "%-10s", p.path[p.npath-1]);
 								
-								active[server][active_id].lib_disc = p.disc;
 								strcpy(active[server][active_id].fhandles[n_handle].acornfullpath, p.acornfullpath);
+								fs_store_tail_path(active[server][active_id].fhandles[n_handle].acorntailpath, p.acornfullpath);
+								active[server][active_id].fhandles[n_handle].mode = 1;
 
-								if (old > 0) fs_deallocate_user_dir_channel(server, active_id, old);
+								if (old > 0 && (old != active[server][active_id].current) && (old != active[server][active_id].lib))
+								{
+									fs_close_interlock(server, active[server][active_id].fhandles[old].handle, active[server][active_id].fhandles[old].mode);
+									fs_deallocate_user_dir_channel(server, active_id, old);
+								}
 
 								r.p.ptype = ECONET_AUN_DATA;
 								r.p.port = reply_port;
@@ -5907,9 +6044,12 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				{
 					if (p.ftype != FS_FTYPE_DIR)
 						fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
+					if (p.disc != active[server][active_id].current_disc)
+						fs_error(server, reply_port, net, stn, 0xFF, "Not on current disc");
 					else
 					{	
-						l = fs_get_dir_handle(server, active_id, p.unixpath);
+						l = fs_open_interlock(server, p.unixpath, 1, active[server][active_id].userid);
+						// l = fs_get_dir_handle(server, active_id, p.unixpath);
 						if (l != -1) // Found
 						{
 							n_handle = fs_allocate_user_dir_channel(server, active_id, l);
@@ -5924,9 +6064,16 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								if (p.npath == 0)	strcpy((char * ) active[server][active_id].current_dir_tail, (const char * ) "$         ");
 								else			sprintf(active[server][active_id].current_dir_tail, "%-10s", p.path[p.npath-1]);
 								
-								active[server][active_id].current_disc = p.disc;
 								strcpy(active[server][active_id].fhandles[n_handle].acornfullpath, p.acornfullpath);
-								if (old > 0) fs_deallocate_user_dir_channel(server, active_id, old);
+								fs_store_tail_path(active[server][active_id].fhandles[n_handle].acorntailpath, p.acornfullpath);
+								active[server][active_id].fhandles[n_handle].mode = 1;
+
+								if (old > 0 && (old != active[server][active_id].root) && (old != active[server][active_id].lib)) // Attempt to close the old handle if it isn't our URD
+								{
+									fs_close_interlock(server, active[server][active_id].fhandles[old].handle, active[server][active_id].fhandles[old].mode);
+									fs_deallocate_user_dir_channel(server, active_id, old);
+								}
+
 								r.p.ptype = ECONET_AUN_DATA;
 								r.p.port = reply_port;
 								r.p.ctrl = 0x80;
@@ -6276,10 +6423,18 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		// According to the excellent Arduino Filestore code, 28 is set FS clock, 29 is create file, 30 read user free space, 31 set user free space, 32 read client id, 33 read current users extended, 34 read user information extended,
 		// 35 reserved, 36 "manager interface", 37 reserved.
 		case 0x1e: // Read user free space - but we aren't implementing quotas at the moment
-			if ((fs_stn_logged_in(server, net, stn) >= 0) && (active[server][active_id].priv & FS_PRIV_SYSTEM))
+			if ((fs_stn_logged_in(server, net, stn) >= 0))
 			{
 				//fs_get_user_free_space(server, reply_port, active_id, net, stn, data); // data+5 has 0x0d terminated username
-				fs_reply_success(server, reply_port, net, stn, 0, 0);
+				struct __econet_packet_udp reply;
+
+				reply.p.port = reply_port;
+				reply.p.ctrl = 0x80;
+				reply.p.data[0] = 0;
+				reply.p.data[1] = 0;
+				reply.p.data[2] = 0;
+				reply.p.data[3] = 0x20; // 512Mb
+				fs_aun_send (&reply, server, 4, net, stn);
 			}
 			break;
 		case 0x1f: // Set user free space
@@ -6289,6 +6444,21 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				fs_reply_success(server, reply_port, net, stn, 0, 0);
 			}
 			break;
+		case 0x20: // Read client ID
+			if (fs_stn_logged_in(server, net, stn) >= 0)
+			{
+                                struct __econet_packet_udp reply;
+				unsigned short counter;
+
+                                reply.p.port = reply_port;
+                                reply.p.ctrl = 0x80;
+				strncpy(reply.p.data, users[server][active[server][active_id].userid].username, 10);
+				counter = 0;
+				while (counter < 10 && reply.p.data[counter] != ' ') counter++;
+					reply.p.data[counter] = 0x0d;
+				
+                                fs_aun_send (&reply, server, counter+1, net, stn);
+			}
 		default: // Send error
 		{
 			if (!fs_quiet) fprintf (stderr, "   FS: to %3d.%3d FS Error - Unknown operation 0x%02x\n", net, stn, fsop);

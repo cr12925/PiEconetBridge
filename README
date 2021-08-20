@@ -438,6 +438,10 @@ You must:
 - Have one such entry for every station on your local Econet which needs to
   speak to the AUN world.
 - Use different port numbers for each such entry. E.g. 32768, 32769, etc.
+- If you use the word AUTO for the port number then it will automatically
+  be calculated as 10000+network*256+port.  So, for example
+    W 0 100 AUTO would result in port 10100 (10000+0*256+100)
+    W 5 200 AUTO would result in port 11480 (10000+5*256+200)
 
 A word on port numbers
 ----------------------
@@ -642,6 +646,22 @@ newly created Library directory as SYST once you get the server up and running.
 
 One function not implemented is user quotas. READFREE will return something,
 but it will be erroneous. SETFREE will appear to complete but achieve nothing.
+
+The server is *broadly* a Level 3-esque server. One day I will implement
+the SJ Research addons. It has some differences:
+
+ - It has permissions on directories which are typically enforced
+ - There is a concept of an 'owner' for each file or directory. Whereas
+   Level 3's semantics were that a user owned everything below their
+   home direcotry, that is not so in this implementation. Ownership can
+   be viewed with *OWNER, and changed with *CHOWN. 
+ - Thus permissions on a file in your home directory as an ordinary user
+   *may* be the ones *after* the / in the permissions if you don't
+   own it.
+ - Where the L3 server will not permit *DIR ^ within your home directory
+   or $, this server *will*. From home it has the expected behaviour.
+   From $ (or if $ is home) it will effectively be ignored.
+ - One day there may be switches to turn some of this on and off.
 
 Configuration file syntax:
 

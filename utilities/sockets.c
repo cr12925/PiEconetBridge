@@ -23,6 +23,7 @@
 #define SKS_PORT 0xDF // Econet Port number
 
 extern int fs_get_server_id(unsigned char, unsigned char);
+extern int fs_stn_logged_in(int, unsigned char, unsigned char);
 extern int get_local_seq(unsigned char, unsigned char);
 extern int aun_send (struct __econet_packet_udp *, int, short, short, short, short);
 
@@ -149,6 +150,7 @@ int sks_initialize(unsigned char net, unsigned char stn, char *config)
 	unsigned short data2;
 	char tmp[1024]; // Temp string holder
 	unsigned short ptr, service;
+	unsigned short mustlogin;
 
 	server = sks_max + 1;
 
@@ -169,6 +171,14 @@ int sks_initialize(unsigned char net, unsigned char stn, char *config)
 		unsigned short dptr; // Pointer into whichever variable we're reading to at the time. We use data3 as a string holder for 
 		
 		dptr = 0;
+
+		mustlogin = 0;
+
+		if ((*(config+ptr)) == '*')
+		{
+			mustlogin = 1;
+			ptr++;
+		}
 
 		while ((*(config+ptr) != ':') && dptr < 16)
 		{
@@ -226,9 +236,9 @@ int sks_initialize(unsigned char net, unsigned char stn, char *config)
 
 		//fprintf (stderr, "Found data1 = %s\n", data1);
 	
-		ptr++;
+		if (*(config+ptr) != ',') ptr++;
 
-		if (ptr < strlen(config) && *(config+ptr-1) != ',') // Entry without final port number
+		if (ptr < strlen(config) && *(config+ptr-1) != ',') // Entry with final port number
 		{
 
 			dptr = 0;
@@ -259,7 +269,7 @@ int sks_initialize(unsigned char net, unsigned char stn, char *config)
 		sks_servers[server].info[service].interlock = 1; // Default for now. May make configurable later
 		sks_servers[server].info[service].max_conns[SKS_READER] = 1; // Ditto
 		sks_servers[server].info[service].max_conns[SKS_WRITER] = 1; // Ditto
-		sks_servers[server].info[service].must_login = 0; // No need for now. Configure later.
+		sks_servers[server].info[service].must_login = mustlogin; 
 
 		if (!strcasecmp(sks_type, "tcp"))
 		{
@@ -319,6 +329,8 @@ int sks_initialize(unsigned char net, unsigned char stn, char *config)
 					fprintf (stderr, "pathname %s", sks_servers[server].info[counter].sks_data.fileopts.filename);
 					break;
 			}
+	
+			fprintf (stderr, " (%s)", (sks_servers[server].info[counter].must_login ? "Must log in" : "Open"));
 			fprintf (stderr, "\n");
 		}
 
@@ -349,14 +361,59 @@ int sks_aun_send (struct sks_tx *t, int server, unsigned short length, unsigned 
 
 }
 
+unsigned short sks_active_connection(int server, unsigned char net, unsigned char stn, unsigned short *service, unsigned short *connection)
+{
+
+	unsigned short service_counter, connection_counter, found;
+
+	service_counter = connection_counter = 0;
+	found = 0;
+
+	while (service_counter < SKS_MAX_SERVICES && connection_counter < SKS_MAX_CONNECTIONS && !found)
+	{
+		if (sks_servers[server].info[service_counter].user_nets[connection_counter] == net && 
+		    sks_servers[server].info[service_counter].user_stns[connection_counter] == stn)
+			found++;
+		else	
+		{
+			connection_counter++;
+			if (connection_counter == SKS_MAX_CONNECTIONS)
+				service_counter++;
+			connection_counter %= SKS_MAX_CONNECTIONS;
+		}
+				
+	}
+
+	if (found)
+	{
+		*service = service_counter;
+		*connection = connection_counter;
+	}
+
+	return found;
+
+}
+
 void sks_nop(int server, unsigned char net, unsigned char stn, unsigned char reply_port, unsigned int window)
 {
 	struct sks_tx tx;
+	unsigned short service, index;
 
 	if (!sks_quiet) fprintf (stderr, "  SKS:%12sfrom %3d.%3d NOP, window %04X\n", "", net, stn, window);
 
 	tx.error = SKS_UNKNOWN;
-	tx.window[0] = tx.window[1] = 0; // TODO real window here if known connection
+	tx.window[0] = tx.window[1] = 0; 
+	// If active user, replace with our local window size
+	if (sks_active_connection(server, net, stn, &service, &index))
+	{
+		tx.window[0] = sks_servers[server].info[service].user_local_win[index] & 0xff;
+		tx.window[1] = (sks_servers[server].info[service].user_local_win[index] & 0xff00) >> 8;
+	}
+	
+	// Test
+
+	tx.d.data.data[100] = 0xde;
+
 	sks_aun_send(&tx, server, 3, reply_port, net, stn);
 
 
@@ -365,6 +422,36 @@ void sks_nop(int server, unsigned char net, unsigned char stn, unsigned char rep
 void sks_list (int server, unsigned char net, unsigned char stn, struct sks_rx *rx)
 {
 
+	struct sks_tx tx;
+	unsigned short counter, ptr;
+	unsigned short service, index;
+
+	ptr = 0;
+	tx.error = SKS_SUCCESS;
+
+	if (!sks_quiet) fprintf (stderr, "  SKS:%12sfrom %3d.%3d LIST services from %d, number %d\n", "", net, stn, rx->d.list.start_index, rx->d.list.number);
+
+	// If active user, replace with our local window size
+	if (sks_active_connection(server, net, stn, &service, &index))
+	{
+		tx.window[0] = sks_servers[server].info[service].user_local_win[index] & 0xff;
+		tx.window[1] = (sks_servers[server].info[service].user_local_win[index] & 0xff00) >> 8;
+		// Update incoming window - TODO.
+	}
+	
+	ptr = rx->d.list.start_index;
+	counter = 0;
+
+	while (ptr < sks_servers[server].services && counter < rx->d.list.number) // ptr is beneath the total number of services, and we have copied less than the required number of services. NB .services = 0 means no services, so this is right
+	{
+		strcpy(tx.d.list.entries[counter].sks_name, sks_servers[server].info[ptr].sks_name);
+		tx.d.list.entries[counter].sks_type = sks_servers[server].info[ptr].sks_type;
+		counter++; ptr++;
+	}
+	
+	tx.d.list.number = counter;
+
+	sks_aun_send(&tx, server, 3 + 1 + (counter * 17), rx->reply_port, net, stn);
 }
 
 void sks_open (int server, unsigned char net, unsigned char stn, struct sks_rx *rx)
