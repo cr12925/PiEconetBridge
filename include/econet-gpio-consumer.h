@@ -30,7 +30,7 @@
    on the physical wire - and neither need know which is which.
 */
 
-#define ECONET_MAX_PACKET_SIZE 4096 /* BeebEm uses 2048, but there is mention of 4K somewhere. Most packets much smaller. */
+#define ECONET_MAX_PACKET_SIZE 32768 /* BeebEm uses 2048, but there is mention of 4K somewhere. But then a *VIEW screendump seems to come in a single packet, so we'll try 32768 */
 
 /* This is what we get from the Kernel (or send to it). 
    Actual structure of 'data' is:

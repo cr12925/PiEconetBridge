@@ -94,7 +94,6 @@ The system will require:
 	- A pre-existing functioning Econet (with clock) with a spare station
           port to connect to the hardware
 
-
 WARNING - NO, REALLY, YOU SHOULD READ THIS!
 -------------------------------------------
 
@@ -149,20 +148,6 @@ there are some wrinkles which periodically crop up:
 It is some time since I saw a kernel crash with this module, but you should be
 alive to the prospect that it might happen. If you use this on a production
 system that's doing something else, you have been warned!
-
-Whilst almost everything I have tried from BeebEm seems to work with a real
-fileserver, there appears to be one exception: If I run up BeebEm as a Master
-128 and try to *SRLOAD a sideways ROM image from a real BBC fileserver, the
-BeebEm end just stops. I can *LOAD the same file elsewhere into the BeebEm's
-emulated RAM, just not *SRLOAD into sideways RAM. At present I take the view
-this may well be a BeebEm bug, but I don't know. (Update: Actually, *real* 
-BBC Masters seem to struggle to *SRLOAD from an Econet fileserver - both them
-and BeebEm seem to get gibberish (packets full of the same byte) delivered in
-the data burst from the server. It is worth noting that *SRLOAD does a file
-open (FS operation 6) rather than *LOAD (FS operation 2). That is almost
-certainly because the NFS has to get swapped out so that the CPU can write
-to &8000 upwards in Sideways RAM so that it cannot simply plonk the data 
-from the server straight into wherever it is going.
 
 INSTALLATION
 ------------
@@ -239,7 +224,8 @@ The kernel module does two things:
 
 The AUN (4-way-handshake) mode is enabled when a 'station set' is delivered to
 the kernel module. The station set map tells the module which stations it
-should handshake for, or otherwise capture traffic for (e.g. immediates, broadcasts). Only stations which appear in the map (and there are macros to put
+should handshake for, or otherwise capture traffic for (e.g. immediates, 
+broadcasts). Only stations which appear in the map (and there are macros to put
 stations in the map) will have their traffic forwarded to userspace when in AUN
 mode.
 
@@ -443,6 +429,8 @@ You must:
     W 0 100 AUTO would result in port 10100 (10000+0*256+100)
     W 5 200 AUTO would result in port 11480 (10000+5*256+200)
 
+  (Thanks to @sweh on stardot.org.uk for the above patch & suggestion.)
+
 A word on port numbers
 ----------------------
 
@@ -475,6 +463,42 @@ name or IP address) port p.
 
 The bridge will ONLY bridge to hosts you have told it about in this way.
 
+L n
+---
+
+The bridge will dynamically assign a station number between 1 & 254 in network
+'n' (which needs to be not in use elsewhere!) to AUN traffic received from
+stations and/or on ports which are not defined with 'A' (above). 
+
+The point is that this allows AUN machines not to *have* to be configured in
+the bridge providing those AUN machines know where the bridge *is* and what
+ports the wire/local stations are on.
+
+Its purpose is to allow users (including local ones) to access the wired
+Econet without them having to be configured on the bridge. For example, if
+you have a fileserver (in the bridge or on the wired network) and you want
+your friends to be able to access it, then providing they can reach the bridge
+it is unnecessary to configure their IP addresses and port numbers in the
+configuration file, in case, for example, they change because their ISP
+provides a dynamic IP address.
+
+Note that *no* filtering is done here - by definition, the bridge will let
+allcomers in!
+
+The bridge will time out a dynamic address if it sees no traffic for 1 hour.
+This is not a configurable timeout, but it *is* in a #define in 
+econet-bridge.c and you should feel free to change it if you want.
+
+When the bridge allocates an apparently unused (including a timed out) 
+station number to a new user, it will
+
+ - tell all locally emulated fileservers to log the station off (in case
+   they were logged on)
+ - spoof an 'end session' command to any wired fileservers it has 
+   detected traffic for (which it does by detecting traffic to port &99).
+
+That is to prevent a newcomer accidentally inheriting access to a
+fileserver from a previous dynamic user.
 P n s p printer
 ---------------
 
@@ -508,10 +532,25 @@ The -h command line switch will give you help as to other things you can do.
 	    AUN-type (i.e. not raw off the wire), post 4-way h/shake.
 -b        : When specified with -d, produces abbreviated (~ 1 line per packet)
 	    output.
+-f	  : Stop the fileserver from producing log output to stderr.
+	    (Incompatible with -n and if specified after -n will take
+	    precedence.)
+-l	  : Stops the bridge code talking to the Econet hardware. Useful
+	    for testing, or if you just want to run a fileserver without any
+	    connection to a wired Econet.
+-n	  : Makes the fileserver log output noisy. Will tell you much more
+	    about what it is doing, notably on file reads/writes/bulk
+	    transfer. (Incompatible with -f and if specified after -f will
+	    override it.)
 -s        : Dump a summary of the config file before bridging - useful for
 	    checking the config has been read.
 -q        : Don't do bridge query responses (but the present version doesn't
 	    anyway, so this achieves nothing).
+-7	  : By default, the FS will use the '7 bit bodge' for dates to
+ 	    provide some Y2K compliance. This turns the option off and
+  	    reverts to 'original' Acorn year numbering which tops out at 
+	    about 1997.
+
 
 EXAMPLE CONFIG & USAGE
 ----------------------
@@ -741,6 +780,13 @@ is the *actual* unix file because if you delete that one, things will go
 haywire. (There is a need for some sanity checking there - be prepared for
 seg faults if you push this too hard.)
 
+Special files
+-------------
+
+System privilege users can open the file %Passwords in any directory
+and will receive a handle to the system passwords file which is not in fact
+accessible in the Econet directory hierarchy.
+
 CLI commands implemented in the server
 --------------------------------------
 
@@ -805,6 +851,8 @@ Non-privileged commands:
 
 *SETLIB <dir>
 	- Set your library directory. Effective from next login.
+	- Setting the directory to % removes the setting and gives you
+  	  the system default library.
 
 Privileged commands:
 
@@ -837,10 +885,14 @@ Privileged commands:
 		S - System user
 		U - Unlocked (normal) user
 		
-*SETHOME <directory>
+*SETHOME (<username>) <directory>
 	- Permanently set replacement home directory (effective next login)
-	- Only works for the executing user. Probably need to make that more
-	  useful.
+	- If <username> omitted, works for the calling user.
+	- Otherwise operates on the named user if they exist.
+	- <directory> can include a :DISC prefix
+
+*SETLIB (<username>) <directory>
+	- See above. System users may specify the optional username.
 
 *UNLINK <link>
 	- Removes a symlink created with *LINK

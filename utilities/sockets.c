@@ -18,6 +18,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
+#ifdef SKS_SSH_ENABLED
+	#include <libssh2.h>
+#endif
 #include "../include/econet-gpio-consumer.h"
 
 #define SKS_PORT 0xDF // Econet Port number
@@ -26,6 +30,8 @@ extern int fs_get_server_id(unsigned char, unsigned char);
 extern int fs_stn_logged_in(int, unsigned char, unsigned char);
 extern int get_local_seq(unsigned char, unsigned char);
 extern int aun_send (struct __econet_packet_udp *, int, short, short, short, short);
+
+unsigned short sks_active_connection(int, unsigned char, unsigned char, unsigned short *, unsigned short *, unsigned short *);
 
 // Running commentary switch
 unsigned short sks_quiet = 0;
@@ -38,8 +44,8 @@ unsigned short sks_max = 0; // First unused server struct (or number of configur
 // Max connections to each server - whether the server is limited to fewer readers/writers or not
 #define SKS_MAX_CONNECTIONS 8
 
-// Maximum TX/RX buffer size -- The beeb client will typically reserve 1 page &100 as buffer space
-#define SKS_MAX_BUFSIZE 256
+// Maximum TX/RX buffer size -- The beeb client will typically reserve 1 page for workspace, and uses 48 byte buffers
+#define SKS_MAX_BUFSIZE 48 
 
 // Note each station can only have one connection at once, so no table of stations->connections is needed - just see if the station crops up 
 // in the user_nets/user_stns elements of the sks_server struct
@@ -68,11 +74,6 @@ enum sks_types {
 	SKS_FILE
 };
 
-enum sks_modes {
-	SKS_READER = 0,
-	SKS_WRITER = 1
-};
-
 struct sks_server {
 	unsigned short sks_type; // One of sks_types
 	char sks_name[16]; // Service name
@@ -89,14 +90,20 @@ struct sks_server {
 			char filename[1024];
 		} fileopts;
 	} sks_data;
-	unsigned short max_conns[2]; // [0] = max readers (SKS_READER), [1] = max writers (SKS_WRITER)
-	unsigned char interlock; // 0 = can have a writer at same time as readers; 1 = any writer prevents any open for reading and vice versa
+	unsigned short max_conns; 
 	unsigned char must_login; // non-zero if config requires user to be logged in
-	unsigned short user_nets[SKS_MAX_CONNECTIONS], user_stns[SKS_MAX_CONNECTIONS], user_modes[SKS_MAX_CONNECTIONS]; // net, stn & mode of each live connection. 0,0,0 = unused
+	unsigned short user_nets[SKS_MAX_CONNECTIONS], user_stns[SKS_MAX_CONNECTIONS]; // net, stn & mode of each live connection. 0,0,0 = unused
 	unsigned char user_tx_buffers[SKS_MAX_CONNECTIONS][SKS_MAX_BUFSIZE];
 	unsigned char user_rx_buffers[SKS_MAX_CONNECTIONS][SKS_MAX_BUFSIZE];
 	unsigned short user_remote_win[SKS_MAX_CONNECTIONS]; // last advertised available bytes in remote receiver buffer
 	unsigned short user_local_win[SKS_MAX_CONNECTIONS]; // number of available bytes in tx buffer for this user
+	union {
+		int socket; // For TCP
+		FILE *fhandle; // For files
+#ifdef SKS_SSH_ENABLED
+		LIBSSH2_SESSION *ssh_session; // For SSH
+#endif
+	} handles[SKS_MAX_CONNECTIONS];
 };
 
 struct {
@@ -115,12 +122,10 @@ struct sks_rx {
 			unsigned char number; // How many entries to query
 		} list;
 		struct {
-			char servicename[16];
-			unsigned char mode;
+			unsigned short service;
 		} open;
 		struct {
-			unsigned char length[2]; // LSB first
-			unsigned char data[SKS_MAX_BUFSIZE]; // Data.
+			unsigned char data[SKS_MAX_BUFSIZE]; // Data. Length calaculated from packet length
 		} data;
 	} d;
 };
@@ -137,8 +142,7 @@ struct sks_tx {
 			} entries[SKS_MAX_SERVICES];
 		} list;
 		struct {
-			unsigned char length[2]; // Data length
-			unsigned char data[SKS_MAX_BUFSIZE]; // Data
+			unsigned char data[SKS_MAX_BUFSIZE]; // Data // Length calculated from packet length
 		} data;
 	} d;
 };
@@ -174,10 +178,45 @@ int sks_initialize(unsigned char net, unsigned char stn, char *config)
 
 		mustlogin = 0;
 
+		// Zero out the struct
+		memset (&(sks_servers[server].info[service]), 0, sizeof(struct sks_server));
+
+		sks_servers[server].info[service].max_conns = 1; 
+
 		if ((*(config+ptr)) == '*')
 		{
 			mustlogin = 1;
 			ptr++;
+		}
+
+		if ((*(config+ptr)) == '+') // Set max users (otherwise 1)
+		{
+			char number[4];
+			unsigned short counter, max;
+
+			ptr++; // Skip the +
+
+			counter = 0;
+
+			while (counter < 3 && (isdigit(*(config+ptr))))
+				number[counter++] = *(config+(ptr++));
+
+			number[counter] = '\0';
+
+			max = atoi(number);
+
+			if (counter == 0)
+			{
+				fprintf (stderr, "  SKS: Bad config line %s - no numbers after +\n", config);
+				return -1;
+			}
+			else if (max > SKS_MAX_CONNECTIONS)
+			{
+				fprintf (stderr, "  SKS: Bad config line %s - max service connections is %d\n", config, SKS_MAX_CONNECTIONS);
+				return -1;
+			}
+			else sks_servers[server].info[service].max_conns = max;
+			
 		}
 
 		while ((*(config+ptr) != ':') && dptr < 16)
@@ -263,12 +302,6 @@ int sks_initialize(unsigned char net, unsigned char stn, char *config)
 
 		//fprintf (stderr, "Found data2 = %d\n", data2);
 
-		// Zero out the struct
-		memset (&(sks_servers[server].info[service]), 0, sizeof(struct sks_server));
-
-		sks_servers[server].info[service].interlock = 1; // Default for now. May make configurable later
-		sks_servers[server].info[service].max_conns[SKS_READER] = 1; // Ditto
-		sks_servers[server].info[service].max_conns[SKS_WRITER] = 1; // Ditto
 		sks_servers[server].info[service].must_login = mustlogin; 
 
 		if (!strcasecmp(sks_type, "tcp"))
@@ -281,11 +314,16 @@ int sks_initialize(unsigned char net, unsigned char stn, char *config)
 		}
 		else if (!strcasecmp(sks_type, "ssh"))
 		{
+#ifndef SKS_SSH_ENABLED
+			fprintf (stderr, "  SKS: No SSH support - bad config line %s\n", config);
+			return -1;
+#else
 			sks_servers[server].info[service].sks_type = SKS_SSH;
 			strcpy(sks_servers[server].info[service].sks_name, sks_name);
 			strcpy(sks_servers[server].info[service].sks_data.sshopts.hostname, data1);
 			sks_servers[server].info[service].sks_data.sshopts.port = data2;
 			service++;
+#endif
 		}
 		else if (!strcasecmp(sks_type, "file"))
 		{
@@ -331,6 +369,7 @@ int sks_initialize(unsigned char net, unsigned char stn, char *config)
 			}
 	
 			fprintf (stderr, " (%s)", (sks_servers[server].info[counter].must_login ? "Must log in" : "Open"));
+			if (sks_servers[server].info[counter].max_conns > 1) fprintf (stderr, " (max. %d)", sks_servers[server].info[counter].max_conns);
 			fprintf (stderr, "\n");
 		}
 
@@ -348,6 +387,7 @@ int sks_aun_send (struct sks_tx *t, int server, unsigned short length, unsigned 
 {
 
 	struct __econet_packet_udp p;
+	unsigned short service, index, window;
 
 	p.p.ptype = ECONET_AUN_DATA;
 	p.p.port = port;
@@ -355,13 +395,35 @@ int sks_aun_send (struct sks_tx *t, int server, unsigned short length, unsigned 
 	p.p.pad = 0x00;
 	p.p.seq = 0x00004000; // We need to have a consistent sequence number across PS, FS, SKS.
 
+	// Insert window if station is connected, otherwise 0
+
+	if (sks_active_connection(server, net, stn, &service, &index, &window))
+	{
+		t->window[0] = window & 0xff;
+		t->window[1] = (window & 0xff00) >> 8;
+	}
+	else
+		t->window[0] = t->window[1] = 0;
+
 	memcpy (p.p.data, t, length);
 
 	return aun_send (&p, 8+length, sks_servers[server].net, sks_servers[server].stn, net, stn);
 
 }
 
-unsigned short sks_active_connection(int server, unsigned char net, unsigned char stn, unsigned short *service, unsigned short *connection)
+unsigned short sks_is_logged_in(int server, unsigned char net, unsigned char stn)
+{
+	int fserver;
+	
+	fserver = fs_get_server_id(sks_servers[server].net, sks_servers[server].stn);
+
+	if (fserver < 0) // We are not a fileserver, so the station cannot be logged into us
+		return 0;
+
+	else return fs_stn_logged_in(fserver, net, stn);
+}
+
+unsigned short sks_active_connection(int server, unsigned char net, unsigned char stn, unsigned short *service, unsigned short *connection, unsigned short *windowsize)
 {
 
 	unsigned short service_counter, connection_counter, found;
@@ -384,37 +446,22 @@ unsigned short sks_active_connection(int server, unsigned char net, unsigned cha
 				
 	}
 
-	if (found)
-	{
-		*service = service_counter;
-		*connection = connection_counter;
-	}
+	*service = (found ? service_counter : 0);
+	*connection = (found ? connection_counter : 0);
+	*windowsize = (found ? sks_servers[server].info[*service].user_local_win[*connection] : 0);
 
 	return found;
 
 }
 
-void sks_nop(int server, unsigned char net, unsigned char stn, unsigned char reply_port, unsigned int window)
+void sks_nop(int server, unsigned char reply_port, unsigned char net, unsigned char stn, unsigned int window)
 {
 	struct sks_tx tx;
-	unsigned short service, index;
 
 	if (!sks_quiet) fprintf (stderr, "  SKS:%12sfrom %3d.%3d NOP, window %04X\n", "", net, stn, window);
 
 	tx.error = SKS_UNKNOWN;
-	tx.window[0] = tx.window[1] = 0; 
-	// If active user, replace with our local window size
-	if (sks_active_connection(server, net, stn, &service, &index))
-	{
-		tx.window[0] = sks_servers[server].info[service].user_local_win[index] & 0xff;
-		tx.window[1] = (sks_servers[server].info[service].user_local_win[index] & 0xff00) >> 8;
-	}
-	
-	// Test
-
-	tx.d.data.data[100] = 0xde;
-
-	sks_aun_send(&tx, server, 3, reply_port, net, stn);
+	sks_aun_send(&tx, server, 3, reply_port, net, stn); // 3 because there is always at least 2 bytes for windowsize...
 
 
 }
@@ -424,7 +471,7 @@ void sks_list (int server, unsigned char net, unsigned char stn, struct sks_rx *
 
 	struct sks_tx tx;
 	unsigned short counter, ptr;
-	unsigned short service, index;
+	unsigned short service, index, window;
 
 	ptr = 0;
 	tx.error = SKS_SUCCESS;
@@ -432,7 +479,7 @@ void sks_list (int server, unsigned char net, unsigned char stn, struct sks_rx *
 	if (!sks_quiet) fprintf (stderr, "  SKS:%12sfrom %3d.%3d LIST services from %d, number %d\n", "", net, stn, rx->d.list.start_index, rx->d.list.number);
 
 	// If active user, replace with our local window size
-	if (sks_active_connection(server, net, stn, &service, &index))
+	if (sks_active_connection(server, net, stn, &service, &index, &window))
 	{
 		tx.window[0] = sks_servers[server].info[service].user_local_win[index] & 0xff;
 		tx.window[1] = (sks_servers[server].info[service].user_local_win[index] & 0xff00) >> 8;
@@ -454,17 +501,87 @@ void sks_list (int server, unsigned char net, unsigned char stn, struct sks_rx *
 	sks_aun_send(&tx, server, 3 + 1 + (counter * 17), rx->reply_port, net, stn);
 }
 
-void sks_open (int server, unsigned char net, unsigned char stn, struct sks_rx *rx)
+// The silent close, used by sks_close and sks_open
+void sks_close_internal (int server, unsigned short service, unsigned short connection)
 {
+	switch (sks_servers[server].info[service].sks_type)
+	{
+		case SKS_TCP:
+			break;
+		
+		case SKS_FILE:
+			fclose(sks_servers[server].info[service].handles[connection].fhandle);
+			break;
 
+#ifdef SKS_SSH_ENABLED
+		case SKS_SSH:
+			libssh2_session_disconnect(sks_servers[server].info[service].handles[connection].ssh_session, "Remote requested disconnection");
+			break;
+#endif
+	}
+
+	sks_servers[server].info[service].user_nets[connection] = sks_servers[server].info[service].user_stns[connection] = 0;
+
+	return;
 }
 
 void sks_close (int server, unsigned char net, unsigned char stn, struct sks_rx *rx)
 {
+	unsigned short service, connection, window;
+	struct sks_tx tx;
+
+	// First, find if we are connected at all
+
+	if (sks_active_connection(server, net, stn, &service, &connection, &window))
+		sks_close_internal(server, service, connection);
+
+	tx.error = SKS_SUCCESS;
+	sks_aun_send(&tx, server, 3, rx->reply_port, net, stn);
 
 }
 
+void sks_open (int server, unsigned char net, unsigned char stn, struct sks_rx *rx)
+{
+
+	struct sks_tx tx;
+
+	unsigned short service, connection, window;
+	unsigned short req_service;
+
+	req_service = rx->d.open.service;
+	
+	if (sks_active_connection(server, net, stn, &service, &connection, &window))
+	{
+		// Disconnect existing service
+		sks_close_internal (server, net, stn);
+
+	}
+
+	if (req_service > sks_servers[server].services) // Not a known service
+	{
+		tx.error = SKS_NOSUCHSERVICE;
+		sks_aun_send(&tx, server, 3, rx->reply_port, net, stn);
+		return;
+	}
+
+	if (sks_servers[server].info[connection].must_login && !sks_is_logged_in(server, net, stn)) // Requires login, but not logged in
+	{
+		tx.error = SKS_NOTLOGGEDIN;
+		sks_aun_send(&tx, server, 3, rx->reply_port, net, stn);
+		return;
+	}
+	
+}
+
 void sks_data (int server, unsigned char net, unsigned char stn, struct sks_rx *rx)
+{
+
+}
+
+// Looks for traffic on our connections and spits it out to stations if possible, within their advertised window (and decrements window
+// as need be)
+
+void sks_poll(int server)
 {
 
 }
@@ -481,7 +598,7 @@ void sks_handle_traffic(int server, unsigned char net, unsigned char stn, unsign
 
 	switch (rx->func)
 	{
-		case SKS_NOP:	sks_nop(server, net, stn, rx->reply_port, window); break;
+		case SKS_NOP:	sks_nop(server, rx->reply_port, net, stn, window); break;
 		case SKS_LIST:
 				sks_list(server, net, stn, rx);
 				break;
@@ -497,7 +614,6 @@ void sks_handle_traffic(int server, unsigned char net, unsigned char stn, unsign
 		default:
 				// Unknown function
 				tx.error = SKS_UNKNOWN;
-				tx.window[0] = tx.window[1] = 0;
 				sks_aun_send(&tx, server, 3, rx->reply_port, net, stn);
 				break;
 	}

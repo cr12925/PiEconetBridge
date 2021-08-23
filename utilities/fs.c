@@ -101,7 +101,8 @@ struct {
 	unsigned char lib[96];
 	unsigned char home_disc;
 	unsigned char year, month, day, hour, min, sec; // Last login time
-	char padding[9]; // Makes up to 256 bytes per user
+	unsigned char groupmap[8]; // 1 bit for each of 256 groups
+	char unused[1];
 } users[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_USERS];
 
 #define FS_MAX_OPEN_FILES 33 // Really 32 because we don't use entry 0
@@ -125,10 +126,6 @@ struct {
 		char acornfullpath[1024]; // Full Acorn path, used for calculating relative paths
 		char acorntailpath[FS_DEFAULT_NAMELEN+1];
 	} fhandles[FS_MAX_OPEN_FILES];
-	struct {
-		short handle; // Pointer into fs_dirs
-		unsigned long cursor; // ftell() cursor
-	} dhandles[FS_MAX_OPEN_FILES];
 	unsigned char sequence; // Used to detect duplicate transmissions on putbyte - oscillates 0-1-0-1 - low bit of ctrl byte in packet. Gets re-set whenever there is an operation which is not a putbyte, so that successive putbytes get the tracker, but anything else in the way resets it
 } active[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_USERS];
 
@@ -238,11 +235,34 @@ struct path {
 	struct path_entry *paths, *paths_tail; // pointers to head and tail of a linked like of path_entry structs. These are dynamically malloced by the wildcard normalize function and must be freed by the caller. If FS_FTYPE_NOTFOUND, then both will be NULL.
 };
 	
-regex_t r_pathname, r_wildcard;
+regex_t r_pathname, r_discname, r_wildcard;
 
 int fs_count = 0;
 
-unsigned short fs_quiet = 0;
+unsigned short fs_quiet = 0, fs_noisy = 0;
+
+// Find username if it exists in server's userbase
+short fs_get_uid(int server, char *username)
+{
+	unsigned short counter = 0;
+	unsigned char padded_username[11];
+	
+	strcpy(padded_username, username);
+
+	counter = strlen(padded_username);
+
+	while (counter < 10) padded_username[counter++] = ' ';
+
+	padded_username[counter] = '\0';
+
+	counter = 0;
+
+	while (counter < ECONET_MAX_FS_USERS && (strncasecmp(padded_username, users[server][counter].username, 10) != 0))
+		counter++;
+
+	return (counter < ECONET_MAX_FS_USERS ? counter : -1);
+
+}
 
 // Find the tail end entry on path2 and store in path1. If path2 empty, store "$".
 void fs_store_tail_path(char *path1, char *path2)
@@ -350,9 +370,12 @@ void fs_copy_to_cr(unsigned char *dest, unsigned char *src, unsigned short len)
 
 	srccount = count = 0;
 
+	// Skip leading whitspace
+	while (*(src+srccount) == ' ') srccount++;
+
 	while (count < len && *(src+count) != 0x0d)
 	{
-		if (*(src+srccount) != ' ') // Skip space
+		//if (*(src+srccount) != ' ') // Skip space - Done above. This version removed spaces within the command line, d'uh!
 			*(dest+count++) = *(src+srccount);
 		srccount++;
 	}
@@ -468,8 +491,6 @@ unsigned short fs_allocate_user_dir_channel(int server, unsigned int active_id, 
 
 	count = 1; // Don't want to feed the user a directory handle 0
 
-// All references to dhandles changed to fhandle so there is a single set of user handles
-
 	while (active[server][active_id].fhandles[count].handle != -1 && count < FS_MAX_OPEN_FILES)
 		count++;
 
@@ -486,8 +507,6 @@ unsigned short fs_allocate_user_dir_channel(int server, unsigned int active_id, 
 // Deallocate a directory handle for a user
 void fs_deallocate_user_dir_channel(int server, unsigned int active_id, unsigned short channel)
 {
-
-	// If it's not a directory handle, do nothing. ALl refs herein changed from dhandles to fhandles
 
 	if (active[server][active_id].fhandles[channel].is_dir == 0) return;
 
@@ -762,7 +781,6 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 
 	fs_wildcard_to_regex(needle, needle_wildcard);
 
-
 	if (fs_compile_wildcard_regex(needle_wildcard) != 0) // Error
 		return -1;
 
@@ -776,6 +794,8 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 	counter = 0;
 	*head = *tail = p = NULL;
 
+	fs_read_xattr(haystack, &oa_parent);
+	
 	while (counter < results)
 	{
 		//fprintf (stderr, "fs_get_wildcard_entries() loop counter %d of %d - %s\n", counter+1, results, namelist[counter]->d_name);
@@ -797,7 +817,8 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 
 		// Read parent information
 
-		fs_read_xattr(p->unixpath, &oa_parent);
+		// ** Bug found by @sweh
+		//fs_read_xattr(p->unixpath, &oa_parent);
 
 		// Fill the struct
 		
@@ -876,7 +897,7 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 
 // We need to amend this to return -1 if it's a bad path so the calling routine can distinguish between no entries and bad pathname
 
-int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short relative_to, struct path *result, unsigned short wildcard)
+int fs_normalize_path_wildcard(int server, int user, unsigned char *received_path, short relative_to, struct path *result, unsigned short wildcard)
 {
 
 	int ptr = 2;
@@ -888,6 +909,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 	struct objattr attr;
 	int parent_owner = 0;
 	short found;
+	unsigned char path[1030];
 
 	DIR *dir;
 	//struct dirent *d;
@@ -898,7 +920,16 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 
 	result->disc = -1; // Rogue so that we can tell if there was a discspec in the path
 
-	if (normalize_debug) fprintf (stderr, "Path provided: '%s'\n", path);
+	strcpy(path, received_path);
+	
+	// Cope with null path relative to dir on another disc
+	if (strlen(path) == 0 && relative_to != -1)
+		strcpy(path, active[server][user].fhandles[relative_to].acornfullpath);
+	else if (relative_to != -1 && (path[0] != ':' && path[0] != '$'))
+		sprintf(path, "%s.%s", active[server][user].fhandles[relative_to].acornfullpath, received_path);
+
+	if (normalize_debug && relative_to != -1) fprintf (stderr, "Path provided: '%s', relative to '%s'\n", received_path, active[server][user].fhandles[relative_to].acornfullpath);
+	else if (normalize_debug) fprintf (stderr, "Path provided: '%s', relative to nowhere\n", received_path);
 
 	// Truncate any path provided that has spaces in it
 	count = 0; 
@@ -916,7 +947,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 		int count, found = 0;
 
 		// Exclude lost+found!
-		if (strcasecmp(path+1, "lost+found") && regexec(&r_pathname, (const char * ) path+1, 1, matches, 0) == 0)
+		if (strcasecmp(path+1, "lost+found") && regexec(&r_discname, (const char * ) path+1, 1, matches, 0) == 0)
 		{
 			strncpy((char * ) result->discname, (const char * ) path+1, matches[0].rm_eo - matches[0].rm_so);
 			*(result->discname + matches[0].rm_eo - matches[0].rm_so) = '\0';
@@ -1025,6 +1056,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 */
 
 	// New relative adjustment code
+
+	// This probably now redundant given the relative adjustment at the head of this routine, but might be relevant if relative_path == -1;
 
 	if (path_internal[0] == '$') // Absolute path given
 	{
@@ -1534,7 +1567,47 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *path, short 
 // path structure and then free all the path entries that have been found.
 int fs_normalize_path(int server, int user, unsigned char *path, short relative_to, struct path *result)
 {
-	return fs_normalize_path_wildcard(server, user, path, relative_to, result, 0);
+	if (!strcasecmp("%Passwords", path) && (users[server][active[server][user].userid].priv & FS_PRIV_SYSTEM)) // System priv user trying to normalize password file
+	{
+		struct tm t;
+		struct stat s;
+
+		result->error = 0;
+		result->ftype = FS_FTYPE_FILE;
+		strcpy(result->discname, fs_discs[server][users[server][active[server][user].userid].home_disc].name);
+		result->disc = users[server][active[server][user].userid].home_disc;
+		strcpy(result->path[0], "Passwords");
+		strcpy(result->acornname, "Passwords");
+		result->npath = 1;
+		strcpy(result->path_from_root, "Passwords");
+		result->owner = result->parent_owner = 0;
+		result->perm = result->my_perm = result->parent_perm = FS_PERM_OWN_W | FS_PERM_OWN_R;
+		result->load = result->exec = 0;
+		// Length & internal name here, and date fields
+		sprintf (result->unixpath, "%s/Passwords", fs_stations[server].directory);
+		sprintf (result->acornfullpath, "$.Passwords");
+		sprintf (result->unixfname, "Passwords");
+		result->paths = result->paths_tail = NULL;	
+
+		if (stat(result->unixpath, &s)) // Failed stat // this should *never* happen, but just in case it does...
+		{
+			result->error = FS_PATH_ERR_NODIR;
+			result->ftype = FS_FTYPE_NOTFOUND;
+			return -1;
+		}
+
+		result->internal = s.st_ino;
+		result->length = s.st_size;
+
+		localtime_r(&(s.st_mtime), &t);
+
+		fs_date_to_two_bytes (t.tm_mday, t.tm_mon+1, t.tm_year, &(result->monthyear), &(result->day));
+		
+		return 1;
+
+	}
+	else
+		return fs_normalize_path_wildcard(server, user, path, relative_to, result, 0);
 }
 
 void fs_write_user(int server, int user, unsigned char *d) // Writes the 256 bytes at d to the user's record in the relevant password file
@@ -1635,11 +1708,24 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 		exit (EXIT_FAILURE);
 	}
 
+	sprintf(regex, "^(%s{1,16})", FSREGEX);
+	if (regcomp(&r_discname, regex, REG_EXTENDED) != 0)
+	{
+                fprintf(stderr, "Unable to compile regex for disc names.\n");
+                exit (EXIT_FAILURE);
+        }
+
+	// Ensure serverparam begins with /
+	if (serverparam[0] != '/')
+	{
+		if (!fs_quiet) fprintf (stderr, "   FS: Bad directory name %s\n", serverparam);
+		return -1;
+	}
+
 	d = opendir(serverparam);
 
 	if (!d)
 	{
-		fprintf (stderr, "It didn't...\n");
 		if (!fs_quiet) fprintf (stderr, "   FS: Unable to open root directory %s\n", serverparam);
 	}
 	else
@@ -1684,7 +1770,7 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 			users[fs_count][0].priv = FS_PRIV_SYSTEM;
 			users[fs_count][0].bootopt = 0;
 			sprintf (users[fs_count][0].home, "%-96s", "$");
-			sprintf (users[fs_count][0].lib, "%-96s", "$");
+			sprintf (users[fs_count][0].lib, "%-96s", "$.Library");
 			users[fs_count][0].home_disc = 0;
 			users[fs_count][0].year = users[fs_count][0].month = users[fs_count][0].day = users[fs_count][0].hour = users[fs_count][0].min = users[fs_count][0].sec = 0; // Last login time
 			if ((passwd = fopen(passwordfile, "w+")))
@@ -1874,7 +1960,7 @@ unsigned short fs_find_bulk_port(int server)
 
 	while (!found && portcount < 255)
 	{
-		if ((fs_bulk_ports[server][portcount].handle == -1) && (portcount != 0x99) && (portcount != 0xd1) && (portcount != 0x9f) && (portcount != 0xf0)) // 0xd1, 9f are print server; f0 will be the port server, 0x99 is the fileserver...
+		if ((fs_bulk_ports[server][portcount].handle == -1) && (portcount != 0x99) && (portcount != 0xd1) && (portcount != 0x9f) && (portcount != 0xdf)) // 0xd1, 9f are print server; df will be the port server, 0x99 is the fileserver...
 			found = 1;
 		else portcount++;
 	}
@@ -2173,23 +2259,63 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 				active[server][usercount].bootopt = users[server][counter].bootopt;
 				active[server][usercount].priv = users[server][counter].priv;
 				active[server][usercount].userid = counter;
-				active[server][usercount].current_disc = users[server][counter].home_disc;
+				active[server][usercount].current_disc = users[server][counter].home_disc; // Need to set here so that first normalize for URD works.
 
-				for (count = 0; count < FS_MAX_OPEN_FILES; count++) active[server][usercount].dhandles[count].handle = -1; // Flag unused for directories
 				for (count = 0; count < FS_MAX_OPEN_FILES; count++) active[server][usercount].fhandles[count].handle = -1; // Flag unused for files
 
 				strncpy((char * ) home, (const char * ) users[server][counter].home, 96);
 				home[96] = '\0';
+
 				for (count = 0; count < 96; count++) if (home[count] == 0x20) home[count] = '\0'; // Remove spaces and null terminate
 
+				if (home[0] == '\0')
+				{
+					sprintf(home, "$.%s", users[server][counter].username);
+					home[96] = '\0';
+					if (strchr(home, ' ')) *(strchr(home, ' ')) = '\0';
+				}
+				
 				// First, user root
 
-				if (!fs_normalize_path(server, usercount, home, -1, &p)) // NOTE: because fs_normalize might look up current or home directory, home must be a complete path from $
+				if (!(fs_normalize_path(server, usercount, home, -1, &p)) || p.ftype == FS_FTYPE_NOTFOUND) // NOTE: because fs_normalize might look up current or home directory, home must be a complete path from $
 				{
+						unsigned short disc_count = 0;
+						unsigned char tmp_path[1024];
 
-					if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Login attempt - cannot find root dir %s\n", "", net, stn, home);
-					fs_error (server, reply_port, net, stn, 0xFF, "Unable to map root.");
-					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
+						// If not found, have a look on the other discs
+	
+						while (disc_count < ECONET_MAX_FS_DISCS)
+						{
+
+							if (fs_discs[server][disc_count].name[0] != '\0') // Extant disc
+							{
+								sprintf(tmp_path, ":%s.%s", fs_discs[server][disc_count].name, home);
+	
+								if (!fs_normalize_path(server, usercount, tmp_path, -1, &p))
+								{
+									disc_count++;
+								}
+								else if (p.ftype != FS_FTYPE_DIR)
+								{
+									disc_count++;
+								}
+								else
+									break;
+							}
+							else disc_count++;
+						
+						}
+	
+						if (disc_count == ECONET_MAX_FS_DISCS)
+						{
+							sprintf (tmp_path, ":%s.$", fs_discs[server][0].name);
+							if (!(fs_normalize_path(server, usercount, tmp_path, -1, &p)) || p.ftype == FS_FTYPE_NOTFOUND) // Should NEVER happen....
+							{
+								if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Login attempt - cannot find root dir %s\n", "", net, stn, home);
+								fs_error (server, reply_port, net, stn, 0xFF, "Unable to map root.");
+								active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
+							}
+						}
 				}
 						
 				if (p.ftype != FS_FTYPE_DIR) // Root wasn't a directory!
@@ -2198,6 +2324,8 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
 				}
 					
+				active[server][usercount].current_disc = p.disc; // Updated here once we know where the URD is for definite.
+
 				internal_handle = fs_open_interlock(server, p.unixpath, 1, active[server][usercount].userid);
 
 				if ((active[server][usercount].root = fs_allocate_user_dir_channel(server, usercount, internal_handle)) == -1) // Can't allocate
@@ -2237,12 +2365,19 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 
 				// Next, Library
 
-				strncpy((char * ) lib, (const char * ) users[server][counter].lib, 96);
+				if (users[server][counter].lib[0] != '\0')
+					strncpy((char * ) lib, (const char * ) users[server][counter].lib, 96);
+				else	strcpy((char *) lib, "$.Library");
+
 				lib[96] = '\0';
 				for (count = 0; count < 96; count++) if (lib[count] == 0x20) lib[count] = '\0'; // Remove spaces and null terminate
 
 				if (!fs_normalize_path(server, usercount, lib, -1, &p) || p.ftype != FS_FTYPE_DIR) // NOTE: because fs_normalize might look up current or home directory, home must be a complete path from $
 				{
+
+					// TODO - Search across all discs here
+
+					// In default, go for root on disc 0
 
 					if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Login attempt - cannot find lib dir %s\n", "", net, stn, lib);
 					if (!fs_normalize_path(server, usercount, "$", -1, &p)) // Use root as library directory instead
@@ -2383,6 +2518,8 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 
 	fs_copy_to_cr(path, (data + 8), 255);
 
+	/* This next bit looks like rubbish
+
 	if (arg == 2) // If arg = 2, it looks like the path to examine starts at data + 9 and ends with the end of the packet, not 0x0d
 	{
 		unsigned short p;
@@ -2401,6 +2538,8 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 		}
 		
 	}
+
+	*/
 
 	if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Examine %s relative to %d, start %d, extent %d, arg = %d\n", "", net, stn, path,
 		relative_to, start, n, arg);
@@ -3413,7 +3552,7 @@ short fs_open_interlock(int server, unsigned char *path, unsigned short mode, un
 			if (mode == 3) // Take ownereship on OPENOUT
 				fs_write_xattr(path, userid, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0);
 	
-			if (!fs_quiet) fprintf (stderr, "   FS:%12sInterlock opened internal handle %d, mode %d. Readers = %d, Writers = %d, path %s\n", "", count, mode, fs_files[server][count].readers, fs_files[server][count].writers, fs_files[server][count].name);
+			if (fs_noisy) fprintf (stderr, "   FS:%12sInterlock opened internal handle %d, mode %d. Readers = %d, Writers = %d, path %s\n", "", count, mode, fs_files[server][count].readers, fs_files[server][count].writers, fs_files[server][count].name);
 			return count;
 		}
 		else count++;
@@ -3432,11 +3571,11 @@ void fs_close_interlock(int server, unsigned short index, unsigned short mode)
 		fs_files[server][index].readers--;
 	else	fs_files[server][index].writers--;
 
-	if (!fs_quiet) fprintf (stderr, "   FS:%12sInterlock close internal handle %d, mode %d. Readers now = %d, Writers now = %d, path %s\n", "", index, mode, fs_files[server][index].readers, fs_files[server][index].writers, fs_files[server][index].name);
+	if (fs_noisy) fprintf (stderr, "   FS:%12sInterlock close internal handle %d, mode %d. Readers now = %d, Writers now = %d, path %s\n", "", index, mode, fs_files[server][index].readers, fs_files[server][index].writers, fs_files[server][index].name);
 
 	if (fs_files[server][index].readers <= 0 && fs_files[server][index].writers <= 0)
 	{
-		if (!fs_quiet) fprintf (stderr, "   FS:%12sInterlock closing internal handle %d in operating system\n", "", index);
+		if (fs_noisy) fprintf (stderr, "   FS:%12sInterlock closing internal handle %d in operating system\n", "", index);
 		fclose(fs_files[server][index].handle);
 		fs_files[server][index].handle = NULL; // Flag unused
 	}
@@ -3738,10 +3877,24 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	root = cur = lib = -1;
 
 	strncpy((char *) home_dir, (const char *) users[server][active[server][active_id].userid].home, 96);
+	if (strchr(home_dir, ' '))
+		*(strchr(home_dir, ' ')) = '\0';
 	home_dir[96] = '\0';
 
 	strncpy((char *) lib_dir, (const char *) users[server][active[server][active_id].userid].lib, 96);
 	lib_dir[96] = '\0';
+	if (strchr(lib_dir, ' '))
+		*(strchr(lib_dir, ' ')) = '\0';
+
+	if (strlen(home_dir) == 0)
+	{
+		snprintf(home_dir, 13, "$.%10s", users[server][active[server][active_id].userid].username);
+		if (strchr(home_dir, ' '))
+			*(strchr(home_dir, ' ')) = '\0';
+	}
+
+	if (strlen(lib_dir) == 0)
+		sprintf(lib_dir, "$.Library");
 
 	// URD first
 
@@ -3754,7 +3907,7 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	{
 		if (!fs_normalize_path(server, active_id, tmppath2, -1, &p_root))
 		{
-			if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Failed to map URD on %s, even %s\n", "", net, stn, discname, tmppath2);
+			if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Failed to map URD %s on %s, even %s\n", "", net, stn, discname, tmppath, tmppath2);
 			fs_error(server, reply_port, net, stn, 0xFF, "Cannot map root directory on new disc");
 			return;
 		}
@@ -4331,11 +4484,72 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 	unsigned char perm;
 	unsigned short path_ptr;
 	unsigned short ptr;
+	unsigned char access_ptr;
+	char perm_str[10];
 
 	fs_copy_to_cr(path, command, 1023);
 
 	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d *ACCESS %s\n", "", net, stn, path);
 
+	if (sscanf(command, "%s %8s", path, perm_str) != 2)
+	{
+		if (sscanf(command, "%s", path) == 1)
+			perm = FS_PERM_OWN_R | FS_PERM_OWN_W | FS_PERM_OTH_R;
+		else
+		{
+			fs_error(server, reply_port, net, stn, 0xFF, "Bad parameters");
+			return;
+		}	
+	}
+	else
+	{
+
+		perm = 0;
+		ptr = 0;
+
+		while (ptr < strlen((const char *) perm_str) && perm_str[ptr] != '/')
+		{
+			switch (perm_str[ptr])
+			{
+				case 'W': perm |= FS_PERM_OWN_W; break;
+				case 'R': perm |= FS_PERM_OWN_R; break;
+				case 'H': perm |= FS_PERM_H; break; // Hidden from directory listings
+				case 'L': perm |= FS_PERM_L; break; // Locked
+				default:
+				{
+					fs_error(server, reply_port, net, stn, 0xCF, "Bad attribute");
+					return;
+				}
+			}
+			ptr++;
+		}
+
+		if (ptr != strlen((const char *) perm_str))
+		{
+			ptr++; // Skip the '/'
+	
+			while (ptr < strlen((const char *) perm_str) && (perm_str[ptr] != ' ')) // Skip trailing spaces too
+			{
+				switch (perm_str[ptr])
+				{
+					case 'W': perm |= FS_PERM_OTH_W; break;
+					case 'R': perm |= FS_PERM_OTH_R; break;
+					default: 
+					{
+						fs_error(server, reply_port, net, stn, 0xCF, "Bad attribute");
+						return;
+					}
+				}
+				
+			ptr++;
+			}
+		}
+			
+
+	}
+			
+	
+	/* OLD NON-SSCANF CODE
 	ptr = 0;
 
 	while (ptr < strlen((const char *) command) && *(command+ptr) == ' ')
@@ -4358,11 +4572,13 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 		return;
 	}
 
+
 	//fprintf (stderr, "Command: %s, path_ptr = %d, ptr = %d\n", command, path_ptr, ptr);
 
 	strncpy((char * ) path, (const char * ) command + path_ptr, (ptr - path_ptr));
 
 	path[ptr - path_ptr] = '\0'; // Terminate the path
+
 
 	ptr++;
 
@@ -4415,6 +4631,8 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 		}
 	}
 			
+	*/
+
 	// Normalize the path
 
 	if (!fs_normalize_path_wildcard(server, active_id, path, active[server][active_id].current, &p, 1))
@@ -5007,7 +5225,7 @@ void fs_get_random_access_info(int server, unsigned char reply_port, unsigned ch
 	r.p.ptype = ECONET_AUN_DATA;
 	r.p.data[0] = r.p.data[1] = 0;
 
-	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Get random access info on handle %02X, function %02X\n", "", net, stn, handle, function);
+	if (fs_noisy) fprintf (stderr, "   FS:%12sfrom %3d.%3d Get random access info on handle %02X, function %02X\n", "", net, stn, handle, function);
 
 	switch (function) 
 	{
@@ -5015,7 +5233,7 @@ void fs_get_random_access_info(int server, unsigned char reply_port, unsigned ch
 			r.p.data[2] = (active[server][active_id].fhandles[handle].cursor & 0xff);
 			r.p.data[3] = (active[server][active_id].fhandles[handle].cursor & 0xff00) >> 8;
 			r.p.data[4] = (active[server][active_id].fhandles[handle].cursor & 0xff00) >> 16;
-			if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d  - cursor %06lX\n", "", net, stn, active[server][active_id].fhandles[handle].cursor);
+			if (fs_noisy) fprintf (stderr, "   FS:%12sfrom %3d.%3d  - cursor %06lX\n", "", net, stn, active[server][active_id].fhandles[handle].cursor);
 			break;
 		case 1: // Fall through extent / allocation - going to assume this is file size but might be wrong
 		case 2:
@@ -5028,7 +5246,7 @@ void fs_get_random_access_info(int server, unsigned char reply_port, unsigned ch
 				return;
 			}
 		
-			if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d  - extent %06lX\n", "", net, stn, s.st_size);
+			if (fs_noisy) fprintf (stderr, "   FS:%12sfrom %3d.%3d  - extent %06lX\n", "", net, stn, s.st_size);
 
 			r.p.data[2] = s.st_size & 0xff;
 			r.p.data[3] = (s.st_size & 0xff00) >> 8;
@@ -5184,9 +5402,9 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	long sent, length;
 	unsigned short internal_handle;
 	unsigned short eofreached, fserroronread;
-	int received;
+	int received, total_received;
 
-	//unsigned char readbuffer[256];
+	unsigned char readbuffer[0x500];
 
 	struct __econet_packet_udp r;
 
@@ -5195,7 +5413,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	bytes = (((*(data+7))) + ((*(data+8)) << 8) + (*(data+9) << 16));
 	offset = (((*(data+10))) + ((*(data+11)) << 8) + (*(data+12) << 16));
 
-	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX by user %04x on handle %02x\n", "", net, stn, bytes, offset, active[server][active_id].userid, handle);
+	if (fs_noisy) fprintf (stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX by user %04x on handle %02x\n", "", net, stn, bytes, offset, active[server][active_id].userid, handle);
 
 	if (active[server][active_id].fhandles[handle].handle == -1) // Invalid handle
 	{
@@ -5216,18 +5434,16 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 	// Seek to end to detect end of file
 	fseek(fs_files[server][internal_handle].handle, 0, SEEK_END);
-	
 	length = ftell(fs_files[server][internal_handle].handle);
 
-	if (offset > length) // Beyond EOF
+	if (offset >= length) // At or eyond EOF
 		eofreached = 1;
 	else
 		eofreached = 0;
 
-	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() offset %04lX, file length %04lX, beyond EOF %s\n", "", net, stn, offset, length, (eofreached ? "Yes" : "No"));
+	if (fs_noisy) fprintf (stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() offset %04lX, file length %04lX, beyond EOF %s\n", "", net, stn, offset, length, (eofreached ? "Yes" : "No"));
 
 	fseek(fs_files[server][internal_handle].handle, offset, SEEK_SET);
-	
 	active[server][active_id].fhandles[handle].cursor = offset;
 
 	// Send acknowledge
@@ -5240,52 +5456,49 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 	fserroronread = 0;
 	sent = 0;
+	total_received = 0;
 
-/* Old loop code
-	while (sent < bytes && (!eofreached) && (!fserroronread))
+	while (sent < bytes)
 	{
 		unsigned short readlen;
 
 		readlen = ((bytes - sent) > sizeof(readbuffer) ? sizeof(readbuffer) : (bytes - sent));
 
-		if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() bytes required %04lX, bytes already sent %04lX, buffer size %04X, bytes to read %04X\n", "", net, stn, bytes, sent, sizeof(readbuffer), readlen);
-
 		received = fread(readbuffer, 1, readlen, fs_files[server][internal_handle].handle);
 
-		if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() read %04x bytes off disc\n", "", net, stn, received);
+		if (fs_noisy) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() bulk transfer: bytes required %04lX, bytes already sent %04lX, buffer size %04X, bytes to read %04X, bytes actually read %04X\n", "", net, stn, bytes, sent, sizeof(readbuffer), readlen, received);
 
 		if (received != readlen) // Either FEOF or error
 		{
 			if (feof(fs_files[server][internal_handle].handle)) eofreached = 1;
 			else
 			{
-				if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d fread returned %d, expected %d\n", "", net, stn, received, readlen);
+				if (fs_noisy) fprintf(stderr, "   FS:%12sfrom %3d.%3d fread returned %d, expected %d\n", "", net, stn, received, readlen);
 				fserroronread = 1;
 			}
 		}
 
-		// Always send a packet which has the same amount of data the station requested, otherwise it barfs, even if all the data is past EOF (because the station works that out from the closing packet)
-		//if (received > 0) // Send what we did get
-		//{
-			r.p.ptype = ECONET_AUN_DATA;
-			r.p.port = txport;
-			r.p.ctrl = 0x80;
+		// Always send packets which total up to the amount of data the station requested, even if all the data is past EOF (because the station works that out from the closing packet)
+		r.p.ptype = ECONET_AUN_DATA;
+		r.p.port = txport;
+		r.p.ctrl = 0x80;
+
+		if (received > 0)
 			memcpy(&(r.p.data), readbuffer, received);	
-	
-			if (received < bytes) // Pad rest of data
-				memset (&(r.p.data[received]), 0, bytes - received);
 
-			// The real FS pads a short packet to the length requested, but then sends a completion message (below) indicating how many bytes were actually valid
+		if (received < readlen) // Pad rest of data
+			memset (&(r.p.data[received]), 0, readlen - received);
 
-			fs_aun_send(&r, server, bytes, net, stn);
+		// The real FS pads a short packet to the length requested, but then sends a completion message (below) indicating how many bytes were actually valid
 
-			sent += received;
-		//}
+		fs_aun_send(&r, server, readlen, net, stn);
 
-			
+		sent += readlen;
+		total_received += received;
+		
 	}
-*/	
 
+/*
 	// New single pass code
 
 	if (bytes > 0)
@@ -5293,7 +5506,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 		received = fread(&(r.p.data), 1, (bytes > (ECONET_MAX_PACKET_SIZE) ? ECONET_MAX_PACKET_SIZE : bytes), fs_files[server][internal_handle].handle);
 
-		if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() bytes required %06lX, max size %06X, read from disc %06X\n", "", net, stn, bytes, ECONET_MAX_PACKET_SIZE-4, received);
+		if (fs_noisy) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() bytes required %06lX, max size %06X, read from disc %06X\n", "", net, stn, bytes, ECONET_MAX_PACKET_SIZE-4, received);
 
 		if (feof(fs_files[server][internal_handle].handle)) eofreached = 1;
 		else if (received != bytes)
@@ -5312,12 +5525,9 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 	// End of new single pass code
 
-	//usleep(100000);
-	//usleep(10000);
+*/
 
-	//active[server][active_id].fhandles[handle].cursor = ftell(fs_files[server][internal_handle].handle);
-	//active[server][active_id].fhandles[handle].cursor += sent;
-	active[server][active_id].fhandles[handle].cursor += received;
+	active[server][active_id].fhandles[handle].cursor += total_received;
 
 	if (fserroronread)
 		fs_error(server, reply_port, net, stn, 0xFF, "FS Error on read");
@@ -5325,15 +5535,15 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	{
 		// Send a completion message
 	
-		if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() Acknowledging %04lX tx bytes, cursor now %06lX\n", "", net, stn, sent, active[server][active_id].fhandles[handle].cursor);
+		if (fs_noisy) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() Acknowledging %04lX tx bytes, cursor now %06lX\n", "", net, stn, sent, active[server][active_id].fhandles[handle].cursor);
 
 		r.p.port = reply_port;
 		r.p.ctrl = 0x80;
 		r.p.data[0] = r.p.data[1] = 0;
 		r.p.data[2] = (eofreached ? 0x80 : 0x00);
-		r.p.data[3] = (sent & 0xff);
-		r.p.data[4] = ((sent & 0xff00) >> 8);
-		r.p.data[5] = ((sent & 0xff0000) >> 16);
+		r.p.data[3] = (total_received & 0xff);
+		r.p.data[4] = ((total_received & 0xff00) >> 8);
+		r.p.data[5] = ((total_received & 0xff0000) >> 16);
 
 		fs_aun_send(&r, server, 6, net, stn);
 	}
@@ -5386,7 +5596,7 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	if (offsetstatus) // write to current position
 		offset = active[server][active_id].fhandles[handle].cursor;
 
-	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d fs_putbytes() %06lX at offset %06lX by user %04X on handle %02d\n",
+	if (fs_noisy) fprintf (stderr, "   FS:%12sfrom %3d.%3d fs_putbytes() %06lX at offset %06lX by user %04X on handle %02d\n",
 			"", net, stn,
 			bytes, offset, active[server][active_id].userid, handle);
 
@@ -5806,8 +6016,10 @@ void fs_garbage_collect(int server)
 
 				fs_close_interlock(server, fs_bulk_ports[server][count].handle, fs_bulk_ports[server][count].mode);
 
-				if (fs_bulk_ports[server][count].active_id != 0) // No user handle = this was a SAVE operation
+				if (fs_bulk_ports[server][count].active_id != 0) // No user handle = this was a SAVE operation, so if non zero we need to close a user handle
 					fs_deallocate_user_file_channel(server, fs_bulk_ports[server][count].active_id, fs_bulk_ports[server][count].user_handle);
+
+				fs_bulk_ports[server][count].handle = -1;
 			}
 
 		}
@@ -5848,7 +6060,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 	unsigned char fsop, reply_port; // , root_dir, current_dir, lib_dir;
 	unsigned int userid;
-	unsigned int active_id;
+	int active_id;
 
 	if (datalen < 1) 
 	{
@@ -5910,26 +6122,62 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			else if (!strncasecmp("BYE", (const char *) command, 3)) fs_bye(server, reply_port, net, stn, 1);
 			else if (!strncasecmp("SETLIB ", (const char *) command, 7))
 			{ // Permanently set library directory
-				unsigned char libdir[96];
+				unsigned char libdir[97], username[11], params[256];
+				short uid;
 
 				if (active[server][active_id].priv & FS_PRIV_LOCKED)
 					fs_error(server, reply_port, net, stn, 0xbd, "Insufficient access");
 				else
 				{
 					struct path p;
-					fs_copy_to_cr(libdir, command+7, 93);
-					if (fs_normalize_path(server, active_id, libdir, *(data+3), &p) && (p.ftype == FS_FTYPE_DIR) && strlen((const char *) p.path_from_root) < 94 && (p.disc == users[server][userid].home_disc))
+					fs_copy_to_cr(params, command+7, 255);
+
+					if ((active[server][active_id].priv & FS_PRIV_SYSTEM) && (sscanf(params, "%10s %96s", username, libdir) == 2)) // System user with optional username
+					{
+						if ((uid = fs_get_uid(server, username)) < 0)
+						{
+							fs_error(server, reply_port, net, stn, 0xFF, "No such user");
+							return;
+						}
+
+						// Can't specify a disc on library set - it will search (eventually!)
+						if (libdir[0] == ':')
+						{
+							fs_error(server, reply_port, net, stn, 0xFF, "Can't specify disc");
+							return;
+						}
+					}
+					else if (strchr(params, ' ')) // Non-privileged user attempting something with a space, or otherwise a pattern mismatch
+					{
+						fs_error(server, reply_port, net, stn, 0xFF, "Bad parameters");
+						return;
+					}
+					else
+					{
+						uid = userid;
+						strcpy(libdir, params);
+					}	
+
+					if (!fs_quiet) fprintf (stderr, "  FS:%12sfrom %3d.%3d SETLIB for uid %04X to %s\n", "", net, stn, uid, libdir);
+
+					if (libdir[0] != '%' && fs_normalize_path(server, active_id, libdir, *(data+3), &p) && (p.ftype == FS_FTYPE_DIR) && strlen((const char *) p.path_from_root) < 94 && (p.disc == users[server][userid].home_disc))
 					{
 						if (strlen(p.path_from_root) > 0)
 						{
-							users[server][userid].lib[0] = '$';
-							users[server][userid].lib[1] = '.';
-							users[server][userid].lib[2] = '\0';
+							users[server][uid].lib[0] = '$';
+							users[server][uid].lib[1] = '.';
+							users[server][uid].lib[2] = '\0';
 						}
-						else	strcpy(users[server][userid].lib, "");
+						else	strcpy(users[server][uid].lib, "");
 
-						strncat((char * ) users[server][userid].lib, (const char * ) p.path_from_root, 94);
-						fs_write_user(server, userid, (unsigned char *) &(users[server][userid]));
+						strncat((char * ) users[server][uid].lib, (const char * ) p.path_from_root, 94);
+						fs_write_user(server, uid, (unsigned char *) &(users[server][uid]));
+						fs_reply_ok(server, reply_port, net, stn);
+					}
+					else if (libdir[0] == '%') // Blank off the library
+					{
+						strncpy((char *) users[server][uid].lib, "", 95);
+						fs_write_user(server, uid, (unsigned char *) &(users[server][uid]));
 						fs_reply_ok(server, reply_port, net, stn);
 					}
 					else	fs_error(server, reply_port, net, stn, 0xA8, "Bad library");
@@ -5970,8 +6218,10 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				{
 					if (p.ftype != FS_FTYPE_DIR)
 						fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
+					/* 
 					if (p.disc != active[server][active_id].current_disc)
 						fs_error(server, reply_port, net, stn, 0xFF, "Not on current disc");
+					*/
 					else
 					{	
 						/* l = fs_get_dir_handle(server, active_id, p.unixpath); */
@@ -6033,7 +6283,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				if (!strcmp(dirname, "")) // Empty string
 				{
 					//int counter;
-					strcpy (dirname, active[server][active_id].root_dir);
+					sprintf (dirname, ":%s.%s", fs_discs[server][active[server][active_id].home_disc].name, users[server][userid].home);
+					//strcpy (dirname, active[server][active_id].root_dir);
 					//counter = 0;
 					//while (counter < FS_DEFAULT_NAMELEN && dirname[counter] != ' ')	counter++;
 					//dirname[counter] = '\0'; // null terminate on space or max length
@@ -6044,12 +6295,13 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				{
 					if (p.ftype != FS_FTYPE_DIR)
 						fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
+					/*
 					if (p.disc != active[server][active_id].current_disc)
 						fs_error(server, reply_port, net, stn, 0xFF, "Not on current disc");
+					*/
 					else
 					{	
 						l = fs_open_interlock(server, p.unixpath, 1, active[server][active_id].userid);
-						// l = fs_get_dir_handle(server, active_id, p.unixpath);
 						if (l != -1) // Found
 						{
 							n_handle = fs_allocate_user_dir_channel(server, active_id, l);
@@ -6068,11 +6320,14 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								fs_store_tail_path(active[server][active_id].fhandles[n_handle].acorntailpath, p.acornfullpath);
 								active[server][active_id].fhandles[n_handle].mode = 1;
 
-								if (old > 0 && (old != active[server][active_id].root) && (old != active[server][active_id].lib)) // Attempt to close the old handle if it isn't our URD
+								//if (old > 0 && (old != active[server][active_id].root) && (old != active[server][active_id].lib)) // Attempt to close the old handle if it isn't our URD
+								if (old > 0)
 								{
 									fs_close_interlock(server, active[server][active_id].fhandles[old].handle, active[server][active_id].fhandles[old].mode);
 									fs_deallocate_user_dir_channel(server, active_id, old);
 								}
+
+								active[server][active_id].current_disc = p.disc; 
 
 								r.p.ptype = ECONET_AUN_DATA;
 								r.p.port = reply_port;
@@ -6099,24 +6354,51 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 				if (!strncasecmp("SETHOME ", (const char *) command, 8))
 				{ // Permanently set home directory
-					unsigned char dir[96];
+					unsigned char params[256], dir[96], username[11];
+					short uid;
 	
 					{
 						struct path p;
-						fs_copy_to_cr(dir, command+8, 93);
-						if (fs_normalize_path(server, active_id, dir, *(data+3), &p) && (p.ftype == FS_FTYPE_DIR) && strlen((const char *) p.path_from_root) < 94)
+
+						fs_copy_to_cr(params, command+8, 255);
+
+						if (sscanf(params, "%10s %96s", username, dir) == 2)
+						{
+							if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Set Home dir for user %s to %s\n", "", net, stn, username, dir);
+							uid = fs_get_uid(server, username);
+							if (uid < 0)
+							{
+								fs_error(server, reply_port, net, stn, 0xFF, "No such user");
+								return;
+							}
+						}
+						else if (sscanf(params, "%96s", (unsigned char *) dir) != 1)
+						{
+							if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Set Home dir - bad parameters %s\n", "", net, stn, params);
+							fs_error(server, reply_port, net, stn, 0xFF, "Bad parameters");
+							return;
+						}
+						else	uid = userid;
+
+						if (!strcmp("%", dir)) // Blank it off
+						{
+							users[server][uid].home[0] = '\0';
+							fs_write_user(server, uid, (unsigned char *) &(users[server][uid]));
+                                                        fs_reply_ok(server, reply_port, net, stn);
+						}
+						else if (fs_normalize_path(server, active_id, dir, *(data+3), &p) && (p.ftype == FS_FTYPE_DIR) && strlen((const char *) p.path_from_root) < 94)
 						{
 							if (strlen(p.path_from_root) > 0)
 							{
-								users[server][userid].home[0] = '$';
-								users[server][userid].home[1] = '.';
-								users[server][userid].home[2] = '\0';
+								users[server][uid].home[0] = '$';
+								users[server][uid].home[1] = '.';
+								users[server][uid].home[2] = '\0';
 							}
-							else	strcpy(users[server][userid].home, "");
+							else	strcpy(users[server][uid].home, "");
 	
-							strncat((char * ) users[server][userid].home, (const char * ) p.path_from_root, 94);
-							users[server][userid].home_disc = p.disc;
-							fs_write_user(server, userid, (unsigned char *) &(users[server][userid]));
+							strncat((char * ) users[server][uid].home, (const char * ) p.path_from_root, 94);
+							users[server][uid].home_disc = p.disc;
+							fs_write_user(server, uid, (unsigned char *) &(users[server][uid]));
 							fs_reply_ok(server, reply_port, net, stn);
 						}
 						else	fs_error(server, reply_port, net, stn, 0xA8, "Bad directory");
@@ -6193,10 +6475,13 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							snprintf((char * ) users[server][id].username, 11, "%-10s", username);
 							snprintf((char * ) users[server][id].password, 7, "%-6s", "");
 							snprintf((char * ) users[server][id].fullname, 31, "%-30s", &(username[ptr]));
-							snprintf((char * ) users[server][id].home, 97, "$.%s", username);
-							snprintf((char * ) users[server][id].lib, 97, "$.%s", "Library");
+							users[server][id].home[0] = '\0';
+							users[server][id].lib[0] = '\0';
+							//snprintf((char * ) users[server][id].home, 97, "$.%s", username);
+							//snprintf((char * ) users[server][id].lib, 97, "$.%s", "Library");
 							users[server][id].home_disc = 0;
 							users[server][id].priv = FS_PRIV_USER;
+							/*
 							sprintf((char * ) homepath, "%s/%1x%s/%s", fs_stations[server].directory, 0, fs_discs[server][0].name, username);
 							if (mkdir((const char *) homepath, 0770) != 0)
 								fs_error(server, reply_port, net, stn, 0xff, "Unable to create home directory");
@@ -6204,11 +6489,14 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							{
 								snprintf((char * ) idtext, 5, "%04x", (unsigned short) id);
 								fs_write_xattr(homepath, id, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0);
+							*/
 								fs_write_user(server, id, (unsigned char *) &(users[server][id]));
 								if (id >= fs_stations[server].total_users) fs_stations[server].total_users = id+1;
 								fs_reply_ok(server, reply_port, net, stn);
 								if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d New User %s, id = %d, total users = %d\n", "", net, stn, username, id, fs_stations[server].total_users);
+							/*
 							}
+							*/
 							
 						}
 					}
@@ -6430,11 +6718,14 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 				reply.p.port = reply_port;
 				reply.p.ctrl = 0x80;
+				
 				reply.p.data[0] = 0;
 				reply.p.data[1] = 0;
 				reply.p.data[2] = 0;
-				reply.p.data[3] = 0x20; // 512Mb
-				fs_aun_send (&reply, server, 4, net, stn);
+				reply.p.data[3] = 0;
+				reply.p.data[4] = 0;
+				reply.p.data[5] = 0x20; // 512Mb
+				fs_aun_send (&reply, server, 6, net, stn);
 			}
 			break;
 		case 0x1f: // Set user free space

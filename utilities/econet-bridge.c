@@ -44,7 +44,8 @@ extern void sks_handle_traffic(int, unsigned char, unsigned char, unsigned char,
 extern void handle_fs_bulk_traffic(int, unsigned char, unsigned char, unsigned char, unsigned char, unsigned char *, unsigned int);
 extern void fs_garbage_collect(int);
 extern void fs_eject_station(unsigned char, unsigned char); // Used to get rid of an old dynamic station
-extern unsigned short fs_quiet;
+extern void sks_poll(int);
+extern unsigned short fs_quiet, fs_noisy;
 extern short fs_sevenbitbodge;
 
 #define ECONET_LEARNED_HOST_IDLE_TIMEOUT 3600 // 1 hour
@@ -475,7 +476,11 @@ void econet_readconfig(void)
 			else	network[entry].servertype |= servertype;
 
 			if (servertype == ECONET_SERVER_FILE)
+			{
+				if (datastring[strlen(datastring)-1] == '/') // Strip trailing slash
+					datastring[strlen(datastring)-1] = '\0';
 				strcpy(network[(entry == -1) ? networkp : entry].fs_serverparam, datastring);
+			}
 			else if (servertype == ECONET_SERVER_PRINT)
 				strcpy(network[(entry == -1) ? networkp : entry].print_serverparam, datastring);
 			else if (servertype == ECONET_SERVER_SOCKET)
@@ -1604,7 +1609,7 @@ int main(int argc, char **argv)
 
 	fs_sevenbitbodge = 1; // On by default
 
-	while ((opt = getopt(argc, argv, "bc:dfilqszh7")) != -1)
+	while ((opt = getopt(argc, argv, "bc:dfilnqszh7")) != -1)
 	{
 		switch (opt) {
 			case 'b': dumpmode_brief = 1; break;
@@ -1614,9 +1619,10 @@ int main(int argc, char **argv)
 			case 'd':
 				pkt_debug = 1;
 				break;
-			case 'f': fs_quiet = 1; break;
+			case 'f': fs_quiet = 1; fs_noisy = 0; break;
 			case 'i': spoof_immediate = 0; break;
 			case 'l': wire_enabled = 0; break;
+			case 'n': fs_noisy = 1; fs_quiet = 0; break;
 			case 'q':
 				bridge_query = 0;
 				break;
@@ -1771,7 +1777,7 @@ Options:\n\
 
 	/* Wait for traffic */
 
-	while (poll((struct pollfd *)&pset, pmax+1, -1))
+	while (poll((struct pollfd *)&pset, pmax+(wire_enabled ? 1 : 0), -1))
 	{
 	
 		//int econet_sequence;
@@ -1781,7 +1787,7 @@ Options:\n\
 			//if (realfd == econet_sequence) // If this is the wire's turn, process a wire packet
 			{
 
-				if (pset[pmax].revents & POLLIN)
+				if (wire_enabled && pset[pmax].revents & POLLIN)
 				{
 
 					int r;
@@ -2024,11 +2030,16 @@ Options:\n\
 		// Fileserver garbage collection
 
 		for (s = 0; s < stations; s++)
+		{
 			if (network[s].servertype & ECONET_SERVER_FILE) 
 			{
 //				fprintf(stderr, "   FS: Garbage collect on server %d\n", network[s].fileserver_index);
-				//fs_garbage_collect(network[s].fileserver_index);
+				fs_garbage_collect(network[s].fileserver_index);
 			}
+		
+			if (network[s].servertype & ECONET_SERVER_SOCKET)
+				sks_poll(network[s].sks_index);
+		}
 	}
 }
 
