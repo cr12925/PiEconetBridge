@@ -1081,7 +1081,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 	else if (a->p.aun_ttype == ECONET_AUN_BCAST) // Broadcast - See if we need to do a bridge query reply
 	{
 		//fprintf (stderr, "Bridge query %s, port %02x, BRIDGE check %s, localnet %s\n", (bridge_query ? "on" : "off"), a->p.port, (!strncmp("BRIDGE", (const char *) a->p.data, 6) ? "match" : "not matched"), localnet ? "set" : "not set");
-		if (bridge_query && (a->p.port == 0x9c) && (!strncmp("BRIDGE", (const char *) a->p.data, 6)) && localnet)
+		if (bridge_query && (a->p.port == 0x9c) && (!strncmp("BRIDGE", (const char *) a->p.data, 6)) && localnet && (network[econet_ptr[a->p.srcnet][a->p.srcstn]].type & ECONET_HOSTTYPE_TWIRE))
 		{
 			short query_net, reply_port;
 			struct __econet_packet_udp reply;

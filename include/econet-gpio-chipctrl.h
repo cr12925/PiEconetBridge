@@ -83,6 +83,7 @@ void econet_flagfill(void);
 #define econet_get_sr()	{ \
 		sr1 = econet_read_sr(1); \
 		sr2 = (sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : ((sr1 & ECONET_GPIO_S1_RDA) >> 7); \
+		econet_data->clock = (sr2 & ECONET_GPIO_S2_DCD) ? 0 : 1; \
 		}
 
 #endif

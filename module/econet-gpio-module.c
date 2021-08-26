@@ -214,6 +214,9 @@ unsigned char econet_read_bus(void)
 
 	econet_wait_pin_low(ECONET_GPIO_PIN_CSRETURN, (ECONET_GPIO_CLOCK_DUTY_CYCLE));
 	econet_set_cs(ECONET_GPIO_CS_OFF); // Put this inactive again once we know the D-Type has clocked it to the 68B54
+
+// Hmm. What happens if we take this away altogether?
+
 #ifndef ECONET_NO_NDELAY
 	econet_ndelay(100); // Max wait time before data settles on bus according to chip spec, less a bit (180ns is what the spec says) // Was 100
 #else
@@ -223,7 +226,6 @@ unsigned char econet_read_bus(void)
 		"nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; "
 		"nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; ");
 #endif
-
 
 	d = (readl(GPIO_PORT + GPLEV0) & ECONET_GPIO_CLRMASK_DATA) >> ECONET_GPIO_PIN_DATA;
 
@@ -294,7 +296,7 @@ int econet_probe_adapter(void)
 #ifndef ECONET_NO_NDELAY
 	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
 #else
-	udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
+	udelay(2); // 2us should always be enough
 #endif
 	if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
 		return 0;
@@ -644,7 +646,7 @@ econet_idlecheck:
 
 #ifdef ECONET_GPIO_DEBUG_TX
 	printk (KERN_INFO "ECONET_GPIO: econet_set_write_mode() instrumentation: After wait %d loops, SR1 = 0x%02x\n", counter, sr1);
-	printk (KERN_INFO "ECONET_GPIO: econet_set_write_mode() instrumentation: ecoent_get_sr() delay was %lld ns, counter loops = %d \n", swm_idlewaitend - swm_idlewaitstart, counter);
+	printk (KERN_INFO "ECONET_GPIO: econet_set_write_mode() instrumentation: econet_get_sr() delay was %lld ns, counter loops = %d \n", swm_idlewaitend - swm_idlewaitstart, counter);
 #endif
 
 	if (counter == 65536) // Didn't get the right TX state above
@@ -793,6 +795,17 @@ void econet_irq_write(void)
 
 	// Added 25.07.21 - Mark transmission even if not successful otherwise the reset timer gets stuck
 	econet_data->aun_last_tx = ktime_get_ns(); // Used to check if we have fallen out of bed on receiving a packet
+
+	if (sr2 & ECONET_GPIO_S2_DCD) // No clock
+	{
+		printk(KERN_INFO "ECONET-GPIO: No clock\n");
+		econet_pkt_tx.length = 0;
+		econet_data->tx_status = -ECONET_TX_NOCLOCK;
+		econet_set_aunstate(EA_IDLE);
+		econet_set_read_mode();
+		return;
+
+	}
 
 	if (econet_pkt_tx.length < 4) // Runt
 	{
@@ -1007,6 +1020,7 @@ recv_more:
 
 					case EA_IDLE: // First in a sequence - see what it is.
 					{
+unexpected_scout:
 						// Is it an immediate?
 						if (econet_pkt_rx.d.p.port == 0 && econet_pkt_rx.d.p.ctrl != 0x85) // Ctrl 0x85 appears, from all the traffic sniffing, to in fact be done as a 4-way handshake even though it's port 0. It's used for notify, remote, view, etc.
 						{
@@ -1213,7 +1227,11 @@ recv_more:
 							(econet_pkt_rx.ptr != 4)	
 						)
 						{
+							// If it's 6 bytes, let's assume it's a scout we weren't expecting and dump it in the scout routine
+							if (econet_pkt_rx.ptr == 6) goto unexpected_scout;
+
 							printk (KERN_ERR "ECONET-GPIO: econet_irq_read(): AUN: Valid frame received, length %04x, but was expecting first ACK from %d.%d - got packet from %d.%d to %d.%d %02x %02x %02x %02x\n", econet_pkt_rx.ptr, aun_tx.d.p.dstnet, aun_tx.d.p.dststn, econet_pkt_rx.d.p.srcnet, econet_pkt_rx.d.p.srcstn, econet_pkt_rx.d.p.dstnet, econet_pkt_rx.d.p.dststn, econet_pkt_rx.d.p.data[0], econet_pkt_rx.d.p.data[1], econet_pkt_rx.d.p.data[2], econet_pkt_rx.d.p.data[3]);
+	
 							econet_set_aunstate(EA_IDLE);
 							//econet_data->aun_state = EA_IDLE;
 							econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // See if this fixes the crashes
@@ -1892,6 +1910,21 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	printk (KERN_INFO "ECONET-GPIO: Adapter mode on entry to writefd() = %d\n", status_on_entry);
 #endif
 
+	reset_counter = 0;
+	while (!(econet_data->clock) && reset_counter < 2)
+	{
+		econet_data->last_tx_user_error = ECONET_TX_NOCLOCK;
+		econet_adlc_cleardown(0);
+		printk (KERN_ERR "ECONET-GPIO: econet_writefd(): No clock\n");
+		econet_set_chipstate(EM_IDLEINIT);
+		econet_set_read_mode();
+		if (econet_data->aun_mode) // If we are giving up, and in AUN mode, gop back to IDLE
+			econet_set_aunstate(EA_IDLE);
+		reset_counter++;
+	}
+	
+	if (!econet_data->clock)
+		return -1;
 
 	if ((c = copy_from_user(&econet_pkt, buffer, len)))
 	{
@@ -2014,6 +2047,7 @@ restart_tx:
 			// Wait for end of transmission
 		
 			while (((tx_success = econet_data->tx_status) == 0xfe) && ((ts_tx_end = ktime_get_ns()) < timer2));
+
 			//if (ts_tx_end >= timer2) // Timed out
 			if (tx_success == 0xff || tx_success == 0xfe) // Never started or didn't finish in time
 			{
@@ -2052,6 +2086,12 @@ restart_tx:
 				econet_set_read_mode();
 				econet_data->last_tx_user_error = 0;
 				return len;
+			}
+			else if (tx_success == -ECONET_TX_NOCLOCK) // No clock on TX
+			{
+				econet_set_read_mode();
+				econet_data->last_tx_user_error = -tx_success;
+				return -1;
 			}
 			else if ((starter_counter++ < ECONET_TX_MAXSTARTS) && (tx_success == ECONET_TX_HANDSHAKEFAIL || tx_success == ECONET_TX_UNDERRUN || tx_success == ECONET_TX_TDRAFULL || tx_success == ECONET_TX_NOTSTART || tx_success == ECONET_TX_COLLISION)) // We've had less than 10 gos and have a non-fatal error, have another go
 				goto restart_tx;
