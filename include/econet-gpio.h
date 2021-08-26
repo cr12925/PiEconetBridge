@@ -164,6 +164,7 @@ struct __econet_data {
 	u64 aun_last_tx;
 	u64 aun_last_statechange;
 	short last_tx_user_error;
+	unsigned char clock; // 0 = no clock; anything else = clock - set when reading registers
 };
 
 struct __econet_pkt_buffer {
