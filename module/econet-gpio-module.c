@@ -568,8 +568,7 @@ void econet_set_read_mode(void)
 	econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 	econet_write_cr(ECONET_GPIO_CR1, C1_READ);
 
-	//econet_data->mode = EM_IDLEINIT; // Idle because we don't know if a packet is going to turn up, and we might want to transmit
-	econet_set_chipstate(EM_IDLEINIT);
+	econet_set_chipstate(EM_IDLEINIT); 
 
 	last_data_rcvd = 0; // Last time we received data off the wire. Detect stuck in read mode when we want to write
 
@@ -611,7 +610,9 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 	if (sr2 & ECONET_GPIO_S2_DCD) // /DCD is high - no clock
 	{
 		econet_data->tx_status = -ECONET_TX_NOCLOCK;
+#ifdef ECONET_GPIO_DEBUG_TX
 		printk (KERN_INFO "ECONET-GPIO: No clock on TX\n");
+#endif
 		econet_set_read_mode();
 		return;
 	}
@@ -798,7 +799,7 @@ void econet_irq_write(void)
 
 	if (sr2 & ECONET_GPIO_S2_DCD) // No clock
 	{
-		printk(KERN_INFO "ECONET-GPIO: No clock\n");
+		//printk(KERN_INFO "ECONET-GPIO: No clock\n");
 		econet_pkt_tx.length = 0;
 		econet_data->tx_status = -ECONET_TX_NOCLOCK;
 		econet_set_aunstate(EA_IDLE);
@@ -1914,8 +1915,10 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	while (!(econet_data->clock) && reset_counter < 2)
 	{
 		econet_data->last_tx_user_error = ECONET_TX_NOCLOCK;
-		econet_adlc_cleardown(0);
+		//econet_adlc_cleardown(0); // Too much logging and probably unnecessary
+#ifdef ECONET_GPIO_DEBUG_TX
 		printk (KERN_ERR "ECONET-GPIO: econet_writefd(): No clock\n");
+#endif
 		econet_set_chipstate(EM_IDLEINIT);
 		econet_set_read_mode();
 		if (econet_data->aun_mode) // If we are giving up, and in AUN mode, gop back to IDLE
