@@ -80,9 +80,11 @@ void econet_flagfill(void);
 	#define econet_wait_pin_low(p,t)	while (readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN))
 #endif
 					
+/* Note that there are two assignments to sr2 here. The first is the historical one. The second is because we discovered that SR2Q on S1 did not go high when, for example, /DCD alone was set in SR2, so we now read both registers. Old code left so we don't lose it */
 #define econet_get_sr()	{ \
 		sr1 = econet_read_sr(1); \
 		sr2 = (sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : ((sr1 & ECONET_GPIO_S1_RDA) >> 7); \
+		sr2 = econet_read_sr(2); \
 		econet_data->clock = (sr2 & ECONET_GPIO_S2_DCD) ? 0 : 1; \
 		}
 

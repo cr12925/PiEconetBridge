@@ -1911,11 +1911,14 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	printk (KERN_INFO "ECONET-GPIO: Adapter mode on entry to writefd() = %d\n", status_on_entry);
 #endif
 
-	reset_counter = 0;
-	while (!(econet_data->clock) && reset_counter < 2)
+// Check for clock 
+
+	if (!(econet_data->clock))
+		econet_get_sr(); // Have another look
+	
+	if (!(econet_data->clock))
 	{
 		econet_data->last_tx_user_error = ECONET_TX_NOCLOCK;
-		//econet_adlc_cleardown(0); // Too much logging and probably unnecessary
 #ifdef ECONET_GPIO_DEBUG_TX
 		printk (KERN_ERR "ECONET-GPIO: econet_writefd(): No clock\n");
 #endif
@@ -1923,11 +1926,12 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		econet_set_read_mode();
 		if (econet_data->aun_mode) // If we are giving up, and in AUN mode, gop back to IDLE
 			econet_set_aunstate(EA_IDLE);
-		reset_counter++;
-	}
-	
-	if (!econet_data->clock)
 		return -1;
+	}
+
+#ifdef ECONET_GPIO_DEBUG_TX
+	printk (KERN_INFO "ECONET-GPIO: econet_writefd(): Clock detected\n");
+#endif
 
 	if ((c = copy_from_user(&econet_pkt, buffer, len)))
 	{
@@ -2379,6 +2383,7 @@ static int __init econet_init(void)
 	econet_data->aun_mode = 0;
 	econet_data->aun_seq = 0x4000;
 	econet_data->aun_last_tx = 0;
+	econet_data->clock = 0; // Assume no clock to start with
 	econet_set_aunstate(EA_IDLE);
 	//econet_data->aun_state = EA_IDLE;
 	econet_data->spoof_immediate = 0;
@@ -2435,6 +2440,13 @@ static int __init econet_init(void)
 	econet_set_read_mode();
 
 	printk (KERN_INFO "ECONET-GPIO: Hardware present. ADLC initialized.\n");
+
+	econet_get_sr();
+
+	if (!(econet_data->clock))
+		printk (KERN_ERR "ECONET-GPIO: No clock! (SR1 = 0x%02x, SR2 = 0x%02x)\n", sr1, sr2);
+	else
+		printk (KERN_INFO "ECONET-GPIO: Clock detected (SR1 = 0x%02x, SR2 = 0x%02x)\n", sr1, sr2);
 
  	return 0;
 
