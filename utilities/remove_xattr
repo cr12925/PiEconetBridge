@@ -1,0 +1,10 @@
+#!/bin/sh
+
+getfattr -d -R $1 | grep '^# file: ' | while read line
+do
+  filename=${line#"# file: "}
+  setfattr -x user.econet_exec $filename
+  setfattr -x user.econet_load $filename
+  setfattr -x user.econet_owner $filename
+  setfattr -x user.econet_perm $filename
+done
