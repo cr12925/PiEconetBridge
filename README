@@ -745,9 +745,18 @@ subject to conversion of '/' (which is permissible in a BBC filename) to ':'
 (which is not) so that individual filenames do not attempt to straddle Linux
 directories. 
 
-Load, Execute and Econet owner are stored as extended attributes, so you need
-to make sure your filesystem supports them. Ext4 does by default on the
-standard Pi installation. 
+By default, Load, Execute and Econet owner are stored as extended attributes,
+so you need to make sure your filesystem supports them. Ext4 does by default
+on the standard Pi installation.
+
+If your filesystem does not support extended attributes then you can use the
+-x flag to disable this, and instead the attributes are stored an in "inf"
+file.  So a filename !BOOT would have an additional !BOOT.inf that stores the
+four values.
+
+Even on a filesystem with extended attributes enabled, if an inf file is
+found then this will be used in preference, so !BOOT.inf will be used if
+it exists.
 
 You can mount each disc as a separate filesystem if you wish. The FS code will
 ignore the lost+found directory.

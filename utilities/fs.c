@@ -64,6 +64,7 @@ extern unsigned long get_local_seq(unsigned char, unsigned char);
 #endif
 
 short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for extra year information
+short use_xattr=1 ; // When set use filesystem extended attributes, otherwise use a dotfile
 
 short fs_open_interlock(int, unsigned char *, unsigned short, unsigned short);
 void fs_close_interlock(int, unsigned short, unsigned short);
@@ -586,8 +587,81 @@ int fs_check_dir(DIR *h, char *e,  char *r)
 
 }
 
+// These three functions emulate xattr for filesystems that can't
+// handle it (enable with -x)
+// Basically the file contains "owner load exec perm" values
+//
+// The filename is "path" + '.inf'
+// This will be hidden at the Acorn layer because filenames can't have
+// a dot in them (that's a directory separator in the Acorn world)
+
+unsigned char *pathname_to_dotfile(unsigned char *path)
+{
+	unsigned char *dotfile;
+	dotfile=malloc(strlen(path)+10);
+	strcpy(dotfile,path);
+	// If last character is a / then strip it off; we want the
+	// filename in the parent directory
+	while (dotfile[strlen(dotfile)-1] == '/')
+		dotfile[strlen(dotfile)-1] = '\0';
+	strcat(dotfile,".inf");
+	return dotfile;
+}
+
+void fs_read_attr_from_file(unsigned char *path, struct objattr *r)
+{
+	char *dotfile=pathname_to_dotfile(path);
+	FILE *f=fopen(dotfile,"r");
+	if (f != NULL)
+	{
+		unsigned short owner, perm;
+		unsigned long load, exec;
+		fscanf(f, "%hx %lx %lx %hx", &owner, &load, &exec, &perm);
+		// printf("GOT %hx %lx %lx %hx\n", owner, load, exec, perm);
+		r->owner = owner;
+		r->load = load;
+		r->exec = exec;
+		r->perm = perm;
+		fclose(f);
+	}
+
+	free(dotfile);
+	return;
+}
+
+void fs_write_attr_to_file(unsigned char *path, int owner, short perm, unsigned long load, unsigned long exec)
+{
+	char *dotfile=pathname_to_dotfile(path);
+	FILE *f=fopen(dotfile,"w");
+	if (f != NULL)
+	{
+		fprintf(f, "%hx %lx %lx %hx", owner, load, exec, perm);
+		fclose(f);
+	}
+	else
+		fprintf(stderr, "Could not open %s for writing: %s\n", path, strerror(errno));
+
+	free(dotfile);
+	return;
+}
+
 void fs_read_xattr(unsigned char *path, struct objattr *r)
 {
+	// Default values
+	r->owner=0; // syst
+        r->load=0;
+        r->exec=0;
+	r->perm=FS_PERM_OWN_R | FS_PERM_OWN_W | FS_PERM_OTH_R;
+
+	char *dotfile=pathname_to_dotfile(path);
+	int dotexists=access(dotfile, F_OK);
+	free(dotfile);
+
+	if (!use_xattr || dotexists==0)
+	{
+		fs_read_attr_from_file(path, r);
+		return;
+	}
 
 	unsigned char attrbuf[20];
 
@@ -596,28 +670,24 @@ void fs_read_xattr(unsigned char *path, struct objattr *r)
 		attrbuf[4] = '\0';
 		r->owner = strtoul((const char * ) attrbuf, NULL, 16);
 	}
-	else	r->owner = 0; // Syst
 
 	if (getxattr((const char *) path, "user.econet_load", attrbuf, 8) >= 0) // Attribute found
 	{
 		attrbuf[8] = '\0';
 		r->load = strtoul((const char * ) attrbuf, NULL, 16);
 	}
-	else	r->load = 0; 
 
 	if (getxattr((const char *) path, "user.econet_exec", attrbuf, 8) >= 0) // Attribute found
 	{
 		attrbuf[8] = '\0';
 		r->exec = strtoul((const char * ) attrbuf, NULL, 16);
 	}
-	else	r->exec = 0; 
 
 	if (getxattr((const char *) path, "user.econet_perm", attrbuf, 2) >= 0) // Attribute found
 	{
 		attrbuf[2] = '\0';
 		r->perm = strtoul((const char * ) attrbuf, NULL, 16);
 	}
-	else	r->perm = FS_PERM_OWN_R | FS_PERM_OWN_W | FS_PERM_OTH_R; 
 
 	return;
 
@@ -625,6 +695,15 @@ void fs_read_xattr(unsigned char *path, struct objattr *r)
 
 void fs_write_xattr(unsigned char *path, int owner, short perm, unsigned long load, unsigned long exec)
 {
+	char *dotfile=pathname_to_dotfile(path);
+	int dotexists=access(dotfile, F_OK);
+	free(dotfile);
+
+	if (!use_xattr || dotexists==0)
+	{
+		fs_write_attr_to_file(path, owner, perm, load, exec);
+		return;
+	}
 
 	unsigned char attrbuf[20];
 
@@ -1195,28 +1274,11 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 		// Next, see if we have xattr and, if not, populate them. We do this for all paths along the way
 
+		fs_read_xattr(result->unixpath,&attr);
 		result->owner = 0; // Always SYST if root directory not owned
-
-		if (getxattr(result->unixpath, "user.econet_load", &attrbuf, 8) >= 0) // Load attribute exists
-		{
-			attrbuf[8] = '\0';
-			result->load = strtoul(attrbuf, NULL, 16);
-		}
-		else	result->load = 0;
-
-		if (getxattr(result->unixpath, "user.econet_exec", &attrbuf, 8) >= 0) // Exec attribute exists
-		{
-			attrbuf[8] = '\0';
-			result->exec = strtoul(attrbuf, NULL, 16);
-		}
-		else	result->exec = 0;
-
-		if (getxattr(result->unixpath, "user.econet_perm", &attrbuf, 2) >= 0) // Perm attribut exists
-		{
-			attrbuf[2] = '\0';
-			result->perm = (unsigned short) strtoul(attrbuf, NULL, 16);
-		}
-		else	result->perm = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R; // Default permissions
+		result->load = attr.load;
+		result->exec = attr.exec;
+		result->perm = attr.perm;
 
 		fs_write_xattr(result->unixpath, result->owner, result->perm, result->load, result->exec);
 
@@ -4223,6 +4285,13 @@ void fs_rename(int server, unsigned short reply_port, int active_id, unsigned ch
 		return;
 	}
 
+	// If the INF file exists, rename it.  Ignore errors
+	char *olddot=pathname_to_dotfile(p_from.unixpath);
+	char *newdot=pathname_to_dotfile(p_to.unixpath);
+	rename(olddot, newdot);
+	free(olddot);
+	free(newdot);
+
 	r.p.ptype = ECONET_AUN_DATA;
 	r.p.port = reply_port;
 	r.p.ctrl = 0x80;
@@ -4312,6 +4381,13 @@ void fs_delete(int server, unsigned short reply_port, int active_id, unsigned ch
 					fs_free_wildcard_list(&p);
 					fs_error(server, reply_port, net, stn, 0xFF, "FS Error");
 					return;
+				}
+				else
+				{
+					// Silently delete the INF file if it exists
+					char *dotfile=pathname_to_dotfile(e->unixpath);
+					unlink(dotfile);
+					free(dotfile);
 				}
 		
 			e = e->next;

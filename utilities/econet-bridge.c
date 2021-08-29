@@ -47,6 +47,7 @@ extern void fs_eject_station(unsigned char, unsigned char); // Used to get rid o
 extern void sks_poll(int);
 extern unsigned short fs_quiet, fs_noisy;
 extern short fs_sevenbitbodge;
+extern short use_xattr; // When set use filesystem extended attributes, otherwise use a dotfile
 
 #define ECONET_LEARNED_HOST_IDLE_TIMEOUT 3600 // 1 hour
 
@@ -1609,7 +1610,7 @@ int main(int argc, char **argv)
 
 	fs_sevenbitbodge = 1; // On by default
 
-	while ((opt = getopt(argc, argv, "bc:dfilnqszh7")) != -1)
+	while ((opt = getopt(argc, argv, "bc:dfilnqsxzh7")) != -1)
 	{
 		switch (opt) {
 			case 'b': dumpmode_brief = 1; break;
@@ -1628,6 +1629,7 @@ int main(int argc, char **argv)
 				break;
 			case 's': dump_station_table = 1; break;
 			case 'z': wired_eject = 0; break;
+                        case 'x': use_xattr = 0; break;
 			case '7': fs_sevenbitbodge = 0; break;
 			case 'h':	
 				fprintf(stderr, " \n\
@@ -1646,6 +1648,7 @@ Options:\n\
 \t-l\tLocal only - do not connect to kernel module (uses /dev/null instead)\n\
 \t-q\tDisable bridge query responses\n\
 \t-s\tDump station table on startup\n\
+\t-x\tNever use filesystem extended attributes and force use of dotfiles\n\
 \t-z\tDisable wired fileserver eject on dynamic allocation (see readme)\n\
 \t-7\tDisable fileserver 7 bit bodge\n\
 \n\
