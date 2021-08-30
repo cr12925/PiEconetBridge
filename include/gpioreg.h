@@ -18,7 +18,7 @@
 #define ECONET_GPIO_PIN_CS      5       /* /CS to card */
 #define ECONET_GPIO_PIN_CLK     4       /* Clock to card. We set this manually. Just here for reference. */
 #define ECONET_GPIO_PIN_RW      6       /* /RW to card */
-#define ECONET_GPIO_PIN_DIR     16      /* DIR to 74LVC245 level shifter */
+#define ECONET_GPIO_PIN_BUSY     16      /* v.2 hardware busy line */
 #define ECONET_GPIO_PIN_CSRETURN	18	/* Pin on which we read /CS as fed to the 68B54 after the D-Type flipflop */
 
 #define ECONET_GPIO_CLRMASK_DATA        (0xff << (ECONET_GPIO_PIN_DATA))
@@ -28,8 +28,7 @@
 #define ECONET_GPIO_CLRMASK_CS          (0x01 << ECONET_GPIO_PIN_CS)
 #define ECONET_GPIO_CLRMASK_CLK         (0x01 << ECONET_GPIO_PIN_CLK)
 #define ECONET_GPIO_CLRMASK_RW          (0x01 << ECONET_GPIO_PIN_RW)
-#define ECONET_GPIO_CLRMASK_DIR         (0x01 << ECONET_GPIO_PIN_DIR)
-#define ECONET_GPIO_CLRMASK_RD          (ECONET_GPIO_CLRMASK_RW | ECONET_GPIO_CLRMASK_DIR)
+#define ECONET_GPIO_CLRMASK_BUSY         (0x01 << ECONET_GPIO_PIN_BUSY)
 
 #define ECONET_GPIO_CLOCKSPEED	1000000	/* 1 Mhz clock. Slower than the Beeb but easier to manage */
 //#define ECONET_GPIO_CLOCKIDIV (750 << 12)

@@ -141,6 +141,7 @@ struct __econet_packet_udp {
 #define ECONETGPIO_IOC_AUNMODE		_IOW(ECONETGPIO_MAGIC, 6, int) /* Turn AUN mode (4-way handshake) on / off */
 #define ECONETGPIO_IOC_IMMSPOOF		_IOW(ECONETGPIO_MAGIC, 7, int) /* Turn in-kernel immediate spoofing for wire stations on/off  */
 #define ECONETGPIO_IOC_TXERR		_IOR(ECONETGPIO_MAGIC, 8, int) /* Read last tx error number  */
+#define ECONETGPIO_IOC_READMODE		_IO(ECONETGPIO_MAGIC, 9) /* Set module to read mode  */
 
 /* The following are for debugging and testing only, and only with interrupts off */
 #define ECONETGPIO_IOC_SETA		_IOW(ECONETGPIO_MAGIC, 100, int) /* bit0 is A0, bit1 is A1 */

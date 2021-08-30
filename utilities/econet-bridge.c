@@ -1331,8 +1331,6 @@ int aun_send (struct __econet_packet_udp *p, int len, short srcnet, short srcstn
 	w.p.dststn = dststn;
 	memcpy (&(w.p.aun_ttype), p, len);
 
-	//fprintf (stderr, "Sending AUN packet type %02x to %3d.%3d from %3d.%3d, seq = %08lx, length %d\n", w.p.aun_ttype, dstnet, dststn, srcnet, srcstn, w.p.seq, len);
-
 	if (w.p.aun_ttype == ECONET_AUN_BCAST)
 		w.p.dstnet = w.p.dststn = 0xff;
 		
@@ -1340,51 +1338,6 @@ int aun_send (struct __econet_packet_udp *p, int len, short srcnet, short srcstn
 	s = econet_ptr[srcnet][srcstn];
 
 	network[d].last_transaction = time(NULL);
-
-/*
- * this code is connected to bridge query handling... it hasn't worked!
-
-	if (dstnet == 255 && dststn == 255) return len; // Dump broadcasts for now.
-
-	if (srcnet == localnet && srcstn == 0 && network[d].type & ECONET_HOSTTYPE_TWIRE) // This is a bridge query response - for now, only send to the wire and only if it came from the wire
-	{
-	
-		int attempts, written, err, outercount;
-		struct timespec now;
-
-		dump_udp_pkt_aun(len - 8, 2, &w, srcnet, srcstn, dstnet, dststn);
-
-		outercount = 0;
-		
-try_again:
-		attempts = 0;
-		written = -1;
-
-		while (attempts++ < 5 && written < 0)
-			written = write(econet_fd, &w, len+4);
-			
-		err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
-		
-		if (written < 0)
-		{
-			if ((err == ECONET_TX_HANDSHAKEFAIL || err == ECONET_TX_UNDERRUN || err == ECONET_TX_TDRAFULL || err == ECONET_TX_NOIRQ || err == ECONET_TX_COLLISION || err == ECONET_TX_NOTSTART) && (outercount++ < 50)) // Non-fatal failure
-			{
-				usleep(((int) (srcstn/10)^outercount); // Exponential backoff
-				//usleep(100);
-				goto try_again;
-			}
-
-			// If we've expired our chances, print the error
-			fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - %s (%02X) - after %d tries\n", dstnet, dststn, srcnet, srcstn, econet_strtxerr(err), err, outercount+1);	
-		}
-
-		if (written < (len+4) && written >= 0)
-			fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - only %d of %d bytes written\n", dstnet, dststn, srcnet, srcstn, written, (len+4));	
-
-		return written;
-	}
-
-*/
 
 	dir = 0;
 
@@ -1459,15 +1412,15 @@ try_again:
 				else if (w.p.aun_ttype == ECONET_AUN_IMM && spoof_immediate == 0) // No immediate spoofing, so we might get immediates off the wire in userspace. In which case, wait to see if we get a response and put it back on the wire
 				{
 
-					ack.fd = network[s].listensocket;
+					ack.fd = network[s].listensocket; // network[s] because we want to listen on the listener for the wire host that sent the immediate request
 					ack.events = POLLIN;
 
-					if ((poll(&ack, 1, 250)) && (ack.revents & POLLIN))
+					if ((poll(&ack, 1, 100)) && (ack.revents & POLLIN))
 					{
 						struct __econet_packet_udp data;
 						int len, attempts, written;
 
-						len = read(network[s].listensocket, &data, 100);
+						len = read(network[s].listensocket, &data, ECONET_MAX_PACKET_SIZE+4);
 			
 						if (data.p.ptype == ECONET_AUN_IMMREP) // && data.p.seq == w.p.seq) At the moment, the sequence number coming back from other bridges on immedaite reply will not match. Need to fix that.
 						{
@@ -1489,8 +1442,8 @@ try_again:
 
 							written = -1;
 
-							dump_udp_pkt_aun(len - 8, dir, &ir, dstnet, dststn, srcnet, srcstn);
-							while ((attempts < 5) && (written < 0))
+							dump_udp_pkt_aun(len - 8, 1, &ir, dstnet, dststn, srcnet, srcstn);
+							while ((attempts < 2) && (written < 0))
 							{
 								written = write(econet_fd, &ir, 12 + (len-8));
 								err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
@@ -1499,12 +1452,11 @@ try_again:
 									break;
 							}	
 
-							fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - %s (%02x) - after %d attempts at sending immediate reply\n", dstnet, dststn, srcnet, srcstn, econet_strtxerr(err), err, attempts);	
 							if (written < 0)
 							{
 								int err;
 								err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
-								fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - %s (%02x) whilst writing immediate reply\n", srcnet, srcstn, dstnet, dststn, econet_strtxerr(err), err);	
+								fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - %s (%02x) after %d attempts whilst writing immediate reply\n", srcnet, srcstn, dstnet, dststn, econet_strtxerr(err), err, attempts);	
 							}
 							if (written < (len+4) && written >= 0)
 								fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - only %d of %d bytes written whilst writing immediate reply\n", srcnet, srcstn, dstnet, dststn, written, (len + 4));	
@@ -1512,6 +1464,7 @@ try_again:
 							acknowledged = 1;
 						}
 					}
+					else	ioctl(econet_fd, ECONETGPIO_IOC_READMODE); // Force read mode on a timeout otherwise the kernel stops listening...
 
 				}
 
@@ -1568,9 +1521,6 @@ try_again:
 						break;
 				}	
 
-				//while (attempts++ < 3 && written < 0)
-					//written = write(econet_fd, &w, len+4);
-					
 				if (written < 0)
 					fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - %s (%02x) - after %d attempts\n", dstnet, dststn, srcnet, srcstn, econet_strtxerr(err), err, attempts);	
 				else if (written < (len+4) && written >= 0)
@@ -1674,6 +1624,9 @@ Options:\n\
 
 		if (learned_net != -1)
 			fprintf (stderr, "%3d                      DYNAMICALLY ALLOCATED STATION NETWORK\n", learned_net);
+
+		if (wire_enabled)
+			fprintf (stderr, "%5d                    MAXIMUM PACKET SIZE\n", ECONET_MAX_PACKET_SIZE);
 
 		for (n = 0; n < 256; n++)
 		{
@@ -1809,6 +1762,7 @@ Options:\n\
 						network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_transaction = time(NULL);
 
 						aun_send((struct __econet_packet_udp *)&(rx.raw[4]), r-4, rx.p.srcnet, rx.p.srcstn, rx.p.dstnet, rx.p.dststn); // Deals with sending to local hosts
+
 					}
 				}
 
