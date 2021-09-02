@@ -110,8 +110,10 @@ u64 last_data_rcvd;
 void econet_set_dir(short d)
 {
 
+/*
 	if (econet_data->current_dir == d)
 		return;
+*/
 
 	econet_data->current_dir = d;
 
@@ -1032,7 +1034,15 @@ recv_more:
 
 				// If our last transmission was more than 0.8s ago, go back to EA_IDLE
 				
-				if (((ktime_get_ns() - econet_data->aun_last_tx) > ECONET_4WAY_TIMEOUT) && (econet_data->aun_state != EA_IDLE)) // If not in IDLE state and last TX was a long time ago, go back to idle because what we've just received must be something new - i.e. a new broadcast / immediate / scout
+				if (
+					(	((ktime_get_ns() - econet_data->aun_last_tx) > (2 * ECONET_4WAY_TIMEOUT)) &&
+						(econet_data->aun_state == EA_I_READREPLY)
+					) 	||
+					(
+						((ktime_get_ns() - econet_data->aun_last_tx) > ECONET_4WAY_TIMEOUT) && 
+						(econet_data->aun_state != EA_IDLE)
+					)
+				) // If we are waiting for an immediate reply (which might be quite long), wait 2 x 4-way timeout (1.6s - ample for a 20k packet (e.g. MODE 0 screen dump on *VIEW) coming across from a station behind an onward bridge, and if not waiting for one of those and it's more than 0.8 seconds, then go back to idle.
 				{
 					printk (KERN_INFO "ECONET-GPIO: Last TX was too long ago. Moving back to AUN IDLE state.\n");
 					econet_set_aunstate(EA_IDLE);
@@ -1629,7 +1639,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 				case EA_I_WRITEIMM: // We receive an immediate from userspace and have just written it to the wire, so need to wait for the reply
 				{
 					econet_set_aunstate(EA_I_READREPLY);
-					//econet_data->aun_state = EA_I_READREPLY;
 					// Because this is an immediate, we need to flag transmit success to the tx user space
 					econet_data->tx_status = ECONET_TX_SUCCESS;
 #ifdef ECONET_GPIO_DEBUG_AUN
@@ -1642,7 +1651,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 					// We don't update tx_status here because the immediate reply will have been generated in-kernel
 					econet_data->tx_status = ECONET_TX_SUCCESS;
 					econet_set_aunstate(EA_IDLE);
-					//econet_data->aun_state = EA_IDLE;
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "ECONET-GPIO: econet_irq(): AUN: Written immediate reply. Signal TX success. Return to IDLE\n");
 #endif
@@ -1654,7 +1662,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 					printk (KERN_INFO "ECONET-GPIO: econet_irq(): AUN: Default reached on write state machine. Return to IDLE. AUN state = %d\n", econet_data->aun_state);
 #endif
 					econet_set_aunstate(EA_IDLE);
-					//econet_data->aun_state = EA_IDLE;
 					break;
 				}
 						
@@ -1820,7 +1827,6 @@ void econet_aun_tx_statemachine(void)
 					memcpy (&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data), (aun_tx.length - 12));
 				econet_pkt_tx_prepare.length = 6 + (aun_tx.length > 12 ? (aun_tx.length -6) : 0); // i.e. up to the port byte and then any data that's around
 				econet_set_aunstate(EA_W_WRITEBCAST);
-				//econet_data->aun_state = EA_W_WRITEBCAST;
 			}
 			else if (aun_tx.d.p.aun_ttype == ECONET_AUN_IMM) // Immediate
 			{
@@ -1831,7 +1837,6 @@ void econet_aun_tx_statemachine(void)
 					memcpy (&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data), (aun_tx.length - 12));
 				econet_pkt_tx_prepare.length = 6 + (aun_tx.length > 12 ? (aun_tx.length - 12) : 0); // i.e. up to the port byte and then any data that's around
 				econet_set_aunstate(EA_I_WRITEIMM);
-				//econet_data->aun_state = EA_I_WRITEIMM;	
 			}	
 			else if (aun_tx.d.p.aun_ttype == ECONET_AUN_DATA) // Data -- NB this will also be used for the "special" port 0 ctrl 0x85 "4-way immediate" for things like Notify, etc.
 			{
@@ -1858,7 +1863,6 @@ void econet_aun_tx_statemachine(void)
 
 				econet_pkt_tx_prepare.ptr = 0;
 				econet_set_aunstate(EA_W_WRITESCOUT);
-				//econet_data->aun_state = EA_W_WRITESCOUT;
 			}
 			else if (aun_tx.d.p.aun_ttype == ECONET_AUN_IMMREP) // Reply to an immediate we presumably collected off the wire & send to userspace some time ago
 			{
@@ -2140,7 +2144,12 @@ restart_tx:
 				return -1;
 			}
 			else if ((starter_counter++ < ECONET_TX_MAXSTARTS) && (tx_success == ECONET_TX_HANDSHAKEFAIL || tx_success == ECONET_TX_UNDERRUN || tx_success == ECONET_TX_TDRAFULL || tx_success == ECONET_TX_NOTSTART || tx_success == ECONET_TX_COLLISION)) // We've had less than 10 gos and have a non-fatal error, have another go
+			{
+				if ((econet_data->aun_mode) && (tx_success == ECONET_TX_COLLISION)) // Back off
+					udelay (starter_counter * ((255 - aun_tx.d.p.srcstn) * 1000)); // per station, prioritising the higher station numbers, increasing every time we have to have another go
+
 				goto restart_tx;
+			}
 			else 
 			{
 				// Note that in this block, tx_success in fact contains an error code.
