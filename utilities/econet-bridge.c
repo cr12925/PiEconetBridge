@@ -47,9 +47,9 @@ extern void fs_eject_station(unsigned char, unsigned char); // Used to get rid o
 extern void fs_dequeue();
 extern short fs_dequeuable();
 extern void sks_poll(int);
+short aun_wait (int, int, unsigned char, unsigned long, short, struct __econet_packet_aun **);
 extern unsigned short fs_quiet, fs_noisy;
 extern short fs_sevenbitbodge;
-short aun_wait (int, int, unsigned char, unsigned long, short, struct __econet_packet_aun **);
 
 #define ECONET_LEARNED_HOST_IDLE_TIMEOUT 3600 // 1 hour
 
