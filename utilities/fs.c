@@ -5293,7 +5293,7 @@ short fs_dequeuable(void)
 		l = l->next;
 	}
 
-	/* if (fs_noisy)	*/ fprintf (stderr, "CACHE: There is%s data in the bulk transfer queue (%d entries)\n", (fs_load_queue ? "" : " no"), count);
+	if (fs_noisy)	fprintf (stderr, "CACHE: There is%s data in the bulk transfer queue (%d entries)\n", (fs_load_queue ? "" : " no"), count);
 
 	if (fs_load_queue)
 		 return 1;
