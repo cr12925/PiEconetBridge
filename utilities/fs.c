@@ -235,6 +235,27 @@ struct path {
 	struct path_entry *paths, *paths_tail; // pointers to head and tail of a linked like of path_entry structs. These are dynamically malloced by the wildcard normalize function and must be freed by the caller. If FS_FTYPE_NOTFOUND, then both will be NULL.
 };
 	
+// Structures used to queue bulk transfers on *LOAD/*RUN. May be adapted later to work on getbytes(), but the latter typically uses smaller number of packets and so doesn't interrupt FS flow like repeated *LOAD does
+// When fs_load_queue is not null (see below), the main loop in the bridge will call fs_execute_load_queue to dump one packet off the head of each queue to the destination station
+struct __pq {
+	struct __econet_packet_udp *packet; // Don't bother with internal 4 byte src/dest header - they are given as parameters to aun_send.
+	int len; // Packet data length
+	struct __pq *next;
+};
+
+struct load_queue {
+	unsigned char net, stn; // Destination net, stn
+	unsigned int server; // Determines source address
+	unsigned queue_type; // For later use with getbytes() - but for now assume always a load
+	unsigned char internal_handle; // Internal file handle to be closed at end / abort
+	unsigned char mode; // Internal mode
+	struct load_queue *next;
+	struct __pq *pq_head, *pq_tail;	
+
+};
+
+struct load_queue *fs_load_queue = NULL; // Pointer to first load_queue entry. If NULL, there are no load queues to execute. The load queue entries are enqueued so as to be sorted in server, net, stn order. 
+
 regex_t r_pathname, r_discname, r_wildcard;
 
 int fs_count = 0;
@@ -3583,7 +3604,7 @@ void fs_close_interlock(int server, unsigned short index, unsigned short mode)
 		fs_files[server][index].readers--;
 	else	fs_files[server][index].writers--;
 
-	if (fs_noisy) fprintf (stderr, "   FS:%12sInterlock close internal handle %d, mode %d. Readers now = %d, Writers now = %d, path %s\n", "", index, mode, fs_files[server][index].readers, fs_files[server][index].writers, fs_files[server][index].name);
+	if (!fs_quiet) fprintf (stderr, "   FS:%12sInterlock close internal handle %d, mode %d. Readers now = %d, Writers now = %d, path %s\n", "", index, mode, fs_files[server][index].readers, fs_files[server][index].writers, fs_files[server][index].name);
 
 	if (fs_files[server][index].readers <= 0 && fs_files[server][index].writers <= 0)
 	{
@@ -4434,9 +4455,7 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 	struct path_entry *e;
 	unsigned char path[1024];
 	unsigned char perm;
-	unsigned short path_ptr;
 	unsigned short ptr;
-	unsigned char access_ptr;
 	char perm_str[10];
 
 	fs_copy_to_cr(path, command, 1023);
@@ -4880,6 +4899,332 @@ void fs_cat_header(int server, unsigned short reply_port, int active_id, unsigne
 	
 }
 
+// Load queue enque, deque functions
+
+// load enqueue. net, stn are destinations. server parameter is to ensure queue is ordered. p & len are the packet to queue
+// Length is data portion length only, so add 8 for the header on a UDP packet, 12 for AUN
+// We do the malloc/free inside the enqueue/dequeue routines
+// RETURNS:
+// -1 Failure - malloc
+// 1 Success
+
+char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigned char net, unsigned char stn, unsigned char internal_handle, unsigned char mode)
+{
+
+	struct __econet_packet_udp *u; // Packet we'll put into the queue
+	struct __pq *q; // Queue entry within a host
+	struct load_queue *l, *l_parent, *n; // l_ used for searching, n is a new entry if we need one
+
+	if (fs_noisy) fprintf (stderr, "CACHE: to %3d.%3d              Enqueue packet length %04X type %d\n", net, stn, len, p->p.ptype);
+
+	u = malloc(len + 8);
+	memcpy(u, p, len + 8); // Copy the packet data off
+
+	q = malloc(sizeof(struct __pq)); // Make a new packet entry
+
+	if (!u || !q) return -1;
+
+	//if (fs_noisy) fprintf (stderr, "CACHE: malloc() and copy succeeded\n");
+
+	// First, see if there is an existing queue entry for this server to this destination, to which we will add the packet.
+	// If there is, there is no need to build a new load_queue entry.
+
+	l = fs_load_queue;
+	l_parent = NULL;
+
+	while (l && (l->server < server))
+	{
+		l_parent = l;
+		l = l->next;
+	}
+
+	// So by here, if there were any entries at all, l points to the first one which is >= our server number.
+
+	// Now see about the network.
+
+	while (l && (l->server == server) && (l->net < net))
+	{
+		l_parent = l;
+		l = l->next;
+	}
+
+	// And likewise station number. If we get here, though, either l points to first entry where l->server > server, or first entry where l->server == server BUT l->net >= l->net - or we fell off the end of the list
+
+	while (l && (l->server == server) && (l->net == net) && (l->stn < stn))
+	{
+		l_parent = l;
+		l = l->next;
+	}
+
+	// And similarly here, we will either have (l->server > server), or (servers equal but net >), or (servers and net equal, but stn >) or (servers and net and stn equal) or fell off end.
+
+	//if (fs_noisy) fprintf (stderr, "CACHE: Existing queue%s found at %p\n", (l ? "" : " not"), l);
+
+	if (!l || (l->server != server || l->net != net || l->stn != stn)) // No entry found - make a new one
+	{
+
+		// Make a new load queue entry
+
+		if (fs_noisy) fprintf (stderr, "CACHE: Making new packet queue entry for this server/net/src triple ");
+
+		n = malloc(sizeof(struct load_queue));
+
+		if (!n)
+		{
+			free (u); free (q); return -1;
+		}
+
+		if (fs_noisy) fprintf (stderr, "at %p ", n);
+
+		n->net = net;
+		n->stn = stn;
+		n->server = server;
+		n->queue_type = 1; // 2 will be getbytes()
+		n->mode = mode;
+		n->internal_handle = internal_handle;
+		n->pq_head = NULL;
+		n->pq_tail = NULL;
+		n->next = NULL; // Applies whether there was no list at all, or we fell off the end of it. We'll fix it below if we're inserting
+
+		if (fs_noisy) fprintf (stderr, "fs_load_queue = %p, l = %p ", fs_load_queue, l);
+
+		if (!fs_load_queue) // There was no queue at all
+		{
+			if (fs_noisy) fprintf(stderr, "as a new fs_load_queue\n");
+			fs_load_queue = n;
+		}
+		else // We are inserting, possibly at the end
+		{
+			if (!l) // We fell off the end
+			{
+				if (fs_noisy) fprintf (stderr, "on the end of the existing queue\n");
+				l_parent->next = n;
+			}
+			else // Inserting in the middle or at queue head
+			{
+				if (!l_parent)
+				{
+					n->next = fs_load_queue;
+					if (fs_noisy) fprintf (stderr, "by inserting at queue head\n");
+					fs_load_queue = n;
+					
+				}
+				else
+				{
+					if (fs_noisy) fprintf (stderr, "by splice at %p\n", l_parent->next);
+					n->next = l_parent->next; // Splice this one in
+					l_parent->next = n;
+				}
+			}
+		
+
+		}
+	}
+	else // We must have found an existing queue for this server->{net,stn} traffic - just add the packet to it.
+		n = l;
+
+	q->packet = u;
+	q->len = len; // Data len only
+	q->next = NULL; // Always adding to end
+
+	if (!(n->pq_head)) // No existing packet in the queue for this transaction
+		n->pq_head = n->pq_tail = q;
+	else // Add to end
+	{
+		n->pq_tail->next = q;
+		n->pq_tail = q;
+	}
+
+/*
+	if (fs_noisy) fprintf (stderr, "CACHE: Queue state for %d to %3d.%3d:\n", server, net, stn);
+
+	if (fs_noisy) fprintf (stderr, "       Load_queue head at %p\n", n);
+*/
+	q = n->pq_head;
+
+	while (q)
+	{
+		//if (fs_noisy) fprintf (stderr, "         Packet length %04X at %p, next at %p\n", q->len, q, q->next);
+		q = q->next;
+	}
+
+	return 1;
+
+}
+
+// fs_enqueue_dump - dump a load queue entry and update the table as necessary
+void fs_enqueue_dump(struct load_queue *l)
+{
+
+	struct load_queue *h, *h_parent;
+	struct __pq *p, *p_next;
+
+	h = fs_load_queue;
+	h_parent = NULL;
+
+	if (l->queue_type == 1) // *LOAD operation
+		fs_close_interlock(l->server, l->internal_handle, l->mode); // Mode should always be one in this instance
+
+	while (h && (h != l))
+	{
+		h_parent = h;
+		h = h->next;
+	}
+
+	if (!h) // not found
+		return;
+
+	// First, dump off any remaining packets
+	
+	p = h->pq_head;
+
+	while (p)
+	{
+		p_next = p->next;
+		if (p->packet) 
+		{
+			if (fs_noisy) fprintf (stderr, "CACHE: Freeing bulk transfer packet at %p\n", p->packet);
+			free (p->packet); // Check it is not null, just in case...
+		}
+		if (fs_noisy) fprintf (stderr, "CACHE: Freeing bulk transfer queue entry at %p\n", p);
+		free(p);
+		p = p_next;
+
+	}
+	
+	if (h_parent) // Mid chain, not at start
+	{
+		if (fs_noisy) fprintf (stderr, "CACHE: Freed structure was not at head of chain. Spliced between %p and %p\n", h_parent, h->next);
+		h_parent->next = h->next; // Drop this one out of the chain
+	}
+	else
+	{
+		if (fs_noisy) fprintf (stderr, "CACHE: Freed structure was at head of chain. fs_load_queue now %p\n", h->next);
+		fs_load_queue = h->next; // Drop this one off the beginning of the chain
+	}
+
+	if (fs_noisy) fprintf (stderr, "CACHE: Freeing bulk transfer transaction queue head at %p\n", h);
+
+	free(h); // Free up this struct
+
+	// Done.
+
+
+}
+
+// Go see if there is an enqueued packet to net, stn from server. If there is, send it and wait for ack.
+// If not acknowledged, dump the rest of the enqueue for that destination from this server.
+// If dumped or nothing left after tx, close the relevant file handle.
+// Return values:
+// 1 - Success
+// 2 - Success at end
+// 0 - Failure - No packet(!)
+// -1 - No ack - dumped
+
+char fs_load_dequeue(int server, unsigned char net, unsigned char stn)
+{
+
+	struct load_queue *l, *l_parent; // Search variable
+
+	l = fs_load_queue;
+	l_parent = NULL;
+
+	if (fs_noisy) fprintf (stderr, "CACHE: to %3d.%3d from %3d.%3d de-queuing bulk transfer\n", net, stn, fs_stations[server].net, fs_stations[server].stn);
+
+	while (l && (l->server != server || l->net != net || l->stn != stn))
+	{
+		l_parent = l;
+		l = l->next;
+	}
+
+	if (!l) return 0; // Nothing found
+
+	if (fs_noisy) fprintf (stderr, "CACHE: to %3d.%3d from %3d.%3d queue head found at %p\n",  net, stn, fs_stations[server].net, fs_stations[server].stn, l);
+
+	if (!(l->pq_head)) // There was an entry, but it had no packets in it!
+	{
+		// Take this one out of the chain
+		if (l_parent)
+			l_parent->next = l->next;
+		else	fs_load_queue = l->next;
+
+		free(l);
+	}
+
+	if (fs_noisy) fprintf (stderr, "CACHE: to %3d.%3d from %3d.%3d Sending packet from __pq %p, length %04X\n", net, stn, fs_stations[server].net, fs_stations[server].stn, l->pq_head, l->pq_head->len);
+
+	if (!fs_aun_send(l->pq_head->packet, server, l->pq_head->len, l->net, l->stn)) // If this fails, dump the rest of the enqueued traffic
+	{
+		fs_enqueue_dump(l); // Also closes file
+		return -1;
+
+	}
+	else // Tx success - just update the packet queue
+	{
+		struct __pq *p;
+
+		p = l->pq_head;
+		l->pq_head = l->pq_head->next;
+		free(p->packet);
+		free(p);
+
+		if (fs_noisy) fprintf (stderr, "CACHE: Packet queue entry freed at %p\n", p);
+
+		if (!(l->pq_head)) // Ran out of packets
+		{
+			if (fs_noisy) fprintf (stderr, "CACHE: End of packet queue - dumping queue head at %p\n", l);
+			l->pq_tail = NULL;
+			fs_enqueue_dump(l);
+			return 2;
+		}
+
+	}
+
+	return 1; // Success - but still more packets to come
+}
+
+// Function called by the bridge when it knows there are things to dequeue
+// Dumps out one packet per bulk transfer per server->{net,stn} combo each time.
+void fs_dequeue(void) 
+{
+	struct load_queue *l;
+
+	if (fs_noisy) fprintf (stderr, "CACHE: fs_dequeue() called\n");
+	l = fs_load_queue;
+
+	while (l)
+	{
+		if (fs_noisy) fprintf(stderr, "CACHE: Dequeue from %p\n", l);
+
+		fs_load_dequeue(l->server, l->net, l->stn);
+		l = l->next;
+	}
+
+}
+
+// Called by the bridge to see if there is traffic
+short fs_dequeuable(void)
+{
+	struct load_queue *l;
+
+	unsigned short count = 0;
+
+	l = fs_load_queue;
+
+	while (l)
+	{
+		count++;
+		l = l->next;
+	}
+
+	/* if (fs_noisy)	*/ fprintf (stderr, "CACHE: There is%s data in the bulk transfer queue (%d entries)\n", (fs_load_queue ? "" : " no"), count);
+
+	if (fs_load_queue)
+		 return 1;
+	
+	return 0;
+}
+
 // Load file, & cope with 'Load as command'
 void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned char stn, unsigned int active_id, unsigned char *data, int datalen, unsigned short loadas, unsigned char rxctrl)
 {
@@ -4948,10 +5293,6 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		return;
 	}
 
-/*
-	// Use interlock function here
-	if (!(f = fopen((const char * ) p.unixpath, "r")))
-*/
 	if ((internal_handle = fs_open_interlock(server, p.unixpath, 1, active[server][active_id].userid)) < 0)	
 	{
 		fs_error(server, reply_port, net, stn, 0xFE, "Already open");
@@ -4995,17 +5336,23 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		// 20210815 Commented
 		//usleep(180000);
 
+		fseek (f, 0, SEEK_SET);
+
 		while (!feof(f))
 		{
 			collected = fread(&(r.p.data), 1, 1280, f);
-			if (collected > 0 && !fs_aun_send(&r, server, collected, net, stn))
+/*
+			if (collected > 0 && (fs_aun_send(&r, server, collected, net, stn) < 1))
 				return; // We failed in some way.
+*/
+			if (collected < 0 || (fs_load_enqueue(server, &r, collected, net, stn, internal_handle, 1) < 0))
+				return; // Failed in some way
+	
 			// short delay to keep certain stations happy
 			//usleep(200000);
 
 		}
 		
-		// 20210815 Commented
 		//usleep (100000); // See if this keeps the BBC Micro happy
 
 		// Send the tail end packet
@@ -5013,13 +5360,12 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		r.p.data[0] = r.p.data[1] = 0x00;
 		r.p.port = reply_port;
 
-		fs_aun_send(&r, server, 2, net, stn);
+		//fs_aun_send(&r, server, 2, net, stn);
+		fs_load_enqueue(server, &r, 2, net, stn, internal_handle, 1);
 
 	}
 	
-	/* fclose(f); */
-	
-	fs_close_interlock(server, internal_handle, 1);
+	//fs_close_interlock(server, internal_handle, 1); // Now closed by the dequeuer
 }
 
 // Get byte from current cursor position
@@ -6408,8 +6754,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					else
 					{
 						int id;
-						unsigned char homepath[2048];
-						unsigned char idtext[5];
 
 						id = fs_find_new_user(server);
 		

@@ -44,9 +44,12 @@ extern void sks_handle_traffic(int, unsigned char, unsigned char, unsigned char,
 extern void handle_fs_bulk_traffic(int, unsigned char, unsigned char, unsigned char, unsigned char, unsigned char *, unsigned int);
 extern void fs_garbage_collect(int);
 extern void fs_eject_station(unsigned char, unsigned char); // Used to get rid of an old dynamic station
+extern void fs_dequeue();
+extern short fs_dequeuable();
 extern void sks_poll(int);
 extern unsigned short fs_quiet, fs_noisy;
 extern short fs_sevenbitbodge;
+short aun_wait (int, int, unsigned char, unsigned long, short, struct __econet_packet_aun **);
 
 #define ECONET_LEARNED_HOST_IDLE_TIMEOUT 3600 // 1 hour
 
@@ -60,10 +63,10 @@ extern short fs_sevenbitbodge;
 #define ECONET_SERVER_SOCKET 0x04
 
 // AUN Ack wait time in ms - a remote bridge will only Ack a packet going to the wire if it successfully transmits onto the wire, so this may need to be a while
-#define ECONET_AUN_ACK_WAIT_TIME 300
+#define ECONET_AUN_ACK_WAIT_TIME 200
 // Delay in us before sending AUN ACK. Helps to smooth traffic flow to remote bridges - otherwise they tend to get their underwear tangled on transmit. Doesn't need to be very long.
 // Note this value is MICROseconds, the wait time above is MILLIseconds
-#define ECONET_AUN_ACK_DELAY 100 
+#define ECONET_AUN_ACK_DELAY 250 
 
 #ifdef ECONET_NO_WIRE
 #define DEVICE_PATH "/dev/null"
@@ -86,11 +89,15 @@ int spoof_immediate = 1;
 int wired_eject = 1; // When set, and a dynamic address is allocated to an unknown AUN station, this will cause the bridge to spoof a '*bye' equivalent to fileservers it has learned about on the wired network
 short learned_net = -1;
 
+unsigned char last_net = 0, last_stn = 0;
+
 int start_fd = 0; // Which index number do we start looking for UDP traffic from after poll returns? We do this cyclicly so we give all stations an even chance
 
 unsigned short numtrunks;
 
 char cfgpath[512] = "/etc/econet-gpio/econet.cfg";
+
+char *beebmem;
 
 unsigned char econet_stations[8192];
 
@@ -126,6 +133,15 @@ struct econet_hosts {							// what we we need to find a beeb?
 struct econet_hosts network[65536]; // Hosts we know about / listen for / bridge for
 short econet_ptr[256][256]; /* [net][stn] pointer into network[] array. */
 short fd_ptr[65536]; /* Index is a file descriptor - yields index into network[] */
+
+struct __econet_packet_aun_cache {
+	struct __econet_packet_aun *p;
+	struct __econet_packet_aun_cache *next;
+	unsigned int size; // Size of p, less its 4 byte header.
+	struct timeval tstamp;
+};
+
+struct __econet_packet_aun_cache *cache_head, *cache_tail;
 
 int stations; // How many entries in network[]
 
@@ -1077,6 +1093,27 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 
 			aun_send ((struct __econet_packet_udp *)&(a->p.aun_ttype), 12, a->p.dstnet, a->p.dststn, a->p.srcnet, a->p.srcstn);
 		}	
+		else if (a->p.ctrl == 0x81) // Memory Peek
+		{
+
+			if (beebmem) // If we managed to load it...
+			{
+				unsigned int start, end;
+
+				start = ((a->p.data[0]) + (256 * (a->p.data[1])));
+				end = ((a->p.data[4]) + (256 * (a->p.data[5])));
+
+				sprintf (beebmem + 0x7c5f, "%d", a->p.dststn);
+
+				a->p.aun_ttype = ECONET_AUN_IMMREP;
+				a->p.seq = (network[d_ptr].seq += 4);
+
+				memcpy(&(a->p.data), (beebmem + start), end-start);
+
+				aun_send ((struct __econet_packet_udp *)&(a->p.aun_ttype), 8 + (end - start), a->p.dstnet, a->p.dststn, a->p.srcnet, a->p.srcstn);
+
+			}
+		}
 	}
 	else if (a->p.aun_ttype == ECONET_AUN_BCAST) // Broadcast - See if we need to do a bridge query reply
 	{
@@ -1374,8 +1411,18 @@ int aun_send (struct __econet_packet_udp *p, int len, short srcnet, short srcstn
 			short acknowledged = 0;
 			short count = 0;
 
-			while (count < 8 && !acknowledged)
+/*
+			if (last_net == dstnet && last_stn == dststn)
+				usleep(2000); // There seems to be some sort of reception problem with BeebEm with packets in quick succession
+*/
+
+			last_net = dstnet; last_stn = dststn;
+
+			while (count < 5 && !acknowledged)
 			{
+				struct __econet_packet_aun_cache *q, *q_parent;
+				short found = 0;
+
 				n.sin_family = AF_INET;
 				n.sin_port = htons(network[d].port);
 				n.sin_addr = network[d].s_addr;
@@ -1384,30 +1431,73 @@ int aun_send (struct __econet_packet_udp *p, int len, short srcnet, short srcstn
 
 				if (w.p.aun_ttype != ECONET_AUN_BCAST) // Need to work on sending broadcasts on AUN
 				{
+
 					if (w.p.aun_ttype == ECONET_AUN_IMMREP)
 						p->p.seq = network[d].last_imm_seq_sent; // Override the sequence number from the kernel to match what was last sent to this host 
 
 					result = sendto(network[s].listensocket, p, len, MSG_DONTWAIT, (struct sockaddr *)&n, sizeof(n));
+				
+					
+					
+				}
+
+				// Clear any entries from this station out of the cache - gets rid of earlier re-tx's
+
+				q_parent = NULL;
+				q = cache_head;
+
+				while (q && !found)
+				{
+					if ((q->p->p.srcnet == dstnet) && (q->p->p.srcstn == dststn)) // If the station we just transmitted to has a packet in the cache, splice it out
+					{
+						found = 1;
+						if (q != cache_head)
+						{
+							q_parent->next = q->next;
+					
+						}
+						else	cache_head = q->next; // Works even if p->next is null (only one packet on queue)
+						free (q->p); free(q); // free both the packet inside the queue entry, and the queue entry
+					}
+					else
+					{
+						q_parent = q;
+						q = q_parent->next;
+					}
 				}
 
 				// Wait for Ack here if it was a data packet
 	
 				if (w.p.aun_ttype == ECONET_AUN_DATA)
 				{
-				//	unsigned short ack_counter = 0;
+					struct __econet_packet_aun *ack;
 
+					ack = malloc(ECONET_MAX_PACKET_SIZE + 4);
+					
+					if (ack && aun_wait(d, s, ECONET_AUN_ACK, w.p.seq, ECONET_AUN_ACK_WAIT_TIME, &ack)) // Matching Ack received - everything else received went in the cache
+						acknowledged = 1;
+		
+					free (ack);
+
+
+/*
 						ack.fd = network[s].listensocket;
 						ack.events = POLLIN;
 						
+						// This needs to store up packets received that aren't the ACK for later processing. TODO. And it needs to keep receiving until the ACK_WAIT_TIME and only abandon when that expires. Problem at present is that if another station sends a packet when we wanted an ack from some other station, we'll quietly drop that other packet and we'll miss the ACK from the one we wanted!
 						if ((poll(&ack, 1, ECONET_AUN_ACK_WAIT_TIME)) && (ack.revents & POLLIN))
 						{
 							struct __econet_packet_udp data;
 	
 							read(network[s].listensocket, &data, 100);
 								
+							// This is bad. It needs to differentiate between senders! TODO
+							// Maybe a generic receiver on a given socket with a timeout which returns if it sees an ACK from a particular host with a given sequence number, and otherwise stores everything up? (Or make it more generic so that it can look for an immediate reply with a given sequence number too?) Then have a routine after aun_send has finished which dumps those incoming packets where they are supposed to go? Maybe make the poll loop pull packets off that queue in preference to the network??
 							if (data.p.ptype == ECONET_AUN_ACK && data.p.seq == w.p.seq)
 								acknowledged = 1;
 						}
+*/
+
 				}
 				else if (w.p.aun_ttype == ECONET_AUN_IMM && spoof_immediate == 0) // No immediate spoofing, so we might get immediates off the wire in userspace. In which case, wait to see if we get a response and put it back on the wire
 				{
@@ -1415,13 +1505,14 @@ int aun_send (struct __econet_packet_udp *p, int len, short srcnet, short srcstn
 					ack.fd = network[s].listensocket; // network[s] because we want to listen on the listener for the wire host that sent the immediate request
 					ack.events = POLLIN;
 
-					if ((poll(&ack, 1, 100)) && (ack.revents & POLLIN))
+					if ((poll(&ack, 1, 1000)) && (ack.revents & POLLIN)) // Too long. TODO. This long because of Mode 0 screen grabs
 					{
 						struct __econet_packet_udp data;
 						int len, attempts, written;
 
 						len = read(network[s].listensocket, &data, ECONET_MAX_PACKET_SIZE+4);
 			
+						// TODO: Likewise here, if we get some other packet we ought to store it up for later processing.
 						if (data.p.ptype == ECONET_AUN_IMMREP) // && data.p.seq == w.p.seq) At the moment, the sequence number coming back from other bridges on immedaite reply will not match. Need to fix that.
 						{
 							struct __econet_packet_aun ir;
@@ -1519,6 +1610,7 @@ int aun_send (struct __econet_packet_udp *p, int len, short srcnet, short srcstn
 					attempts++;	
 					if (written < 0 && (err == ECONET_TX_JAMMED || err == ECONET_TX_NOCLOCK || err == ECONET_TX_NOCOPY)) // Fatal errors
 						break;
+					if (err == ECONET_TX_COLLISION)	usleep(network[d].station * 1000);
 				}	
 
 				if (written < 0)
@@ -1541,19 +1633,242 @@ int aun_send (struct __econet_packet_udp *p, int len, short srcnet, short srcstn
 
 }
 
+unsigned long timediffmsec(struct timeval *s, struct timeval *d)
+{
+
+	return (((d->tv_sec - s->tv_sec) * 1000) + ((d->tv_usec - s->tv_usec) / 1000));
+
+}
+
+// Map a sockaddr to a network[] entry - used to find source station of UDP packets
+// Returns 0xffff if not founD
+
+int econet_find_source_station (struct sockaddr_in *src_address)
+{
+
+	int from_found = 0xffff;
+	int count = 0;
+
+        while ((from_found == 0xffff) && (count < stations))
+        {
+
+		if ( (network[count].s_addr.s_addr == src_address->sin_addr.s_addr) &&
+             		(network[count].port == ntohs(src_address->sin_port)) &&
+             		(	network[count].is_dynamic == 0 ||
+                		(network[count].last_transaction > (time(NULL) - ECONET_LEARNED_HOST_IDLE_TIMEOUT))
+             		)
+            	   )
+  	          	from_found = count;
+
+                 count++;
+        }
+
+	return from_found;
+}
+
+
+// Wait up to timeout ms for a packet from station network[sptr] to station network[dptr] matching AUN type aun_type with 
+// sequence number seq. If it arrives, put the packet in *p and return 1. Otherwise set *p = NULL and return 0. Any other
+// traffic arriving gets put on the packet cache for later processing.
+// If returns 1, caller MUST free *p after use.
+// dptr is where the packet we're looking for is going to, sptr is where it must have come from
+
+short aun_wait (int sptr, int dptr, unsigned char aun_type, unsigned long seq, short timeout, struct __econet_packet_aun **p)
+{
+
+	struct timeval start, now;
+	struct __econet_packet_udp in;
+	struct pollfd pwait;
+	struct sockaddr addr;
+
+	short received = 0;
+	unsigned long diff;
+	
+
+	if ((network[dptr].type & (ECONET_HOSTTYPE_TWIRE | ECONET_HOSTTYPE_TLOCAL)) == 0)
+		return 0; // This function only works on WIRE type destinations (and LOCAL)
+
+	gettimeofday(&start, 0);
+
+	gettimeofday(&now, 0);
+
+	diff = timediffmsec(&start, &now);
+
+	*p = NULL; // Initialize
+
+	while ((diff < timeout) && !received)
+	{
+		pwait.fd = network[dptr].listensocket;
+		pwait.events = POLLIN;
+
+
+		if (poll(&pwait, 1, (timeout - diff)) && (pwait.revents & POLLIN))
+		{
+			int r;
+			int net_src;
+
+			//r = read (network[dptr].listensocket, &in, ECONET_MAX_PACKET_SIZE + 4);
+			r = udp_receive (network[dptr].listensocket, &in, ECONET_MAX_PACKET_SIZE + 4, &addr);
+
+			if (r >= 0)
+			{
+				struct __econet_packet_aun *c;
+
+				net_src = econet_find_source_station((struct sockaddr_in *) &addr);
+	
+				if (pkt_debug) fprintf (stderr, "CACHE: to %3d.%3d from %3d.%3d AUN type %02X, seq %08lX, len %04X received ", 
+					network[dptr].network, network[dptr].station,
+					(net_src == 0xff ? 0:network[net_src].network), 
+					(net_src == 0xff ? 0:network[net_src].station), 
+					in.p.ptype, in.p.seq, r);
+
+
+/*
+// Temp code - recognize what we want, ditch the rest
+
+				if ((net_src = sptr) && (in.p.ptype == aun_type) && (in.p.seq == seq)) 
+				{
+					if (pkt_debug && fs_noisy) fprintf (stderr, "MATCHED");
+
+					// Found the packet we want
+					received = 1;
+				}
+				if (pkt_debug && fs_noisy) fprintf (stderr, "\n");
+*/
+
+				if (net_src != 0xffff) // We found the source network entry
+				{
+	
+					c = malloc (r + 4);
+	
+					if (!c) return 0; // Cannot malloc - barf.
+	
+					c->p.dststn = network[dptr].station;
+					c->p.dstnet = network[dptr].network;
+					c->p.srcstn = network[net_src].station;
+					c->p.srcnet = network[net_src].network;
+	
+					memcpy(&(c->p.aun_ttype), &in, r);
+	
+					if ((net_src == sptr) && (in.p.ptype == aun_type) && (in.p.seq == seq)) 
+					{
+						if (pkt_debug) fprintf (stderr, "MATCHED");
+	
+						// Found the packet we want
+						*p = c;
+						received = 1;
+					}
+					else if (net_src != sptr && (in.p.ptype == ECONET_AUN_IMM || in.p.ptype == ECONET_AUN_IMMREP || in.p.ptype == ECONET_AUN_DATA)) // Put this one on the cache if it's not from the source we want (because if it's the source we were looking for, but not the packet we were looking for, it's probably a re-tx we want to jettison) (We only bother with three types of packet... the rest we can discard)
+					{
+						struct __econet_packet_aun_cache *entry;
+	
+						// Dear purists, you will not like the next two lines. They acknowledge a data packet before transmission to local or wire.
+						// Since the kernel module collapses a 4-way handshake to 2-way in the other direction, so that a sending wire station
+						// thinks its packet has got to its destination before the AUN packet hits the UDP stack, still less before it has been
+						// acknowledged, then in *this* direction it is hardly much different to acknoweldge an incoming UDP AUN packet before
+						// it has gone where it is going... The former is necessary in order to collect a whole packet before an AUN datagram
+						// could even be sent, and is thus a necesary compromise for this to work at all. The latter is simply a comparable and
+						// consistent compromise in the opposite direction!
+
+						if (in.p.ptype == ECONET_AUN_DATA)
+							aun_acknowledge(&in, c->p.srcnet, c->p.srcstn, c->p.dstnet, c->p.dststn, ECONET_AUN_ACK);
+
+						entry = malloc (sizeof(struct __econet_packet_aun_cache));
+	
+						if (!entry)
+						{
+							free(c);
+							return 0; 
+						}
+	
+						entry->p = c;
+						entry->next = NULL;
+						entry->size = r; // Size of p less 4 bytes for the AUN header - i.e. the value we pass to aun_send to send this packet
+						gettimeofday(&(entry->tstamp), 0);
+	
+						if (pkt_debug) fprintf (stderr, "CACHED ");
+	
+						if (!cache_head) // Cache is empty
+						{
+							if (pkt_debug) fprintf (stderr, "as first cache entry");
+							cache_head = entry;
+							cache_tail = entry;
+						}
+						else
+						{
+							// We only want the last packet from each source station in the cache because they retransmit stuff, so have a look and see if we can find it. If we find it, replace the existing entry - doing some free()ing along the way
+
+							struct __econet_packet_aun_cache *q;
+							short found = 0;
+
+							q = cache_head;
+
+							while (q && !found)
+							{
+								if ((q->p->p.srcnet == entry->p->p.srcnet) && (q->p->p.srcstn == entry->p->p.srcstn))
+								{
+									if (pkt_debug) fprintf (stderr, "by replacing packet cache entry at %p", q);
+									// Free existing packet
+									free (q->p);
+									q->size = entry->size;
+									q->p = entry->p;
+									found = 1;
+								}
+								q = q->next;
+							}
+
+							if (!q && !found) // Source not found in cache, put it on the tail
+							{
+								if (pkt_debug) fprintf (stderr, "on the cache tail");
+								cache_tail->next = entry;
+								cache_tail = entry;
+							}
+						}
+					}
+					else if (pkt_debug) fprintf (stderr, "DISCARDED");
+
+					if (pkt_debug) fprintf (stderr, "\n");
+				}
+				else if (pkt_debug) fprintf (stderr, "JETTISONED\n");
+			}
+			else
+			{
+				if (pkt_debug) fprintf (stderr, "CACHE: Network read error\n");
+				return 0; // Read error
+			}
+
+		}	
+
+		gettimeofday(&now, 0);
+
+	        diff = timediffmsec(&start, &now);
+
+	}
+
+	if (!received)
+		return 0;
+
+	return 1;
+
+}
+
 int main(int argc, char **argv)
 {
 
 	int s;
 	int opt;
 	int dump_station_table = 0;
-	int new_start_fd;
+	short fs_bulk_traffic = 0;
 
 	struct __econet_packet_aun rx;
 
 	memset(&network, 0, sizeof(network));
 	memset(&econet_ptr, 0xff, sizeof(econet_ptr));
 	memset(&fd_ptr, 0xff, sizeof(fd_ptr));
+
+	// Clear the packet cache
+
+	cache_head = cache_tail = NULL;
 
 	seq = 0x46; /* Random number */
 
@@ -1728,50 +2043,104 @@ Options:\n\
 	for (s = 0; s <= pmax; s++)
 		pset[s].events = POLLIN;
 
+	// Set up our fake BeebMem if available
+
+	{
+
+		FILE *f;
+
+		beebmem = malloc(65536);
+		
+		if (beebmem && (f = fopen("BEEBMEM", "r")))
+		{
+
+			fread(beebmem, 32768, 1, f);
+
+			fclose(f);
+
+			// Leave a message on the Mode 7 screen
+
+			memset(beebmem + 0x7c00, 0, 0x400);
+
+			strcpy(beebmem + 0x7c00, "Raspberry Pi Econet Bridge");
+			strcpy((beebmem + 0x7c50), "Econet station ");
+			strcpy(beebmem + 0x7ca0, "Pi OS");
+			strcpy(beebmem + 0x7cf0, "*");
+			sprintf (beebmem + 0x7F20, "%c%cWhat do you think you're doing, Dave?", 129, 136);
+			
+		}
+		else if (beebmem)
+		{
+			free(beebmem);
+			beebmem = NULL;
+		}
+		
+	}
+	
 	/* Wait for traffic */
 
-	while (poll((struct pollfd *)&pset, pmax+(wire_enabled ? 1 : 0), -1))
+	fs_bulk_traffic = fs_dequeuable();
+
+	while (cache_head || fs_bulk_traffic || poll((struct pollfd *)&pset, pmax+(wire_enabled ? 1 : 0), -1)) // If there are packets in the cache, process them. If there's cache or bulk traffic, only poll for 10ms so that we pick up traffic quickly if it's there.
 	{
-	
-		//int econet_sequence;
 
-		//econet_sequence = rand() % pmax; // Gives us a random number in the range 0...pmax-1 (i.e. the set of other descriptors)
+		// If there is cached or fs_bulk traffic, do a poll anyway and see if there is anything to come - but make it snappy
 
-			//if (realfd == econet_sequence) // If this is the wire's turn, process a wire packet
+		if (cache_head || fs_bulk_traffic)
+			poll((struct pollfd *)&pset, pmax+(wire_enabled ? 1 : 0), 10);
+
+		if (wire_enabled && pset[pmax].revents & POLLIN) // Let the wire take a back seat sometimes
+		{
+
+			int r;
+			// Collect the packet
+			r = read(econet_fd, &rx, ECONET_MAX_PACKET_SIZE);
+
+			if (r > 0) // Ding dong, traffic arriving off the wire 
 			{
+				if (r < 12)
+					fprintf(stderr, "Runt packet length %d received off Econet wire\n", r);
 
-				if (wire_enabled && pset[pmax].revents & POLLIN)
-				{
+				rx.p.seq = (network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].seq += 4);
+				if (rx.p.aun_ttype == ECONET_AUN_IMMREP)
+					rx.p.seq = network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_imm_seq_sent;
+				// Fudge the AUN type on port 0 ctrl 0x85, which is done as some sort of weird special 4 way handshake with 4 data bytes on the Scout - done as "data" and the kernel module works out that the first 4 bytes in the packet go on the scout and the rest go in the 3rd packet in the 4-way
+				if (rx.p.aun_ttype == ECONET_AUN_IMM && rx.p.ctrl == 0x85)
+					rx.p.aun_ttype = ECONET_AUN_DATA;
 
-					int r;
-					// Collect the packet
-					r = read(econet_fd, &rx, ECONET_MAX_PACKET_SIZE);
+				network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_transaction = time(NULL);
 
-					if (r > 0) // Ding dong, traffic arriving off the wire 
-					{
-						if (r < 12)
-							fprintf(stderr, "Runt packet length %d received off Econet wire\n", r);
-	
-						rx.p.seq = (network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].seq += 4);
-						if (rx.p.aun_ttype == ECONET_AUN_IMMREP)
-							rx.p.seq = network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_imm_seq_sent;
-						// Fudge the AUN type on port 0 ctrl 0x85, which is done as some sort of weird special 4 way handshake with 4 data bytes on the Scout - done as "data" and the kernel module works out that the first 4 bytes in the packet go on the scout and the rest go in the 3rd packet in the 4-way
-						if (rx.p.aun_ttype == ECONET_AUN_IMM && rx.p.ctrl == 0x85)
-							rx.p.aun_ttype = ECONET_AUN_DATA;
-
-						network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_transaction = time(NULL);
-
-						aun_send((struct __econet_packet_udp *)&(rx.raw[4]), r-4, rx.p.srcnet, rx.p.srcstn, rx.p.dstnet, rx.p.dststn); // Deals with sending to local hosts
-
-					}
-				}
+				aun_send((struct __econet_packet_udp *)&(rx.raw[4]), r-4, rx.p.srcnet, rx.p.srcstn, rx.p.dstnet, rx.p.dststn); // Deals with sending to local hosts
 
 			}
+		}
+
+		while (cache_head) // If packet in cache, deal with it
+		{
+			struct __econet_packet_aun_cache *p;
+			struct timeval now;
+
+			p = cache_head;
+
+			cache_head = cache_head->next;
+
+			gettimeofday(&now, 0);
+
+			if (timediffmsec(&(p->tstamp), &now) <= 200) // If newer than 200ms
+			{
+				if (pkt_debug)	fprintf (stderr, "CACHE: to %3d.%3d from %3d.%3d packet type %02X length %04X RETRIEVED from cache\n", p->p->p.dstnet, p->p->p.dststn, p->p->p.srcnet, p->p->p.srcstn, p->p->p.aun_ttype, p->size);
+
+				aun_send((struct __econet_packet_udp *)&(p->p->raw[4]), p->size, p->p->p.srcnet, p->p->p.srcstn, p->p->p.dstnet, p->p->p.dststn);
+			}
+
+			free(p->p); // Frees the cache structure entry
+			free(p); // Frees the malloc on the packet
+
+		}
 
 		/* See if anything turned up on UDP */
 
 		s = start_fd;
-		new_start_fd = -1; // -1 rogue - means we haven't found a receipt from UDP from anywhere yet, so when we do, we'll update the start_fd to start at the next one next time round
 		
 		for (s = 0; s < pmax; s++) /* not the last fd - which is the econet hardware */
 		{
@@ -1788,12 +2157,6 @@ Options:\n\
 				int count;
 				unsigned short from_found, to_found;
 
-				if (new_start_fd == -1)
-				{
-					//new_start_fd = ((realfd + 1) % pmax); // Update start_fd to start at next FD next time, clamped to within pmax, so that the first station we received from is last in line next time round
-					//fprintf (stderr, "Updated start_fd to %d\n", new_start_fd);
-				}
-
 				r = udp_receive(pset[realfd].fd, (void *) &udp_pkt, sizeof(udp_pkt), (struct sockaddr * restrict) &src_address);
 
 				if (r< 0) continue; // Debut produced in udp_receive
@@ -1802,9 +2165,9 @@ Options:\n\
 		
 				count = 0;
 
-				to_found = 0xffff;
-				from_found = 0xffff;
+				from_found = econet_find_source_station (&src_address); // 0xffff;
 
+/*
 				while ((from_found == 0xffff) && (count < stations))
 				{
 
@@ -1817,6 +2180,7 @@ Options:\n\
 						from_found = count;
 					count++;
 				}
+*/
 
 				/* Now where did was it going /to/ ? We can find that by the listening socket number */
 	
@@ -1945,7 +2309,7 @@ Options:\n\
 
 							if ((udp_pkt.p.ptype == ECONET_AUN_DATA) && (network[from_found].type == ECONET_HOSTTYPE_DIS_AUN)) // Only bother sending ACKs to UDP stations - We tried only acking after transmission on to the wire and it took too long
 							{
-								usleep(ECONET_AUN_ACK_DELAY); // sleep - may help to slow things down a bit and kill off the transmission problems at other end of a bridge
+								//usleep(ECONET_AUN_ACK_DELAY); // sleep - may help to slow things down a bit and kill off the transmission problems at other end of a bridge
 								aun_acknowledge (&udp_pkt, srcnet, srcstn, dstnet, dststn, ECONET_AUN_ACK);
 							}
 
@@ -1970,16 +2334,13 @@ Options:\n\
 	
 		}
 
-/*
-		if (new_start_fd != -1)
-			start_fd = new_start_fd;
-*/
+		fs_bulk_traffic = fs_dequeuable(); // In case something got put there from UDP/Wire/Local above
+
+		if (fs_bulk_traffic)	fs_dequeue(); // Do bulk transfers out.
+	
+		fs_bulk_traffic = fs_dequeuable();
 
 		start_fd = (start_fd + 1) % pmax;
-
-		// Reset our poll structure
-		for (s = 0; s <= pmax; s++)
-			pset[s].events = POLLIN;
 
 		// Fileserver garbage collection
 
@@ -1987,13 +2348,21 @@ Options:\n\
 		{
 			if (network[s].servertype & ECONET_SERVER_FILE) 
 			{
-//				fprintf(stderr, "   FS: Garbage collect on server %d\n", network[s].fileserver_index);
+				if (fs_noisy) fprintf(stderr, "   FS: Garbage collect on server %d\n", network[s].fileserver_index);
 				fs_garbage_collect(network[s].fileserver_index);
 			}
 		
 			if (network[s].servertype & ECONET_SERVER_SOCKET)
 				sks_poll(network[s].sks_index);
 		}
+
+		// Reset our poll structure
+		for (s = 0; s <= pmax; s++)
+		{
+			pset[s].events = POLLIN;
+			pset[s].revents = 0; // Need to re-set because we might go round the loop because of the cache not poll()
+		}
+
 	}
 }
 
