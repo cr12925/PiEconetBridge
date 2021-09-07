@@ -29,7 +29,6 @@ unsigned char econet_read_bus(void);
 void econet_write_cr(short, unsigned char);
 void econet_write_cr_long(short, unsigned char);
 unsigned char econet_read_sr(short);
-unsigned short econet_gpio_init(void);
 void econet_gpio_release(void);
 
 void econet_reset(void);
@@ -47,10 +46,12 @@ void econet_flagfill(void);
 
 #define econet_set_addr(x,y)	gpioset_value = (((x) << (ECONET_GPIO_PIN_ADDR + 1)) | ((y) << (ECONET_GPIO_PIN_ADDR))); \
 				writel(gpioset_value, GPIO_PORT + GPSET0); \
-				writel(((~gpioset_value) & ECONET_GPIO_CLRMASK_ADDR), GPIO_PORT + GPCLR0)
+				writel(((~gpioset_value) & ECONET_GPIO_CLRMASK_ADDR), GPIO_PORT + GPCLR0); \
+				barrier()
 
 #define econet_set_rw(x)	if (x)	writel(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPSET0)); \
 				else	writel(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPCLR0))
+
 #define econet_set_datadir_in	for (gpioset_value = ECONET_GPIO_PIN_DATA; gpioset_value < (ECONET_GPIO_PIN_DATA + 8); gpioset_value++) \
 				{ \
 					*(GPIO_PORT + GPSEL0 + (gpioset_value/10)) &= (7<<((gpioset_value % 10) * 3)); \
@@ -59,8 +60,8 @@ void econet_flagfill(void);
 				{ \
 					*(GPIO_PORT + GPSEL0 + (gpioset_value/10)) |= (7<<((gpioset_value %10) * 3)); \
 				}
-#define econet_set_cs(x)	if (x)	writel(ECONET_GPIO_CLRMASK_CS, (GPIO_PORT + GPSET0)); \
-				else	writel(ECONET_GPIO_CLRMASK_CS, (GPIO_PORT + GPCLR0))
+#define econet_set_cs(x)	if (x)	writel(ECONET_GPIO_CLRMASK_CS, (GPIO_PORT + (econet_data->hwver < 2 ? GPSET0 : GPCLR0))); \
+				else	writel(ECONET_GPIO_CLRMASK_CS, (GPIO_PORT + (econet_data->hwver < 2 ? GPCLR0 : GPSET0)))
 
 #define econet_set_rst(x)	if (x)	writel(ECONET_GPIO_CLRMASK_RST, (GPIO_PORT + GPSET0)); \
 				else	writel(ECONET_GPIO_CLRMASK_RST, (GPIO_PORT + GPCLR0))

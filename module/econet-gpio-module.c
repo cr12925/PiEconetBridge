@@ -155,10 +155,9 @@ void econet_set_dir(short d)
 unsigned char econet_write_bus (unsigned char d)
 {
 
-	char tmp;
 	unsigned long gpioset_val = (d << ECONET_GPIO_PIN_DATA);
-	if (econet_data->hwver == 2) while (econet_isbusy());
-	
+
+	// Calling routine will have already made sure chip not busy	
 
 #ifdef ECONET_GPIO_DEBUG_BUS
 	printk (KERN_DEBUG "ECONET-GPIO: Bus write 0x%02x (%c) - bits %d %d %d %d %d %d %d %d\n",
@@ -179,6 +178,8 @@ unsigned char econet_write_bus (unsigned char d)
 	writel(gpioset_val, GPIO_PORT + GPSET0);
 	writel((~gpioset_val) & ECONET_GPIO_CLRMASK_DATA, GPIO_PORT + GPCLR0);
 
+	barrier();
+
 	// Let it settle - was #ifndef ECONET_NO_NDELAY
 #if 0
 	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
@@ -193,24 +194,29 @@ unsigned char econet_write_bus (unsigned char d)
 	{
 		econet_wait_pin_low(ECONET_GPIO_PIN_CSRETURN, (ECONET_GPIO_CLOCK_DUTY_CYCLE));
 	}
-	else
-		tmp = econet_data->hwver; // Memory barrier	
+	else	while (!econet_isbusy());
+
 
 	// Turn off chip select
 	econet_set_cs(ECONET_GPIO_CS_OFF);
 
-	        // Just put some delay in here in case the chip needs to settle
-		// We put the line above in because sometimes we got a duplicate - i.e.
-		// two bytes the same, and the second was in place of another byte that ought to have
-		// been transmitted instead, as opposed to an *inserted extra* byte, which was the original
-		// Problem. So this "overwrite" condition may be because the chip is trying to read the bus again
-		// too quickkly, so we put a delay in.
+	barrier();
 
+	// Just put some delay in here in case the chip needs to settle
+	// We put the line above in because sometimes we got a duplicate - i.e.
+	// two bytes the same, and the second was in place of another byte that ought to have
+	// been transmitted instead, as opposed to an *inserted extra* byte, which was the original
+	// Problem. So this "overwrite" condition may be because the chip is trying to read the bus again
+	// too quickkly, so we put a delay in.
+
+	if (econet_data->hwver < 2)
+	{
 #ifndef ECONET_NO_NDELAY
 	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
 #else
 	udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
 #endif
+	}
 
 	return d;
 
@@ -225,19 +231,19 @@ unsigned char econet_read_bus(void)
 
 	unsigned char d;
 
-	if (econet_data->hwver >= 2)
-		while (econet_isbusy());
+	// Calling routine will have ensured !Busy
 
 	econet_set_dir(ECONET_GPIO_READ);
 
 	econet_set_cs(ECONET_GPIO_CS_ON);
 
+	barrier();
+
 	if (econet_data->hwver < 2)
 	{
 		econet_wait_pin_low(ECONET_GPIO_PIN_CSRETURN, (ECONET_GPIO_CLOCK_DUTY_CYCLE));
 	}
-	else
-		d = econet_data->hwver; // memory barrier
+	else while (!econet_isbusy());
 
 	econet_set_cs(ECONET_GPIO_CS_OFF); // Put this inactive again once we know the D-Type has clocked it to the 68B54
 
@@ -257,7 +263,10 @@ unsigned char econet_read_bus(void)
 
 	}
 	else
+	{
 		while (econet_isbusy());
+		while (econet_isbusy());
+	}
 
 	d = (readl(GPIO_PORT + GPLEV0) & ECONET_GPIO_CLRMASK_DATA) >> ECONET_GPIO_PIN_DATA;
 
@@ -284,7 +293,7 @@ void econet_write_cr(short r, unsigned char d)
 {
 	r--;
 
-	if (econet_data->hwver == 2) while (econet_isbusy());
+	if (econet_data->hwver >= 2) while (econet_isbusy());
 
 	econet_set_addr ((r & 0x02) >> 1, (r & 0x01));
 	econet_write_bus(d);
@@ -298,7 +307,7 @@ unsigned char econet_read_sr(short r)
 	unsigned char d;
 	if (r > 2) return 0;
 	r--;
-	if (econet_data->hwver == 2) while (econet_isbusy());
+	if (econet_data->hwver >= 2) while (econet_isbusy());
 	econet_set_addr ((r & 0x02) >> 1, (r & 0x01));
 	d = econet_read_bus();
 #ifdef ECONET_GPIO_DEBUG_REG
@@ -322,13 +331,23 @@ void econet_gpio_release_pins(void)
 }
 
 /* Probe the hardware, once GPIOs obtained */
+
 int econet_probe_adapter(void)
 {
+
+	// Do a reset to make sure IRQ line is clear
+
+	econet_set_rst(ECONET_GPIO_RST_RST);
+	msleep(100);
+	econet_set_rst(ECONET_GPIO_RST_CLR);
+
+	// Look at the IRQ line and see if it's high (v1) or low (v2 onwards)
 
 	if (econet_gpio_pin(ECONET_GPIO_PIN_IRQ) == 0) // Likely v2 hardware
 	{
 		// Need a better test in here!!
 		econet_data->hwver = 2;
+		econet_set_cs(0);
 		return 1;
 	}
 
@@ -360,7 +379,7 @@ int econet_probe_adapter(void)
 
 /* Set up GPIO region */
 
-unsigned short econet_gpio_init(void)
+short econet_gpio_init(void)
 {
 
 	unsigned long t; /* Variable to read / write GPIO registers in this function */
@@ -419,13 +438,11 @@ unsigned short econet_gpio_init(void)
 
 	gpio_direction_input(econet_gpio_pins[EGP_IRQ]);
 
-
 	econet_data->irq_state = 1;
 
 #ifdef ECONET_GPIO_DEBUG_SETUP
 	printk (KERN_INFO "ECONET-GPIO: IRQ Successfully set up - IRQ %d\n", econet_data->irq);
 #endif
-
 	request_region(GPIO_PERI_BASE, GPIO_RANGE, DEVICE_NAME);
 	GPIO_PORT = ioremap(GPIO_PERI_BASE, GPIO_RANGE);
 
@@ -478,13 +495,14 @@ unsigned short econet_gpio_init(void)
 
 	if (!econet_probe_adapter())
 	{
+		econet_gpio_release_pins();
 		printk (KERN_ERR "ECONET-GPIO: Hardware not found.\n");
 		return -1;
 	}
 
 	econet_data->irq = gpio_to_irq(econet_gpio_pins[EGP_IRQ]);
 
-	if ((econet_data->irq < 0) || ((err = request_irq(econet_data->irq, econet_irq, IRQF_SHARED | ((econet_data->hwver == 1) ? IRQF_TRIGGER_FALLING : IRQF_TRIGGER_RISING), THIS_MODULE->name, THIS_MODULE->name)) != 0))
+	if ((econet_data->irq < 0) || ((err = request_irq(econet_data->irq, econet_irq, IRQF_SHARED | ((econet_data->hwver < 2) ? IRQF_TRIGGER_FALLING : IRQF_TRIGGER_RISING), THIS_MODULE->name, THIS_MODULE->name)) != 0))
 	{
 		printk (KERN_INFO "ECONET-GPIO: Failed to request IRQ on pin BCM %d\n", econet_gpio_pins[EGP_IRQ]);
 		econet_gpio_release_pins();
@@ -932,7 +950,7 @@ next_byte:
 				printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): TX byte % 4d - %02x %c\n", econet_pkt_tx.ptr, (int) c, ((c > 32) && (c < 127)) ? c : '.');
 			}
 #endif 
-			if (econet_data->hwver == 2) while (econet_isbusy());
+			if (econet_data->hwver >= 2) while (econet_isbusy());
 			econet_set_addr(1, 0);
 			econet_write_bus(econet_pkt_tx.d.data[econet_pkt_tx.ptr++]);
 
@@ -983,7 +1001,7 @@ void econet_irq_read(void)
 recv_more:
 
 
-	if (econet_data->hwver == 2) while (econet_isbusy());
+	if (econet_data->hwver >= 2) while (econet_isbusy());
 	econet_set_addr(1,0);
 	d = econet_read_bus();
 
@@ -2299,7 +2317,7 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "ECONET-GPIO: ioctl(set address, %02lx) called\n", (arg & 0x03));
 #endif
-			if (econet_data->hwver == 2) while (econet_isbusy());
+			if (econet_data->hwver >= 2) while (econet_isbusy());
                         econet_set_addr((arg & 0x2) >> 1, (arg & 0x1));
                         break;
                 case ECONETGPIO_IOC_WRITEMODE:
@@ -2498,7 +2516,7 @@ static int __init econet_init(void)
 
 	econet_set_read_mode();
 
-	printk (KERN_INFO "ECONET-GPIO: Hardware present - version %d. ADLC initialized.\n", econet_data->hwver);
+	printk (KERN_INFO "ECONET-GPIO: Hardware present - version %d%s. ADLC initialized.\n", econet_data->hwver, (econet_data->hwver >= 2) ? " - how exciting!" : "");
 
 	econet_get_sr();
 

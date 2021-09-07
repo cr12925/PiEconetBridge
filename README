@@ -591,15 +591,64 @@ You should find your real BBC can log into the BeebEm Fileserver.
 The reverse also works - logging into a real BBC fileserver (or potentially SJ
 Research, but I don't have one) from BeebEm.
 
+TRUNKING, FIREWALLING AND NETWORK ADDRESS TRANSLATION
+-----------------------------------------------------
+
+Examples of all of the following are in the sample config file.
+
+Trunking: This allows you to configure a single host & port combination
+which will receive all traffic for all hosts on particular networks. The
+network list must be either a single network, or a range specified as X-Y
+in the config.
+
+This saves having to specify all the hosts on a remote network and saves
+each one having its own UDP port open at the other end.
+
+NOTE: Traffic from other AUN stations WILL NOT be put on the trunk. That is
+because those local AUN stations will not know where to send the traffic
+for the distant networks.
+
+So a trunk only carries traffic off the Econet wire or locally emulated
+server traffic.
+
+Each trunk has a manually configured number, starting at 1.
+
+NOTE: Trunking CANNOT at present be used to bridge two net 0's together.
+It may be that some clever learning process can be implemented at a later 
+date, but for now it is not there. Don't try it, you will likely become
+frustrated.
+
+Address translation: It is considered helpful that, if two sites use
+overlapping network numbers, they need not renumber in order to communicate
+over a bridged trunk. Address translation (the 'X' configuration entry)
+allows you to specify, on a per trunk basis, the local network number
+and a different network number by which the local net is seen at the
+far end of the trunk. E.g. 'X 1 2 3' will translate local network 2
+to be seen as network 3 at the other end of trunk 1. The translation
+is undone when traffic is received.
+
+NOTE: Do not attempt to translate net 0. Always use you local network
+number ('L' configuration entry) instead.
+
+Firewalling: Sometimes it is useful to be able to stop remote stations
+on a given trunk talking to particular hosts - e.g. development
+machines, or private filestores. The 'Y' parameter allows you to
+configure a per-trunk firewall system based on source network/host and
+destination network/host. The default policy is ACCEPT. The rules are
+executed in order each time a packet arrives.
+
+NOTE: Firewalling is only done INBOUND. There is no outbound filtering;
+you can send what you like. If the other end filters it, so be it.
+
+NOTE: Network or host 255 is used as the wildcard to mean "anything".
+It does NOT mean broadcast.
+
 TO DO
 -----
 
 - Implement device tree so that the GPIO pins are defined outside the code
 - Use better routines to access GPIOs in kernel
 - Make the kernel module use ..._probe instead of ..._init
-- Add ability for bridge to use a single IP:port combination to send whole
-  networks over, with network number translation, so that individual remote
-  stations need not be inidivually configured.
 
 KNOWN BUGS
 ----------
