@@ -194,7 +194,7 @@ unsigned char econet_write_bus (unsigned char d)
 	{
 		econet_wait_pin_low(ECONET_GPIO_PIN_CSRETURN, (ECONET_GPIO_CLOCK_DUTY_CYCLE));
 	}
-	else	while (!econet_isbusy());
+	//else	while (!econet_isbusy());
 
 
 	// Turn off chip select
@@ -243,7 +243,7 @@ unsigned char econet_read_bus(void)
 	{
 		econet_wait_pin_low(ECONET_GPIO_PIN_CSRETURN, (ECONET_GPIO_CLOCK_DUTY_CYCLE));
 	}
-	else while (!econet_isbusy());
+	//else while (!econet_isbusy());
 
 	econet_set_cs(ECONET_GPIO_CS_OFF); // Put this inactive again once we know the D-Type has clocked it to the 68B54
 
