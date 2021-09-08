@@ -50,7 +50,7 @@
 // special meaning as 'end of character class' so you can match on it.
 #define FSREGEX "[]\\*\\#A-Za-z0-9\\+_;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 
-extern int aun_send (struct __econet_packet_udp *, int, short, short, short, short);
+extern int aun_send (struct __econet_packet_aun *, int);
 #ifdef ECONET_64BIT
 extern unsigned int local_seq;
 #else
@@ -407,10 +407,18 @@ void fs_copy_to_cr(unsigned char *dest, unsigned char *src, unsigned short len)
 
 int fs_aun_send(struct __econet_packet_udp *p, int server, int len, unsigned short net, unsigned short stn)
 {
-	p->p.pad = 0x00;
-	//p->p.seq = (fs_stations[server].seq += 4);
-	p->p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
-	return aun_send (p, 8+len, fs_stations[server].net, fs_stations[server].stn, net, stn);
+	struct __econet_packet_aun a;
+
+	memcpy(&(a.p.aun_ttype), p, len+8);
+	a.p.padding = 0x00;
+	a.p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
+		
+	a.p.srcnet = fs_stations[server].net;
+	a.p.srcstn = fs_stations[server].stn;
+	a.p.dstnet = net;
+	a.p.dststn = stn;
+
+	return aun_send (&a, len + 8 + 4);
 }
 
 unsigned short fs_get_dir_handle(int server, unsigned int active_id, unsigned char *path)
@@ -1283,7 +1291,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		struct stat s;
 		struct tm t;
 		//int owner;
-		char attrbuf[20];
+		//char attrbuf[20];
 
 		result->ftype = FS_FTYPE_DIR;
 		
@@ -1781,7 +1789,7 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 	
 // END OF WILDCARD TEST HARNESS
 
-	if (!fs_quiet) fprintf (stderr, "   FS: Attempting to initialize server %d on %d.%d at directory %s\n", fs_count, net, stn, serverparam);
+	if (fs_noisy) fprintf (stderr, "   FS: Attempting to initialize server %d on %d.%d at directory %s\n", fs_count, net, stn, serverparam);
 
 	sprintf(regex, "^(%s{1,10})", FSREGEX);
 
@@ -1880,7 +1888,7 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 			{
 				int discs_found = 0;
 	
-				if (!fs_quiet) fprintf (stderr, "   FS: Password file read - %d user(s)\n", (length / 256));
+				if (fs_noisy) fprintf (stderr, "   FS: Password file read - %d user(s)\n", (length / 256));
 				fread (&(users[fs_count]), 256, (length / 256), passwd);
 				fs_stations[fs_count].total_users = (length / 256);
 				fs_stations[fs_count].total_discs = 0;
@@ -1904,7 +1912,7 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 						}
 						fs_discs[fs_count][index].name[count] = 0;
 					
-						if (!fs_quiet) fprintf (stderr, "   FS: Initialized disc name %s (%d)\n", fs_discs[fs_count][index].name, index);
+						if (fs_noisy) fprintf (stderr, "   FS: Initialized disc name %s (%d)\n", fs_discs[fs_count][index].name, index);
 						discs_found++;
 	
 					}
@@ -2539,7 +2547,7 @@ void fs_read_user_env(int server, unsigned short reply_port, unsigned char net, 
 	int replylen = 0;
 	unsigned short disclen;
 
-	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Read user environment\n", "", net, stn);
+	if (fs_noisy) fprintf (stderr, "   FS:%12sfrom %3d.%3d Read user environment\n", "", net, stn);
 
 	r.p.port = reply_port;
 	r.p.ctrl = 0x80;
@@ -2625,7 +2633,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 
 	*/
 
-	if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Examine %s relative to %d, start %d, extent %d, arg = %d\n", "", net, stn, path,
+	if (fs_noisy) fprintf(stderr, "   FS:%12sfrom %3d.%3d Examine %s relative to %d, start %d, extent %d, arg = %d\n", "", net, stn, path,
 		relative_to, start, n, arg);
 
 	if (!fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1) || p.ftype == FS_FTYPE_NOTFOUND)
@@ -3116,7 +3124,7 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 
 	path[replylen] = '\0'; // Null terminate instead of 0x0d in the packet
 
-	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Get Object Info %s relative to %02X, command %d\n", "", net, stn, path, relative_to, command);
+	if (fs_noisy) fprintf (stderr, "   FS:%12sfrom %3d.%3d Get Object Info %s relative to %02X, command %d\n", "", net, stn, path, relative_to, command);
 	
 
 	norm_return = fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1);
@@ -3618,7 +3626,7 @@ short fs_open_interlock(int server, unsigned char *path, unsigned short mode, un
 				if (fs_files[server][count].writers == 0) // We can open this existing handle for reading
 				{
 					fs_files[server][count].readers++;
-					if (!fs_quiet) fprintf (stderr, "   FS:%12sInterlock opened internal dup handle %d, mode %d. Readers = %d, Writers = %d, path %s\n", "", count, mode, fs_files[server][count].readers, fs_files[server][count].writers, fs_files[server][count].name);
+					if (fs_noisy) fprintf (stderr, "   FS:%12sInterlock opened internal dup handle %d, mode %d. Readers = %d, Writers = %d, path %s\n", "", count, mode, fs_files[server][count].readers, fs_files[server][count].writers, fs_files[server][count].name);
 					return count; // Return the index into fs_files
 				}
 				else // We can't open for reading because someone else has it open for writing
@@ -3666,7 +3674,7 @@ void fs_close_interlock(int server, unsigned short index, unsigned short mode)
 		fs_files[server][index].readers--;
 	else	fs_files[server][index].writers--;
 
-	if (!fs_quiet) fprintf (stderr, "   FS:%12sInterlock close internal handle %d, mode %d. Readers now = %d, Writers now = %d, path %s\n", "", index, mode, fs_files[server][index].readers, fs_files[server][index].writers, fs_files[server][index].name);
+	if (fs_noisy) fprintf (stderr, "   FS:%12sInterlock close internal handle %d, mode %d. Readers now = %d, Writers now = %d, path %s\n", "", index, mode, fs_files[server][index].readers, fs_files[server][index].writers, fs_files[server][index].name);
 
 	if (fs_files[server][index].readers <= 0 && fs_files[server][index].writers <= 0)
 	{
