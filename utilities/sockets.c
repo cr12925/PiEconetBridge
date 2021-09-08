@@ -15,13 +15,17 @@
 
 */
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <ctype.h>
-#ifdef SKS_SSH_ENABLED
-	#include <libssh2.h>
-#endif
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <libgen.h>
 #include "../include/econet-gpio-consumer.h"
 
 #define SKS_PORT 0xDF // Econet Port number
@@ -29,9 +33,9 @@
 extern int fs_get_server_id(unsigned char, unsigned char);
 extern int fs_stn_logged_in(int, unsigned char, unsigned char);
 extern int get_local_seq(unsigned char, unsigned char);
-extern int aun_send (struct __econet_packet_udp *, int, short, short, short, short);
+extern int aun_send (struct __econet_packet_aun *, int);
 
-unsigned short sks_active_connection(int, unsigned char, unsigned char, unsigned short *, unsigned short *, unsigned short *);
+unsigned short sks_active_connection(int, unsigned char, unsigned char, unsigned short *, unsigned short *, unsigned short *, unsigned short *);
 
 // Running commentary switch
 unsigned short sks_quiet = 0;
@@ -70,7 +74,7 @@ enum sks_funcs {
 
 enum sks_types {
 	SKS_TCP = 1,
-	SKS_SSH,
+	SKS_PIPE,
 	SKS_FILE
 };
 
@@ -80,12 +84,11 @@ struct sks_server {
 	union {
 		struct {
 			char hostname[1024];
-			unsigned short port;
+			char port[128];
 		} tcpopts;
 		struct {
-			char hostname[1024];
-			unsigned short port;
-		} sshopts;
+			char command[1024];
+		} pipeopts;
 		struct {
 			char filename[1024];
 		} fileopts;
@@ -95,14 +98,15 @@ struct sks_server {
 	unsigned short user_nets[SKS_MAX_CONNECTIONS], user_stns[SKS_MAX_CONNECTIONS]; // net, stn & mode of each live connection. 0,0,0 = unused
 	unsigned char user_tx_buffers[SKS_MAX_CONNECTIONS][SKS_MAX_BUFSIZE];
 	unsigned char user_rx_buffers[SKS_MAX_CONNECTIONS][SKS_MAX_BUFSIZE];
-	unsigned short user_remote_win[SKS_MAX_CONNECTIONS]; // last advertised available bytes in remote receiver buffer
-	unsigned short user_local_win[SKS_MAX_CONNECTIONS]; // number of available bytes in tx buffer for this user
+	unsigned short user_remote_win[SKS_MAX_CONNECTIONS], user_remote_ack[SKS_MAX_CONNECTIONS]; // last advertised available bytes in remote receiver buffer
+	unsigned short user_local_win[SKS_MAX_CONNECTIONS], user_local_ack[SKS_MAX_CONNECTIONS]; // number of available bytes in tx buffer for this user
 	union {
-		int socket; // For TCP
+		int socket; // For TCP and pipes
 		FILE *fhandle; // For files
-#ifdef SKS_SSH_ENABLED
-		LIBSSH2_SESSION *ssh_session; // For SSH
-#endif
+		struct {
+			int bridge_reader[2];
+			int bridge_writer[2];
+		} pipe;
 	} handles[SKS_MAX_CONNECTIONS];
 };
 
@@ -115,7 +119,8 @@ struct {
 struct sks_rx {
 	unsigned char func;
 	unsigned char reply_port;
-	unsigned char window[2]; // LSB first.
+	unsigned char window[2]; // LSB first. Maximum byte in stream remote can accept - if would be greater than &FFFF, will send &FFFF receipt acknowledged, then wrap to &0 onwards
+	unsigned char ack[2]; // LSB first. Last byte in stream received. 
 	union {
 		struct {
 			unsigned char start_index;
@@ -132,7 +137,8 @@ struct sks_rx {
 
 struct sks_tx {
 	unsigned char error;
-	unsigned char window[2]; // LSB first - this is our side's receiver window
+	unsigned char window[2]; // LSB first - this is our side's receiver window - maximum byte number in stream we can accept. Same semantics as for the other end (see above)
+	unsigned char ack[2]; // LSB first - this is the byte in the stream we acknowledge having received - &0 means nothing received.
 	union {
 		struct {
 			unsigned char number; // Number of entries returned
@@ -150,8 +156,7 @@ struct sks_tx {
 int sks_initialize(unsigned char net, unsigned char stn, char *config)
 {
 	unsigned short server;
-	char sks_name[16], sks_type[5], data1[1024];
-	unsigned short data2;
+	char sks_name[16], sks_type[5], data1[1024], data2[128];
 	char tmp[1024]; // Temp string holder
 	unsigned short ptr, service;
 	unsigned short mustlogin;
@@ -296,9 +301,9 @@ int sks_initialize(unsigned char net, unsigned char stn, char *config)
 
 			tmp[dptr] = '\0';
 
-			data2 = atoi(tmp);
+			strcpy(data2, tmp);
 		}
-		else	data2 = 0;
+		else	strcpy(data2, "");
 
 		//fprintf (stderr, "Found data2 = %d\n", data2);
 
@@ -309,21 +314,17 @@ int sks_initialize(unsigned char net, unsigned char stn, char *config)
 			sks_servers[server].info[service].sks_type = SKS_TCP;
 			strcpy(sks_servers[server].info[service].sks_name, sks_name);
 			strcpy(sks_servers[server].info[service].sks_data.tcpopts.hostname, data1);
-			sks_servers[server].info[service].sks_data.tcpopts.port = data2;
+			if (!strcmp(data2, "")) // Blank
+				strcpy(data2, "echo"); // People should soon figure out what's up with their config....
+			strcpy(sks_servers[server].info[service].sks_data.tcpopts.port, data2);
 			service++;
 		}
-		else if (!strcasecmp(sks_type, "ssh"))
+		else if (!strcasecmp(sks_type, "pipe"))
 		{
-#ifndef SKS_SSH_ENABLED
-			fprintf (stderr, "  SKS: No SSH support - bad config line %s\n", config);
-			return -1;
-#else
-			sks_servers[server].info[service].sks_type = SKS_SSH;
+			sks_servers[server].info[service].sks_type = SKS_PIPE;
 			strcpy(sks_servers[server].info[service].sks_name, sks_name);
-			strcpy(sks_servers[server].info[service].sks_data.sshopts.hostname, data1);
-			sks_servers[server].info[service].sks_data.sshopts.port = data2;
+			strcpy(sks_servers[server].info[service].sks_data.pipeopts.command, data1);
 			service++;
-#endif
 		}
 		else if (!strcasecmp(sks_type, "file"))
 		{
@@ -353,15 +354,15 @@ int sks_initialize(unsigned char net, unsigned char stn, char *config)
 			fprintf (stderr, "  SKS: - service %02d (%s) is type %02X (%s), ", counter, sks_servers[server].info[counter].sks_name,
 							sks_servers[server].info[counter].sks_type,
 							(sks_servers[server].info[counter].sks_type == SKS_TCP ? "tcp" :
-							 	sks_servers[server].info[counter].sks_type == SKS_SSH ? "ssh" : "file"));
+							 	sks_servers[server].info[counter].sks_type == SKS_PIPE ? "pipe" : "file"));
 			switch (sks_servers[server].info[counter].sks_type)
 			{
 				case SKS_TCP:
-					fprintf (stderr, "%s:%d", sks_servers[server].info[counter].sks_data.tcpopts.hostname,
+					fprintf (stderr, "%s:%s", sks_servers[server].info[counter].sks_data.tcpopts.hostname,
 							sks_servers[server].info[counter].sks_data.tcpopts.port);
 					break;
-				case SKS_SSH:
-					fprintf (stderr, "%s", sks_servers[server].info[counter].sks_data.sshopts.hostname);
+				case SKS_PIPE:
+					fprintf (stderr, "%s", sks_servers[server].info[counter].sks_data.pipeopts.command);
 					break;
 				case SKS_FILE:
 					fprintf (stderr, "pathname %s", sks_servers[server].info[counter].sks_data.fileopts.filename);
@@ -386,28 +387,36 @@ int sks_initialize(unsigned char net, unsigned char stn, char *config)
 int sks_aun_send (struct sks_tx *t, int server, unsigned short length, unsigned char port, unsigned char net, unsigned char stn)
 {
 
-	struct __econet_packet_udp p;
-	unsigned short service, index, window;
+	struct __econet_packet_aun p;
+	unsigned short service, index, window, ack;
 
-	p.p.ptype = ECONET_AUN_DATA;
+	p.p.aun_ttype = ECONET_AUN_DATA;
 	p.p.port = port;
 	p.p.ctrl = 0x80; // Always
-	p.p.pad = 0x00;
-	p.p.seq = 0x00004000; // We need to have a consistent sequence number across PS, FS, SKS.
+	p.p.padding = 0x00;
+	p.p.seq = get_local_seq(sks_servers[server].net, sks_servers[server].stn); 
+
+	p.p.srcnet = sks_servers[server].net;
+	p.p.srcstn = sks_servers[server].stn;
+	p.p.dstnet = net;
+	p.p.dststn = stn;
 
 	// Insert window if station is connected, otherwise 0
 
-	if (sks_active_connection(server, net, stn, &service, &index, &window))
+	if (sks_active_connection(server, net, stn, &service, &index, &window, &ack))
 	{
 		t->window[0] = window & 0xff;
 		t->window[1] = (window & 0xff00) >> 8;
+		t->ack[0] = ack & 0xff;
+		t->ack[1] = (ack & 0xff00) >> 8;
+	
 	}
 	else
-		t->window[0] = t->window[1] = 0;
+		t->window[0] = t->window[1] = t->ack[0] = t->ack[1] = 0;
 
 	memcpy (p.p.data, t, length);
 
-	return aun_send (&p, 8+length, sks_servers[server].net, sks_servers[server].stn, net, stn);
+	return aun_send (&p, 12+length);
 
 }
 
@@ -423,7 +432,7 @@ unsigned short sks_is_logged_in(int server, unsigned char net, unsigned char stn
 	else return fs_stn_logged_in(fserver, net, stn);
 }
 
-unsigned short sks_active_connection(int server, unsigned char net, unsigned char stn, unsigned short *service, unsigned short *connection, unsigned short *windowsize)
+unsigned short sks_active_connection(int server, unsigned char net, unsigned char stn, unsigned short *service, unsigned short *connection, unsigned short *windowsize, unsigned short *ack)
 {
 
 	unsigned short service_counter, connection_counter, found;
@@ -449,20 +458,20 @@ unsigned short sks_active_connection(int server, unsigned char net, unsigned cha
 	*service = (found ? service_counter : 0);
 	*connection = (found ? connection_counter : 0);
 	*windowsize = (found ? sks_servers[server].info[*service].user_local_win[*connection] : 0);
+	*ack = (found ? sks_servers[server].info[*service].user_local_ack[*connection] : 0);
 
 	return found;
 
 }
 
-void sks_nop(int server, unsigned char reply_port, unsigned char net, unsigned char stn, unsigned int window)
+void sks_nop(int server, unsigned char reply_port, unsigned char net, unsigned char stn, unsigned int window, unsigned int ack)
 {
 	struct sks_tx tx;
 
 	if (!sks_quiet) fprintf (stderr, "  SKS:%12sfrom %3d.%3d NOP, window %04X\n", "", net, stn, window);
 
-	tx.error = SKS_UNKNOWN;
-	sks_aun_send(&tx, server, 3, reply_port, net, stn); // 3 because there is always at least 2 bytes for windowsize...
-
+	tx.error = SKS_SUCCESS;
+	sks_aun_send(&tx, server, 5, reply_port, net, stn); // 3 because there is always at least 2 bytes for windowsize...
 
 }
 
@@ -471,7 +480,7 @@ void sks_list (int server, unsigned char net, unsigned char stn, struct sks_rx *
 
 	struct sks_tx tx;
 	unsigned short counter, ptr;
-	unsigned short service, index, window;
+	unsigned short service, index, window, ack;
 
 	ptr = 0;
 	tx.error = SKS_SUCCESS;
@@ -479,7 +488,7 @@ void sks_list (int server, unsigned char net, unsigned char stn, struct sks_rx *
 	if (!sks_quiet) fprintf (stderr, "  SKS:%12sfrom %3d.%3d LIST services from %d, number %d\n", "", net, stn, rx->d.list.start_index, rx->d.list.number);
 
 	// If active user, replace with our local window size
-	if (sks_active_connection(server, net, stn, &service, &index, &window))
+	if (sks_active_connection(server, net, stn, &service, &index, &window, &ack))
 	{
 		tx.window[0] = sks_servers[server].info[service].user_local_win[index] & 0xff;
 		tx.window[1] = (sks_servers[server].info[service].user_local_win[index] & 0xff00) >> 8;
@@ -498,7 +507,7 @@ void sks_list (int server, unsigned char net, unsigned char stn, struct sks_rx *
 	
 	tx.d.list.number = counter;
 
-	sks_aun_send(&tx, server, 3 + 1 + (counter * 17), rx->reply_port, net, stn);
+	sks_aun_send(&tx, server, 5 + 1 + (counter * 17), rx->reply_port, net, stn);
 }
 
 // The silent close, used by sks_close and sks_open
@@ -507,17 +516,15 @@ void sks_close_internal (int server, unsigned short service, unsigned short conn
 	switch (sks_servers[server].info[service].sks_type)
 	{
 		case SKS_TCP:
+			close(sks_servers[server].info[service].handles[connection].socket);
 			break;
-		
 		case SKS_FILE:
 			fclose(sks_servers[server].info[service].handles[connection].fhandle);
 			break;
-
-#ifdef SKS_SSH_ENABLED
-		case SKS_SSH:
-			libssh2_session_disconnect(sks_servers[server].info[service].handles[connection].ssh_session, "Remote requested disconnection");
+		case SKS_PIPE:
+			close(sks_servers[server].info[server].handles[connection].pipe.bridge_reader[0]);
+			close(sks_servers[server].info[server].handles[connection].pipe.bridge_writer[1]);
 			break;
-#endif
 	}
 
 	sks_servers[server].info[service].user_nets[connection] = sks_servers[server].info[service].user_stns[connection] = 0;
@@ -527,16 +534,16 @@ void sks_close_internal (int server, unsigned short service, unsigned short conn
 
 void sks_close (int server, unsigned char net, unsigned char stn, struct sks_rx *rx)
 {
-	unsigned short service, connection, window;
+	unsigned short service, connection, window, ack;
 	struct sks_tx tx;
 
 	// First, find if we are connected at all
 
-	if (sks_active_connection(server, net, stn, &service, &connection, &window))
+	if (sks_active_connection(server, net, stn, &service, &connection, &window, &ack))
 		sks_close_internal(server, service, connection);
 
 	tx.error = SKS_SUCCESS;
-	sks_aun_send(&tx, server, 3, rx->reply_port, net, stn);
+	sks_aun_send(&tx, server, 5, rx->reply_port, net, stn);
 
 }
 
@@ -545,32 +552,191 @@ void sks_open (int server, unsigned char net, unsigned char stn, struct sks_rx *
 
 	struct sks_tx tx;
 
-	unsigned short service, connection, window;
+	unsigned short service, connection, window, ack;
 	unsigned short req_service;
+	unsigned short counter;
 
 	req_service = rx->d.open.service;
 	
-	if (sks_active_connection(server, net, stn, &service, &connection, &window))
+	if (!sks_quiet) fprintf (stderr, "  SKS:%12sfrom %3d.%3d Open service %d\n", "", net, stn, req_service);
+
+	if (sks_active_connection(server, net, stn, &service, &connection, &window, &ack))
 	{
+		if (!sks_quiet) fprintf (stderr, "  SKS:%12sfrom %3d.%3d Closing existing connection\n", "", net, stn);
 		// Disconnect existing service
 		sks_close_internal (server, net, stn);
-
 	}
 
 	if (req_service > sks_servers[server].services) // Not a known service
 	{
+		if (!sks_quiet) fprintf (stderr, "  SKS:%12sfrom %3d.%3d Cannot open - no such service\n", "", net, stn);
 		tx.error = SKS_NOSUCHSERVICE;
-		sks_aun_send(&tx, server, 3, rx->reply_port, net, stn);
+		sks_aun_send(&tx, server, 5, rx->reply_port, net, stn);
 		return;
 	}
 
 	if (sks_servers[server].info[connection].must_login && !sks_is_logged_in(server, net, stn)) // Requires login, but not logged in
 	{
+		if (!sks_quiet) fprintf (stderr, "  SKS:%12sfrom %3d.%3d Cannot open - not logged in\n", "", net, stn);
 		tx.error = SKS_NOTLOGGEDIN;
-		sks_aun_send(&tx, server, 3, rx->reply_port, net, stn);
+		sks_aun_send(&tx, server, 5, rx->reply_port, net, stn);
 		return;
 	}
 	
+	// Find a spare connection if there is one
+
+	counter = 0;
+
+	while ((counter < sks_servers[server].info[req_service].max_conns) &&
+			((sks_servers[server].info[req_service].user_nets[counter] != 0) || (sks_servers[server].info[req_service].user_stns[counter] != 0))
+		)
+		counter++;
+
+	if (counter == sks_servers[server].info[req_service].max_conns) // No space here
+	{
+		tx.error = SKS_SERVICEBUSY;
+		if (!sks_quiet) fprintf (stderr, "  SKS:%12sfrom %3d.%3d Cannot open - maximum connections reached - service busy\n", "", net, stn);
+		sks_aun_send(&tx, server, 5, rx->reply_port, net, stn);
+                return;
+	}
+
+	// Attempt to open service - set req_service = 0xffff as a rogue for failure
+
+	switch (sks_servers[server].info[req_service].sks_type)
+	{
+		case SKS_TCP:
+		{
+			int sockfd, ai;
+			struct addrinfo hints, *result, *rp;
+
+			bzero (&hints, sizeof(hints));
+			hints.ai_socktype = SOCK_STREAM;
+			hints.ai_protocol = AF_INET;
+			hints.ai_family = AF_INET;
+
+			ai = getaddrinfo(sks_servers[server].info[req_service].sks_data.tcpopts.hostname,
+				sks_servers[server].info[req_service].sks_data.tcpopts.port,
+				&hints,
+				&result);	
+			
+			if (ai != 0) // failed
+			{
+				if (!sks_quiet) fprintf (stderr, "  SKS:%12sfrom %3d.%3d Cannot open - Address lookup for TCP connection failed (%s:%s)\n", "", net, stn, sks_servers[server].info[req_service].sks_data.tcpopts.hostname, sks_servers[server].info[req_service].sks_data.tcpopts.port);
+				req_service = 0xffff;
+			}
+			else
+			{
+				for (rp = result; rp != NULL; rp = rp->ai_next)
+				{
+					sockfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+
+					if (sockfd == -1) continue;
+
+					if (bind(sockfd, rp->ai_addr, rp->ai_addrlen) == 0)
+						break; // connected	
+
+					close(sockfd); // Close this one, have another go.
+					
+				}
+		
+				freeaddrinfo(result); // Finished with that.
+
+				if (rp == NULL) // Nothing connected
+				{
+					if (!sks_quiet) fprintf (stderr, "  SKS:%12sfrom %3d.%3d Cannot open - socket creation failed\n", "", net, stn);
+					req_service = 0xffff;
+				}
+				else // Succeeded - set up the user state
+				{
+					sks_servers[server].info[req_service].handles[counter].socket = sockfd;
+					sks_servers[server].info[req_service].user_remote_win[counter] = 0;
+					sks_servers[server].info[req_service].user_remote_ack[counter] = 0;
+					sks_servers[server].info[req_service].user_local_win[counter] = SKS_MAX_BUFSIZE;
+					sks_servers[server].info[req_service].user_local_ack[counter] = 0;
+					sks_servers[server].info[req_service].user_nets[counter] = net;
+					sks_servers[server].info[req_service].user_stns[counter] = stn;
+				}	
+			}
+
+		}
+			break;
+		
+		case SKS_FILE:
+			if (!(sks_servers[server].info[req_service].handles[connection].fhandle = fopen(sks_servers[server].info[req_service].sks_data.fileopts.filename, "r+")))
+			{
+				if (!sks_quiet) fprintf (stderr, "  SKS:%12sfrom %3d.%3d Cannot open - cannot open file %s\n", "", net, stn, sks_servers[server].info[req_service].sks_data.fileopts.filename);
+				req_service = 0xffff; // Failure
+			}
+			break;
+
+		case SKS_PIPE: // This needs to be updated to use exec...() functions to avoid manipulation of user environment - see popen man page. TODO.
+		{
+			int p2r, p2w;
+
+			p2r = pipe2(sks_servers[server].info[req_service].handles[counter].pipe.bridge_reader, O_NONBLOCK);
+			p2w = pipe2(sks_servers[server].info[req_service].handles[counter].pipe.bridge_writer, O_NONBLOCK);
+
+			if ((p2r == -1) || (p2w == -1))
+			{
+				 if (!sks_quiet) fprintf (stderr, "  SKS:%12sfrom %3d.%3d Cannot open - cannot open pipes\n", "", net, stn);
+				req_service = 0xffff;
+			}
+			else
+			{
+				
+				int childpid;
+
+				if ((childpid = fork()) == -1)
+				{
+					close (sks_servers[server].info[req_service].handles[counter].pipe.bridge_reader[0]);
+					close (sks_servers[server].info[req_service].handles[counter].pipe.bridge_reader[1]);
+					close (sks_servers[server].info[req_service].handles[counter].pipe.bridge_writer[0]);
+					close (sks_servers[server].info[req_service].handles[counter].pipe.bridge_writer[1]);
+				 	if (!sks_quiet) fprintf (stderr, "  SKS:%12sfrom %3d.%3d Cannot open - cannot fork child process\n", "", net, stn);
+					req_service = 0xffff;
+				}
+				else
+				{
+					if (childpid == 0) // child
+					{
+						char *base;
+
+						close (sks_servers[server].info[req_service].handles[counter].pipe.bridge_reader[0]);
+						close (sks_servers[server].info[req_service].handles[counter].pipe.bridge_writer[1]);
+						// Probably need to close all our other descriptors here - UDP, etc. etc.
+						dup2(0, sks_servers[server].info[req_service].handles[counter].pipe.bridge_writer[0]);
+						dup2(1, sks_servers[server].info[req_service].handles[counter].pipe.bridge_reader[1]);
+						dup2(2, sks_servers[server].info[req_service].handles[counter].pipe.bridge_reader[1]);
+
+						base = basename(sks_servers[server].info[req_service].sks_data.pipeopts.command);
+
+						execl(sks_servers[server].info[req_service].sks_data.pipeopts.command, base, NULL);
+
+						// Should never get here. If we do, exit.
+		
+						exit(EXIT_SUCCESS);
+					}
+					else // parent
+					{
+						close (sks_servers[server].info[req_service].handles[counter].pipe.bridge_reader[1]);
+                                                close (sks_servers[server].info[req_service].handles[counter].pipe.bridge_writer[0]);
+						// All ready, unless the exec in the child failed, in which case hopefully we'll detect that on sks_poll() or sks_data(), if we haven't run out of talent by then....
+					}
+				}
+	
+			}
+		}
+		break;
+	}
+
+	if (req_service == 0xffff) // Connection failed
+		tx.error = SKS_CANNOTOPEN;
+	else
+		tx.error = SKS_SUCCESS; // Successful open
+	
+	// Tell the station
+	sks_aun_send(&tx, server, 5, rx->reply_port, net, stn);
+
 }
 
 void sks_data (int server, unsigned char net, unsigned char stn, struct sks_rx *rx)
@@ -590,15 +756,16 @@ void sks_handle_traffic(int server, unsigned char net, unsigned char stn, unsign
 {
 	struct sks_rx *rx;
 	struct sks_tx tx;
-	unsigned int window;
+	unsigned int window, ack;
 
 	rx = (struct sks_rx *) data;
 
 	window = (*(data+2) & 0xff) + ((*(data+3) & 0xff) << 8);
+	   ack = (*(data+4) & 0xff) + ((*(data+5) & 0xff) << 8);
 
 	switch (rx->func)
 	{
-		case SKS_NOP:	sks_nop(server, rx->reply_port, net, stn, window); break;
+		case SKS_NOP:	sks_nop(server, rx->reply_port, net, stn, window, ack); break;
 		case SKS_LIST:
 				sks_list(server, net, stn, rx);
 				break;
@@ -614,7 +781,7 @@ void sks_handle_traffic(int server, unsigned char net, unsigned char stn, unsign
 		default:
 				// Unknown function
 				tx.error = SKS_UNKNOWN;
-				sks_aun_send(&tx, server, 3, rx->reply_port, net, stn);
+				sks_aun_send(&tx, server, 5, rx->reply_port, net, stn);
 				break;
 	}
 
