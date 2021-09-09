@@ -53,6 +53,7 @@ extern short fs_sevenbitbodge;
 extern short use_xattr; // When set use filesystem extended attributes, otherwise use a dotfile
 
 #define ECONET_LEARNED_HOST_IDLE_TIMEOUT 3600 // 1 hour
+#define ECONET_BRIDGE_RESET_FREQ 300 // 300s = 5 minutes. Every 5 mins we do a full reset and re-learn
 
 #define ECONET_HOSTTYPE_TDIS 0x02
 #define ECONET_HOSTTYPE_TWIRE 0x04
@@ -64,7 +65,7 @@ extern short use_xattr; // When set use filesystem extended attributes, otherwis
 #define ECONET_SERVER_SOCKET 0x04
 
 // AUN Ack wait time in ms - a remote bridge will only Ack a packet going to the wire if it successfully transmits onto the wire, so this may need to be a while
-#define ECONET_AUN_ACK_WAIT_TIME 300
+#define ECONET_AUN_ACK_WAIT_TIME 400
 // Delay in us before sending AUN ACK. Helps to smooth traffic flow to remote bridges - otherwise they tend to get their underwear tangled on transmit. Doesn't need to be very long.
 // Note this value is MICROseconds, the wait time above is MILLIseconds
 #define ECONET_AUN_ACK_DELAY 200 
@@ -80,6 +81,7 @@ unsigned short is_aun(unsigned char, unsigned char);
 int trunk_xlate_fw(struct __econet_packet_aun *, int, unsigned char);
 short trunk_find (unsigned char);
 int aun_trunk_send (struct __econet_packet_aun *, int);
+int aun_trunk_send_internal (struct __econet_packet_aun *, int, int);
 
 void dump_pkt_data(unsigned char *, int, unsigned long);
 
@@ -133,12 +135,18 @@ struct econet_hosts {							// what we we need to find a beeb?
 	unsigned char is_dynamic; // 0 = ordinary fixed host; 1 = host which can be assigned to unknown incoming traffic
 	unsigned char is_wired_fs; // 0 = not a fileserver; 1 = we have seen port &99 traffic to this host and it is on the wire, so we think it's a fileserver. This is used to spoof *bye equivalents when a station number of dynamically allocated to an unknown AUN source, so that the previous user of the same address's login cannot be re-used
 	unsigned long last_transaction;
+	struct timeval last_bridge_reply;
+	// These only apply to wire hosts
+	unsigned char adv_in[256], adv_out[256]; // Advertised networks. _in received from other end, _out is last advert sent by us
+	unsigned char filter_in[256], filter_out[256]; // Filter masks for in & out
 };
 
 struct econet_hosts network[65536]; // Hosts we know about / listen for / bridge for
 short econet_ptr[256][256]; /* [net][stn] pointer into network[] array. */
 short fd_ptr[65536]; /* Index is a file descriptor - yields index into network[] */
 short trunk_fd_ptr[65536]; /* Index is a file descriptor - pointer to index in trunks[] */
+
+struct timeval last_bridge_reset;
 
 struct __econet_packet_aun_cache {
 	struct __econet_packet_aun *p;
@@ -151,7 +159,11 @@ struct __econet_packet_aun_cache *cache_head, *cache_tail;
 
 int stations; // How many entries in network[]
 
-short ip_networklist[256]; /* Networks we know about somewhere in IP space - for bridge queries */
+unsigned char wire_advertizable[256]; /* AUN/IP and local networks - for replying to wire bridge queries */
+unsigned char trunk_advertizable[256]; /* Networks we know about which have wire or local stations on them, since we do not advertise AUN/IP stations on trunks */
+
+unsigned char wire_adv_out[256], wire_adv_in[256];
+unsigned char wire_filter_out[256], wire_filter_in[256];
 
 // Trunking stuff
 
@@ -165,13 +177,14 @@ struct __fw_entry {
 };
 
 struct __trunk {
-	unsigned short dst_start, dst_end;
 	struct addrinfo *addr;
 	int listenport; // Local port number
 	int port; // Remote port number
 	int listensocket;
 	struct __fw_entry *head, *tail;
 	unsigned char xlate_src[256], xlate_dst[256]; // _src is the map we apply outbound, _dst is the mirror image for inbound
+	unsigned char adv_in[256], adv_out[256]; // Advertised networks. _in received from other end, _out is last advert sent by us
+	unsigned char filter_in[256], filter_out[256]; // Filter masks for in & out
 	char hostname[300];
 };
 
@@ -211,6 +224,13 @@ struct printjob printjobs[MAXPRINTJOBS];
 // Local bridge query status
 int bridge_query = 1;
 
+unsigned long timediffmsec(struct timeval *s, struct timeval *d)
+{
+
+	return (((d->tv_sec - s->tv_sec) * 1000) + ((d->tv_usec - s->tv_usec) / 1000));
+
+}
+
 void econet_readconfig(void) 
 {
 	// This reads a config file in like the BeebEm One.
@@ -223,7 +243,7 @@ void econet_readconfig(void)
 	char linebuf[256];
 	regex_t r_comment, r_entry_distant, r_entry_local, r_entry_server, r_entry_wire, r_entry_trunk, r_entry_xlate, r_entry_fw, r_entry_learn;
 	regmatch_t matches[9];
-	int i, count;
+	int count;
 	short j, k;
 	int networkp; // Pointer into network[] array whilst reading config. 
 	
@@ -235,8 +255,12 @@ void econet_readconfig(void)
 	numtrunks = 0;
 
 	pmax = 0;
-	for (i=0; i < 256; i++)
-		ip_networklist[i] = 0;
+	memset(&wire_advertizable, 0, sizeof(wire_advertizable));
+	memset(&trunk_advertizable, 0, sizeof(wire_advertizable));
+	memset(&wire_adv_in, 0, sizeof(wire_adv_in));
+	memset(&wire_adv_out, 0, sizeof(wire_adv_out));
+	memset(&wire_filter_in, 0, sizeof(wire_filter_in));
+	memset(&wire_filter_out, 0, sizeof(wire_filter_out));
 
 	configfile = fopen(cfgpath, "r");
 	if (configfile == NULL)
@@ -265,13 +289,13 @@ void econet_readconfig(void)
 	}
 
 	/* This needs a better regex */
-	if (regcomp(&r_entry_distant, "^\\s*([Aa])\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([^[:space:]]+)\\s+([[:digit:]]{4,5})\\s*$", REG_EXTENDED) != 0)
+	if (regcomp(&r_entry_distant, "^\\s*([Aa]|IP)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([^[:space:]]+)\\s+([[:digit:]]{4,5})\\s*$", REG_EXTENDED) != 0)
 	{
 		fprintf(stderr, "Unable to compile full distant station regex.\n");
 		exit(EXIT_FAILURE);
 	}
 
-	if (regcomp(&r_entry_local, "^\\s*[Nn]\\s+([[:digit:]]{1,3})\\s*$", REG_EXTENDED) != 0)
+	if (regcomp(&r_entry_local, "^\\s*([Nn]|LOCALNET)\\s+([[:digit:]]{1,3})\\s*$", REG_EXTENDED) != 0)
 	{
 		fprintf(stderr, "Unable to compile full local config regex.\n");
 		exit(EXIT_FAILURE);
@@ -283,31 +307,31 @@ void econet_readconfig(void)
 		exit(EXIT_FAILURE);
 	}
 
-        if (regcomp(&r_entry_wire, "^\\s*([Ww])\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{4,5}|AUTO)\\s*$", REG_EXTENDED) != 0)
+        if (regcomp(&r_entry_wire, "^\\s*([Ww]|WIRE)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{4,5}|AUTO)\\s*$", REG_EXTENDED) != 0)
         {
                 fprintf(stderr, "Unable to compile full wire station regex.\n");
                 exit(EXIT_FAILURE);
         }
 
-        if (regcomp(&r_entry_learn, "^\\s*([Ll])\\s+([[:digit:]]{1,3})\\s*$", REG_EXTENDED) != 0)
+        if (regcomp(&r_entry_learn, "^\\s*([Ll]|LEARN|DYNAMIC)\\s+([[:digit:]]{1,3})\\s*$", REG_EXTENDED) != 0)
         {
                 fprintf(stderr, "Unable to compile full wire station regex.\n");
                 exit(EXIT_FAILURE);
         }
 
-        if (regcomp(&r_entry_trunk, "^\\s*([T])\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{4,5})\\s+([[:digit:]]{1,3}|[[:digit:]]{1,3}\\-[[:digit:]]{1,3})\\s+([^[:space:]]+)\\s+([[:digit:]]{4,5})\\s*$", REG_EXTENDED | REG_ICASE) != 0)
+        if (regcomp(&r_entry_trunk, "^\\s*([T]|TRUNK)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{4,5})\\s+([^[:space:]]+)\\s+([[:digit:]]{4,5})\\s*$", REG_EXTENDED | REG_ICASE) != 0)
         {
                 fprintf(stderr, "Unable to compile trunk regex.\n");
                 exit(EXIT_FAILURE);
         }
 
-        if (regcomp(&r_entry_xlate, "^\\s*([X])\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s*$", REG_EXTENDED | REG_ICASE) != 0)
+        if (regcomp(&r_entry_xlate, "^\\s*([X]|XLATE|TRANSLATE)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s*$", REG_EXTENDED | REG_ICASE) != 0)
         {
                 fprintf(stderr, "Unable to compile network translation regex.\n");
                 exit(EXIT_FAILURE);
         }
 
-        if (regcomp(&r_entry_fw, "^\\s*([Y])\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+(DROP|ACCEPT)\\s*$", REG_EXTENDED | REG_ICASE) != 0)
+        if (regcomp(&r_entry_fw, "^\\s*([Y]|FIREWALL)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+(DROP|ACCEPT)\\s*$", REG_EXTENDED | REG_ICASE) != 0)
         {
                 fprintf(stderr, "Unable to compile network translation regex.\n");
                 exit(EXIT_FAILURE);
@@ -397,7 +421,7 @@ void econet_readconfig(void)
 			network[networkp].last_seq_ack = 0; // Tracks the last AUN data packet we acknowledged from this host.
 
 			// Include the network in our list
-			ip_networklist[network[networkp].network] = 1;
+			wire_advertizable[network[networkp].network] = 0xff;
 			econet_ptr[network[networkp].network][network[networkp].station] = networkp;
 
 			// If this is a distant AUN station, put it in the station map so the kernel module does the 4-way handshake / replies to immediates
@@ -415,7 +439,7 @@ void econet_readconfig(void)
 			int	ptr;
 				
 			/* Find our matches */
-			for (count = 1; count <= 1; count++)
+			for (count = 2; count <= 2; count++)
 			{
 				ptr = 0;
 				while (ptr < (matches[count].rm_eo - matches[count].rm_so))
@@ -425,8 +449,11 @@ void econet_readconfig(void)
 				}
 				tmp[ptr] = 0x00;
 				
-				if (count == 1)
+				if (count == 2)
 					localnet = atoi(tmp);
+
+				if (localnet)
+					trunk_advertizable[localnet] = 0xff;
 			}
 		}
 		else if (regexec(&r_entry_server, linebuf, 6, matches, 0) == 0)
@@ -528,6 +555,13 @@ void econet_readconfig(void)
 				else f = -1;
 			}
 
+			// Set up bridge adverts
+			if (network[networkp].network !=0)
+			{
+				wire_advertizable[network[networkp].network] = 0xff;
+				trunk_advertizable[network[networkp].network] = 0xff;
+			}
+
                         // Set up the listener
 
 			if (entry == -1) // Doesn't presently exist
@@ -558,11 +592,17 @@ void econet_readconfig(void)
 
 				ECONET_SET_STATION(econet_stations, net, stn); // Put it in our list of AUN bridges
 
-				ip_networklist[net] = 0xff;
+				if (net != 0)
+				{
+					wire_advertizable[net] = 0xff;
+					trunk_advertizable[net] = 0xff;
+				}
+
 				econet_ptr[net][stn] = networkp;
 
 				networkp++;
 			}
+	
 		}
 		else if (regexec(&r_entry_wire, linebuf, 5, matches, 0) == 0)
                 {
@@ -638,9 +678,13 @@ void econet_readconfig(void)
                         network[networkp].pind = pmax;
 			network[networkp].seq = 0x00004000;
 
+			gettimeofday(&(network[networkp].last_bridge_reply),0);
 			clock_gettime (CLOCK_MONOTONIC, &(network[networkp].last_wire_tx));
                         fd_ptr[network[networkp].listensocket] = networkp; // Create the index to find a station from its FD
 
+			if (network[networkp].network != 0)
+				trunk_advertizable[network[networkp].network] = 0xff;
+	
                         pset[pmax++].fd = network[networkp].listensocket; // Fill in our poll structure
 
                         networkp++;
@@ -682,8 +726,7 @@ void econet_readconfig(void)
 				ECONET_SET_STATION(econet_stations, network[networkp].network, network[networkp].station);
 
 				// Include the network in our list
-				ip_networklist[network[networkp].network] = 0xff;
-
+				wire_advertizable[network[networkp].network] = 0xff;
 			
 				if (nativebridgenet == 0 && network[networkp].network != 0)
 					nativebridgenet = network[networkp].network;
@@ -694,11 +737,11 @@ void econet_readconfig(void)
 
 
 		}
-		else if (regexec(&r_entry_trunk, linebuf, 7, matches, 0) == 0)
+		else if (regexec(&r_entry_trunk, linebuf, 6, matches, 0) == 0)
 		{
 			char tmp[300];
 			int ptr;
-			unsigned short trunknum, d_start, d_end, localport, port;
+			unsigned short trunknum, localport, port;
 			char hostname[300], portname[6];
 			struct addrinfo hints;
 
@@ -721,45 +764,22 @@ void econet_readconfig(void)
 						localport = atoi(tmp);
 						strcpy(portname, tmp);
 						break;
-					case 4: // network range
-					{
-						switch (sscanf(tmp, "%hd-%hd", &d_start, &d_end))
-						{
-							case 1:
-								d_end = d_start;
-								break;
-							case 0: 
-								fprintf(stderr, "Bad configuration line: %s\n", linebuf);
-
-						}
-					}
-					case 5: // hostname
+					case 4: // hostname
 						strcpy(hostname, tmp);
 						break;
-					case 6: // port
+					case 5: // port
 						port = atoi(tmp);
 						break;	
 				}
 
 			}
 
-			trunks[trunknum].dst_start = d_start;
-			trunks[trunknum].dst_end = d_end;
-
-			while (d_start <= d_end)
-			{
-				unsigned char stn;
-			 
-				for (stn = 1; stn < 255; stn++)
-					ECONET_SET_STATION(econet_stations, d_start, stn);
-
-				ip_networklist[d_start++] = 0xff;
-				
-			}
-	
-
 			trunks[trunknum].head = trunks[trunknum].tail = NULL;
 			trunks[trunknum].listenport = localport;
+			memset (trunks[trunknum].adv_in, 0x0, sizeof(trunks[trunknum].adv_in));
+			memset (trunks[trunknum].adv_out, 0x0, sizeof(trunks[trunknum].adv_out));
+			memset (trunks[trunknum].filter_in, 0x0, sizeof(trunks[trunknum].filter_in));
+			memset (trunks[trunknum].filter_out, 0x0, sizeof(trunks[trunknum].filter_out));
 			memset (trunks[trunknum].xlate_src, 0xff, sizeof(trunks[trunknum].xlate_src));
 			memset (trunks[trunknum].xlate_dst, 0xff, sizeof(trunks[trunknum].xlate_dst));
 
@@ -798,6 +818,9 @@ void econet_readconfig(void)
 
                         pset[pmax++].fd = trunks[trunknum].listensocket; // Fill in our poll structure
 			trunk_fd_ptr[trunks[trunknum].listensocket] = trunknum; // Map the Trunk FD array
+
+			// Populate our advertizable structure
+			// And set the module to listen for these distant stations
 
 			numtrunks++;
 
@@ -1129,7 +1152,259 @@ void aun_acknowledge (struct __econet_packet_aun *a, unsigned char ptype)
 
 }
 
-void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
+// Called when we receive a &80 bridge instruction from somewhere
+// Source will be set to 0 if wire (shouldn't be defining trunk 0), -1 if this is a self-initiated reset (e.g. on startup), otherwise a trunk number
+// p is a pointer to the incoming reset packet, and len is its data length
+// If this is self-originated, it is treated as a bridge reset (&80), otherwise it's a bridge update (&81) or reset (&80) depending on what is in *p->p.ctrl
+
+void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
+{
+
+	short counter;
+	unsigned char is_reset;
+	struct __econet_packet_aun out; // Packet structure for the packets we will send out
+
+	if (!bridge_query || !localnet) // Exit if we are not briding
+		return;
+
+	if (source == -1)
+		is_reset = 1;
+	else
+		is_reset = (p->p.ctrl == 0x80 ? 1 : 0);
+
+	if (pkt_debug)
+	{
+		fprintf (stderr, "B-->B: Bridge %s from %s ", (is_reset ? "reset" : "update"), (source == -1 ? "internal" : (source == 0 ? "wire" : "trunk")));
+
+		if (source > 0) fprintf (stderr, "%d ", source);
+
+		if (source >= 0)
+		{
+			fprintf (stderr, "for nets ");
+			for (counter = 0; counter < len-12; counter++)
+				fprintf (stderr, "%3d ", p->p.data[counter]);
+		}
+
+		fprintf (stderr, "\n");
+	}
+
+	if (is_reset)
+	{
+
+		// First the ones for the wire
+	
+		memset(&wire_adv_in, 0, sizeof(wire_adv_in));
+		memcpy(&wire_adv_out, &wire_advertizable, sizeof(wire_advertizable));
+
+		// Then the trunks
+	
+		for (counter = 1; counter < 256; counter++)
+		{
+			if (trunks[counter].listensocket >= 0)
+			{
+				memset(&(trunks[counter].adv_in), 0, sizeof(trunks[counter].adv_in));
+				memset(&(trunks[counter].adv_out), 0, sizeof(trunks[counter].adv_out)); // This gets populated with local advertizables subject to nat lower down
+			}
+		}
+
+		nativebridgenet = 0; 
+
+		// If we have some networks advertizable to the wire, set our local bridge net to the first one we find that isn't the local network
+		for (counter = 1; counter < 255; counter++)
+		{
+			if (wire_advertizable[counter] == 0xff && (counter != localnet))
+			{
+				nativebridgenet = counter;
+				break;
+			}
+		}
+	}
+	
+	// Extract the advertised packets, filtering as we go
+
+	for (counter = 0; counter < len-12; counter++) 
+	{
+		if (source == 0) // Wire origin
+			wire_adv_in[p->p.data[counter]] = 0xff ^ wire_filter_in[p->p.data[counter]]; // Since the filter_in entry for a network will be 0xff if we are filtering it, this will result in 0 if the network is filtered.	
+		else if (source > 0) // Not wire, but not self-originated either. (If self-originated, there will be no *p to look at)
+		{
+			trunks[source].adv_in[p->p.data[counter]] = 0xff ^ trunks[source].filter_in[p->p.data[counter]]; // Since the filter_in entry for a network will be 0xff if we are filtering it, this will result in 0 if the network is filtered.	
+			if (!nativebridgenet) // There wasn't anything we were already advertizing to the wire - so use this as our native network
+				nativebridgenet = (0xff ^ trunks[source].filter_in[p->p.data[counter]]) ? counter : 0;  // If this network wasn't filtered, nativebridgenet is set to it. Otherwise 0 (which is what it was before)
+		}
+	}
+
+	// Now update the outbound advertizement tables
+
+	// Wire first - go through each trunk and pick up its inbound advert, and combine it with what we were advertizing anyway
+	// Remove any networks from outbound advert that were in the inbound advert *from* the wire
+
+	for (counter = 0; counter < 255; counter++)
+	{
+		if (trunks[counter].listensocket >= 0) // Active trunk
+		{
+			short net;
+			
+			for (net = 1; net < 255; net++)
+				if ((trunks[counter].adv_in[net] == 0xff) && (wire_adv_in[net] != 0xff) && (wire_filter_out[net] != 0xff)) // Copy trunk adverts to wire unless either (i) the wire was advertizing those networks to us, or (ii) there was an outbound filter on the wire advertizement for this network
+					wire_adv_out[net] = 0xff;
+		}
+
+	}
+
+	// Now rebuild the econet_stations structure
+
+	// Update for all local servers, AUN stations, and all stations in nets advertized out to the wire, together with nativebridgenet.0, and 255.255 for broadcasts
+	
+	ECONET_INIT_STATIONS(econet_stations);
+	ECONET_SET_STATION(econet_stations, 255, 255); // Broadcast
+	if (nativebridgenet)
+		ECONET_SET_STATION(econet_stations, nativebridgenet, 0); // Local bridge handshakes // Can't do this without a far side network
+
+	// First, known AUN & local stations
+	for (counter = 0; counter < pmax; counter++)
+		if ((network[counter].type & ECONET_HOSTTYPE_TDIS) || (network[counter].type & ECONET_HOSTTYPE_TLOCAL))
+			ECONET_SET_STATION(econet_stations, network[counter].network, network[counter].station);
+
+	// Then everything we are advertising out as a bridge (except stn 0 & 255)
+	for (counter = 1; counter < 256; counter++)
+	{
+		unsigned char stn;
+		
+		if (wire_adv_out[counter] == 0xff) // Outbound advert
+			for (stn = 1; stn < 255; stn++)
+				ECONET_SET_STATION(econet_stations, counter, stn);
+	}
+
+	// Update the station set
+
+	ioctl(econet_fd, ECONETGPIO_IOC_SET_STATIONS, &econet_stations);
+
+	// Now update each trunk's outbound advert with what's come in on every other trunk, sifting out any loops (i.e. don't advertize back to a trunk that which it advertized to us). Do NAT here.
+	for (counter = 0; counter < 255; counter++)
+	{
+
+		short other; // Loop counter for other trunks
+
+		if (trunks[counter].listensocket >= 0) // Active trunk
+		{
+			// The wire & local stuff will already be there because we copied trunk_advertizable into it. BUT we need to do NAT on it. TODO.
+
+			for (other = 1; other < 255; other++)
+			{
+				if (trunk_advertizable[other])
+				{
+					unsigned char xlated;
+
+					xlated = other;
+
+					if (trunks[counter].xlate_src[other] != 0xff)
+						xlated = trunks[counter].xlate_src[other];
+
+					trunks[counter].adv_out[xlated] = 0xff ^ trunks[counter].filter_out[xlated]; // Apply filter to translated net
+
+				}
+
+			}
+
+			// Now the other trunks. Note, we filter the outbound advert here but we need do no NAT here because these are advertizements from other trunks
+
+			for (other = 0; other < 255; other++)
+			{
+				if (other != counter) // Don't copy from same trunk!
+				{
+					if (trunks[other].listensocket >= 0)
+					{
+						unsigned char net;
+			
+						for (net = 1; net < 255; net++)
+							if ((trunks[other].adv_in[net] == 0xff) && (trunks[counter].adv_in[net] != 0xff) && (trunks[counter].filter_out[net] != 0xff)) // Other trunk advertising net 'n', and it wasn't advertized to us on this trunk, advertize it out, unless it was filtered outbound
+								trunks[counter].adv_out[net] = 0xff;
+
+					}	
+
+				}
+
+			}
+				
+		}
+
+	}
+
+	// Now spit out a broadcast with port &9C and ctrl byte as appropriate
+
+	// First to the wire
+	if (nativebridgenet) // Can't send this unless we have *something* on the far side of local...
+	{
+
+		unsigned char net, count;
+
+		out.p.srcnet = nativebridgenet;
+		out.p.srcstn = 0;
+		out.p.dstnet = out.p.dststn = 255;
+		out.p.port = 0x9c;
+		out.p.ctrl = (is_reset ? (source == 0 ? 0x81 : 0x80) : 0x81); // Send this as an update if the source was the wire, otherwise as an update
+		out.p.aun_ttype = ECONET_AUN_BCAST;
+		out.p.seq = (local_seq += 4);
+
+		count = 0;
+
+		if (pkt_debug) fprintf (stderr, "B-->B: Sending bridge %s to wire    with nets ", (is_reset ? "reset" : "update"));
+
+		for (net = 1; net < 255; net++)
+			if (wire_adv_out[net] == 0xff)
+			{
+				out.p.data[count++] = net;
+				if (pkt_debug) fprintf (stderr, "%3d ", net);
+			}
+
+		if (pkt_debug) fprintf (stderr, "\n");
+		
+		write (econet_fd, &out, count+12);
+	}
+
+	// Then to the trunks
+	{
+
+		unsigned char net, trunk, count;
+
+		for (trunk = 1; trunk < 255; trunk++)
+		{
+			if (trunks[trunk].listensocket >= 0 && ((source == trunk && is_reset) || (source != trunk))) // Active trunk - but we only send to the source trunk if it's a reset, and the code switches that to an update
+			{
+		
+				out.p.srcnet = localnet;	
+				out.p.srcstn = 0;
+				out.p.dstnet = out.p.dststn = 255;
+				out.p.port = 0x9c;
+				out.p.ctrl = (is_reset ? (source == trunk ? 0x81 : 0x80) : 0x81); // If it's a reset but was from this trunk, send update not reset
+				out.p.aun_ttype = ECONET_AUN_BCAST;
+				out.p.seq = (local_seq += 4);
+
+				if (pkt_debug) fprintf (stderr, "B-->B: Sending bridge %s on trunk %d with nets ", (out.p.ctrl == 0x80 ? "reset" : "update"), trunk);
+
+				count = 0;
+
+				for (net = 1; net < 255; net++)
+					if (trunks[trunk].adv_out[net] == 0xff)
+					{
+						out.p.data[count++] = net;	
+						if (pkt_debug) fprintf (stderr, "%3d ", net);
+					}
+
+				if (pkt_debug) fprintf (stderr, "\n");
+
+				aun_trunk_send_internal (&out, count+12, trunk);
+			}
+
+		}
+
+	}
+}
+
+// a contains a packet received from somwhere, packlen is it's length. source is either 0 for the wire, > 0 for a trunk number, or -1 from anywhere else
+
+void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int source)
 {
 
 	struct __econet_packet_aun reply;
@@ -1184,27 +1459,46 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 	else if (a->p.aun_ttype == ECONET_AUN_BCAST) // Broadcast - See if we need to do a bridge query reply
 	{
 		//fprintf (stderr, "Bridge query %s, port %02x, BRIDGE check %s, localnet %s\n", (bridge_query ? "on" : "off"), a->p.port, (!strncmp("BRIDGE", (const char *) a->p.data, 6) ? "match" : "not matched"), localnet ? "set" : "not set");
-		if (bridge_query && (a->p.port == 0x9c) && (!strncmp("BRIDGE", (const char *) a->p.data, 6)) && localnet && (network[econet_ptr[a->p.srcnet][a->p.srcstn]].type & ECONET_HOSTTYPE_TWIRE))
+
+		if (bridge_query && (a->p.port == 0x9C) && (a->p.ctrl == 0x80 || a->p.ctrl == 0x81) && (source >= 0)) // bridge reset/update broadcast
+			econet_bridge_process (a, packlen, source);
+
+		else if (bridge_query && (a->p.port == 0x9c) && (!strncmp("BRIDGE", (const char *) a->p.data, 6)) && localnet && (network[econet_ptr[a->p.srcnet][a->p.srcstn]].type & ECONET_HOSTTYPE_TWIRE))
 		{
 			short query_net, reply_port;
+			struct timeval now;
 
 			reply_port = a->p.data[6];
 			query_net = a->p.data[7];
 	
+			gettimeofday(&now, 0);
+
 			if (pkt_debug && !dumpmode_brief)
 				fprintf (stderr, "LOC  : BRIDGE     from %3d.%3d, query 0x%02x, reply port 0x%02x, query net %d\n", a->p.srcnet, a->p.srcstn, a->p.ctrl, reply_port, query_net);
 
-			if (a->p.ctrl == 0x82 || (a->p.ctrl == 0x83 && (ip_networklist[query_net] == 0xff))) // Either a local network number query, or a query for a network in our known distant list
+			if (nativebridgenet && 
+				(
+					(a->p.ctrl == 0x82 
+					&& (timediffmsec(&(network[econet_ptr[a->p.srcnet][a->p.srcstn]].last_bridge_reply), &now) > 1000)
+					) 
+				|| 	(a->p.ctrl == 0x83 && (wire_advertizable[query_net] == 0xff))
+				) // Either a local network number query, or a query for a network in our known distant list
+			)
 			{
+				
+				if (a->p.ctrl == 0x82)
+					gettimeofday(&(network[econet_ptr[a->p.srcnet][a->p.srcstn]].last_bridge_reply),0); // Don't reply too quickly
+
 				reply.p.srcnet = nativebridgenet;
 				reply.p.srcstn = 0;
 				reply.p.dstnet = a->p.srcnet;
 				reply.p.dststn = a->p.srcstn;
 				reply.p.aun_ttype = ECONET_AUN_DATA;
 				reply.p.port = reply_port;
-				reply.p.ctrl = a->p.ctrl;
+				//reply.p.ctrl = a->p.ctrl;
+				reply.p.ctrl = 0x80;
 				reply.p.padding = 0x00;
-				reply.p.seq = get_local_seq(a->p.dstnet, a->p.dststn);
+				reply.p.seq = (local_seq += 4);
 				reply.p.data[0] = localnet;
 				reply.p.data[1] = query_net; 
 				aun_send (&reply, 14);
@@ -1421,13 +1715,25 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen)
 
 }
 
+// Trunk send internal - send packet p of length len on trunk t - used once we've found which trunk we want
+int aun_trunk_send_internal (struct __econet_packet_aun *p, int len, int t)
+{
+
+	int result;
+
+	if (trunk_xlate_fw(p, t, 1) == FW_ACCEPT) // returns 0 for drop traffic (param 3 = 1 means outbound)
+		result = sendto(trunks[t].listensocket, p, len, MSG_DONTWAIT, trunks[t].addr->ai_addr, trunks[t].addr->ai_addrlen); 
+
+	return result;
+}
+
 // Send AUN format packet (including our 4 byte magic header) over a trunk. Return 0 if it hasn't worked, otherwise packet length.
 // For now, the firewall is not implemented.
 
 int aun_trunk_send(struct __econet_packet_aun *p, int len)
 {
 
-	unsigned short trunk;
+	short trunk;
 	int result = 0;
 
 	// First, see which trunk this destination might be on.
@@ -1435,11 +1741,7 @@ int aun_trunk_send(struct __econet_packet_aun *p, int len)
 	trunk = trunk_find(p->p.dstnet);
 
 	if (trunk >= 0)
-	{
-
-		if (trunk_xlate_fw(p, trunk, 1) == FW_ACCEPT) // returns 0 for drop traffic (param 3 = 1 means outbound)
-			result = sendto(trunks[trunk].listensocket, p, len, MSG_DONTWAIT, trunks[trunk].addr->ai_addr, trunks[trunk].addr->ai_addrlen); // +4 because len is actually fed from aun_send which is packet length without the four byte header
-	}
+		result = aun_trunk_send_internal(p, len, trunk);
 	else	if (pkt_debug) fprintf (stderr, "TRUNK: to %3d.%3d from %3d.%3d Trunk destination not found\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 
 	return result;
@@ -1477,7 +1779,8 @@ void aun_clear_cache (unsigned char net, unsigned char stn)
 
 }
 
-int aun_send (struct __econet_packet_aun *p, int len)
+// Source is only used to pass to local handler to process broadcasts so we know where they came from
+int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 {
 
 	int d, s, result; // d, s are pointers into network[]; result is number of bytes written or error return
@@ -1526,17 +1829,19 @@ int aun_send (struct __econet_packet_aun *p, int len)
 	}
 	else
 	{
+/* ALLOW TRUNK TO TRUNK
 		if (d == -1 && s == -1 && (p->p.srcstn != 0 && p->p.srcnet != nativebridgenet) && (p->p.aun_ttype != ECONET_AUN_BCAST)) // Trunk to trunk - dump it - unless it's from our bridge query system, or a broadcast
 		{
 			if (pkt_debug) fprintf (stderr, "ILOCK: to %3d.%3d from %3d.%3d I am refusing to forward.\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 			return result;
 		}
-		if (d == -1 && (network[s].type & ECONET_HOSTTYPE_TDIS)) // AUN/IP source to Trunk - dump it
+*/
+		if (d == -1 && (s != -1) && (network[s].type & ECONET_HOSTTYPE_TDIS)) // AUN/IP source to Trunk - dump it
 		{
 			if (pkt_debug) fprintf (stderr, "ILOCK: to %3d.%3d from %3d.%3d I am refusing to forward.\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 			return result;
 		}
-		if (s == -1 && (network[d].type & ECONET_HOSTTYPE_TDIS)) // Trunk to AUN/IP - dump it
+		if (s == -1 && (d != -1) && (network[d].type & ECONET_HOSTTYPE_TDIS)) // Trunk to AUN/IP - dump it
 		{
 			if (pkt_debug) fprintf (stderr, "ILOCK: to %3d.%3d from %3d.%3d I am refusing to forward.\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 			return result;
@@ -1557,25 +1862,27 @@ int aun_send (struct __econet_packet_aun *p, int len)
 		{
 			p->p.ctrl &= 0x7f; // Strip high bit from control an AUN transmission
 
+/*
 			// Restore sequence number if we are sending an immediate reply
 
 			if (p->p.aun_ttype == ECONET_AUN_IMMREP)
 				p->p.seq = network[d].last_imm_seq_sent; // Override the sequence number from the kernel to match what was last sent to this host 
+*/
 
 			result = aun_trunk_send (p, len);
 
-			// Wait for ack / immrep here.
+			// Wait for ack / immrep here. if the traffic didn't come from another trunk - in which case the other end can deal with waiting around for replies
 
-			if (p->p.aun_ttype == ECONET_AUN_DATA) // Wait for ack
+			if ((s != -1) && p->p.aun_ttype == ECONET_AUN_DATA) // Wait for ack
 			{
 				if (aun_wait(p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, ECONET_AUN_ACK, p->p.seq, ECONET_AUN_ACK_WAIT_TIME, NULL))
 					acknowledged = 1;
 			}
-                        else if (p->p.aun_ttype == ECONET_AUN_IMM) // Wait for immediate reply - see note above about why we need not check immediate_spoof here
+                        else if ((s != -1) && p->p.aun_ttype == ECONET_AUN_IMM) // Wait for immediate reply - see note above about why we need not check immediate_spoof here
                         {
                                 int acklen;
 
-                                if ((acklen = aun_wait(p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, ECONET_AUN_IMMREP, p->p.seq, ECONET_AUN_ACK_WAIT_TIME, &ack)))
+                                if ((acklen = aun_wait(p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, ECONET_AUN_IMMREP, p->p.seq, ECONET_AUN_ACK_WAIT_TIME * 2, &ack)))
                                 {
                                         acknowledged = 1;
                                         // Can only sensibly be going on the wire
@@ -1590,7 +1897,7 @@ int aun_send (struct __econet_packet_aun *p, int len)
 		}
 		else if ((network[d].type & ECONET_HOSTTYPE_TLOCAL) || p->p.aun_ttype == ECONET_AUN_BCAST) // Probably need to forward broadcasts received off the wire to AUN/IP hosts on same net, but we don't at the moment
 		{
-			econet_handle_local_aun(p, len);
+			econet_handle_local_aun(p, len, source);
 			result = len;
 			acknowledged = 1;
 		}
@@ -1607,8 +1914,10 @@ int aun_send (struct __econet_packet_aun *p, int len)
 			if (p->p.aun_ttype != ECONET_AUN_BCAST) // Need to work on sending broadcasts on AUN
 			{
 
+/*
 				if (p->p.aun_ttype == ECONET_AUN_IMMREP)
 					p->p.seq = network[d].last_imm_seq_sent; // Override the sequence number from the kernel to match what was last sent to this host 
+*/
 
 				result = sendto(network[s].listensocket, &(p->p.aun_ttype), len-4, MSG_DONTWAIT, (struct sockaddr *)&n, sizeof(n)); // Strip first four bytes off - p is now a full internal format packet, so we ditch the first four.
 				
@@ -1626,7 +1935,7 @@ int aun_send (struct __econet_packet_aun *p, int len)
 			{
 				int acklen;
 
-				if ((acklen = aun_wait(p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, ECONET_AUN_IMMREP, p->p.seq, ECONET_AUN_ACK_WAIT_TIME, &ack)))
+				if ((acklen = aun_wait(p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, ECONET_AUN_IMMREP, p->p.seq, ECONET_AUN_ACK_WAIT_TIME * 2, &ack)))
 				{
 					acknowledged = 1;
 					// Can only sensibly be going on the wire
@@ -1700,11 +2009,10 @@ int aun_send (struct __econet_packet_aun *p, int len)
 
 }
 
-unsigned long timediffmsec(struct timeval *s, struct timeval *d)
+// Stub function to wrap around aun_send_internal for compatibility with code which does not send broadcasts to be handled by the local bridge handler
+int aun_send (struct __econet_packet_aun *p, int len)
 {
-
-	return (((d->tv_sec - s->tv_sec) * 1000) + ((d->tv_usec - s->tv_usec) / 1000));
-
+	return aun_send_internal(p, len, -1);
 }
 
 // Map a sockaddr to a network[] entry - used to find source station of UDP packets
@@ -1742,12 +2050,8 @@ short trunk_find (unsigned char net)
 
 	while (!found && (counter < 256))
 	{
-		if (trunks[counter].listensocket >= 0)
-		{
-			if ((net >= trunks[counter].dst_start) && (net <= trunks[counter].dst_end))
-				found = 1;
-			else counter++;
-		}
+		if ((trunks[counter].listensocket >= 0) && (trunks[counter].adv_in[net] == 0xff))
+			found = 1;
 		else	counter++;
 	}
 
@@ -1932,6 +2236,8 @@ short aun_wait (unsigned char srcnet, unsigned char srcstn, unsigned char dstnet
 					{
 						if (pkt_debug && !dumpmode_brief) fprintf (stderr, "MATCHED");
 	
+						in.p.ctrl |= 0x80; 
+
 						// Found the packet we want
 						if (p) 
 						{
@@ -2195,7 +2501,7 @@ Options:\n\
 				{
 					struct __fw_entry *e;
 
-					fprintf (stderr, "\n%3d listening on port %5d, carrying network(s) %3d - %3d, via %s:%d\n", n, trunks[n].listenport, trunks[n].dst_start, trunks[n].dst_end, trunks[n].hostname, trunks[n].port);
+					fprintf (stderr, "\n%3d listening on port %5d via %s:%d\n", n, trunks[n].listenport, trunks[n].hostname, trunks[n].port);
 					for (s = 0; s < 256; s++)
 						if (trunks[n].xlate_src[s] != 0xff) fprintf (stderr, "    XLATE (net)  from %3d local to %3d remote\n", s, trunks[n].xlate_src[s]);
 
@@ -2221,10 +2527,10 @@ Options:\n\
 
 	}
 
-	// If in bridge query mode, we need to enable station localnet.0 so that the kernel module will deal with it
+	// If in bridge query mode, we need to enable station nativebridgenet.0 so that the kernel module will deal with it
 	// Otherwise our bridge query responses won't work
 
-	if (bridge_query && localnet)
+	if (bridge_query && nativebridgenet)
 		ECONET_SET_STATION(econet_stations, nativebridgenet, 0);
 
 	/* The open() call will do an econet_reset() in the kernel */
@@ -2291,8 +2597,25 @@ Options:\n\
 
 	fs_bulk_traffic = fs_dequeuable();
 
+	// Do a bridge reset - Announce our presence
+
+	econet_bridge_process (NULL, 0, -1); // Self-initiated reset
+	gettimeofday(&last_bridge_reset, 0);
+
 	while (cache_head || fs_bulk_traffic || poll((struct pollfd *)&pset, pmax+(wire_enabled ? 1 : 0), -1)) // If there are packets in the cache, process them. If there's cache or bulk traffic, only poll for 10ms so that we pick up traffic quickly if it's there.
 	{
+
+		struct timeval now;
+
+		// See if it's time for a bridge reset
+
+		gettimeofday(&now, 0);
+
+		if ((timediffmsec(&last_bridge_reset, &now)/1000) > (ECONET_BRIDGE_RESET_FREQ))
+		{
+			econet_bridge_process (NULL, 0, -1); // Self-initiated reset
+			gettimeofday(&last_bridge_reset, 0);
+		}
 
 		// If there is cached or fs_bulk traffic, do a poll anyway and see if there is anything to come - but make it snappy
 
@@ -2313,17 +2636,17 @@ Options:\n\
 
 				rx.p.seq = get_local_seq(rx.p.srcnet, rx.p.srcstn);
 
-				if (rx.p.aun_ttype == ECONET_AUN_IMMREP)
-					rx.p.seq = network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_imm_seq_sent;
+				if (rx.p.aun_ttype == ECONET_AUN_IMMREP) // Fudge - assume the immediate we have received is a reply to the last one we sent. Maybe make this more intelligent.
+					rx.p.seq = network[econet_ptr[rx.p.dstnet][rx.p.dststn]].last_imm_seq_sent;
 
 				network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_transaction = time(NULL);
 
 				// Fudge the AUN type on port 0 ctrl 0x85, which is done as some sort of weird special 4 way handshake with 4 data bytes on the Scout - done as "data" and the kernel module works out that the first 4 bytes in the packet go on the scout and the rest go in the 3rd packet in the 4-way
 
-				if (rx.p.aun_ttype == ECONET_AUN_IMM && rx.p.ctrl == 0x85)
+				if (rx.p.aun_ttype == ECONET_AUN_IMM && rx.p.ctrl == 0x85) // Fudge-a-rama. This deals with the fact that NFS & ANFS in fact do a 4-way handshake on immediate $85, but with 4 data bytes on the "Scout". Those four bytes are put as the first four bytes in the data packet, and a receiving bridge will strip them off, detect the ctrl byte, and do a 4-way with the 4 bytes on the Scout, and the remainder of the data in the "data" packet (packet 3/4 in the 4-way). This enables things like *remote, *view and *notify to work.
 					rx.p.aun_ttype = ECONET_AUN_DATA;
 
-				aun_send (&rx, r);
+				aun_send_internal (&rx, r, 0);
 
 			}
 		}
@@ -2380,15 +2703,13 @@ Options:\n\
 				while ((from_found == 0xffff) && (count < 256))
 				{
 
-//					fprintf (stderr, "Checking trunk %d - dst_start = %d, dst_end = %d\n", count, trunks[count].dst_start, trunks[count].dst_end);
+//					fprintf (stderr, "Checking trunk %d\n", count);
 
 					if (
 // May need some ntohs or ntohl here somewhere..?? TODO
 						trunks[count].listensocket >= 0 // Active trunk
 					&&	((((struct sockaddr_in *) (trunks[count].addr->ai_addr))->sin_addr.s_addr) == src_address.sin_addr.s_addr) // Someone we know about
 					&&	((((struct sockaddr_in *) (trunks[count].addr->ai_addr))->sin_port) == (src_address.sin_port))
-					&&	(p.p.srcnet >= trunks[count].dst_start)
-					&&	(p.p.srcnet <= trunks[count].dst_end) // And the source is within the set of networks we expect down this trunk
 					)
 						from_found = count;
 					else	count++;
@@ -2401,14 +2722,20 @@ Options:\n\
 					fprintf (stderr, "TRUNK: to %3d.%3d from %3d.%3d received on trunk %04X unrecognized\n", p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn, (from_found == 0xffff ? 0xffff : count));
 					continue;
 				}
+				else if (trunks[from_found].adv_in[p.p.srcnet] != 0xff && (p.p.port != 0x9c)) // Check if this was a network we were expecting from that source, and it wasn't bridge traffic
+				{
+					fprintf (stderr, "FWALL: to %3d.%3d from %3d.%3d received on trunk %04X from unadvertized source network %d\n", p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn, from_found, p.p.srcnet);
+					continue;
+				}
+			
 
 				policy = trunk_xlate_fw(&p, count, 0); // 0 = inbound translation && firewalling
 
 				if (p.p.aun_ttype == ECONET_AUN_DATA)
 					aun_acknowledge(&p, ECONET_AUN_ACK);
 
-				if ((p.p.aun_ttype == ECONET_AUN_BCAST)) // Dump to local in case it's bridge stuff
-					econet_handle_local_aun(&p, r);
+				if ((p.p.aun_ttype == ECONET_AUN_BCAST) && from_found != 0xffff) // Dump to local in case it's bridge stuff - but only if we knew where it came from
+					econet_handle_local_aun(&p, r, from_found);
 
 				// Note that aun_send now dumps traffic we refuse to forward so we don't need to check here
 
