@@ -1262,9 +1262,12 @@ void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
 		ECONET_SET_STATION(econet_stations, nativebridgenet, 0); // Local bridge handshakes // Can't do this without a far side network
 
 	// First, known AUN & local stations
-	for (counter = 0; counter < pmax; counter++)
-		if ((network[counter].type & ECONET_HOSTTYPE_TDIS) || (network[counter].type & ECONET_HOSTTYPE_TLOCAL))
+	for (counter = 0; counter < stations; counter++)
+		if ((network[counter].type & ECONET_HOSTTYPE_TDIS) || (network[counter].type & ECONET_HOSTTYPE_TLOCAL)) // NB because our dynamic network is preallocated in here, this catches the dynamic net too
+		{
+			//fprintf (stderr, "Adding station %3d.%3d\n", network[counter].network, network[counter].station);
 			ECONET_SET_STATION(econet_stations, network[counter].network, network[counter].station);
+		}
 
 	// Then everything we are advertising out as a bridge (except stn 0 & 255)
 	for (counter = 1; counter < 256; counter++)
