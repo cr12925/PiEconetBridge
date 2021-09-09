@@ -1426,6 +1426,8 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 			reply.p.dststn = a->p.srcstn;
 			reply.p.aun_ttype = ECONET_AUN_IMMREP;
 			reply.p.seq = a->p.seq;
+			reply.p.port = 0;
+			reply.p.ctrl = 0x88;
 			reply.p.data[0] = ADVERTISED_MACHINETYPE & 0xff;
 			reply.p.data[1] = (ADVERTISED_MACHINETYPE & 0xff00) >> 8;
 			reply.p.data[2] = ADVERTISED_VERSION & 0xff;
@@ -1450,6 +1452,8 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 				reply.p.dstnet = a->p.srcnet;
 				reply.p.dststn = a->p.srcstn;
 				reply.p.aun_ttype = ECONET_AUN_IMMREP;
+				reply.p.port = a->p.port;
+				reply.p.ctrl = a->p.ctrl;
 				reply.p.seq = a->p.seq;
 			
 				memcpy(&(reply.p.data), (beebmem + start), end-start);
@@ -2565,7 +2569,7 @@ Options:\n\
 
 		beebmem = malloc(65536);
 		
-		if (beebmem && (f = fopen("BEEBMEM", "r")))
+		if (beebmem && (f = fopen("/etc/econet-gpio/BEEBMEM", "r")))
 		{
 
 			fread(beebmem, 32768, 1, f);
