@@ -2124,6 +2124,8 @@ void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned ch
 
 	if (do_reply) // != 0 if we need to send a reply (i.e. user initiated bye) as opposed to 0 if this is an internal cleardown of a user
 	{
+	
+		reply.p.ptype = ECONET_AUN_DATA;
 		reply.p.port = reply_port;
 		reply.p.ctrl = 0x80;
 		reply.p.data[0] = reply.p.data[1] = 0;
