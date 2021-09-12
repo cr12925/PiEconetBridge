@@ -90,7 +90,7 @@ struct __aun_pkt_buffer aun_tx, aun_rx;
 
 char aun_stn, aun_net; // The net & station we are presently dealing with in the IP world - used to sanity check whether what comes off the wire is what we expect!
 
-u64 econet_timer;
+// u64 econet_timer;
 u64 last_data_rcvd;
 
 /*
@@ -152,6 +152,9 @@ void econet_set_dir(short d)
  * This is to see if it's any use in fixing the 3-byte problem on data TX.
  * Sets write mode.
  */
+
+/* DISUSED code commented 12.09.11 - consider removal at v1
+
 unsigned char econet_write_bus (unsigned char d)
 {
 
@@ -180,15 +183,17 @@ unsigned char econet_write_bus (unsigned char d)
 
 	barrier();
 
+//
 	// Let it settle - was #ifndef ECONET_NO_NDELAY
 #if 0
-	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
+	//econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
 #else
-	udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
+	//udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
 #endif
 
 	// Turn on chip select
 	econet_set_cs(ECONET_GPIO_CS_ON);
+	barrier();
 	
 	if (econet_data->hwver < 2)
 	{
@@ -223,9 +228,14 @@ unsigned char econet_write_bus (unsigned char d)
 
 }
 
+--DISUSED CODE END COMMENT */
+
 /*
  * econet_read_bus - reads current value off the bus. Sets read mode but DOES NOT set chip select
  */
+
+/* Disused - commented out 12.09.21 - consider removal on release of v1 code
+
 unsigned char econet_read_bus(void)
 {
 
@@ -236,16 +246,13 @@ unsigned char econet_read_bus(void)
 	econet_set_dir(ECONET_GPIO_READ);
 
 	econet_set_cs(ECONET_GPIO_CS_ON);
-
 	barrier();
 
 	if (econet_data->hwver < 2)
-	{
 		econet_wait_pin_low(ECONET_GPIO_PIN_CSRETURN, (ECONET_GPIO_CLOCK_DUTY_CYCLE));
-	}
-	//else while (!econet_isbusy());
 
 	econet_set_cs(ECONET_GPIO_CS_OFF); // Put this inactive again once we know the D-Type has clocked it to the 68B54
+	barrier();
 
 	if (econet_data->hwver < 2)
 	{
@@ -287,29 +294,167 @@ unsigned char econet_read_bus(void)
 	return d;
 }
 
+*/
+
+#define econet_write_fifo(x) econet_write_cr(3, (x))
+
 /* econet_write_cr - write value to ADLC control register
  */
 void econet_write_cr(short r, unsigned char d)
 {
+	unsigned long gpioval, gpiomask;
+
 	r--;
 
+/* OLD CODE
 	if (econet_data->hwver >= 2) while (econet_isbusy());
 
 	econet_set_addr ((r & 0x02) >> 1, (r & 0x01));
 	econet_write_bus(d);
+*/
+
+/* NEW CODE */
+
+	gpiomask = ECONET_GPIO_CLRMASK_DATA | ECONET_GPIO_CLRMASK_RW | ECONET_GPIO_CLRMASK_ADDR;
+
+	gpioval = (r & 0x03) << ECONET_GPIO_PIN_ADDR;
+	gpioval |= (d << ECONET_GPIO_PIN_DATA);
+	// No need to set RW because it will be 0 by virtue of the first assignment to gpioval above.
+
+	if (econet_data->hwver >= 2)
+		while (econet_isbusy());
+
+	// Change the bus direction
+                INP_GPIO(ECONET_GPIO_PIN_DATA);
+                INP_GPIO(ECONET_GPIO_PIN_DATA + 1);
+                INP_GPIO(ECONET_GPIO_PIN_DATA + 2);
+                INP_GPIO(ECONET_GPIO_PIN_DATA + 3);
+                INP_GPIO(ECONET_GPIO_PIN_DATA + 4);
+                INP_GPIO(ECONET_GPIO_PIN_DATA + 5);
+                INP_GPIO(ECONET_GPIO_PIN_DATA + 6);
+                INP_GPIO(ECONET_GPIO_PIN_DATA + 7);
+
+                OUT_GPIO(ECONET_GPIO_PIN_DATA);
+                OUT_GPIO(ECONET_GPIO_PIN_DATA + 1);
+                OUT_GPIO(ECONET_GPIO_PIN_DATA + 2);
+                OUT_GPIO(ECONET_GPIO_PIN_DATA + 3);
+                OUT_GPIO(ECONET_GPIO_PIN_DATA + 4);
+                OUT_GPIO(ECONET_GPIO_PIN_DATA + 5);
+                OUT_GPIO(ECONET_GPIO_PIN_DATA + 6);
+                OUT_GPIO(ECONET_GPIO_PIN_DATA + 7);
+
+	econet_data->current_dir = 0;
+
+	// Put that lot on the GPIO
+	writel(gpioval, GPIO_PORT+GPSET0);
+	writel((~gpioval) & gpiomask, GPIO_PORT + GPCLR0);
+
+	// Enable nCS
+	econet_set_cs(ECONET_GPIO_CS_ON);
+
+	// If v1 hardware, wait until we know CS has reached the ADLC
+	if (econet_data->hwver < 2)
+	{
+		econet_wait_pin_low(ECONET_GPIO_PIN_CSRETURN, (ECONET_GPIO_CLOCK_DUTY_CYCLE));
+	}
+	else
+		barrier();
+
+	// Disable nCS again
+	econet_set_cs(ECONET_GPIO_CS_OFF);
+
+	// Delay here to allow chip to settle. We had this in write_bus() because it appeared
+	// to avoid duplicate writes
+
+	if (econet_data->hwver < 2)
+	{
+		// ? Try a barrier() here to see if we get a suitable delay.
+		econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
+	}
+	else
+		udelay(1); // This appears to stop us trying to start a read on the back of a write, which in turn stops the ADLC misreading our writes and producing gibberish from time to time
+
 }
 
 /* econet_read_sr - read value from ADLC status register
  */
 
+#define econet_read_fifo() econet_read_sr(3)
+
 unsigned char econet_read_sr(short r)
 {
 	unsigned char d;
-	if (r > 2) return 0;
+	unsigned long gpioval, gpiomask;
+
+	if (r > 4) return 0;
+
 	r--;
-	if (econet_data->hwver >= 2) while (econet_isbusy());
-	econet_set_addr ((r & 0x02) >> 1, (r & 0x01));
-	d = econet_read_bus();
+
+	if (econet_data->hwver >= 2)
+		while (econet_isbusy());
+
+	// New code - sets up a single gpio value & mask and plonks it on the hardware in one go
+
+	// First, set the data pins to read
+	econet_data->current_dir = 1;
+        INP_GPIO(ECONET_GPIO_PIN_DATA);
+        INP_GPIO(ECONET_GPIO_PIN_DATA + 1);
+        INP_GPIO(ECONET_GPIO_PIN_DATA + 2);
+        INP_GPIO(ECONET_GPIO_PIN_DATA + 3);
+        INP_GPIO(ECONET_GPIO_PIN_DATA + 4);
+        INP_GPIO(ECONET_GPIO_PIN_DATA + 5);
+        INP_GPIO(ECONET_GPIO_PIN_DATA + 6);
+        INP_GPIO(ECONET_GPIO_PIN_DATA + 7);
+
+	// And the mask, so that we can write the 0s properly
+	gpiomask = ECONET_GPIO_CLRMASK_ADDR | ECONET_GPIO_CLRMASK_RW;
+
+	// Next, put the address into our prepared value - Nothing has gone in this before, so a straigth = rather than |= will be fine
+	//gpioval = (((r & 0x02) << (ECONET_GPIO_PIN_ADDR + 1)) | ((r & 0x01) << (ECONET_GPIO_PIN_ADDR)));
+	gpioval = (r & 0x03) << ECONET_GPIO_PIN_ADDR;
+
+	// Next, set the RnW bit appropriately - and since we want a 1 we can use the mask
+
+	gpioval |= ECONET_GPIO_CLRMASK_RW;
+
+	// Now, put that on the hardware
+
+	writel(gpioval, GPIO_PORT + GPSET0);
+	writel((~gpioval) & gpiomask, GPIO_PORT + GPCLR0);
+	
+	// Shouldn't need a barrier here because apparently writel() has one in it.
+
+	// Waggle nCS appropriately
+	
+	econet_set_cs(ECONET_GPIO_CS_ON);
+
+	if (econet_data->hwver < 2)
+	{
+		econet_wait_pin_low(ECONET_GPIO_PIN_CSRETURN, (ECONET_GPIO_CLOCK_DUTY_CYCLE));
+	}
+	else
+		barrier();
+
+	econet_set_cs(ECONET_GPIO_CS_OFF);	
+
+	if (econet_data->hwver < 2)
+	{
+		// ? Try a barrier() here and see if it generates the right sort of delay so we can ditch ndelay?
+		econet_ndelay(100);
+	}
+	else
+		while (econet_isbusy());
+
+	d = (readl(GPIO_PORT + GPLEV0) & ECONET_GPIO_CLRMASK_DATA) >> ECONET_GPIO_PIN_DATA;
+
+	// Old code follows
+	
+	//if (econet_data->hwver >= 2) while (econet_isbusy());
+	//econet_set_addr ((r & 0x02) >> 1, (r & 0x01));
+	//d = econet_read_bus();
+
+	// Original retained code follows
+
 #ifdef ECONET_GPIO_DEBUG_REG
 	printk (KERN_DEBUG "ECONET-GPIO: Read SR%d = 0x%02x\n", r, d);
 #endif
@@ -345,9 +490,20 @@ int econet_probe_adapter(void)
 
 	if (econet_gpio_pin(ECONET_GPIO_PIN_IRQ) == 0) // Likely v2 hardware
 	{
-		// Need a better test in here!!
+
+		// Set nCS active and we should see BUSY immediately
 		econet_data->hwver = 2;
-		econet_set_cs(0);
+		econet_set_cs(ECONET_GPIO_CS_ON);
+		barrier();
+
+		if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_BUSY)) == 0) // Circuit didn't produce busy when we turned nCS active, which it should - it'll go busy for a variable length of time depending on where we are in the board's local (8MHz divided to) 2MHz clock cycle, but not more than about 500ns. Possible given busy delay on the GPIO that it may have gone !busy by the time we read it, but hopefully not!
+		{
+			econet_data->hwver = 0;
+			printk (KERN_ERR "ECONET-GPIO: Version 2 hardware test failed.\n");
+			econet_set_cs(ECONET_GPIO_CS_OFF);	
+			return 0;
+		}
+		econet_set_cs(ECONET_GPIO_CS_OFF);
 		return 1;
 	}
 
@@ -359,19 +515,29 @@ int econet_probe_adapter(void)
 
 	udelay(2); // 2us should always be enough
 	if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
+	{
+
+		printk (KERN_ERR "ECONET-GPIO: Version 1 hardware test failed - nCS return not returning (test 1).\n");
 		return 0;
+	}
 
 	econet_set_cs(1);
 	udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
 
 	if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) == 0)
+	{
+		printk (KERN_ERR "ECONET-GPIO: Version 1 hardware test failed - nCS return not returning (test 2).\n");
 		return 0;
+	}
 
 	econet_set_cs(0);
 	udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
 
 	if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
+	{
+		printk (KERN_ERR "ECONET-GPIO: Version 1 hardware test failed - nCS return not returning (test 3).\n");
 		return 0;
+	}
 
 	return 1;
 
@@ -605,7 +771,13 @@ void econet_reset(void)
 	
 	init_waitqueue_head(&econet_data->econet_read_queue);
 
+	/* Take us out of AUN mode and set the chip to read */
+
+	econet_data->aun_mode = 0;
+
 	econet_set_read_mode();
+
+	printk (KERN_INFO "ECONET-GPIO: Module reset. AUN mode off. ADLC re-initialized.\n");
 
 }
 
@@ -842,9 +1014,6 @@ void econet_irq_write(void)
 	char tdra_flag;
 	int loopcount = 0;
 
-	/* Acquire packet spinlock */
-
-	//spin_lock(&econet_pkt_spin);
 
 	// Added 25.07.21 - Mark transmission even if not successful otherwise the reset timer gets stuck
 	econet_data->aun_last_tx = ktime_get_ns(); // Used to check if we have fallen out of bed on receiving a packet
@@ -862,7 +1031,7 @@ void econet_irq_write(void)
 
 	if (econet_pkt_tx.length < 4) // Runt
 	{
-		printk(KERN_INFO "ECONET-GPIO: Attempt to transmit runt frame (len = %d). Not bothering\n", econet_pkt_tx.length);
+		printk(KERN_INFO "ECONET-GPIO: Attempt to transmit runt frame (len = %d). Not bothering.\n", econet_pkt_tx.length);
 		econet_pkt_tx.length = 0; // Abandon
 		econet_data->tx_status = -ECONET_TX_NOTSTART;
 	}	
@@ -895,7 +1064,7 @@ next_byte:
 				// Commented out to see if this is what causes the kernel panic
 				econet_data->tx_status = -ECONET_TX_UNDERRUN;
 				econet_set_aunstate(EA_IDLE);
-				//econet_data->aun_state = EA_IDLE; // Abort AUN transaction if there is one
+
 				// Set up to read again
 				econet_set_read_mode();
 				return;
@@ -950,9 +1119,13 @@ next_byte:
 				printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): TX byte % 4d - %02x %c\n", econet_pkt_tx.ptr, (int) c, ((c > 32) && (c < 127)) ? c : '.');
 			}
 #endif 
+			/* OLD CODE 
 			if (econet_data->hwver >= 2) while (econet_isbusy());
 			econet_set_addr(1, 0);
 			econet_write_bus(econet_pkt_tx.d.data[econet_pkt_tx.ptr++]);
+			*/
+
+			econet_write_fifo(econet_pkt_tx.d.data[econet_pkt_tx.ptr++]);
 
 			if (econet_pkt_tx.ptr == econet_pkt_tx.length)
 			{
@@ -1000,10 +1173,10 @@ void econet_irq_read(void)
 
 recv_more:
 
-
-	if (econet_data->hwver >= 2) while (econet_isbusy());
-	econet_set_addr(1,0);
-	d = econet_read_bus();
+	//if (econet_data->hwver >= 2) while (econet_isbusy());
+	//econet_set_addr(1,0);
+	//d = econet_read_bus();
+	d = econet_read_fifo(); 
 
 #ifdef ECONET_GPIO_DEBUG_RX
 	printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): SR1 = %02x, SR2 = %02x, ptr = %d, c = %02x %c\n", sr1, sr2, econet_pkt_rx.ptr, d, (d < 32 || d >126) ? '.' : d);
@@ -1022,7 +1195,9 @@ recv_more:
 
 		if (econet_pkt_rx.ptr < 4) // Runt
 		{
+			printk (KERN_INFO "ECONET-GPIO: Runt received (len %d) - jettisoning\n", econet_pkt_rx.ptr);
 			econet_set_chipstate(EM_IDLE);
+			econet_set_aunstate(EA_IDLE);
 			// CR2 done above
 			econet_write_cr(ECONET_GPIO_CR1, C1_READ);
 			return;
@@ -2164,7 +2339,7 @@ restart_tx:
 			else if ((starter_counter++ < ECONET_TX_MAXSTARTS) && (tx_success == ECONET_TX_HANDSHAKEFAIL || tx_success == ECONET_TX_UNDERRUN || tx_success == ECONET_TX_TDRAFULL || tx_success == ECONET_TX_NOTSTART || tx_success == ECONET_TX_COLLISION)) // We've had less than 10 gos and have a non-fatal error, have another go
 			{
 				if ((econet_data->aun_mode) && (tx_success == ECONET_TX_COLLISION)) // Back off
-					udelay (starter_counter * ((255 - aun_tx.d.p.srcstn) * 1000)); // per station, prioritising the higher station numbers, increasing every time we have to have another go
+					udelay (160+(50 * aun_tx.d.p.srcstn)); // per station, prioritising the higher station numbers, increasing every time we have to have another go. Adjusted to match what the SJ Bridge used to do - but not necessarily on a bog standard collision - not sure if I've read the source right.
 
 				goto restart_tx;
 			}
@@ -2265,7 +2440,8 @@ unsigned int econet_poll (struct file *filp, poll_table *wait)
 long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 {
 
-        unsigned char w;
+        // unsigned char w; // Disused after removal of use of econet_write_bus() in data bus test harness ioctl()
+
 #ifdef ECONET_GPIO_DEBUG_IOCTL
         printk (KERN_DEBUG "ECONET-GPIO: IOCTL(%d, %lu)\n", cmd, arg);
 #endif
@@ -2336,7 +2512,14 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "ECONET-GPIO: ioctl(set bus, %02lx) called\n", (arg & 0xff));
 #endif
-                        w = econet_write_bus((char) (arg & 0xff));
+			// Commented to remove reliance on write bus. This ioctl() only for hardware test harness, so no nCS testing required etc.
+                        //w = econet_write_bus((char) (arg & 0xff));
+
+			econet_set_dir(ECONET_GPIO_WRITE);
+			
+			// Put it on the bus
+			writel((arg << ECONET_GPIO_PIN_DATA), GPIO_PORT + GPSET0);
+			writel((~(arg << ECONET_GPIO_PIN_DATA)) & ECONET_GPIO_CLRMASK_DATA, GPIO_PORT + GPCLR0);
                         break;
                 case ECONETGPIO_IOC_TEST:
 #ifdef ECONET_GPIO_DEBUG_IOCTL
@@ -2362,10 +2545,23 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
                                 econet_flagfill();
                         else    econet_set_read_mode();
                         break;
+
 		case ECONETGPIO_IOC_AUNMODE:
-			printk (KERN_INFO "ECONET-GPIO: AUN mode disabled\n");
-			econet_data->aun_mode = arg;
+			if (arg != 1 && arg != 0)
+			{
+				printk (KERN_ERR "ECONET-GPIO: Invalid argument (%ld) to ECONETGPIO_IOC_AUNMODE ioctl()\n", arg);
+				break;
+			}
+
+			// By here, we have a valid arg
+
+			econet_reset();
+			econet_data->aun_mode = arg; // Must do this after econet_reset, because econet_reset turns AUN off.
+
+			printk (KERN_INFO "ECONET-GPIO: AUN mode turned %s by ioctl()\n", (arg == 1 ? "on" : "off"));
+
 			break;
+
 		case ECONETGPIO_IOC_IMMSPOOF:
 			printk (KERN_INFO "ECONET-GPIO: Changing immediate spoof mode to %s\n", arg ? "ON" : "OFF");
 			econet_data->spoof_immediate = arg ? 1 : 0;
