@@ -1476,7 +1476,7 @@ void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
 
 				if (pkt_debug) fprintf (stderr, "\n");
 
-				aun_trunk_send_internal (&out, count+8, trunk);
+				aun_trunk_send_internal (&out, count+12, trunk);
 			}
 
 		}
