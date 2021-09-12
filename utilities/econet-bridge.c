@@ -1253,13 +1253,13 @@ void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
 
 	if (pkt_debug)
 	{
-		fprintf (stderr, "B-->B: Bridge %s from %s ", (is_reset ? "reset" : "update"), (source == -1 ? "internal" : (source == 0 ? "wire" : "trunk")));
+		fprintf (stderr, "B-->B: Receive bridge %s from %s ", (is_reset ? "reset " : "update"), (source == -1 ? "internal" : (source == 0 ? "wire" : "trunk")));
 
 		if (source > 0) fprintf (stderr, "%d ", source);
 
 		if (source >= 0)
 		{
-			fprintf (stderr, "for nets ");
+			fprintf (stderr, "with nets ");
 			for (counter = 0; counter < len-12; counter++)
 				fprintf (stderr, "%3d ", p->p.data[counter]);
 		}
@@ -1431,7 +1431,7 @@ void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
 
 		count = 0;
 
-		if (pkt_debug) fprintf (stderr, "B-->B: Sending bridge %s to wire    with nets ", (is_reset ? "reset" : "update"));
+		if (pkt_debug) fprintf (stderr, "B-->B: Sending bridge %s to   wire    with nets ", (is_reset ? "reset " : "update"));
 
 		for (net = 1; net < 255; net++)
 			if (wire_adv_out[net] == 0xff)
@@ -1463,7 +1463,7 @@ void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
 				out.p.aun_ttype = ECONET_AUN_BCAST;
 				out.p.seq = (local_seq += 4);
 
-				if (pkt_debug) fprintf (stderr, "B-->B: Sending bridge %s on trunk %d with nets ", (out.p.ctrl == 0x80 ? "reset" : "update"), trunk);
+				if (pkt_debug) fprintf (stderr, "B-->B: Sending bridge %s on   trunk %d with nets ", (out.p.ctrl == 0x80 ? "reset " : "update"), trunk);
 
 				count = 0;
 
