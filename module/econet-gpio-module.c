@@ -496,6 +496,8 @@ int econet_probe_adapter(void)
 		econet_set_cs(ECONET_GPIO_CS_ON);
 		barrier();
 
+/*
+
 		if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_BUSY)) == 0) // Circuit didn't produce busy when we turned nCS active, which it should - it'll go busy for a variable length of time depending on where we are in the board's local (8MHz divided to) 2MHz clock cycle, but not more than about 500ns. Possible given busy delay on the GPIO that it may have gone !busy by the time we read it, but hopefully not!
 		{
 			econet_data->hwver = 0;
@@ -503,6 +505,7 @@ int econet_probe_adapter(void)
 			econet_set_cs(ECONET_GPIO_CS_OFF);	
 			return 0;
 		}
+*/
 		econet_set_cs(ECONET_GPIO_CS_OFF);
 		return 1;
 	}
