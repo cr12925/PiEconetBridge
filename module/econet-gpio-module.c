@@ -372,7 +372,7 @@ void econet_write_cr(short r, unsigned char d)
 		econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
 	}
 	else
-		udelay(1); // This appears to stop us trying to start a read on the back of a write, which in turn stops the ADLC misreading our writes and producing gibberish from time to time
+		while (econet_isbusy()); // Wait until the ADLC has read our data. Not massively reliable yet.
 
 }
 
