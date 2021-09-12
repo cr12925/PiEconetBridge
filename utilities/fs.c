@@ -1791,6 +1791,19 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 
 	if (fs_noisy) fprintf (stderr, "   FS: Attempting to initialize server %d on %d.%d at directory %s\n", fs_count, net, stn, serverparam);
 
+	// If there is a file in this directory called "auto_inf" then we
+	// automatically turn on "-x" mode.  This should work transparently
+	// for any filesystem that isn't currently inf'd 'cos reads will
+	// get the xattr and writes will create a new inf file
+	char *autoinf=malloc(strlen(serverparam)+15);
+	strcpy(autoinf,serverparam);
+	strcat(autoinf,"/auto_inf");
+	if (access(autoinf, F_OK) == 0)
+	{
+		if (!fs_quiet) fprintf(stderr, "   FS: Automatically turned on -x mode because of %s\n",autoinf);
+		use_xattr = 0;
+	}
+	free(autoinf);
 	sprintf(regex, "^(%s{1,10})", FSREGEX);
 
 	//if (regcomp(&r_pathname, "^([A-Za-z0-9\\+_;\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]{1,10})", REG_EXTENDED) != 0)
