@@ -597,19 +597,25 @@ TRUNKING, FIREWALLING AND NETWORK ADDRESS TRANSLATION
 Examples of all of the following are in the sample config file.
 
 Trunking: This allows you to configure a single host & port combination
-which will receive all traffic for all hosts on particular networks. The
-network list must be either a single network, or a range specified as X-Y
-in the config.
+which will receive all traffic for all hosts on particular networks. 
 
 This saves having to specify all the hosts on a remote network and saves
 each one having its own UDP port open at the other end.
+
+Trunks learn which networks are where by sending and receiving bridge
+reset (&80) and update (&81) packets. Every 5 minutes, the bridge will
+do a full reset in case anything went wrong. In doing the adverts, it will
+apply the address translation mapping for your local networks. It will
+*never* advertise net 0, so to enable the functionality you *must* 
+specify a local network number with 'N'.
 
 NOTE: Traffic from other AUN stations WILL NOT be put on the trunk. That is
 because those local AUN stations will not know where to send the traffic
 for the distant networks.
 
-So a trunk only carries traffic off the Econet wire or locally emulated
-server traffic.
+The bridge *can* forward from one trunk to another. When it does so, it
+disables its intelligent waiting routine which looks for replies to 
+immediates and data packets, and leaves the distant ends to do it.
 
 Each trunk has a manually configured number, starting at 1.
 
