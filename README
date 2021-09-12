@@ -809,9 +809,18 @@ If your filesystem does not support extended attributes then you can use the
 file.  So a filename !BOOT would have an additional !BOOT.inf that stores the
 four values.
 
+This mode can also be enabled by creating a file called auto_inf in a
+server directory.  So, for example, if you have
+  F 0 254 32768 /econet
+then if the file /econet/auto_inf exists then it will automatically
+apply -x mode, and this will show in the log
+  FS: Attempting to initialize server 0 on 0.254 at directory /econet
+  FS: Automatically turned on -x mode because of /econet/auto_inf
+
 Even on a filesystem with extended attributes enabled, if an inf file is
 found then this will be used in preference, so !BOOT.inf will be used if
 it exists.
+
 
 You can mount each disc as a separate filesystem if you wish. The FS code will
 ignore the lost+found directory.
