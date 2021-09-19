@@ -26,9 +26,8 @@ void econet_set_dir(short); /* This calls econet_set_rw(), but also changes the 
 unsigned char econet_write_bus(unsigned char);
 unsigned char econet_write_bus_slow(unsigned char);
 unsigned char econet_read_bus(void);
-void econet_write_cr(short, unsigned char);
-void econet_write_cr_long(short, unsigned char);
-unsigned char econet_read_sr(short);
+void econet_write_cr(unsigned short, unsigned char);
+unsigned char econet_read_sr(unsigned short);
 void econet_gpio_release(void);
 
 void econet_reset(void);

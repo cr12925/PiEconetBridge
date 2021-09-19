@@ -95,9 +95,7 @@ ssize_t econet_readfd(struct file *, char *, size_t, loff_t *);
 ssize_t econet_writefd(struct file *, const char *, size_t, loff_t *);
 
 /* Abstracted functions to read SR / write CR  & FIFO */
-unsigned char econet_read_sr(short);
-void econet_write_fifo(unsigned char);
-unsigned char econet_read_fifo(void);
+unsigned char econet_read_sr(unsigned short);
 
 /* IRQ */
 irqreturn_t econet_irq(int, void *);
