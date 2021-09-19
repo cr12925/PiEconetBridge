@@ -48,6 +48,18 @@ unsigned GPIO_RANGE = 0x40;
 unsigned long *GPIO_CLK;
 unsigned GPIO_CLK_RANGE = 0xA8;
 
+#define econet_discontinue() \
+		econet_pkt_rx.length = econet_pkt_rx.ptr = 0; \
+		econet_set_chipstate(EM_IDLE); \
+		econet_write_cr(ECONET_GPIO_CR2, C2_READ); \
+		econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_DISC | ECONET_GPIO_C1_RX_RESET); /* Discontinue reception */ \
+		econet_write_cr(ECONET_GPIO_CR1, C1_READ)
+
+#define econet_rx_cleardown() \
+			econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); /* Maybe try commenting this out to see if we pick up receptions immediately after transmissions? */ \
+			econet_write_cr(ECONET_GPIO_CR2, C2_READ);  /* We use this here to clear the RX status */ \
+			econet_write_cr(ECONET_GPIO_CR1, C1_READ)
+
 short sr1, sr2;
 long gpioset_value;
 
@@ -147,182 +159,45 @@ void econet_set_dir(short d)
 }
 
 
-/*
- * econet_write_bus - puts values on the bus but the timings are far shorter.
- * This is to see if it's any use in fixing the 3-byte problem on data TX.
- * Sets write mode.
- */
-
-/* DISUSED code commented 12.09.11 - consider removal at v1
-
-unsigned char econet_write_bus (unsigned char d)
-{
-
-	unsigned long gpioset_val = (d << ECONET_GPIO_PIN_DATA);
-
-	// Calling routine will have already made sure chip not busy	
-
-#ifdef ECONET_GPIO_DEBUG_BUS
-	printk (KERN_DEBUG "ECONET-GPIO: Bus write 0x%02x (%c) - bits %d %d %d %d %d %d %d %d\n",
-                d, 
-		((d > 32) && (d < 'z') ? d : '.'),
-		(d & 0x80) >> 7,
-		(d & 0x40) >> 6,
-		(d & 0x20) >> 5,
-		(d & 0x10) >> 4,
-		(d & 0x08) >> 3,
-		(d & 0x04) >> 2,
-		(d & 0x02) >> 1,
-		(d & 0x01));
-#endif
-
-	econet_set_dir(ECONET_GPIO_WRITE);
-	// Put it on the bus
-	writel(gpioset_val, GPIO_PORT + GPSET0);
-	writel((~gpioset_val) & ECONET_GPIO_CLRMASK_DATA, GPIO_PORT + GPCLR0);
-
-	barrier();
-
-//
-	// Let it settle - was #ifndef ECONET_NO_NDELAY
-#if 0
-	//econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
-#else
-	//udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
-#endif
-
-	// Turn on chip select
-	econet_set_cs(ECONET_GPIO_CS_ON);
-	barrier();
-	
-	if (econet_data->hwver < 2)
-	{
-		econet_wait_pin_low(ECONET_GPIO_PIN_CSRETURN, (ECONET_GPIO_CLOCK_DUTY_CYCLE));
-	}
-	//else	while (!econet_isbusy());
-
-
-	// Turn off chip select
-	econet_set_cs(ECONET_GPIO_CS_OFF);
-
-	barrier();
-
-	// Just put some delay in here in case the chip needs to settle
-	// We put the line above in because sometimes we got a duplicate - i.e.
-	// two bytes the same, and the second was in place of another byte that ought to have
-	// been transmitted instead, as opposed to an *inserted extra* byte, which was the original
-	// Problem. So this "overwrite" condition may be because the chip is trying to read the bus again
-	// too quickkly, so we put a delay in.
-
-	if (econet_data->hwver < 2)
-	{
-#ifndef ECONET_NO_NDELAY
-	econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
-#else
-	udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
-#endif
-	}
-
-	return d;
-
-
-}
-
---DISUSED CODE END COMMENT */
-
-/*
- * econet_read_bus - reads current value off the bus. Sets read mode but DOES NOT set chip select
- */
-
-/* Disused - commented out 12.09.21 - consider removal on release of v1 code
-
-unsigned char econet_read_bus(void)
-{
-
-	unsigned char d;
-
-	// Calling routine will have ensured !Busy
-
-	econet_set_dir(ECONET_GPIO_READ);
-
-	econet_set_cs(ECONET_GPIO_CS_ON);
-	barrier();
-
-	if (econet_data->hwver < 2)
-		econet_wait_pin_low(ECONET_GPIO_PIN_CSRETURN, (ECONET_GPIO_CLOCK_DUTY_CYCLE));
-
-	econet_set_cs(ECONET_GPIO_CS_OFF); // Put this inactive again once we know the D-Type has clocked it to the 68B54
-	barrier();
-
-	if (econet_data->hwver < 2)
-	{
-// Hmm. What happens if we take this away altogether?
-
-#ifndef ECONET_NO_NDELAY
-		econet_ndelay(100); // Max wait time before data settles on bus according to chip spec, less a bit (180ns is what the spec says) // Was 100
-#else
-		__asm__ ("nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; "
-		"nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; "
-		"nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; "
-		"nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; "
-		"nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; ");
-#endif
-
-	}
-	else
-	{
-		while (econet_isbusy());
-		while (econet_isbusy());
-	}
-
-	d = (readl(GPIO_PORT + GPLEV0) & ECONET_GPIO_CLRMASK_DATA) >> ECONET_GPIO_PIN_DATA;
-
-#ifdef ECONET_GPIO_DEBUG_BUS
-	printk (KERN_DEBUG "ECONET-GPIO: Bus read 0x%02x (%c) - bits %d %d %d %d %d %d %d %d\n",
-                d, 
-		((d > 32) && (d < 'z') ? d : '.'),
-		(d & 0x80) >> 7,
-		(d & 0x40) >> 6,
-		(d & 0x20) >> 5,
-		(d & 0x10) >> 4,
-		(d & 0x08) >> 3,
-		(d & 0x04) >> 2,
-		(d & 0x02) >> 1,
-		(d & 0x01));
-#endif
-
-	return d;
-}
-
-*/
-
 #define econet_write_fifo(x) econet_write_cr(3, (x))
 
 /* econet_write_cr - write value to ADLC control register
  */
-void econet_write_cr(short r, unsigned char d)
+void econet_write_cr(unsigned short r, unsigned char d)
 {
 	unsigned long gpioval, gpiomask;
+#ifdef ECONET_GPIO_DEBUG_TIMING
+	u64 kt_start, kt_end;
+#endif
+
+	if (r > 4)
+	{
+		printk (KERN_ERR "ECONET-GPIO: Attempt to write to CR%d ! What is going on ?", r);
+		return;
+	}
 
 	r--;
-
-/* OLD CODE
-	if (econet_data->hwver >= 2) while (econet_isbusy());
-
-	econet_set_addr ((r & 0x02) >> 1, (r & 0x01));
-	econet_write_bus(d);
-*/
-
-/* NEW CODE */
 
 	gpiomask = ECONET_GPIO_CLRMASK_DATA | ECONET_GPIO_CLRMASK_RW | ECONET_GPIO_CLRMASK_ADDR;
 
 	gpioval = (r & 0x03) << ECONET_GPIO_PIN_ADDR;
 	gpioval |= (d << ECONET_GPIO_PIN_DATA);
+
 	// No need to set RW because it will be 0 by virtue of the first assignment to gpioval above.
 
 	if (econet_data->hwver >= 2)
+	{
+#ifdef ECONET_GPIO_DEBUG_TIMING
+		kt_start = ktime_get_ns();
+#endif
+
 		while (econet_isbusy());
+
+#ifdef ECONET_GPIO_DEBUG_TIMING
+		kt_end = ktime_get_ns();
+#endif
+
+	}
 
 	// Change the bus direction
                 INP_GPIO(ECONET_GPIO_PIN_DATA);
@@ -345,9 +220,13 @@ void econet_write_cr(short r, unsigned char d)
 
 	econet_data->current_dir = 0;
 
+	barrier(); // In case we need one on a change of direction
+
 	// Put that lot on the GPIO
 	writel(gpioval, GPIO_PORT+GPSET0);
 	writel((~gpioval) & gpiomask, GPIO_PORT + GPCLR0);
+
+	barrier();
 
 	// Enable nCS
 	econet_set_cs(ECONET_GPIO_CS_ON);
@@ -366,13 +245,21 @@ void econet_write_cr(short r, unsigned char d)
 	// Delay here to allow chip to settle. We had this in write_bus() because it appeared
 	// to avoid duplicate writes
 
+	barrier();
+
 	if (econet_data->hwver < 2)
 	{
 		// ? Try a barrier() here to see if we get a suitable delay.
 		econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
 	}
 	else
-		while (econet_isbusy()); // Wait until the ADLC has read our data. Not massively reliable yet.
+	{
+		// Reprot bus timing if need be
+#ifdef ECONET_GPIO_DEBUG_TIMING
+		printk (KERN_DEBUG "ECONET-GPIO: econet_write_cr(): econet_isbusy (pre-setup) took %lld ns\n", (kt_end - kt_start));
+#endif
+		while (econet_isbusy()); // Wait until the ADLC has read our data. Not massively reliable yet.. SHouldn't be required, but seems to be!
+	}
 
 }
 
@@ -381,17 +268,36 @@ void econet_write_cr(short r, unsigned char d)
 
 #define econet_read_fifo() econet_read_sr(3)
 
-unsigned char econet_read_sr(short r)
+unsigned char econet_read_sr(unsigned short r)
 {
 	unsigned char d;
 	unsigned long gpioval, gpiomask;
+#ifdef ECONET_GPIO_DEBUG_TIMING
+	u64 kt_start_ps, kt_start_pr, kt_end_ps, kt_end_pr;
+#endif
 
-	if (r > 4) return 0;
+	if (r > 4)
+	{
+		printk (KERN_ERR "ECONET-GPIO: Attempt to read SR%d ! What is going on ?\n", r);
+		return 0;
+	}
 
 	r--;
 
+#ifdef ECONET_GPIO_DEBUG_TIMING
+	kt_start_ps = ktime_get_ns();
+#endif
+
+	barrier();
+
 	if (econet_data->hwver >= 2)
 		while (econet_isbusy());
+
+#ifdef ECONET_GPIO_DEBUG_TIMING
+	kt_end_ps = ktime_get_ns();
+#endif
+
+	barrier();
 
 	// New code - sets up a single gpio value & mask and plonks it on the hardware in one go
 
@@ -406,16 +312,14 @@ unsigned char econet_read_sr(short r)
         INP_GPIO(ECONET_GPIO_PIN_DATA + 6);
         INP_GPIO(ECONET_GPIO_PIN_DATA + 7);
 
+	barrier(); // In case needed on a bus direction change
+
 	// And the mask, so that we can write the 0s properly
 	gpiomask = ECONET_GPIO_CLRMASK_ADDR | ECONET_GPIO_CLRMASK_RW;
 
 	// Next, put the address into our prepared value - Nothing has gone in this before, so a straigth = rather than |= will be fine
 	//gpioval = (((r & 0x02) << (ECONET_GPIO_PIN_ADDR + 1)) | ((r & 0x01) << (ECONET_GPIO_PIN_ADDR)));
-	gpioval = (r & 0x03) << ECONET_GPIO_PIN_ADDR;
-
-	// Next, set the RnW bit appropriately - and since we want a 1 we can use the mask
-
-	gpioval |= ECONET_GPIO_CLRMASK_RW;
+	gpioval = (r << ECONET_GPIO_PIN_ADDR) | ECONET_GPIO_CLRMASK_RW;
 
 	// Now, put that on the hardware
 
@@ -423,6 +327,11 @@ unsigned char econet_read_sr(short r)
 	writel((~gpioval) & gpiomask, GPIO_PORT + GPCLR0);
 	
 	// Shouldn't need a barrier here because apparently writel() has one in it.
+
+	// Diagnostics appear to show that the address line settings above are not making it to the ADLC and
+	// we get reads of SRs when we intend to read the FIFO. udelay(1) makes it worse, so what to do?
+
+	barrier();
 
 	// Waggle nCS appropriately
 	
@@ -437,26 +346,27 @@ unsigned char econet_read_sr(short r)
 
 	econet_set_cs(ECONET_GPIO_CS_OFF);	
 
+	barrier();
+
 	if (econet_data->hwver < 2)
 	{
-		// ? Try a barrier() here and see if it generates the right sort of delay so we can ditch ndelay?
 		econet_ndelay(100);
 	}
 	else
+	{
+#ifdef ECONET_GPIO_DEBUG_TIMING
+		kt_start_pr = ktime_get_ns();
+#endif	
 		while (econet_isbusy());
+#ifdef ECONET_GPIO_DEBUG_TIMING
+		kt_end_pr = ktime_get_ns();
+#endif
+	}
 
 	d = (readl(GPIO_PORT + GPLEV0) & ECONET_GPIO_CLRMASK_DATA) >> ECONET_GPIO_PIN_DATA;
 
-	// Old code follows
-	
-	//if (econet_data->hwver >= 2) while (econet_isbusy());
-	//econet_set_addr ((r & 0x02) >> 1, (r & 0x01));
-	//d = econet_read_bus();
-
-	// Original retained code follows
-
-#ifdef ECONET_GPIO_DEBUG_REG
-	printk (KERN_DEBUG "ECONET-GPIO: Read SR%d = 0x%02x\n", r, d);
+#ifdef ECONET_GPIO_DEBUG_TIMING
+	printk (KERN_DEBUG "ECONET-GPIO: econet_read_sr(): econet_isbusy (pre-setup) took %lld ns, pre-read took %lld ns, SR%d = 0x%02x\n", (kt_end_ps - kt_start_ps), (kt_end_pr - kt_start_pr), r, d);
 #endif
 	return d;	
 }
@@ -493,20 +403,6 @@ int econet_probe_adapter(void)
 
 		// Set nCS active and we should see BUSY immediately
 		econet_data->hwver = 2;
-		econet_set_cs(ECONET_GPIO_CS_ON);
-		barrier();
-
-/*
-
-		if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_BUSY)) == 0) // Circuit didn't produce busy when we turned nCS active, which it should - it'll go busy for a variable length of time depending on where we are in the board's local (8MHz divided to) 2MHz clock cycle, but not more than about 500ns. Possible given busy delay on the GPIO that it may have gone !busy by the time we read it, but hopefully not!
-		{
-			econet_data->hwver = 0;
-			printk (KERN_ERR "ECONET-GPIO: Version 2 hardware test failed.\n");
-			econet_set_cs(ECONET_GPIO_CS_OFF);	
-			return 0;
-		}
-*/
-		econet_set_cs(ECONET_GPIO_CS_OFF);
 		return 1;
 	}
 
@@ -671,12 +567,25 @@ short econet_gpio_init(void)
 
 	econet_data->irq = gpio_to_irq(econet_gpio_pins[EGP_IRQ]);
 
-	if ((econet_data->irq < 0) || ((err = request_irq(econet_data->irq, econet_irq, IRQF_SHARED | ((econet_data->hwver < 2) ? IRQF_TRIGGER_FALLING : IRQF_TRIGGER_RISING), THIS_MODULE->name, THIS_MODULE->name)) != 0))
+	// 20210919 OLD if ((econet_data->irq < 0) || ((err = request_irq(econet_data->irq, econet_irq, IRQF_SHARED | ((econet_data->hwver < 2) ? IRQF_TRIGGER_FALLING : IRQF_TRIGGER_RISING), THIS_MODULE->name, THIS_MODULE->name)) != 0))
+	if ((econet_data->irq < 0) || ((err = request_irq(econet_data->irq, econet_irq, IRQF_SHARED | ((econet_data->hwver < 2) ? IRQF_TRIGGER_LOW : IRQF_TRIGGER_HIGH), THIS_MODULE->name, THIS_MODULE->name)) != 0))
 	{
 		printk (KERN_INFO "ECONET-GPIO: Failed to request IRQ on pin BCM %d\n", econet_gpio_pins[EGP_IRQ]);
 		econet_gpio_release_pins();
 		return err;
 	}
+
+#ifdef ECONET_GPIO_DEBUG_IRQ
+	printk (KERN_INFO "ECONET-GPIO: GPREN0(%d) = %s, GPFEN0(%d) = %s, GPHEN0(%d) = %s, GPLEN0(%d) = %s\n",
+		ECONET_GPIO_PIN_IRQ,
+		(readl(GPIO_PORT + GPREN0) & (1 << ECONET_GPIO_PIN_IRQ)) ? "Set" : "Unset",
+		ECONET_GPIO_PIN_IRQ,
+		(readl(GPIO_PORT + GPFEN0) & (1 << ECONET_GPIO_PIN_IRQ)) ? "Set" : "Unset",
+		ECONET_GPIO_PIN_IRQ,
+		(readl(GPIO_PORT + GPHEN0) & (1 << ECONET_GPIO_PIN_IRQ)) ? "Set" : "Unset",
+		ECONET_GPIO_PIN_IRQ,
+		(readl(GPIO_PORT + GPLEN0) & (1 << ECONET_GPIO_PIN_IRQ)) ? "Set" : "Unset");
+#endif
 
 	econet_irq_mode(0);
 
@@ -738,7 +647,8 @@ void econet_adlc_cleardown(unsigned short in_irq)
 	/* Clear the address control bit because write_cr won't do it */
 	econet_write_cr(ECONET_GPIO_CR1, 0);
 
-	econet_set_dir(ECONET_GPIO_READ);
+	// This may be being optimized wrongly
+	//econet_set_dir(ECONET_GPIO_READ);
 
 
 }
@@ -785,6 +695,8 @@ void econet_reset(void)
 }
 
 /* Puts us in read mode & enables IRQs */
+/* NB doesn't change AUN state because this function is used *during* 4-way exchanges when moving between states */
+
 void econet_set_read_mode(void)
 {
 
@@ -804,6 +716,10 @@ void econet_set_read_mode(void)
 }
 
 /* Puts us in write mode & enables IRQs */
+/* NB doesn't change AUN state because this function is used *during* 4-way exchanges when setting up a new part of the 4-way to transmit */
+
+/* Needs updating so that it claims the line better */
+
 void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 {
 
@@ -830,7 +746,7 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 #endif
 	/* Routine assumes we have a packet ready to go */
 
-	/* First check DCD */
+/* DCD checked by writefd() now
 
 	econet_get_sr();
 
@@ -844,6 +760,7 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 		return;
 	}
 
+*/
 	// Now lock the spinlock and see if we are already transmitting, so that we know we are the only one
 	// trying to set write mode
 
@@ -992,6 +909,14 @@ void econet_irq_mode(short m)
 	spin_unlock(&econet_irqstate_spin);
 }
 
+/* 
+ * econet_finish_tx()
+ *
+ * Routine called when the IRQ routine has put the last byte of a frame into the FIFO.
+ * 
+ * Signals to the ADLC that it can now put the checksum on the wire and then the closing flag.
+ */
+
 void econet_finish_tx(void)
 {
 
@@ -1008,6 +933,13 @@ void econet_finish_tx(void)
 #endif
 
 }
+
+/* econet_irq_write()
+ *
+ * Routine called by main IRQ handler when it has been established that we are in write mode so that
+ * we need to put another byte of data in the FIFO from our queued packet
+ *
+ */
 
 void econet_irq_write(void)
 {
@@ -1058,25 +990,28 @@ void econet_irq_write(void)
 next_byte:
 			loopcount++;
 
-			//printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): Registers on entry - SR1 = 0x%02x, SR2 = 0x%02x, ptr = %d, loopcount = %d\n", sr1, sr2, econet_pkt_tx.ptr, loopcount);
+			//printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): Registers on entry - SR1 = 0x%02x, SR2 = 0x%02x, ptr = %d, loopcount = %d\n", sr1, (sr2 = econet_read_sr(2)), econet_pkt_tx.ptr, loopcount);
 
 			if (sr1 & ECONET_GPIO_S1_UNDERRUN) // Underrun
 			{
 				printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): TX Underrun at byte %02x - abort transmission\n", econet_pkt_tx.ptr);
+
 				econet_pkt_tx.length = 0;
-				// Commented out to see if this is what causes the kernel panic
+
 				econet_data->tx_status = -ECONET_TX_UNDERRUN;
+
 				econet_set_aunstate(EA_IDLE);
 
-				// Set up to read again
+				// Set up to read again (NB this sets the chip state)
 				econet_set_read_mode();
+
 				return;
 			}
 
 			tdra_flag = (sr1  & ECONET_GPIO_S1_TDRA);
 
 #ifdef ECONET_GPIO_DEBUG_TX
-		 	printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): Loop % 2d - TDRA FLAG IS %s. SR1 = 0x%02x, SR2 = 0x%02x\n", loopcount, (sr1 & ECONET_GPIO_S1_TDRA) ? "SET" : "UNSET", sr1, sr2);
+		 	printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): Loop % 2d - TDRA FLAG IS %s. SR1 = 0x%02x, SR2 = 0x%02x\n", loopcount, (sr1 & ECONET_GPIO_S1_TDRA) ? "SET" : "UNSET", sr1, (sr2 = econet_read_sr(2)));
 
 #endif 
 			tdra_counter = 0;
@@ -1085,17 +1020,24 @@ next_byte:
 			{
 				econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_CLR_TX_STATUS |
 					ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE);
+/* Altered 20210915 
 				udelay(10);
 				econet_get_sr();
 				tdra_flag = (sr1  & ECONET_GPIO_S1_TDRA);
+*/
+				udelay(5); // Shorter delay
+				tdra_flag = ((sr1 = econet_read_sr(1) & ECONET_GPIO_S1_TDRA)); // Only read SR1. (get_sr now always reads both, but we aren't fussed about sr2 here)
 			}
 
 			if (!tdra_flag)
 			{
 				// ANFS 4.25 checks TDRA on IRQ. If not available, it clears RX & TX status and waits for another IRQ
 
+				// Sub-clauses read sr2 beacuse we changed from econet_get_sr() in the loop above, so the sr2 value may be out of date by now.
+
 				if (sr1 & ECONET_GPIO_S1_CTS) // Collision?
 				{
+					sr2 = econet_read_sr(2);
 					printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): /CTS - Collision? TDRA unavailable on IRQ - SR1 - 0x%02X, SR2 = 0x%02X, ptr = %d, loopcount = %d - abort tx\n", sr1, sr2, econet_pkt_tx.ptr, loopcount);
 					econet_data->tx_status = -ECONET_TX_COLLISION;
 					// See if clearing the ADLC down helps here
@@ -1103,13 +1045,17 @@ next_byte:
 				}
 				else	
 				{
+					sr2 = econet_read_sr(2);
 					printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): TDRA not available on IRQ - SR1 = 0x%02x, SR2 = 0x%02x, ptr = %d, loopcount = %d - abort transmission\n", sr1, sr2, econet_pkt_tx.ptr, loopcount);
 					econet_data->tx_status = -ECONET_TX_TDRAFULL;
 				}
+
+				// Give up and go jettison the packet
+
 				econet_pkt_tx.length = 0;
 				econet_set_aunstate(EA_IDLE);
-				//spin_unlock(&econet_pkt_spin);
 				econet_set_read_mode();
+
 				return;
 			}
 
@@ -1122,41 +1068,49 @@ next_byte:
 				printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): TX byte % 4d - %02x %c\n", econet_pkt_tx.ptr, (int) c, ((c > 32) && (c < 127)) ? c : '.');
 			}
 #endif 
-			/* OLD CODE 
-			if (econet_data->hwver >= 2) while (econet_isbusy());
-			econet_set_addr(1, 0);
-			econet_write_bus(econet_pkt_tx.d.data[econet_pkt_tx.ptr++]);
-			*/
 
 			econet_write_fifo(econet_pkt_tx.d.data[econet_pkt_tx.ptr++]);
 
+			/* Last byte of packet? If so, flag end of transmission and show an empty packet */
 			if (econet_pkt_tx.ptr == econet_pkt_tx.length)
 			{
-				//spin_unlock(&econet_pkt_spin);
 				econet_finish_tx();
 				econet_pkt_tx.length = 0;
 				return;
 			}
+
 
 			byte_counter++;
 
 			econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_CLR_TX_STATUS |
 				ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE);
 
-			econet_get_sr();
+/* Skip this lot on level triggered IRQ
+			//econet_get_sr();
+			sr1 = econet_read_sr(1); // Quicker, since econet_get_sr() reads both now.
 	
 			if (sr1 & ECONET_GPIO_S1_IRQ) // If the IRQ line is still active. ANFS sends another byte if it is
 				goto next_byte; // This will re-check TDRA anyway
+*/
 
 		}
 
 		
 	}
 
-	//spin_unlock(&econet_pkt_spin);
 	return;
 
 }
+
+/* 
+ * econet_process_rx(byte off fifo)
+ *
+ * DOes nothing more than stick the byte we got off the fifo into our reception buffer.
+ *
+ * If we are about to overrun, stop it. Update last data received time - used to detect
+ * blockages!
+ *
+ */
 
 void econet_process_rx(unsigned char d)
 {
@@ -1167,34 +1121,36 @@ void econet_process_rx(unsigned char d)
 
 }
 
+/* 
+ * econet_irq_read() - called by the main IRQ handler when it thinks there is some data to read off the FIFO
+ *
+ */
+
 void econet_irq_read(void)
 {
 
 	unsigned char d;
 	int copied_to_fifo;
 	int copied_from_fifo;
+	unsigned short old_ptr;
 
 recv_more:
 
-	//if (econet_data->hwver >= 2) while (econet_isbusy());
-	//econet_set_addr(1,0);
-	//d = econet_read_bus();
 	d = econet_read_fifo(); 
+
+	old_ptr = econet_pkt_rx.ptr;
 
 #ifdef ECONET_GPIO_DEBUG_RX
 	printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): SR1 = %02x, SR2 = %02x, ptr = %d, c = %02x %c\n", sr1, sr2, econet_pkt_rx.ptr, d, (d < 32 || d >126) ? '.' : d);
 #endif
+
 	econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Tell the chip we've read the data
 
 	last_data_rcvd = ktime_get_ns();
 
-	if (sr2 & ECONET_GPIO_S2_VALID) // Frame valid received
+	if (sr2 & ECONET_GPIO_S2_VALID) // Frame valid received - i.e. end of frame received
 	{
-		econet_process_rx(d);
-		//econet_write_cr(ECONET_GPIO_CR2, C2_READ); // clear status // Now done above
-		// If kfifo is full, take something out of it before we shove this packet in.
-		if (kfifo_is_full(&econet_rx_queue))
-			copied_from_fifo = kfifo_out(&econet_rx_queue, &dump_pkt, sizeof(dump_pkt));
+		econet_process_rx(d); // Process the (final) incoming byte
 
 		if (econet_pkt_rx.ptr < 4) // Runt
 		{
@@ -1206,17 +1162,26 @@ recv_more:
 			return;
 		}
 
+		// If kfifo is full, take something out of it before we shove this packet in.
+
+		if (kfifo_is_full(&econet_rx_queue))
+			copied_from_fifo = kfifo_out(&econet_rx_queue, &dump_pkt, sizeof(dump_pkt));
+
 		if (!(econet_data->aun_mode)) // Raw mode - straight on the FIFO
 		{
 			// Put the packet on the kernel FIFO
+
+			//printk (KERN_INFO "ECONET-GPIO: Packet onto RX FIFO - len = %04X, first two bytes 0x%02X 0x%02x\n", econet_pkt_rx.ptr, econet_pkt_rx.d.p.dststn, econet_pkt_rx.d.p.dstnet);
+
 			copied_to_fifo = kfifo_in(&econet_rx_queue, &(econet_pkt_rx.d.data), econet_pkt_rx.ptr); 
 			wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
 #ifdef ECONET_GPIO_DEBUG_RX
 			printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): Valid frame received, length %04x, %04x bytes copied to kernel FIFO\n", econet_pkt_rx.ptr, copied_to_fifo);
 #endif
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // See if this fixes the crashes
+			// 20210919 - avoid doing RX Reset econet_rx_cleardown(); 
+			/* econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // See if this fixes the crashes
 			econet_write_cr(ECONET_GPIO_CR2, C2_READ);
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+			econet_write_cr(ECONET_GPIO_CR1, C1_READ); */
 			econet_set_chipstate(EM_IDLE);
 		}
 		else
@@ -1293,9 +1258,12 @@ unexpected_scout:
 #ifdef ECONET_GPIO_DEBUG_AUN
 								printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): Valid frame received, length %04x, %04x AUN bytes copied to kernel FIFO\n", econet_pkt_rx.ptr, copied_to_fifo);
 #endif
+								econet_rx_cleardown();
+							/*
 								econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // See if this fixes the crashes
 								econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 								econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+							*/
 								econet_flagfill();
 								econet_set_aunstate(EA_IDLE); // Wait and see what turns up next - probably an immediate reply
 								econet_set_chipstate(EM_FLAGFILL);
@@ -1402,9 +1370,12 @@ unexpected_scout:
 #ifdef ECONET_GPIO_DEBUG_RX
 							printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): Valid frame received, length %04x, %04x AUN bytes copied to kernel FIFO\n", econet_pkt_rx.ptr, copied_to_fifo);
 #endif
+							econet_rx_cleardown();
+					/*
 							econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // See if this fixes the crashes
 							econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 							econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+					*/
 							econet_set_chipstate(EM_IDLE);
 						}
 						else // not immediate or broadcast - Should be a scout, unless it's a broadcast (And if it's not a scout, our state machine has gone wrong)
@@ -1416,9 +1387,12 @@ unexpected_scout:
 								econet_set_aunstate(EA_IDLE);
 								//econet_data->aun_state = EA_IDLE;
 								printk (KERN_ERR "ECONET-GPIO: econet_irq_read(): AUN: Valid frame received, length %04x, but was expecting Scout and this wasn't\n", econet_pkt_rx.ptr);
+								econet_rx_cleardown();
+					/*
 								econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // See if this fixes the crashes
 								econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 								econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+					*/
 								econet_set_chipstate(EM_IDLE);
 							}
 							else // It was a scout, so send an Ack and wait for some data to come in
@@ -1477,7 +1451,6 @@ unexpected_scout:
 							printk (KERN_ERR "ECONET-GPIO: econet_irq_read(): AUN: Valid frame received, length %04x, but was expecting first ACK from %d.%d - got packet from %d.%d to %d.%d %02x %02x %02x %02x\n", econet_pkt_rx.ptr, aun_tx.d.p.dstnet, aun_tx.d.p.dststn, econet_pkt_rx.d.p.srcnet, econet_pkt_rx.d.p.srcstn, econet_pkt_rx.d.p.dstnet, econet_pkt_rx.d.p.dststn, econet_pkt_rx.d.p.data[0], econet_pkt_rx.d.p.data[1], econet_pkt_rx.d.p.data[2], econet_pkt_rx.d.p.data[3]);
 	
 							econet_set_aunstate(EA_IDLE);
-							//econet_data->aun_state = EA_IDLE;
 							econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // See if this fixes the crashes
 							econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 							econet_write_cr(ECONET_GPIO_CR1, C1_READ);
@@ -1490,7 +1463,7 @@ unexpected_scout:
 							{
 								memcpy (&(econet_pkt_tx.d.p.ctrl), &(aun_tx.d.p.data), aun_tx.length-12); // Strip off the header - note, ctrl byte is first on the econet wire, and is where the data portion of a data packet starts
 								econet_pkt_tx.length = 4 + (aun_tx.length - 12); // Data starts at byte 4 in a data packet to econet
-							} // Else it WAS one of those Immediate 0x85 specials which had 4 data bytes on the "Scout", so we only copy n-4 data bytes into the data packet
+							} 
 							else // Else it WAS one of those Immediate 0x85 specials which had 4 data bytes on the "Scout", so we only copy n-4 data bytes into the data packet
 							{
 								memcpy (&(econet_pkt_tx.d.p.ctrl), &(aun_tx.d.p.data[4]), aun_tx.length-16); // Strip off the header - note, ctrl byte is first on the econet wire, and is where the data portion of a data packet starts
@@ -1499,7 +1472,6 @@ unexpected_scout:
 
 							econet_pkt_tx.ptr = 0;
 							econet_set_aunstate(EA_W_WRITEDATA);
-							//econet_data->aun_state = EA_W_WRITEDATA;	
 
 							econet_set_chipstate(EM_WRITE);
 							econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2);
@@ -1528,7 +1500,6 @@ unexpected_scout:
 						{
 							printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): Valid frame received, length %04x, but was expecting final ACK from %d.%d\n", econet_pkt_rx.ptr, aun_tx.d.p.dstnet, aun_tx.d.p.dststn);
 							econet_set_aunstate(EA_IDLE);
-							//econet_data->aun_state = EA_IDLE;
 						}
 						else // It was an ACK from where we expected, so flag completion to writefd
 						{
@@ -1541,9 +1512,12 @@ unexpected_scout:
 
 						// Either way, go back to idle.
 
+						econet_rx_cleardown();
+					/*
 						econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // See if this fixes the crashes
 						econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 						econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+					*/
 						econet_set_chipstate(EM_IDLE);
 						econet_set_aunstate(EA_IDLE);
 					}
@@ -1577,7 +1551,6 @@ unexpected_scout:
 							econet_pkt_tx.length = 4;
 
 							econet_set_aunstate(EA_R_WRITEFINALACK);
-							//econet_data->aun_state = EA_R_WRITEFINALACK;	
 
 							econet_set_chipstate(EM_WRITE);
 							econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2);
@@ -1585,12 +1558,14 @@ unexpected_scout:
 						else // Soemthing went wrong - clear down
 						{
 							printk (KERN_ERR "ECONET-GPIO: econet_irq_read(): AUN: Valid frame received, length %04x, but was expecting data packet from %d.%d and this wasn't\n", econet_pkt_rx.length, econet_pkt_rx.d.p.srcnet, econet_pkt_rx.d.p.srcstn);
+							econet_rx_cleardown();
+						/*
 							econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // See if this fixes the crashes
 							econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 							econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+						*/
 							econet_set_chipstate(EM_IDLE);
 							econet_set_aunstate(EA_IDLE);
-							//econet_data->aun_state = EA_IDLE;
 						}
 					}
 					break;
@@ -1624,13 +1599,17 @@ unexpected_scout:
 							printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): AUN Immediate reply received from %d.%d - send to userspace, data portion length %d\n", aun_rx.d.p.srcnet, aun_rx.d.p.srcstn, (econet_pkt_rx.ptr -4));
 #endif
 						}
+			
+						econet_rx_cleardown();
+
+					/*
 						econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // See if this fixes the crashes
 						econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 						econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+					*/
+
 						econet_set_chipstate(EM_IDLE);
 						econet_set_aunstate(EA_IDLE);
-						//econet_data->aun_state = EA_IDLE;
-
 					}
 					break;	
 				}	
@@ -1641,89 +1620,74 @@ unexpected_scout:
 		econet_pkt_rx.ptr = 0; // Reset packet receive counter - flags the receive buffer as empty
 
 	}
-	//else if (!(sr2 & (ECONET_GPIO_S2_RX_ABORT | ECONET_GPIO_S2_DCD | ECONET_GPIO_S2_OVERRUN | ECONET_GPIO_S2_ERR | ECONET_GPIO_S2_RX_IDLE))) // No errors
-	else if ((sr2 & ECONET_GPIO_S2_AP) || (sr1 & ECONET_GPIO_S1_RDA))
+	else if (sr2 & ECONET_GPIO_S2_AP) // New frame
 	{
-		if (sr2 & ECONET_GPIO_S2_AP) // New frame
-		{
 #ifdef ECONET_GPIO_DEBUG_RX
 			printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): Address present and no errors. SR1 = 0x%02x\n", sr1);
 #endif
 			econet_set_chipstate(EM_READ);
 			econet_pkt_rx.length = econet_pkt_rx.ptr = 0;
 			econet_process_rx(d);
+/* Apparently unnecessary
+			econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Clear status
+*/
+/* Skip this on legel triggered IRQ
+			econet_get_sr();
+			if (sr1 & (ECONET_GPIO_S1_IRQ | ECONET_GPIO_S1_RDA))
+				goto recv_more;
+*/
+	}
+	else if (sr1 & ECONET_GPIO_S1_RDA) // Ordinary data
+	{
+		if (econet_pkt_rx.ptr == 0) // Shouldn't be getting here without AP set (caught above)
+		{
+			printk (KERN_INFO "ECONET-GPIO: Received first byte of packet without AP flag set. Discontinuing. SR2=0x%02x.\n", sr2);
+			econet_discontinue();
 		}
-		else if (sr1 & ECONET_GPIO_S1_RDA) // Data available
+		else // Data available
+		{
 			econet_process_rx(d);
+/* Apparently unnecessary
+			econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Clear status
+*/
 
-		econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Clear status
-
-		econet_get_sr();
+/* Skip this on level triggered IRQ
+			econet_get_sr();
 	
-		if (sr1 & (ECONET_GPIO_S1_IRQ | ECONET_GPIO_S1_RDA)) // More data available
-			goto recv_more;
+			if (sr1 & (ECONET_GPIO_S1_IRQ | ECONET_GPIO_S1_RDA)) // More data available
+				goto recv_more;
+*/
+		}
 	}
 	else if (sr2 & ECONET_GPIO_S2_RX_IDLE) // Abort RX
 	{
-#ifdef ECONET_GPIO_DEBUG_RX
 		printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): RX Idle received\n");
-#endif
-		//econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE);
-		econet_pkt_rx.length = econet_pkt_rx.ptr = 0;
-		econet_set_chipstate(EM_IDLE);
-		econet_write_cr(ECONET_GPIO_CR2, C2_READ);
-		econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_DISC | ECONET_GPIO_C1_RX_RESET); // Discontinue reception
-		econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+		econet_discontinue();
 	}
 	else if (sr2 & ECONET_GPIO_S2_RX_ABORT) // Abort RX
 	{
-#ifdef ECONET_GPIO_DEBUG_RX
 		printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): RX Abort received\n");
-#endif
-		econet_pkt_rx.length = econet_pkt_rx.ptr = 0;
-		econet_set_chipstate(EM_IDLE);
-		econet_write_cr(ECONET_GPIO_CR2, C2_READ);
-		econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_DISC | ECONET_GPIO_C1_RX_RESET); // Discontinue reception
-		econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+		econet_discontinue();
 	}
 	else if (sr2 & ECONET_GPIO_S2_DCD) // No clock all of a sudden
 	{
-#ifdef ECONET_GPIO_DEBUG_RX
 		printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): RX No clock\n");
-#endif
-		econet_pkt_rx.length = econet_pkt_rx.ptr = 0;
-		econet_set_chipstate(EM_IDLE);
-		econet_write_cr(ECONET_GPIO_CR2, C2_READ);
-		econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_DISC | ECONET_GPIO_C1_RX_RESET); // Discontinue reception
-		econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+		econet_discontinue();
 	}
 	else if (sr2 & ECONET_GPIO_S2_OVERRUN) // Overrun RX
 	{
-#ifdef ECONET_GPIO_DEBUG_RX
 		printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): RX Overrun\n");
-#endif
-		econet_pkt_rx.length = econet_pkt_rx.ptr = 0;
-		econet_set_chipstate(EM_IDLE);
-		econet_write_cr(ECONET_GPIO_CR2, C2_READ);
-		econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_DISC | ECONET_GPIO_C1_RX_RESET); // Discontinue reception
-		econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+		econet_discontinue();
 	}
 	else if (sr2 & ECONET_GPIO_S2_ERR) // Checksum error
 	{
-#ifdef ECONET_GPIO_DEBUG_RX
 		printk (KERN_INFO "ECONET-GPIO: CRC Error\n");
-#endif
-		econet_pkt_rx.length = econet_pkt_rx.ptr = 0;
-		econet_set_chipstate(EM_IDLE);
-		econet_write_cr(ECONET_GPIO_CR2, C2_READ);
-		econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_DISC | ECONET_GPIO_C1_RX_RESET); // Discontinue reception
-		econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+		econet_discontinue();
 	}
 	else
 	{
-#ifdef ECONET_GPIO_DEBUG_RX
 		printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): Unhandled state - SR1 = 0x%02x, SR1 = 0x%02x\n", sr1, sr2);
-#endif
+		econet_discontinue();
 	}
 
 	// Detect packets we are not interested in and discontinue them
@@ -1731,14 +1695,15 @@ unexpected_scout:
 	{
 		if (!ECONET_DEV_STATION(econet_stations, econet_pkt_rx.d.p.dstnet, econet_pkt_rx.d.p.dststn)) // Not a station we are interested in
 		{
-			econet_pkt_rx.length = econet_pkt_rx.ptr = 0;
-			econet_set_chipstate(EM_IDLE);
-			econet_write_cr(ECONET_GPIO_CR2, C2_READ);
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_DISC | ECONET_GPIO_C1_RX_RESET); // Discontinue reception
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+			econet_discontinue();
 		}
 
 	}
+
+/*
+	if (old_ptr == 0 && econet_pkt_rx.ptr > 0)
+		printk (KERN_INFO "ECONET-GPIO: First byte received is 0x%02x\n", econet_pkt_rx.d.p.dststn);
+*/
 
 	return;
 
@@ -1898,9 +1863,12 @@ irqreturn_t econet_irq(int irq, void *ident)
 		econet_write_cr(ECONET_GPIO_CR2, C2_READ); // We use this here to clear the RX status
 		if (tmp_status == EM_IDLE) // Only if we were in IDLE
 		{
+			econet_rx_cleardown();
+		/*
 			econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // Maybe try commenting this out to see if we pick up receptions immediately after transmissions?
 			econet_write_cr(ECONET_GPIO_CR2, C2_READ); // We use this here to clear the RX status
 			econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+		*/
 		}
 	}
 	else if (econet_data->mode == EM_IDLE || econet_data->mode == EM_IDLEINIT) // We seem to get these when the chip gets its pants tangled. (With sr1=0 - but we've handled reading and writing above, so just clear status)
@@ -1910,21 +1878,27 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 		if (sr2 & ~(ECONET_GPIO_S2_AP | ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_RDA)) // Errors
 		{
+			econet_rx_cleardown();
+		/*
 			econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // Maybe try commenting this out to see if we pick up receptions immediately after transmissions?
 			econet_write_cr(ECONET_GPIO_CR2, C2_READ); // We use this here to clear the RX status
 			econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+		*/
 		}
 		else
 			econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Just clear status
 	}
-	else if (econet_data->mode == EM_IDLEINIT)
+	else if (econet_data->mode == EM_IDLEINIT) // Not clear we ever get here given the statement above!
 	{
 		econet_set_chipstate(EM_IDLE); // econet_data->mode = EM_IDLE;
 		if (sr2 & ~(ECONET_GPIO_S2_AP | ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_RDA)) // Errors
 		{
+			econet_rx_cleardown();
+		/*
 			econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // Maybe try commenting this out to see if we pick up receptions immediately after transmissions?
 			econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 			econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+		*/
 		}
 		else	econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 	}
@@ -2152,10 +2126,13 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 // Check for clock 
 
-	if (!(econet_data->clock))
-		econet_get_sr(); // Have another look
+	sr2 = econet_read_sr(2);
 	
-	if (!(econet_data->clock))
+	if (sr2 & ECONET_GPIO_S2_DCD)
+		// Have another look
+		sr2 = econet_read_sr(2);
+	
+	if (sr2 & ECONET_GPIO_S2_DCD)
 	{
 		econet_data->last_tx_user_error = ECONET_TX_NOCLOCK;
 #ifdef ECONET_GPIO_DEBUG_TX
@@ -2414,6 +2391,9 @@ int econet_open(struct inode *inode, struct file *file) {
  }
  econet_data->open_count++;
  try_module_get(THIS_MODULE);
+	
+econet_reset(); // Does the station array clear, resets the FIFOs etc.
+
  return 0;
 }
 
@@ -2717,12 +2697,10 @@ static int __init econet_init(void)
 
 	printk (KERN_INFO "ECONET-GPIO: Hardware present - version %d%s. ADLC initialized.\n", econet_data->hwver, (econet_data->hwver >= 2) ? " - how exciting!" : "");
 
-	econet_get_sr();
+	sr1 = econet_read_sr(1);
+	sr2 = econet_read_sr(2);
 
-	if (!(econet_data->clock))
-		printk (KERN_ERR "ECONET-GPIO: No clock! (SR1 = 0x%02x, SR2 = 0x%02x)\n", sr1, sr2);
-	else
-		printk (KERN_INFO "ECONET-GPIO: Clock detected (SR1 = 0x%02x, SR2 = 0x%02x)\n", sr1, sr2);
+	printk (KERN_ERR "ECONET-GPIO: %s (SR1 = 0x%02x, SR2 = 0x%02x)\n", (sr2 & ECONET_GPIO_S2_DCD) ? "No clock!" : "Clock detected", sr1, sr2);
 
  	return 0;
 
