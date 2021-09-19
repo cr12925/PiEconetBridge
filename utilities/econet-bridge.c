@@ -237,7 +237,7 @@ void econet_readconfig(void)
 	
 	FILE *configfile;
 	char linebuf[256];
-	regex_t r_comment, r_entry_distant, r_entry_local, r_entry_server, r_entry_wire, r_entry_trunk, r_entry_xlate, r_entry_fw, r_entry_learn, r_entry_namedpipe;
+	regex_t r_comment, r_entry_distant, r_entry_local, r_entry_server, r_entry_wire, r_entry_trunk, r_entry_xlate, r_entry_fw, r_entry_learn, r_entry_namedpipe, r_entry_filter;
 	regmatch_t matches[9];
 	int count;
 	short j, k;
@@ -335,7 +335,13 @@ void econet_readconfig(void)
 
         if (regcomp(&r_entry_fw, "^\\s*([Y]|FIREWALL)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+(DROP|ACCEPT)\\s*$", REG_EXTENDED | REG_ICASE) != 0)
         {
-                fprintf(stderr, "Unable to compile network translation regex.\n");
+                fprintf(stderr, "Unable to compile network firewall regex.\n");
+                exit(EXIT_FAILURE);
+        }
+
+        if (regcomp(&r_entry_filter, "^\\s*FILTER\\s+(IN|OUT)\\s+([[:digit:]]{1,3})\\s+NET\\s+([[:digit:]]{1,3})\\s*$", REG_EXTENDED | REG_ICASE) != 0)
+        {
+                fprintf(stderr, "Unable to compile network filter regex.\n");
                 exit(EXIT_FAILURE);
         }
 
@@ -2061,6 +2067,8 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 
 			if (result < 0 && (err == ECONET_TX_JAMMED || err == ECONET_TX_NOCLOCK || err == ECONET_TX_NOCOPY)) // Fatal errors
 				break;
+			else if (result < 0)
+				result = -1 * err;
 			
 			if (result == len) 
 			{
