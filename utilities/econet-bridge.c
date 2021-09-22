@@ -2054,6 +2054,8 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 		else if (network[d].type & ECONET_HOSTTYPE_TWIRE) // Wire
 		{
 
+			unsigned short txcount = 0;
+
 			// Is it a wired fileserver we might want to know about?
 
 			if ((network[d].type & ECONET_HOSTTYPE_TWIRE) && (p->p.port == 0x99) && (!(network[d].is_wired_fs))) // Fileserver traffic on a wire station
@@ -2062,13 +2064,18 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 				fprintf (stderr, "  DYN:%12s             Station %d.%d identified as wired fileserver\n", "", p->p.dstnet, p->p.dststn);
 			}
 
-			result = write(econet_fd, p, len);
-			err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
+			while (result <= 0 && txcount++ < 10)
+			{
+				result = write(econet_fd, p, len);
+				err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
+				if (result < 0) // Snooze a while
+					usleep(160 + (30 * (p->p.srcstn)));
+			}
 
 			if (result < 0 && (err == ECONET_TX_JAMMED || err == ECONET_TX_NOCLOCK || err == ECONET_TX_NOCOPY)) // Fatal errors
 				break;
 			else if (result < 0)
-				result = -1 * err;
+			result = -1 * err;
 			
 			if (result == len) 
 			{
