@@ -7,7 +7,6 @@
 //#define PERIBASE 0x20000000 /* Pi Zero */
 
 #define GPIO_PERI_BASE (PERIBASE + 0x200000)
-#define GPIO_CLK_BASE (PERIBASE + 0x101070)
 
 /* GPIO PINS - Broadcom numbering */
 
@@ -40,14 +39,12 @@
 #define GPCLR0 0x0a
 #define GPLEV0 0x0d
 
-#define GPIOCLKPASSWD (0x5A << 24)
-#define GPIOCLKSRC_PLLD 6
-#define GPIOCLKBUSY (1 << 7)
-#define GPIOCLKKILL (1 << 5)
-#define GPIOCLKENABLE (1 << 4)
+// IRQ debug
+#define GPREN0 19
+#define GPFEN0 22
+#define GPHEN0 25
+#define GPLEN0 28
 
-#define GPIOCLK_GP0CTL 0 
-#define GPIOCLK_GP0DIV 1
 
 /* Pin numbering index */
 

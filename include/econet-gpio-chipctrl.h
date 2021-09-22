@@ -33,6 +33,10 @@ void econet_gpio_release(void);
 void econet_reset(void);
 void econet_flagfill(void);
 
+#define ECONET_GPIO_DATA_PIN_MASK (0x00ffffff << (ECONET_GPIO_PIN_DATA % 10))
+// 0x249249 is a bit pattern 001 001 001 ... which is the 'OUT' mode for three bits on a GPIO reg
+#define ECONET_GPIO_DATA_PIN_OUT (0x00249249 << (ECONET_GPIO_PIN_DATA % 10))
+
 #define INP_GPIO(g) *(GPIO_PORT+((g)/10)) &= ~(7<<(((g)%10)*3))
 #define OUT_GPIO(g) *(GPIO_PORT+((g)/10)) |=  (1<<(((g)%10)*3))
 #define SET_GPIO_ALT(g,a) *(GPIO_PORT+(((g)/10))) |= (((a)<=3?(a)+4:(a)==4?3:2)<<(((g)%10)*3))
@@ -87,9 +91,7 @@ void econet_flagfill(void);
 /* Note that there are two assignments to sr2 here. The first is the historical one. The second is because we discovered that SR2Q on S1 did not go high when, for example, /DCD alone was set in SR2, so we now read both registers. Old code left so we don't lose it */
 #define econet_get_sr()	{ \
 		sr1 = econet_read_sr(1); \
-		sr2 = (sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : ((sr1 & ECONET_GPIO_S1_RDA) >> 7); \
-		sr2 = econet_read_sr(2); \
-		econet_data->clock = (sr2 & ECONET_GPIO_S2_DCD) ? 0 : 1; \
+		sr2 = (sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : ((sr1 & ECONET_GPIO_S1_RDA) ? 0x80 : 0x00); \
 		}
 
 #endif
