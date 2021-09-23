@@ -1037,7 +1037,6 @@ void econet_irq_read(void)
 
 recv_more:
 
-	d = econet_read_fifo(); 
 
 	old_ptr = econet_pkt_rx.ptr;
 
@@ -1056,7 +1055,8 @@ recv_more:
 	if (sr2 & ECONET_GPIO_S2_RX_IDLE) // Abort RX
 	{
 		printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): RX Idle received\n");
-		econet_discontinue();
+		//econet_discontinue(); // This may be causing a problem since we'd be discontinuing when there is no frame in receiption, try cleardown instead
+		econet_rx_cleardown();
 	}
 	else if (sr2 & ECONET_GPIO_S2_RX_ABORT) // Abort RX
 	{
@@ -1075,6 +1075,7 @@ recv_more:
 	}
 	else if (sr2 & ECONET_GPIO_S2_VALID) // Frame valid received - i.e. end of frame received
 	{
+		d = econet_read_fifo(); 
 		econet_process_rx(d); // Process the (final) incoming byte
 
 		if (econet_pkt_rx.ptr < 4) // Runt
@@ -1522,6 +1523,7 @@ unexpected_scout:
 #endif
 			econet_set_chipstate(EM_READ);
 			econet_pkt_rx.length = econet_pkt_rx.ptr = 0;
+			d = econet_read_fifo(); 
 			econet_process_rx(d);
 	}
 	else if (sr1 & ECONET_GPIO_S1_RDA) // Ordinary data
@@ -1533,6 +1535,7 @@ unexpected_scout:
 		}
 		else // Data available
 		{
+			d = econet_read_fifo(); 
 			econet_process_rx(d);
 		}
 	}
