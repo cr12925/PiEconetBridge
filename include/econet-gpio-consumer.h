@@ -18,6 +18,7 @@
 #define __ECONETGPIOCONSUMER_H__
 
 #include <linux/ioctl.h>
+#include <stdint.h>
 
 /* This is the map of stations we want to handle traffic for that
    are not on the local econet wire. One bit per station, arranged
@@ -100,11 +101,7 @@ struct __econet_packet_aun {
 			unsigned char port;
 			unsigned char ctrl; // Internally, this will have high bit set. On the UDP packet it is stripped off
 			unsigned char padding;
-#ifdef ECONET_64BIT
-			unsigned int seq;
-#else
-			unsigned long seq;
-#endif
+			uint32_t seq;
 			unsigned char data[ECONET_MAX_PACKET_SIZE-9];
 		} p;
 		unsigned char raw[ECONET_MAX_PACKET_SIZE];
@@ -119,11 +116,7 @@ struct __econet_packet_udp {
                         unsigned char port; /* Yes, port first on AUN; it's CB first on the Econet wire! */
                         unsigned char ctrl;
                         unsigned char pad;
-#ifdef ECONET_64BIT
-			unsigned int seq;
-#else
-			unsigned long seq;
-#endif
+			uint32_t seq;
 			unsigned char data[ECONET_MAX_PACKET_SIZE-4];
                 } p;
         };

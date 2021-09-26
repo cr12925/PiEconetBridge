@@ -35,6 +35,8 @@
 #include <endian.h>
 #include <regex.h>
 #include <time.h>
+#include <stdint.h>
+#include <inttypes.h>
 #include "../include/econet-gpio-consumer.h"
 #include "../include/econet-pserv.h"
 
@@ -48,7 +50,7 @@ extern void fs_eject_station(unsigned char, unsigned char); // Used to get rid o
 extern void fs_dequeue();
 extern short fs_dequeuable();
 extern void sks_poll(int);
-short aun_wait (unsigned char, unsigned char, unsigned char, unsigned char, unsigned char, unsigned long, short, struct __econet_packet_aun **);
+short aun_wait (unsigned char, unsigned char, unsigned char, unsigned char, unsigned char, uint32_t, short, struct __econet_packet_aun **);
 extern unsigned short fs_quiet, fs_noisy;
 extern short fs_sevenbitbodge;
 extern short use_xattr; // When set use filesystem extended attributes, otherwise use a dotfile
@@ -117,13 +119,8 @@ struct econet_hosts {							// what we we need to find a beeb?
 	char print_serverparam[1024];
 	char socket_serverparam[1024];
 	int pind; /* Index into pset for this host, if it has a socket */
-#ifdef ECONET_64BIT
-	unsigned int seq, last_imm_seq_sent; // Our local sequence number, and the last immediate sequence number sent to this host (for wire hosts) so that we acknowledge with the same immediate sequence number
-	unsigned int last_seq_ack; // The last sequence number which was acknowledged to this host if it is AUN. If we have already acknoweldged a given sequence number, we *don't* attempt to re-transmit the data onto the Econet Wire, but we do acknowledge the packet again
-#else	
-	unsigned long seq, last_imm_seq_sent;
-	unsigned int last_seq_ack; // The last sequence number which was acknowledged to this host if it is AUN. If we have already acknoweldged a given sequence number, we *don't* attempt to re-transmit the data onto the Econet Wire, but we do acknowledge the packet again
-#endif
+	uint32_t seq, last_imm_seq_sent; // Our local sequence number, and the last immediate sequence number sent to this host (for wire hosts) so that we acknowledge with the same immediate sequence number
+	uint32_t last_seq_ack; // The last sequence number which was acknowledged to this host if it is AUN. If we have already acknoweldged a given sequence number, we *don't* attempt to re-transmit the data onto the Econet Wire, but we do acknowledge the packet again
 	unsigned char last_imm_ctrl, last_imm_net, last_imm_stn; // Designed to try and avoid adding high bit back on where it's an immediate transmitting a characer for *NOTIFY - net & stn are source net & stn of the last immediate going to this host
 	int fileserver_index, sks_index;
 	struct timespec last_wire_tx;
@@ -198,11 +195,7 @@ struct __econet_packet_udp udp_pkt;
 struct __econet_packet_aun aun_pkt;
 
 // Locally Emulated machines
-#ifdef ECONET_64BIT
-unsigned int local_seq = 0x00004000;
-#else
-unsigned long local_seq = 0x00004000;
-#endif
+uint32_t local_seq = 0x00004000;
 
 // Local Print Server state
 
@@ -1032,11 +1025,7 @@ short fs_get_server_id(unsigned char net, unsigned char stn)
 }
 
 // Returns local/wire machine sequence number and increments it
-#ifdef ECONET_64BIT
-unsigned int get_local_seq(unsigned char net, unsigned char stn)
-#else
-unsigned long get_local_seq(unsigned char net, unsigned char stn)
-#endif
+uint32_t get_local_seq(unsigned char net, unsigned char stn)
 {
 
 	return (network[econet_ptr[net][stn]].seq += 4);
@@ -1170,7 +1159,8 @@ void dump_udp_pkt_aun(struct __econet_packet_aun *a, int s)
 		fprintf (stderr, "         SRC Net/Stn 0x%02x/0x%02x\n", a->p.srcnet, a->p.srcstn);
 		fprintf (stderr, "         PORT/CTRL   0x%02x/0x%02x\n", a->p.port, a->p.ctrl);
 	
-		fprintf (stderr, "         SEQ         0x%08lX\n", a->p.seq);
+		//fprintf (stderr, "         SEQ         0x%08X\n", a->p.seq);
+		fprintf (stderr, "         SEQ         0x%08" PRIx32 "\n", a->p.seq);
 
 		dump_pkt_data((unsigned char *) &(a->p.data), s-12, 0);
 
@@ -2235,7 +2225,7 @@ int trunk_xlate_fw(struct __econet_packet_aun *p, int trunk, unsigned char dir)
 // traffic arriving gets put on the packet cache for later processing.
 // If returns 1, caller MUST free *p after use.
 
-short aun_wait (unsigned char srcnet, unsigned char srcstn, unsigned char dstnet, unsigned char dststn, unsigned char aun_type, unsigned long seq, short timeout, struct __econet_packet_aun **p)
+short aun_wait (unsigned char srcnet, unsigned char srcstn, unsigned char dstnet, unsigned char dststn, unsigned char aun_type, uint32_t seq, short timeout, struct __econet_packet_aun **p)
 {
 
 	struct timeval start, now;
@@ -2325,7 +2315,7 @@ short aun_wait (unsigned char srcnet, unsigned char srcstn, unsigned char dstnet
 				else
 					policy = trunk_xlate_fw(&in, trunk, 0); // 0 = Inbound
 
-				if (pkt_debug && !dumpmode_brief) fprintf (stderr, "CACHE: to %3d.%3d from %3d.%3d AUN type %02X, seq %08lX, len %04X received ", 
+				if (pkt_debug && !dumpmode_brief) fprintf (stderr, "CACHE: to %3d.%3d from %3d.%3d AUN type %02X, seq %08" PRIx32 ", len %04X received ", 
 					network[dptr].network, network[dptr].station,
 					(trunk ? in.p.srcnet : (net_src == 0xffff ? 0:network[net_src].network)), 
 					(trunk ? in.p.srcstn : (net_src == 0xffff ? 0:network[net_src].station)), 

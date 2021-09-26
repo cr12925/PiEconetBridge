@@ -43,6 +43,7 @@
 #include <sys/syscall.h>
 #include <sys/sendfile.h>
 #include <ctype.h>
+#include <stdint.h>
 
 #include "../include/econet-gpio-consumer.h"
 
@@ -51,17 +52,9 @@
 #define FSREGEX "[]\\*\\#A-Za-z0-9\\+_;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 
 extern int aun_send (struct __econet_packet_aun *, int);
-#ifdef ECONET_64BIT
-extern unsigned int local_seq;
-#else
-extern unsigned long local_seq;
-#endif
+uint32_t local_seq;
 
-#ifdef ECONET_64BIT
-extern unsigned int get_local_seq(unsigned char, unsigned char);
-#else
-extern unsigned long get_local_seq(unsigned char, unsigned char);
-#endif
+extern uint32_t get_local_seq(unsigned char, unsigned char);
 
 short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for extra year information
 short use_xattr=1 ; // When set use filesystem extended attributes, otherwise use a dotfile
@@ -135,12 +128,6 @@ struct {
 	unsigned char stn; // Station number of this server
 	unsigned char directory[256]; // Root directory
 	unsigned int total_users; // How many entries in users[][]?
-	// Local sequence number now disused. Held centrally in the network[] structure in econet-bridge.c
-#ifdef ECONET_64BIT
-	unsigned int seq;
-#else
-	unsigned long seq;
-#endif
 	int total_discs;
 } fs_stations[ECONET_MAX_FS_SERVERS];
 
@@ -1840,7 +1827,6 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 		fs_stations[fs_count].directory[1024] = (char) 0; // Just in case
 		fs_stations[fs_count].net = net;
 		fs_stations[fs_count].stn = stn;
-		fs_stations[fs_count].seq = 0x4000;
 
 		// Clear state
 		/*
@@ -5863,7 +5849,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 		received = fread(readbuffer, 1, readlen, fs_files[server][internal_handle].handle);
 
-		if (fs_noisy) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() bulk transfer: bytes required %04lX, bytes already sent %04lX, buffer size %04X, bytes to read %04X, bytes actually read %04X\n", "", net, stn, bytes, sent, sizeof(readbuffer), readlen, received);
+		if (fs_noisy) fprintf(stderr, "   FS:%12sfrom %3d.%3d fs_getbytes() bulk transfer: bytes required %04lX, bytes already sent %04lX, buffer size %04X, bytes to read %04X, bytes actually read %04X\n", "", net, stn, bytes, sent, (unsigned short) sizeof(readbuffer), readlen, received);
 
 		if (received != readlen) // Either FEOF or error
 		{
