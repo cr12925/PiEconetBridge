@@ -149,12 +149,11 @@ struct __econet_data {
         struct cdev c_dev;
         int major;
 	dev_t majorminor;
-        //struct mutex lock;
         short mode; // IRQ handler state machine IDLEINIT -> IDLE -> (READ / WRITE_START); WRITE_START -> WRITE -> WRITE_WAIT or IDLE. Only IRQ space writes to this.
 	short userspacemode; // READ, WRITE or TEST. Tells the IRQ handler what it's supposed to be doing. Only userspace writes to this.
 	short open_count;
 	wait_queue_head_t econet_read_queue;
-	short tx_status;
+	atomic_t tx_status;
 	short aun_mode;
 	short aun_state;
 	short spoof_immediate;

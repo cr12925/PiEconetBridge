@@ -10,6 +10,10 @@
 
 //#define ECONET_GPIO_DEBUG_BUS 1
 
+/* Version 2 hardware bus timing debug */
+
+//#define ECONET_GPIO_DEBUG_TIMING 1
+
 /* Read/write 68B54 register debug */
 
 //#define ECONET_GPIO_DEBUG_REG 1

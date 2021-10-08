@@ -82,6 +82,8 @@ int aun_trunk_send_internal (struct __econet_packet_aun *, int, int);
 
 void dump_pkt_data(unsigned char *, int, unsigned long);
 
+char * econet_strtxerr(int);
+
 struct pollfd pset[65536];
 int pmax;
 int econet_fd;
@@ -113,6 +115,7 @@ struct econet_hosts {							// what we we need to find a beeb?
 	char hostname[250];
 	unsigned int port;
 	int listensocket; /* One socket for each thing on the Econet wire - -2 if on UDP because we don't listen "for" those, we only transmit /to/ them */
+	int pipewritesocket; /* file descriptor for the socket we write to when this connection is a named pipe */
 	short type;
 	short servertype;
 	char fs_serverparam[1024];
@@ -217,6 +220,59 @@ unsigned long timediffmsec(struct timeval *s, struct timeval *d)
 {
 
 	return (((d->tv_sec - s->tv_sec) * 1000) + ((d->tv_usec - s->tv_usec) / 1000));
+
+}
+
+unsigned int econet_write_wire(struct __econet_packet_aun *p, int len)
+{
+
+	int err = ECONET_TX_JAMMED; // Default
+	uint8_t counter = 0;
+
+	while (counter++ < 50)
+	{
+		write(econet_fd, p, len);
+	
+		err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
+
+		if (err == ECONET_TX_NOCLOCK || err == ECONET_TX_NOCOPY)
+			return (-1 * err);
+
+		if (err == ECONET_TX_INPROGRESS)
+		{
+			struct timeval start, now;
+
+			gettimeofday(&start, 0);
+			gettimeofday(&now, 0);
+
+			// Wait for TX to complete
+			while (((err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR)) == ECONET_TX_INPROGRESS) && (timediffmsec(&start, &now) < 2000))
+			{
+				gettimeofday(&now, 0);
+			}
+
+			if (err != ECONET_TX_SUCCESS) // Failed - reset the chip
+			{
+				ioctl(econet_fd, ECONETGPIO_IOC_READMODE);
+				return (-1 * err);
+			}
+			else
+			{
+				return len;
+			}
+
+		}
+
+		// Almost Everything else, wait a while and try again
+	
+		//if (err != ECONET_TX_BUSY) // Do the delay on busy too
+		{
+			usleep(200 + (250 * (p->p.srcstn)));
+		}
+
+	}
+
+	return (-1 * err);
 
 }
 
@@ -461,6 +517,7 @@ void econet_readconfig(void)
 		{
 			int stn, net, ptr, entry, mfr;
 			char filename[200], tmp[300];
+			char readerfilename[250], writerfilename[250];
 
 			for (count = 2; count <= 4; count++) // start at 2 - we know the first one is 'UNIX'
 			{
@@ -497,37 +554,52 @@ void econet_readconfig(void)
 			network[networkp].port = 0;
 			strcpy(network[networkp].named_pipe_filename, filename);
 
-			mfr = mkfifo(filename, 0666); // Not keen on this.
+			snprintf(readerfilename, 249, "%s.tobridge", filename);
+			snprintf(writerfilename, 249, "%s.frombridge", filename);
+
+			mfr = mkfifo(readerfilename, 0666); // Not keen on this.
 
 			network[networkp].listensocket = -1;
 
 			if (mfr == -1 && (errno != EEXIST)) // mkfifo failed and it wasn't because the fifo already existed
 			{
-				fprintf (stderr, "Cannot initialize named pipe at %s - ignoring\n", filename);
+				fprintf (stderr, "Cannot initialize named pipe at %s - ignoring\n", readerfilename);
 			}
 			else
-				network[networkp].listensocket = open(filename, O_RDWR);
+				network[networkp].listensocket = open(readerfilename, O_RDONLY | O_NONBLOCK);
 
 			if (network[networkp].listensocket != -1) // Open succeeded
 			{
 			
-                        	network[networkp].pind = pmax; // Index into pset from the network[] array
-
-                       		fd_ptr[network[networkp].listensocket] = networkp; // Create the index to find a station from its FD
-	
-                       		pset[pmax++].fd = network[networkp].listensocket; // Fill in our poll structure
-	
-				ECONET_SET_STATION(econet_stations, net, stn); // Put it in our list of AUN bridges
-
-				if (net != 0)
+				mfr = mkfifo(writerfilename, 0666);
+				
+				if (mfr == -1 && (errno != EEXIST))
 				{
-					wire_advertizable[net] = 0xff;
-					trunk_advertizable[net] = 0xff;
+					fprintf (stderr, "Cannot initialize named pipe at %s - ignoring\n", writerfilename);
 				}
+				else
+					network[networkp].pipewritesocket = open(writerfilename, O_WRONLY | O_NONBLOCK);
 
-				econet_ptr[net][stn] = networkp;
+				if (network[networkp].pipewritesocket != -1)
+				{
+                        		network[networkp].pind = pmax; // Index into pset from the network[] array
 
-				networkp++;
+                       			fd_ptr[network[networkp].listensocket] = networkp; // Create the index to find a station from its FD
+	
+                       			pset[pmax++].fd = network[networkp].listensocket; // Fill in our poll structure
+	
+					ECONET_SET_STATION(econet_stations, net, stn); // Put it in our list of AUN bridges
+
+					if (net != 0)
+					{
+						wire_advertizable[net] = 0xff;
+						trunk_advertizable[net] = 0xff;
+					}
+
+					econet_ptr[net][stn] = networkp;
+
+					networkp++;
+				}
 			}
 			else	fprintf (stderr, "Failed to initialize named pipe for station %d.%d - passively ignoring\n", net, stn);
 
@@ -1187,10 +1259,10 @@ int udp_receive(int fd, void *a, int maxlen, struct sockaddr * restrict addr)
 
 char * econet_strtxerr(int e)
 {
-	switch (e)
+	switch (-1 * e)
 	{
 		case ECONET_TX_SUCCESS: return (char *)"No error"; 
-		case EBUSY: return (char *)"Module busy";
+		case ECONET_TX_BUSY: return (char *)"Module busy";
 		case ECONET_TX_JAMMED: return (char *)"Line jammed";
 		case ECONET_TX_HANDSHAKEFAIL: return (char *)"Handshake failure";
 		case ECONET_TX_NOCLOCK: return (char *)"No clock";
@@ -1438,7 +1510,8 @@ void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
 
 		if (pkt_debug) fprintf (stderr, "\n");
 		
-		write (econet_fd, &out, count+12);
+		//write (econet_fd, &out, count+12);
+		econet_write_wire (&out, count+12);
 	}
 
 	// Then to the trunks
@@ -1867,7 +1940,6 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 
 	int d, s, result; // d, s are pointers into network[]; result is number of bytes written or error return
 	unsigned short count; // Transmission attempt counter
-	int err; // Wire transmit error number if any
 	unsigned char acknowledged = 0;
 	struct sockaddr_in n;
 	struct __econet_packet_aun *ack;
@@ -1968,7 +2040,8 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
                                 {
                                         acknowledged = 1;
                                         // Can only sensibly be going on the wire
-                                        write (econet_fd, ack, acklen);
+                                        //	write (econet_fd, ack, acklen);
+					econet_write_wire (ack, acklen);
                                 }
                                 else    ioctl(econet_fd, ECONETGPIO_IOC_READMODE); // Force read mode on a timeout otherwise the kernel stops listening...
 
@@ -2032,7 +2105,8 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 				{
 					acknowledged = 1;
 					// Can only sensibly be going on the wire
-					write (econet_fd, ack, acklen);
+					//write (econet_fd, ack, acklen);
+					econet_write_wire (ack, acklen);
 				}
 				else	ioctl(econet_fd, ECONETGPIO_IOC_READMODE); // Force read mode on a timeout otherwise the kernel stops listening...
 			
@@ -2044,8 +2118,6 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 		else if (network[d].type & ECONET_HOSTTYPE_TWIRE) // Wire
 		{
 
-			unsigned short txcount = 0;
-
 			// Is it a wired fileserver we might want to know about?
 
 			if ((network[d].type & ECONET_HOSTTYPE_TWIRE) && (p->p.port == 0x99) && (!(network[d].is_wired_fs))) // Fileserver traffic on a wire station
@@ -2054,19 +2126,8 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 				fprintf (stderr, "  DYN:%12s             Station %d.%d identified as wired fileserver\n", "", p->p.dstnet, p->p.dststn);
 			}
 
-			while (result <= 0 && txcount++ < 10)
-			{
-				result = write(econet_fd, p, len);
-				err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
-				if (result < 0) // Snooze a while
-					usleep(160 + (30 * (p->p.srcstn)));
-			}
+			result = econet_write_wire (p, len);
 
-			if (result < 0 && (err == ECONET_TX_JAMMED || err == ECONET_TX_NOCLOCK || err == ECONET_TX_NOCOPY)) // Fatal errors
-				break;
-			else if (result < 0)
-			result = -1 * err;
-			
 			if (result == len) 
 			{
 				acknowledged = 1;
@@ -2078,7 +2139,7 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 
 			// Collision backoff
 
-			if (err == ECONET_TX_COLLISION)	usleep(network[d].station * 1000);
+			if (result == -ECONET_TX_COLLISION)	usleep(network[d].station * 1000);
 
 			
 		}
@@ -2096,7 +2157,7 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 		if ((d != -1) && (network[d].type & ECONET_HOSTTYPE_TWIRE)) // Wire destination - specific types of error
 		{
 			if (result < 0)
-				fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - %s (%02x)\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, econet_strtxerr(err), err);	
+				fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - %s (%02x)\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, econet_strtxerr(result), result);	
 			else if (result < len && result >= 0)
 				fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - only %d of %d bytes written\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, result, len);	
 		}
@@ -2707,6 +2768,8 @@ Options:\n\
 	econet_bridge_process (NULL, 0, -1); // Self-initiated reset
 	gettimeofday(&last_bridge_reset, 0);
 
+	srand(time(NULL));
+
 	while (cache_head || fs_bulk_traffic || poll((struct pollfd *)&pset, pmax+(wire_enabled ? 1 : 0), -1)) // If there are packets in the cache, process them. If there's cache or bulk traffic, only poll for 10ms so that we pick up traffic quickly if it's there.
 	{
 
@@ -2784,8 +2847,6 @@ Options:\n\
 
 		/* See if anything turned up on UDP */
 
-		s = start_fd;
-		
 		for (s = 0; s < pmax; s++) /* not the last fd - which is the econet hardware */
 		{
 			int realfd;
@@ -3017,7 +3078,9 @@ Options:\n\
 	
 		fs_bulk_traffic = fs_dequeuable(); // Reset flag for next while() loop check
 
-		start_fd = (start_fd + 1) % pmax;
+		start_fd = rand() % pmax;
+
+		//start_fd = (start_fd + 1) % pmax;
 
 		// Fileserver garbage collection
 

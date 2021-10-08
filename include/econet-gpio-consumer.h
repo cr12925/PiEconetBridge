@@ -18,7 +18,7 @@
 #define __ECONETGPIOCONSUMER_H__
 
 #include <linux/ioctl.h>
-#include <stdint.h>
+#include <linux/types.h>
 
 /* This is the map of stations we want to handle traffic for that
    are not on the local econet wire. One bit per station, arranged
@@ -101,7 +101,12 @@ struct __econet_packet_aun {
 			unsigned char port;
 			unsigned char ctrl; // Internally, this will have high bit set. On the UDP packet it is stripped off
 			unsigned char padding;
+#ifdef u32
+			u32 seq;
+#else
 			uint32_t seq;
+#endif
+
 			unsigned char data[ECONET_MAX_PACKET_SIZE-9];
 		} p;
 		unsigned char raw[ECONET_MAX_PACKET_SIZE];
@@ -153,6 +158,7 @@ struct __econet_packet_udp {
 #define ECONET_GPIO_RST_CLR 1
 
 #define ECONET_TX_SUCCESS 0
+#define ECONET_TX_BUSY 0x10
 #define ECONET_TX_JAMMED 0x40
 #define ECONET_TX_HANDSHAKEFAIL 0x41
 #define ECONET_TX_NOCLOCK 0x43
@@ -162,6 +168,8 @@ struct __econet_packet_udp {
 #define ECONET_TX_NOCOPY 0x53 // Coulndn't copy from userspace
 #define ECONET_TX_NOTSTART 0x54 // TX start timed out - we never got a result back from the IRQ routine
 #define ECONET_TX_COLLISION 0x55 // CTS went high during transmit - try again
+#define ECONET_TX_INPROGRESS 0xfe
+#define ECONET_TX_STARTWAIT 0xff
 
 #define ADVERTISED_MACHINETYPE 0xeeee
 #define ADVERTISED_VERSION 0x0001
