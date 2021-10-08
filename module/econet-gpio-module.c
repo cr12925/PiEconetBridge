@@ -1889,7 +1889,20 @@ ssize_t econet_readfd(struct file *flip, char *buffer, size_t len, loff_t *offse
 	int ret;
 	unsigned int copied;
 
+	// See if we can get the lock
+	econet_irq_mode(0);
+	
+        if (!spin_trylock(&econet_irqstate_spin))
+        {
+                printk (KERN_INFO "ECONET-GPIO: Flag busy on read because cannot get IRQ spinlock\n");
+                econet_irq_mode(1);
+                return -1;
+        }
+
 	ret = kfifo_to_user(&econet_rx_queue, buffer, len, &copied);
+
+	spin_unlock(&econet_irqstate_spin);
+	econet_irq_mode(1);
 
 	if (ret == 0)
 		return copied;
