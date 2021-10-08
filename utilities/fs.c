@@ -2278,9 +2278,11 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 	{
 		unsigned short pw_counter = 0;
 
-		counter++;
+		//counter++;
 	
-		while ((*(command + stringptr) != 0x00) && (pw_counter < 6))
+		if (*(command + stringptr) == '"') stringptr++; // Skip any preliinary double quote
+
+		while ((*(command + stringptr) != 0x00) && (pw_counter < 6) && (*(command + stringptr) != '"'))
 		{
 			password[pw_counter++] = *(command + stringptr);
 			stringptr++;
