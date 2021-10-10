@@ -1097,8 +1097,6 @@ void econet_irq_read(void)
 {
 
 	unsigned char d;
-	int copied_to_fifo;
-	int copied_from_fifo;
 	unsigned short old_ptr;
 
 //recv_more:
@@ -1154,8 +1152,10 @@ void econet_irq_read(void)
 
 		// If kfifo is full, take something out of it before we shove this packet in.
 
+/*
 		if (kfifo_is_full(&econet_rx_queue))
 			copied_from_fifo = kfifo_out(&econet_rx_queue, &dump_pkt, sizeof(dump_pkt));
+*/
 
 		if (!(econet_data->aun_mode)) // Raw mode - straight on the FIFO
 		{
@@ -1164,8 +1164,12 @@ void econet_irq_read(void)
 			// Clear state
 			econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 
-			copied_to_fifo = kfifo_in(&econet_rx_queue, &(econet_pkt_rx.d.data), econet_pkt_rx.ptr); 
-			wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
+			// Just for experimentation, we'll constrain this to have only a single record in the fifo at once by checking for empty
+			if (kfifo_is_empty(&econet_rx_queue))
+			{
+				kfifo_in(&econet_rx_queue, &(econet_pkt_rx.d.data), econet_pkt_rx.ptr); 
+				wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
+			}
 #ifdef ECONET_GPIO_DEBUG_RX
 			printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): Valid frame received, length %04x, %04x bytes copied to kernel FIFO\n", econet_pkt_rx.ptr, copied_to_fifo);
 #endif
@@ -1245,9 +1249,12 @@ unexpected_scout:
 									memcpy (&(aun_rx.d.p.data), &(econet_pkt_rx.d.p.data), econet_pkt_rx.length - 6);
 								aun_rx.length = econet_pkt_rx.length + 6; // AUN packets have 12 bytes before the data, econet packets have 6 (on a broadcast or immediate, anyway).
 				
-								// Put it on the FIFO
-								copied_to_fifo = kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
-								wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
+								// Put it on the FIFO - just for now, only if it's empty
+								if (kfifo_is_empty(&econet_rx_queue))
+								{
+									kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
+									wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
+								}
 #ifdef ECONET_GPIO_DEBUG_AUN
 								printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): Valid frame received, length %04x, %04x AUN bytes copied to kernel FIFO\n", econet_pkt_rx.ptr, copied_to_fifo);
 #endif
@@ -1358,8 +1365,11 @@ unexpected_scout:
 							aun_rx.length = econet_pkt_rx.length + 6; // AUN packets have 12 bytes before the data, econet packets have 6 (on a broadcast or immediate, anyway).
 				
 							// Put it on the FIFO
-							copied_to_fifo = kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
-							wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
+							if (kfifo_is_empty(&econet_rx_queue))
+							{
+								kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
+								wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
+							}
 #ifdef ECONET_GPIO_DEBUG_RX
 							printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): Valid frame received, length %04x, %04x AUN bytes copied to kernel FIFO\n", econet_pkt_rx.ptr, copied_to_fifo);
 #endif
@@ -1567,8 +1577,11 @@ unexpected_scout:
 							aun_rx.d.p.seq = aun_tx.d.p.seq;
 							aun_rx.d.p.aun_ttype = ECONET_AUN_IMMREP;
 							aun_rx.d.p.padding = 0x00;
-							copied_to_fifo = kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), econet_pkt_rx.ptr - 4 + 12); 
-							wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
+							if (kfifo_is_empty(&econet_rx_queue))
+							{
+								kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
+								wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
+							}
 #ifdef ECONET_GPIO_DEBUG_RX
 							printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): AUN Immediate reply received from %d.%d - send to userspace, data portion length %d\n", aun_rx.d.p.srcnet, aun_rx.d.p.srcstn, (econet_pkt_rx.ptr -4));
 #endif
@@ -1716,8 +1729,11 @@ irqreturn_t econet_irq(int irq, void *ident)
 				case EA_R_WRITEFINALACK: // Just written final ACK after a data packet - go back to IDLE & dump received packet to userspace
 				{
 					
-					kfifo_in(&econet_rx_queue, &aun_rx, aun_rx.length); 
-					wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
+					if (kfifo_is_empty(&econet_rx_queue))
+					{
+						kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
+						wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
+					}
 					econet_set_aunstate(EA_IDLE);
 					//econet_data->aun_state = EA_IDLE;
 #ifdef ECONET_GPIO_DEBUG_AUN
@@ -1938,11 +1954,13 @@ void econet_aun_tx_statemachine(void)
 		{
 			if (aun_tx.d.p.aun_ttype == ECONET_AUN_BCAST) // Broadcast
 			{
-				econet_pkt_tx_prepare.d.p.dstnet = econet_pkt_tx_prepare.d.p.srcnet = 0xff;
+				econet_pkt_tx_prepare.d.p.dstnet = econet_pkt_tx_prepare.d.p.dststn = 0xff;
 				econet_pkt_tx_prepare.d.p.ctrl = aun_tx.d.p.ctrl; // IMMEDIATE MOD | 0x80; // Set high bit. It is apparently always clear in UDP space	
+				econet_pkt_tx_prepare.d.p.port = aun_tx.d.p.port;
 				if (aun_tx.length > 12) // Otherwise there's no data to copy (AUN format packet has 12 header bytes incl. the sequence
 					memcpy (&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data), (aun_tx.length - 12));
-				econet_pkt_tx_prepare.length = 6 + (aun_tx.length > 12 ? (aun_tx.length -6) : 0); // i.e. up to the port byte and then any data that's around
+				//econet_pkt_tx_prepare.length = 6 + (aun_tx.length > 12 ? (aun_tx.length -6) : 0); // i.e. up to the port byte and then any data that's around
+				econet_pkt_tx_prepare.length = aun_tx.length -6; // aun_tx has a minimum length of 12, and a wire broadcast has a minimum length of 6 (if no data, but has ctrl + port). So if the writefd() packet was 12, this will give src, dst, ctrl and port. If it was 13, it'll have one data byte... so this calculation works.
 				econet_set_aunstate(EA_W_WRITEBCAST);
 			}
 			else if (aun_tx.d.p.aun_ttype == ECONET_AUN_IMM) // Immediate
