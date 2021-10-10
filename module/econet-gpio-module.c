@@ -1152,10 +1152,11 @@ void econet_irq_read(void)
 
 		// If kfifo is full, take something out of it before we shove this packet in.
 
-/*
 		if (kfifo_is_full(&econet_rx_queue))
-			copied_from_fifo = kfifo_out(&econet_rx_queue, &dump_pkt, sizeof(dump_pkt));
-*/
+		{
+			int a;
+			a = kfifo_out(&econet_rx_queue, &dump_pkt, sizeof(dump_pkt));
+		}
 
 		if (!(econet_data->aun_mode)) // Raw mode - straight on the FIFO
 		{
@@ -1165,7 +1166,7 @@ void econet_irq_read(void)
 			econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 
 			// Just for experimentation, we'll constrain this to have only a single record in the fifo at once by checking for empty
-			if (kfifo_is_empty(&econet_rx_queue))
+			//if (kfifo_is_empty(&econet_rx_queue))
 			{
 				kfifo_in(&econet_rx_queue, &(econet_pkt_rx.d.data), econet_pkt_rx.ptr); 
 				wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
@@ -1250,7 +1251,7 @@ unexpected_scout:
 								aun_rx.length = econet_pkt_rx.length + 6; // AUN packets have 12 bytes before the data, econet packets have 6 (on a broadcast or immediate, anyway).
 				
 								// Put it on the FIFO - just for now, only if it's empty
-								if (kfifo_is_empty(&econet_rx_queue))
+								//if (kfifo_is_empty(&econet_rx_queue))
 								{
 									kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
 									wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
@@ -1365,7 +1366,7 @@ unexpected_scout:
 							aun_rx.length = econet_pkt_rx.length + 6; // AUN packets have 12 bytes before the data, econet packets have 6 (on a broadcast or immediate, anyway).
 				
 							// Put it on the FIFO
-							if (kfifo_is_empty(&econet_rx_queue))
+							//if (kfifo_is_empty(&econet_rx_queue))
 							{
 								kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
 								wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
@@ -1577,7 +1578,8 @@ unexpected_scout:
 							aun_rx.d.p.seq = aun_tx.d.p.seq;
 							aun_rx.d.p.aun_ttype = ECONET_AUN_IMMREP;
 							aun_rx.d.p.padding = 0x00;
-							if (kfifo_is_empty(&econet_rx_queue))
+							aun_rx.length = 12 + (econet_pkt_rx.ptr -4);
+							//if (kfifo_is_empty(&econet_rx_queue))
 							{
 								kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
 								wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
@@ -1729,7 +1731,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 				case EA_R_WRITEFINALACK: // Just written final ACK after a data packet - go back to IDLE & dump received packet to userspace
 				{
 					
-					if (kfifo_is_empty(&econet_rx_queue))
+					//if (kfifo_is_empty(&econet_rx_queue))
 					{
 						kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
 						wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
@@ -1970,7 +1972,7 @@ void econet_aun_tx_statemachine(void)
 				econet_pkt_tx_prepare.d.p.ctrl = aun_tx.d.p.ctrl; // IMMEDIATE MOD | 0x80; // Set high bit. It is apparently always clear in UDP space	
 				if (aun_tx.length > 12) // Otherwise there's no data to copy (AUN format packet has 12 header bytes incl. the sequence
 					memcpy (&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data), (aun_tx.length - 12));
-				econet_pkt_tx_prepare.length = 6 + (aun_tx.length > 12 ? (aun_tx.length - 12) : 0); // i.e. up to the port byte and then any data that's around
+				econet_pkt_tx_prepare.length = aun_tx.length -6; // aun_tx has a minimum length of 12, and a wire broadcast has a minimum length of 6 (if no data, but has ctrl + port). So if the writefd() packet was 12, this will give src, dst, ctrl and port. If it was 13, it'll have one data byte... so this calculation works.
 				econet_set_aunstate(EA_I_WRITEIMM);
 			}	
 			else if (aun_tx.d.p.aun_ttype == ECONET_AUN_DATA) // Data -- NB this will also be used for the "special" port 0 ctrl 0x85 "4-way immediate" for things like Notify, etc.
