@@ -168,6 +168,7 @@ struct __econet_packet_udp {
 #define ECONET_TX_NOCOPY 0x53 // Coulndn't copy from userspace
 #define ECONET_TX_NOTSTART 0x54 // TX start timed out - we never got a result back from the IRQ routine
 #define ECONET_TX_COLLISION 0x55 // CTS went high during transmit - try again
+#define ECONET_TX_DATAPROGRESS 0xfd // Flags the fact that we got an ack to the Scout
 #define ECONET_TX_INPROGRESS 0xfe
 #define ECONET_TX_STARTWAIT 0xff
 

@@ -152,6 +152,8 @@ struct __econet_packet_aun_cache {
 };
 
 struct __econet_packet_aun_cache *cache_head, *cache_tail;
+// This next cache is a cache of packets which didn't transmit onto the wire, so that they can be retransmitted. It is kept in order to avoid concurrency issues
+struct __econet_packet_aun_cache *wire_cache_head, *wire_cache_tail;
 
 int stations; // How many entries in network[]
 
@@ -223,7 +225,8 @@ unsigned long timediffmsec(struct timeval *s, struct timeval *d)
 
 }
 
-unsigned int econet_write_wire(struct __econet_packet_aun *p, int len)
+// cache_pos = 0 means put this packet on the tail of the queue if it collides. 1 = put it on the head, because that's where it came from
+unsigned int econet_write_wire(struct __econet_packet_aun *p, int len, int cache_pos)
 {
 
 	int err = ECONET_TX_JAMMED; // Default
@@ -238,7 +241,7 @@ unsigned int econet_write_wire(struct __econet_packet_aun *p, int len)
 		if (err == ECONET_TX_NOCLOCK || err == ECONET_TX_NOCOPY)
 			return (-1 * err);
 
-		if (err == ECONET_TX_INPROGRESS)
+		if (err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS)
 		{
 			struct timeval start, now;
 
@@ -246,17 +249,25 @@ unsigned int econet_write_wire(struct __econet_packet_aun *p, int len)
 			gettimeofday(&now, 0);
 
 			// Wait for TX to complete
-			while (((err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR)) == ECONET_TX_INPROGRESS) && (timediffmsec(&start, &now) < 2000))
+			err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
+			while ((err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS) && (timediffmsec(&start, &now) < 1500)) // 1Kb on the wire is < 50ms. So 30Kb is < 1500ms.
 			{
 				gettimeofday(&now, 0);
+				err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
 			}
 
-			if (err != ECONET_TX_SUCCESS) // Failed - reset the chip
+			if (err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS) // Stalled in some way
+			{
+				//err = ECONET_TX_COLLISION;
+				ioctl(econet_fd, ECONETGPIO_IOC_READMODE);
+				counter = 51;
+			}
+			else if (err != ECONET_TX_SUCCESS && err != ECONET_TX_COLLISION) // Failed - reset the chip
 			{
 				ioctl(econet_fd, ECONETGPIO_IOC_READMODE);
 				return (-1 * err);
 			}
-			else
+			else if (err == ECONET_TX_SUCCESS)
 			{
 				return len;
 			}
@@ -265,13 +276,46 @@ unsigned int econet_write_wire(struct __econet_packet_aun *p, int len)
 
 		// Almost Everything else, wait a while and try again
 	
-		//if (err != ECONET_TX_BUSY) // Do the delay on busy too
-		{
-			usleep(200 + (250 * (p->p.srcstn)));
-		}
+		usleep((50 * (p->p.srcstn)));
 
 	}
 
+	if (err == ECONET_TX_DATAPROGRESS || err == ECONET_TX_COLLISION || err == ECONET_TX_BUSY) // - Put this on the wire cache
+	{
+		struct __econet_packet_aun_cache *c;
+
+		if ((c = malloc(sizeof(struct __econet_packet_aun_cache))))
+		{
+			gettimeofday(&(c->tstamp), 0);
+			c->size = len;
+			c->next = NULL;
+			if ((c->p = malloc(len)))
+			{
+				memcpy(c->p, p, len);
+		
+				fprintf (stderr, "CACHE: to %3d.%3d from %3d.%3d Caching packet on collision - onto %s of cache\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, (cache_pos ? "head" : "tail"));
+				if (!wire_cache_head) // DOesn't matter whether we want to be on tail or head - there is no cache at present
+				{
+					wire_cache_head = wire_cache_tail = c;
+				}
+				else if (cache_pos == 0) // Put this on the tail
+				{
+					wire_cache_tail->next = c;
+					wire_cache_tail = c;
+				}
+				else // There must by here by a cache, and we aren't putting on tail, so it's going on the head 
+				{
+					c->next = wire_cache_head;
+					wire_cache_head = c;
+				}	
+						
+
+			}
+			else	free(c); // Free main struct - couldn't allocate packet data
+		}
+		// else we couldn't allocate memory so don't bother
+	}
+	
 	return (-1 * err);
 
 }
@@ -1272,6 +1316,7 @@ char * econet_strtxerr(int e)
 		case ECONET_TX_NOCOPY: return (char *)"Could not copy packet from userspace";
 		case ECONET_TX_NOTSTART: return (char *)"Transmission never begun";
 		case ECONET_TX_COLLISION: return (char *)"Collision during transmission";
+		case ECONET_TX_INPROGRESS: return (char *)"Transmission in progress";
 		default: return (char *)"Unknown error";
 	}	
 
@@ -1510,8 +1555,7 @@ void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
 
 		if (pkt_debug) fprintf (stderr, "\n");
 		
-		//write (econet_fd, &out, count+12);
-		econet_write_wire (&out, count+12);
+		econet_write_wire (&out, count+12, 0);
 	}
 
 	// Then to the trunks
@@ -1804,8 +1848,6 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 					case 0x82: // Print job start
 					{
 						reply.p.data[0] = 0x2a;
-						// 20210815 Commented
-						//usleep(50000); // Short delay - otherwise we get failed transmits for some reason - probably 4-way failures
 						aun_send (&reply, 13);
 					}
 					break;
@@ -2010,7 +2052,7 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 
 	//aun_clear_cache (p->p.dstnet, p->p.dststn);
 
-	while (count < 2 && !acknowledged)
+	while (count < 1 && !acknowledged) // Was 2
 	{
 		if (d == -1 && (p->p.aun_ttype != ECONET_AUN_BCAST))
 		{
@@ -2041,7 +2083,7 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
                                         acknowledged = 1;
                                         // Can only sensibly be going on the wire
                                         //	write (econet_fd, ack, acklen);
-					econet_write_wire (ack, acklen);
+					econet_write_wire (ack, acklen, 0);
                                 }
                                 else    ioctl(econet_fd, ECONETGPIO_IOC_READMODE); // Force read mode on a timeout otherwise the kernel stops listening...
 
@@ -2106,7 +2148,7 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 					acknowledged = 1;
 					// Can only sensibly be going on the wire
 					//write (econet_fd, ack, acklen);
-					econet_write_wire (ack, acklen);
+					econet_write_wire (ack, acklen, 0);
 				}
 				else	ioctl(econet_fd, ECONETGPIO_IOC_READMODE); // Force read mode on a timeout otherwise the kernel stops listening...
 			
@@ -2126,21 +2168,14 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 				fprintf (stderr, "  DYN:%12s             Station %d.%d identified as wired fileserver\n", "", p->p.dstnet, p->p.dststn);
 			}
 
-			result = econet_write_wire (p, len);
+			// Update this even if we don't get to transmit - what's the harm?
+			if (p->p.aun_ttype == ECONET_AUN_IMM)
+				network[d].last_imm_seq_sent = p->p.seq;
+
+			result = econet_write_wire (p, len, 0);
 
 			if (result == len) 
-			{
 				acknowledged = 1;
-
-				if (p->p.aun_ttype == ECONET_AUN_IMM) // Update last immediate sequence
-					network[d].last_imm_seq_sent = p->p.seq;
-
-			}
-
-			// Collision backoff
-
-			if (result == -ECONET_TX_COLLISION)	usleep(network[d].station * 1000);
-
 			
 		}
 		else // Unknown destination type
@@ -2157,7 +2192,7 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 		if ((d != -1) && (network[d].type & ECONET_HOSTTYPE_TWIRE)) // Wire destination - specific types of error
 		{
 			if (result < 0)
-				fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - %s (%02x)\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, econet_strtxerr(result), result);	
+				fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d %s (%02x)\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, econet_strtxerr(result), -result);	
 			else if (result < len && result >= 0)
 				fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - only %d of %d bytes written\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, result, len);	
 		}
@@ -2544,6 +2579,7 @@ int main(int argc, char **argv)
 	// Clear the packet cache
 
 	cache_head = cache_tail = NULL;
+	wire_cache_head = wire_cache_tail = NULL;
 
 	seq = 0x46; /* Random number */
 
@@ -2770,7 +2806,7 @@ Options:\n\
 
 	srand(time(NULL));
 
-	while (cache_head || fs_bulk_traffic || poll((struct pollfd *)&pset, pmax+(wire_enabled ? 1 : 0), -1)) // If there are packets in the cache, process them. If there's cache or bulk traffic, only poll for 10ms so that we pick up traffic quickly if it's there.
+	while (wire_cache_head || cache_head || fs_bulk_traffic || poll((struct pollfd *)&pset, pmax+(wire_enabled ? 1 : 0), -1)) // If there are packets in the cache, process them. If there's cache or bulk traffic, only poll for 10ms so that we pick up traffic quickly if it's there.
 	{
 
 /*
@@ -2792,14 +2828,14 @@ Options:\n\
 		if (cache_head || fs_bulk_traffic)
 			poll((struct pollfd *)&pset, pmax+(wire_enabled ? 1 : 0), 10);
 
-		if (wire_enabled && pset[pmax].revents & POLLIN) // Let the wire take a back seat sometimes
+		if (wire_enabled && (pset[pmax].revents & POLLIN)) // Let the wire take a back seat sometimes
 		{
 			int r;
 
 			// Collect the packet
 			r = read(econet_fd, &rx, ECONET_MAX_PACKET_SIZE);
 
-			if (r > 0) // Ding dong, traffic arriving off the wire 
+			if (r > 0) // Ding dong, traffic arriving off the wire  (and if it's -1, the module was busy on read - try next time)
 			{
 				if (r < 12)
 					fprintf(stderr, "Runt packet length %d received off Econet wire\n", r);
@@ -2807,7 +2843,7 @@ Options:\n\
 				rx.p.seq = get_local_seq(rx.p.srcnet, rx.p.srcstn);
 
 				if (rx.p.aun_ttype == ECONET_AUN_IMMREP) // Fudge - assume the immediate we have received is a reply to the last one we sent. Maybe make this more intelligent.
-					rx.p.seq = network[econet_ptr[rx.p.dstnet][rx.p.dststn]].last_imm_seq_sent;
+					rx.p.seq = network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_imm_seq_sent;
 
 				network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_transaction = time(NULL);
 
@@ -2819,6 +2855,54 @@ Options:\n\
 				aun_send_internal (&rx, r, 0);
 
 			}
+		}
+
+		// Now see if there are any outbound wire packets that have been cached - dump one of them off the head of the queue (because if it collides, it'll get put back there so we don't want to sit trying over and over)
+
+		if (wire_cache_head)
+		{
+			struct __econet_packet_aun a;
+			struct __econet_packet_aun_cache *o;
+			int size, nothing_sent = 1;
+
+			while (wire_cache_head && nothing_sent)
+			{
+				
+				struct timeval now;
+
+				gettimeofday(&now, 0);
+
+				if (timediffmsec(&(wire_cache_head->tstamp), &now) <= 30000) // 20 seconds or we dump it  - Beebs seem to wait a looooonnnnnggg time...
+				{
+					memcpy(&a, wire_cache_head->p, wire_cache_head->size);
+
+					// Must free it and update the cache because it might get stuck back on the front
+	
+					free (wire_cache_head->p);
+
+					o = wire_cache_head->next;
+					size = wire_cache_head->size;
+
+					free(wire_cache_head);
+
+					wire_cache_head = o;
+
+					if (!wire_cache_head)	wire_cache_tail = NULL;
+
+					econet_write_wire (&a, size, 1); // 1 == Put back on head of queue to maintain concurrency
+					nothing_sent = 0;
+				}
+				else // Dump this entry
+				{
+					o = wire_cache_head;
+					wire_cache_head = o->next;
+					if (!wire_cache_head) wire_cache_tail = NULL;
+					free (o->p);
+					free (o);
+					// Have a look at next entry - via the while loop
+				}
+			}
+
 		}
 
 		// Next, see if there are any cache entries to deal with
@@ -3102,6 +3186,8 @@ Options:\n\
 			pset[s].events = POLLIN;
 			pset[s].revents = 0; // Need to re-set because we might go round the loop because of the cache not poll()
 		}
+		
+		//fprintf (stderr, "Wire cache head is %s\n", (wire_cache_head ? "NOT EMPTY" : "empty"));
 
 	}
 }

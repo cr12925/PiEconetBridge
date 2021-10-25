@@ -79,7 +79,7 @@
 #define ECONET_MAXQUEUE 10 /* max number of packets we can queue, in or outbound */
 
 /* Timeouts for 4-way handshake */
-#define ECONET_4WAY_TIMEOUT 300000000 /* 0.3s (in ns) - timeout beyond which we will decide that our last transmission as part of a 4-way handshake was so long ago that the data we just received cannot be part of it and must be a new incoming exchange */
+#define ECONET_4WAY_TIMEOUT 200000000000 /* 2s (in ns) - timeout beyond which we will decide that our last transmission as part of a 4-way handshake was so long ago that the data we just received cannot be part of it and must be a new incoming exchange */
 
 /* Internal functions */
 
@@ -149,16 +149,17 @@ struct __econet_data {
         struct cdev c_dev;
         int major;
 	dev_t majorminor;
-        short mode; // IRQ handler state machine IDLEINIT -> IDLE -> (READ / WRITE_START); WRITE_START -> WRITE -> WRITE_WAIT or IDLE. Only IRQ space writes to this.
+        atomic_t mode; // IRQ handler state machine IDLEINIT -> IDLE -> (READ / WRITE_START); WRITE_START -> WRITE -> WRITE_WAIT or IDLE. Only IRQ space writes to this.
 	short userspacemode; // READ, WRITE or TEST. Tells the IRQ handler what it's supposed to be doing. Only userspace writes to this.
 	short open_count;
 	wait_queue_head_t econet_read_queue;
 	atomic_t tx_status;
 	short aun_mode;
-	short aun_state;
+	atomic_t aun_state;
 	short spoof_immediate;
 	long aun_seq;
 	u64 aun_last_tx;
+	u64 aun_last_writefd;
 	u64 aun_last_statechange;
 	short last_tx_user_error;
 	unsigned char clock; // 0 = no clock; anything else = clock - set when reading registers
@@ -179,8 +180,10 @@ struct __aun_pkt_buffer {
 };
 
 #define econet_set_aunstate(x) { \
-	econet_data->aun_state = (x); \
+	atomic_set(&(econet_data->aun_state), (x)); \
 	econet_data->aun_last_statechange = ktime_get_ns(); \
 }
+
+#define econet_get_aunstate() atomic_read(&(econet_data->aun_state))
 
 #endif
