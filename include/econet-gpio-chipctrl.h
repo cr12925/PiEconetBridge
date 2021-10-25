@@ -97,10 +97,11 @@ void econet_flagfill(void);
 #endif
 
 #define econet_set_chipstate(x) { \
-	econet_data->mode = (x); \
+	atomic_set(&(econet_data->mode), (x)); \
 	/* printk (KERN_INFO "ECONET-GPIO: econet_set_chipstate(%d)\n", (x)); */ \
 }
 
+#define econet_get_chipstate() atomic_read(&(econet_data->mode))
 
 /* Control and status reg indexes */
 #define ECONET_GPIO_CR1 1
