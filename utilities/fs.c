@@ -2703,6 +2703,9 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 		e = e->next;
 	}
 
+	if (arg == 0) // Looks like the cycle number gets repeated in arg=0 replies
+		replylen--;
+
 	while (examined < n && (e != NULL))
 	{	
 		if ((e->perm & FS_PERM_H) == 0 || (e->owner == active[server][active_id].userid)) // not hidden or we are the owner
@@ -2711,6 +2714,10 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 			{
 				case 0: // Machine readable format
 				{
+					
+					r.p.data[replylen++] = examined+start;
+					snprintf(&(r.p.data[replylen]), 11, "%-10s", e->acornname);
+					replylen += 10;
 					r.p.data[replylen] = htole32(e->load); replylen += 4;
 					r.p.data[replylen] = htole32(e->exec); replylen += 4;
 					r.p.data[replylen++] = e->perm;
@@ -2738,7 +2745,8 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 						((e->perm & FS_PERM_OTH_W) ? "W" : ""),
 						((e->perm & FS_PERM_OTH_R) ? "R" : "") );
 
-					sprintf (tmp, "%-10s %08lX %08lX   %06lX   %4s/%-2s     %02d/%02d/%02d %06lX", e->acornname,
+					sprintf (tmp, "%-10s %08lX %08lX   %06lX   %4s/%-2s     %02d/%02d/%02d %06lX", 
+						e->acornname,
 						e->load, e->exec, e->length,
 						permstring_l, permstring_r,
 						fs_day_from_two_bytes(e->day, e->monthyear),
@@ -2942,7 +2950,8 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 */	
 	r.p.data[replylen++] = 0x80;
 	r.p.data[2] = (examined & 0xff);
-	r.p.data[3] = (examined & 0xff); // Can't work out how L3 is calculating this number
+	if (arg != 0) // Cycle number repeats in arg = 0 it looks like
+		r.p.data[3] = (examined & 0xff); // Can't work out how L3 is calculating this number
 
 /* OLD non-wildcard code
 	closedir (d);
@@ -5419,35 +5428,24 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		r.p.ctrl = 0x80;
 		r.p.port = data_port;
 
-		// short delay to keep certain stations happy
-		// 20210815 Commented
-		//usleep(180000);
 
 		fseek (f, 0, SEEK_SET);
 
 		while (!feof(f))
 		{
 			collected = fread(&(r.p.data), 1, 1280, f);
-/*
-			if (collected > 0 && (fs_aun_send(&r, server, collected, net, stn) < 1))
-				return; // We failed in some way.
-*/
+
 			if (collected < 0 || (fs_load_enqueue(server, &r, collected, net, stn, internal_handle, 1) < 0))
 				return; // Failed in some way
 	
-			// short delay to keep certain stations happy
-			//usleep(200000);
 
 		}
 		
-		//usleep (100000); // See if this keeps the BBC Micro happy
-
 		// Send the tail end packet
 	
 		r.p.data[0] = r.p.data[1] = 0x00;
 		r.p.port = reply_port;
 
-		//fs_aun_send(&r, server, 2, net, stn);
 		fs_load_enqueue(server, &r, 2, net, stn, internal_handle, 1);
 
 	}
@@ -6106,7 +6104,10 @@ void fs_close(int server, unsigned char reply_port, unsigned char net, unsigned 
 	count = 1;
 
 	if (handle != 0)
+	{
+		if (!fs_quiet) fprintf(stderr, "(%s)", active[server][active_id].fhandles[handle].acornfullpath);
 		fs_close_handle(server, reply_port, net, stn, active_id, handle);
+	}
 	else // User wants to close everything
 	{
 		if (!fs_quiet) fprintf (stderr, "closing ");
@@ -6121,7 +6122,7 @@ void fs_close(int server, unsigned char reply_port, unsigned char net, unsigned 
 		}
 	}
 
-	fprintf (stderr, "\n");
+	if (!fs_quiet) fprintf (stderr, "\n");
 
 	fs_reply_success(server, reply_port, net, stn, 0, 0);
 
@@ -6157,7 +6158,7 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 
 	fs_copy_to_cr(filename, data+start, 1023);
 
-	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Open %s readonly %s, must exist? %s\n", "", net, stn, filename, (readonly ? "yes" : "no"), (existingfile ? "yes" : "no"));
+	if (fs_noisy) fprintf (stderr, "   FS:%12sfrom %3d.%3d Open %s readonly %s, must exist? %s\n", "", net, stn, filename, (readonly ? "yes" : "no"), (existingfile ? "yes" : "no"));
 
 	result = fs_normalize_path(server, active_id, filename, active[server][active_id].current, &p);
 
@@ -6232,7 +6233,7 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 				reply.p.data[0] = reply.p.data[1] = 0;
 				reply.p.data[2] = (unsigned char) (userhandle & 0xff);
 	
-				if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Opened handle %d\n", "", net, stn, userhandle);
+				if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Opened handle %d (%s)\n", "", net, stn, userhandle, p.acornfullpath);
 				fs_aun_send(&reply, server, 3, net, stn);
 			}
 		}

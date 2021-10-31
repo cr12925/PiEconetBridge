@@ -140,30 +140,6 @@ void econet_set_dir(short d)
 		(d == ECONET_GPIO_WRITE ? ECONET_GPIO_DATA_PIN_OUT : 0),
 		GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10));
 
-/*
-        {
-                INP_GPIO(ECONET_GPIO_PIN_DATA);
-                INP_GPIO(ECONET_GPIO_PIN_DATA + 1);
-                INP_GPIO(ECONET_GPIO_PIN_DATA + 2);
-                INP_GPIO(ECONET_GPIO_PIN_DATA + 3);
-                INP_GPIO(ECONET_GPIO_PIN_DATA + 4);
-                INP_GPIO(ECONET_GPIO_PIN_DATA + 5);
-                INP_GPIO(ECONET_GPIO_PIN_DATA + 6);
-                INP_GPIO(ECONET_GPIO_PIN_DATA + 7);
-        }
-        if (d == ECONET_GPIO_WRITE)
-        {
-                OUT_GPIO(ECONET_GPIO_PIN_DATA);
-                OUT_GPIO(ECONET_GPIO_PIN_DATA + 1);
-                OUT_GPIO(ECONET_GPIO_PIN_DATA + 2);
-                OUT_GPIO(ECONET_GPIO_PIN_DATA + 3);
-                OUT_GPIO(ECONET_GPIO_PIN_DATA + 4);
-                OUT_GPIO(ECONET_GPIO_PIN_DATA + 5);
-                OUT_GPIO(ECONET_GPIO_PIN_DATA + 6);
-                OUT_GPIO(ECONET_GPIO_PIN_DATA + 7);
-        }
-*/
-
 	econet_set_rw(d);
 
 	econet_data->current_dir = d;
@@ -669,30 +645,48 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 
 	if (!(econet_get_chipstate() == EM_FLAGFILL))
 	{
-		econet_get_sr();
+		uint8_t count, outercount;
 
-		// This used to be negated 20211024 - but that's probably wrong.
-		// not even sure we need this. Try commenting it out.
-/*
-		if (!(sr1 & ECONET_GPIO_S1_CTS)) // Something else on wire
+		outercount = count = 0;
+
+		while (outercount < 10)
 		{
-			econet_set_tx_status(ECONET_TX_COLLISION);
-			return;
-		}
-*/
+			econet_irq_mode(0);
 
-		// Attempt to seize line
-		econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT1);
-		sr2 = econet_read_sr(2);
+			// Attempt to seize line
+			econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT1);
+			sr2 = econet_read_sr(2);
 
-		if (!(sr2 & ECONET_GPIO_S2_RX_IDLE)) // Line not idle
+			while (count < 10 && (!(sr2 & ECONET_GPIO_S2_RX_IDLE)))
+			{
+				econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT1);
+				mdelay(260);
+				sr2 = econet_read_sr(2);
+				count++;
+			}
+			
+
+			// Is line idle?
+			if (sr2 & ECONET_GPIO_S2_RX_IDLE)
+			{
+				econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT2); // +RTS
+				econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2); // TIE + RX Reset
+				econet_irq_mode(1);
+				sr1 = econet_read_sr(1);
+				if (!(sr1 & ECONET_GPIO_S1_CTS)) // Should be low if successful, so this indicates OK
+					break; // Line siezed OK - get out of while loop
+			}
+			outercount++;
+		}	
+
+		if (outercount >= 10) // Jammed - give up
 		{
 			econet_set_tx_status(ECONET_TX_JAMMED);
 			econet_set_read_mode();
+			econet_irq_mode(1);
 			return;
 		}
 
-		econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT2); // +RTS
 
 	}
 
@@ -704,10 +698,6 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 	econet_pkt_tx.ptr = 0;
 
 	econet_set_chipstate(EM_WRITE);
-
-	econet_irq_mode(1);
-
-	econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2); // RXRst + TxInt
 
 	econet_set_tx_status(ECONET_TX_INPROGRESS);
 
@@ -2100,7 +2090,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	txstatus = econet_get_tx_status();
 	aunstate = econet_get_aunstate();
 
-	if (econet_data->aun_mode && (aunstate != EA_IDLE) && (txstatus >= ECONET_TX_DATAPROGRESS) && ((ktime_get_ns() - econet_data->aun_last_writefd) >= ECONET_4WAY_TIMEOUT)) // The >= caches data progress, in progress, waiting to start
+	if (econet_data->aun_mode && (aunstate != EA_IDLE) && (txstatus >= ECONET_TX_DATAPROGRESS) && ((ktime_get_ns() - econet_data->aun_last_writefd) >= ECONET_4WAY_TIMEOUT)) // The >= catches data progress, in progress, waiting to start
 	{
 		econet_set_tx_status(ECONET_TX_SUCCESS);
 		econet_set_aunstate(EA_IDLE); 
@@ -2179,6 +2169,8 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		spin_unlock(&econet_irqstate_spin);
 		econet_set_write_mode (&econet_pkt, len);
 	}
+
+	udelay(100); // Wait for an IRQ to have happened
 
 	if (econet_get_tx_status() != ECONET_TX_INPROGRESS) // Something failed in set_write_mode
 	{

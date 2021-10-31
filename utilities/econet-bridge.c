@@ -91,7 +91,7 @@ int seq;
 int pkt_debug = 0;
 int dumpmode_brief = 0;
 int wire_enabled = 1;
-int spoof_immediate = 1;
+int spoof_immediate = 0;
 int wired_eject = 1; // When set, and a dynamic address is allocated to an unknown AUN station, this will cause the bridge to spoof a '*bye' equivalent to fileservers it has learned about on the wired network
 short learned_net = -1;
 
@@ -106,6 +106,18 @@ char cfgpath[512] = "/etc/econet-gpio/econet.cfg";
 char *beebmem;
 
 unsigned char econet_stations[8192];
+
+#define ECONET_AUN_MAX_TX 10
+#define ECONET_RETX_INTERVAL_MSEC 50
+
+struct __econet_packet_aun_cache {
+	struct __econet_packet_aun *p;
+	struct __econet_packet_aun_cache *next;
+	unsigned int size; // Size of p, less its 4 byte header.
+	struct timeval tstamp; // When it went in the cache - used to expire stale packets
+	unsigned short tx_count; // Initially set to 0. Increases each time there is a TX attempt. After ECONET_AUN_MAX_TX is reached, the packet gets ditched (along with everything to this host from the same source, so that we ditch any bulk transfer queues that might be lurking in the queue). ONLY RELEVANT TO WIRE STATIONS, AND NON-TRUNK AUN STATIONS. For local, we are guaranteed to transmit successfully. For AUN, the packet will get taken off the queue when an ACK or NAK arrives. For Wire, it gets taken off the queue when there is a successful transmit. For trunks, endpoint retransmission is the job of the last bridge in the chain
+	// tx_count is also used to work out, based on tstamp, whether it's time for another retransmission (e.g. tx_count = 2, next transmission needs to be at tstamp+(2 x ECONET_RETX_INTERVAL_MSEC) msecs
+};
 
 // Holds data from econet.cfg file
 struct econet_hosts {							// what we we need to find a beeb?
@@ -135,6 +147,9 @@ struct econet_hosts {							// what we we need to find a beeb?
 	unsigned char adv_in[256], adv_out[256]; // Advertised networks. _in received from other end, _out is last advert sent by us
 	unsigned char filter_in[256], filter_out[256]; // Filter masks for in & out
 	char named_pipe_filename[200];
+	struct __econet_packet_aun_cache *output_head, *output_tail;
+	short prio_out_srcnet, prio_out_srcstn, prio_out_auntype, prio_out_port; // -1 = value unused. Used to allow a packet headed for this machine to jump the queue and go first, e.g. an immediate reply the machine is waiting for. Basically used to decide whether we put a new packet destined for this machine on the head or the tail of the queue
+	struct timeval prio_expiry; // Time at which the priority values in the line above expire and become invalid
 };
 
 struct econet_hosts network[65536]; // Hosts we know about / listen for / bridge for
@@ -143,13 +158,6 @@ short fd_ptr[65536]; /* Index is a file descriptor - yields index into network[]
 short trunk_fd_ptr[65536]; /* Index is a file descriptor - pointer to index in trunks[] */
 
 struct timeval last_bridge_reset;
-
-struct __econet_packet_aun_cache {
-	struct __econet_packet_aun *p;
-	struct __econet_packet_aun_cache *next;
-	unsigned int size; // Size of p, less its 4 byte header.
-	struct timeval tstamp;
-};
 
 struct __econet_packet_aun_cache *cache_head, *cache_tail;
 // This next cache is a cache of packets which didn't transmit onto the wire, so that they can be retransmitted. It is kept in order to avoid concurrency issues
@@ -225,20 +233,95 @@ unsigned long timediffmsec(struct timeval *s, struct timeval *d)
 
 }
 
+unsigned long queued_packets = 0; // Number of packets in all queues for all stations in network[]. Indicates whether the main loop needs to do work.
+
+#define QUEUE_HEAD 1
+#define QUEUE_TAIL 2
+#define QUEUE_AUTO 3
+
+// Puts packet *p on the queue starting at *head. If headortail = QUEUE_HEAD, it will go at *head; if QUEUE_TAIL, then at *tail; if AUTO then it will decide based
+// on whether the current priority settings for this host require it to be prioritised
+// ptr is a pointer into the network[] array for the host in question, so we can find the priority settings
+// This will COPY p from its current memory and malloc a new structure for the queue
+void econet_enqueue (int ptr, struct __econet_packet_aun *p, int len, unsigned char headortail)
+{
+
+	struct timeval now;
+	unsigned char placeat = QUEUE_TAIL;
+	struct __econet_packet_aun *p_entry;
+	struct __econet_packet_aun_cache *q_entry;
+
+	gettimeofday(&now, 0);
+
+	if (headortail == QUEUE_AUTO) // See if it's prioritized
+	{
+		if (
+			((network[ptr].prio_out_srcnet != -1 || network[ptr].prio_out_srcstn != -1 || network[ptr].prio_out_auntype != -1 || network[ptr].prio_out_port == -1)) // Some sort of priority set
+		&&	(timediffmsec(&(network[ptr].prio_expiry), &now) < 0) // I.e. now is before expiry
+		&&	(
+				(network[ptr].prio_out_srcnet == -1 || (network[ptr].prio_out_srcnet == p->p.srcnet))
+			&&	(network[ptr].prio_out_srcstn == -1 || (network[ptr].prio_out_srcstn == p->p.srcstn))
+			&&	(network[ptr].prio_out_auntype == -1 || (network[ptr].prio_out_auntype == p->p.aun_ttype))
+			&&	(network[ptr].prio_out_port == -1 || (network[ptr].prio_out_port == p->p.port))
+			)
+		)
+			placeat = QUEUE_HEAD;
+	
+	}
+
+	p_entry = malloc(len);
+	if (!p_entry) // Malloc failed
+		return;
+
+	q_entry = malloc(sizeof(struct __econet_packet_aun_cache));
+	if (!q_entry) // Malloc failed
+	{
+		free(p_entry);
+		return;
+	}
+
+	memcpy(p_entry, p, len);
+	q_entry->p = p_entry;
+	q_entry->size = len-4;
+	q_entry->next = NULL;
+	q_entry->tx_count = 0;
+	memcpy(&(q_entry->tstamp), &now, sizeof(struct timeval));
+
+	// Is the queue empty so it doesn't matter where we put this?
+	if (network[ptr].output_head == NULL)
+		network[ptr].output_head = network[ptr].output_tail = q_entry;
+	else if (placeat == QUEUE_HEAD)
+	{
+		q_entry->next = network[ptr].output_head;
+		network[ptr].output_head = q_entry;
+	}
+	else
+	{
+		network[ptr].output_tail->next = q_entry;
+		network[ptr].output_tail = q_entry;
+	}
+
+	queued_packets++; // Increment counter of total packets in all queues so we know if there is something to look for
+
+	return;
+
+}
+
 // cache_pos = 0 means put this packet on the tail of the queue if it collides. 1 = put it on the head, because that's where it came from
 unsigned int econet_write_wire(struct __econet_packet_aun *p, int len, int cache_pos)
 {
 
 	int err = ECONET_TX_JAMMED; // Default
 	uint8_t counter = 0;
+	int result;
 
 	while (counter++ < 50)
 	{
-		write(econet_fd, p, len);
+		result = write(econet_fd, p, len);
 	
 		err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
 
-		if (err == ECONET_TX_NOCLOCK || err == ECONET_TX_NOCOPY)
+		if (err == ECONET_TX_NOCLOCK || err == ECONET_TX_NOCOPY || result != len)
 			return (-1 * err);
 
 		if (err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS)
@@ -256,15 +339,18 @@ unsigned int econet_write_wire(struct __econet_packet_aun *p, int len, int cache
 				err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
 			}
 
-			if (err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS) // Stalled in some way
+			if (err == ECONET_TX_JAMMED)
 			{
-				//err = ECONET_TX_COLLISION;
+				ioctl(econet_fd, ECONETGPIO_IOC_READMODE); // Try a reset
+			}
+			else if (err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS) // Stalled in some way
+			{
 				ioctl(econet_fd, ECONETGPIO_IOC_READMODE);
 				counter = 51;
 			}
 			else if (err != ECONET_TX_SUCCESS && err != ECONET_TX_COLLISION) // Failed - reset the chip
 			{
-				ioctl(econet_fd, ECONETGPIO_IOC_READMODE);
+				//ioctl(econet_fd, ECONETGPIO_IOC_READMODE);
 				return (-1 * err);
 			}
 			else if (err == ECONET_TX_SUCCESS)
@@ -274,9 +360,9 @@ unsigned int econet_write_wire(struct __econet_packet_aun *p, int len, int cache
 
 		}
 
-		// Almost Everything else, wait a while and try again
+		// Almost Everything else, try again
 	
-		usleep((50 * (p->p.srcstn)));
+		//usleep((2500 * (p->p.srcstn)));
 
 	}
 
@@ -532,6 +618,9 @@ void econet_readconfig(void)
 			if (nativebridgenet == 0 && network[networkp].network != 0)
 				nativebridgenet = network[networkp].network;
 			
+			network[networkp].output_head = network[networkp].output_tail = NULL;
+			network[networkp].prio_out_srcnet = network[networkp].prio_out_srcstn = network[networkp].prio_out_auntype = network[networkp].prio_out_port = -1;
+
 			networkp++;
 		}
 		else if (regexec(&r_entry_local, linebuf, 3, matches, 0) == 0)
@@ -641,6 +730,10 @@ void econet_readconfig(void)
 					}
 
 					econet_ptr[net][stn] = networkp;
+
+					// Probably unnecessary because we probably won't queue for named pipes
+					network[networkp].output_head = network[networkp].output_tail = NULL;
+					network[networkp].prio_out_srcnet = network[networkp].prio_out_srcstn = network[networkp].prio_out_auntype = network[networkp].prio_out_port = -1;
 
 					networkp++;
 				}
@@ -792,6 +885,10 @@ void econet_readconfig(void)
 
 				econet_ptr[net][stn] = networkp;
 
+				// Probably not needed because we probably won't queue for locally emulated hosts
+				network[networkp].output_head = network[networkp].output_tail = NULL;
+				network[networkp].prio_out_srcnet = network[networkp].prio_out_srcstn = network[networkp].prio_out_auntype = network[networkp].prio_out_port = -1;
+
 				networkp++;
 			}
 	
@@ -878,6 +975,9 @@ void econet_readconfig(void)
 				trunk_advertizable[network[networkp].network] = 0xff;
 	
                         pset[pmax++].fd = network[networkp].listensocket; // Fill in our poll structure
+
+			network[networkp].output_head = network[networkp].output_tail = NULL;
+			network[networkp].prio_out_srcnet = network[networkp].prio_out_srcstn = network[networkp].prio_out_auntype = network[networkp].prio_out_port = -1;
 
                         networkp++;
                 }
@@ -2071,7 +2171,7 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 
 			if ((s != -1) && p->p.aun_ttype == ECONET_AUN_DATA) // Wait for ack
 			{
-				if (aun_wait(p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, ECONET_AUN_ACK, p->p.seq, ECONET_AUN_ACK_WAIT_TIME, NULL))
+				if (aun_wait(p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, ECONET_AUN_ACK, p->p.seq, ECONET_AUN_ACK_WAIT_TIME * 2, NULL))
 					acknowledged = 1;
 			}
                         else if ((s != -1) && p->p.aun_ttype == ECONET_AUN_IMM) // Wait for immediate reply - see note above about why we need not check immediate_spoof here
@@ -2549,7 +2649,7 @@ short aun_wait (unsigned char srcnet, unsigned char srcstn, unsigned char dstnet
 
 }
 
-// Returns 1 if net.stn is either AUN/IP or trunk
+// Returns 1 if net.stn is either AUN/IP or trunk (use is_on_trunk() to work out whether it's on a trunk)
 
 unsigned short is_aun(unsigned char net, unsigned char stn)
 {
@@ -2558,6 +2658,24 @@ unsigned short is_aun(unsigned char net, unsigned char stn)
 		
 	return 0;
 }
+
+// Returns 1 if net.stn isn't in network[] - i.e. if it's anywhere it's on a trunk AND we can find a trunk that appears to advertise it the relevant network
+static inline unsigned short is_on_trunk(unsigned char net, unsigned char stn)
+{
+	if (econet_ptr[net][stn] == -1) 
+	{
+		unsigned short count = 0;
+	
+		while (count < numtrunks)
+		{
+			if (trunks[count].adv_in[net] == 0xff)
+				return 1;
+			else count++;
+		}
+	}
+	return 0;
+}
+
 
 int main(int argc, char **argv)
 {
@@ -2596,7 +2714,7 @@ int main(int argc, char **argv)
 				pkt_debug = 1;
 				break;
 			case 'f': fs_quiet = 1; fs_noisy = 0; break;
-			case 'i': spoof_immediate = 0; break;
+			case 'i': spoof_immediate = 1; break;
 			case 'l': wire_enabled = 0; break;
 			case 'n': fs_noisy = 1; fs_quiet = 0; break;
 			case 'q':
@@ -2619,7 +2737,7 @@ Options:\n\
 \t-c\t<config path>\n\
 \t-d\tTurn on packet debug (you won't see much without!)\n\
 \t-f\tSilence fileserver log output\n\
-\t-i\tDon't spoof immediate responses in-kernel (experimental\n\
+\t-i\tSpoof immediate responses in-kernel (will break *REMOTE, *VIEW etc.)\n\
 \t-l\tLocal only - do not connect to kernel module (uses /dev/null instead)\n\
 \t-q\tDisable bridge query responses\n\
 \t-s\tDump station table on startup\n\
