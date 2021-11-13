@@ -68,9 +68,6 @@ extern short use_xattr; // When set use filesystem extended attributes, otherwis
 #define ECONET_SERVER_PRINT 0x02
 #define ECONET_SERVER_SOCKET 0x04
 
-// AUN Ack wait time in ms
-#define ECONET_AUN_ACK_WAIT_TIME 400
-
 #define DEVICE_PATH "/dev/econet-gpio"
 
 int aun_send (struct __econet_packet_aun *, int);
@@ -91,10 +88,10 @@ int seq;
 int pkt_debug = 0;
 int dumpmode_brief = 0;
 int wire_enabled = 1;
-int spoof_immediate = 0;
+int spoof_immediate = 1;
 int wired_eject = 1; // When set, and a dynamic address is allocated to an unknown AUN station, this will cause the bridge to spoof a '*bye' equivalent to fileservers it has learned about on the wired network
 short learned_net = -1;
-
+int wire_tx_errors = 0; // Count of successive errors on tx to the wire - if it gets too high, we'll do a chip reset
 unsigned char last_net = 0, last_stn = 0;
 
 int start_fd = 0; // Which index number do we start looking for UDP traffic from after poll returns? We do this cyclicly so we give all stations an even chance
@@ -108,7 +105,13 @@ char *beebmem;
 unsigned char econet_stations[8192];
 
 #define ECONET_AUN_MAX_TX 10
-#define ECONET_RETX_INTERVAL_MSEC 50
+#define ECONET_WIRE_MAX_TX 20  // Attempt to improve reliability on a busy network
+// Time before we send another packet on the Econet - Query whether we should be doing this at all (looks like we don't actually use it anywhere)
+#define ECONET_RETX_INTERVAL_MSEC 75
+// AUN Ack wait time in ms
+#define ECONET_AUN_ACK_WAIT_TIME 200
+// Mandatory gap between last tx to or rx from an AUN host so that it doesn't get confused (ms)
+#define ECONET_AUN_INTERPACKET_GAP 50
 
 struct __econet_packet_aun_cache {
 	struct __econet_packet_aun *p;
@@ -146,25 +149,36 @@ struct econet_hosts {							// what we we need to find a beeb?
 	// These only apply to wire hosts
 	unsigned char adv_in[256], adv_out[256]; // Advertised networks. _in received from other end, _out is last advert sent by us
 	unsigned char filter_in[256], filter_out[256]; // Filter masks for in & out
+	// Named pipe filename
 	char named_pipe_filename[200];
-	struct __econet_packet_aun_cache *output_head, *output_tail;
-	short prio_out_srcnet, prio_out_srcstn, prio_out_auntype, prio_out_port; // -1 = value unused. Used to allow a packet headed for this machine to jump the queue and go first, e.g. an immediate reply the machine is waiting for. Basically used to decide whether we put a new packet destined for this machine on the head or the tail of the queue
-	struct timeval prio_expiry; // Time at which the priority values in the line above expire and become invalid
+	// Some sequence number tracking for AUN hosts
+	struct timeval aun_last_tx; // Last AUN tx to an AUN machine. Used to time out the ACK/IMM wait below. (The 'awaited' value.)
+	struct timeval aun_last_rx; // When we received a packet from the AUN machine so we can time out the ACK / IMMREP timer on our own transmits to it
+	uint32_t ackimm_seq_awaited; // Sequence number we are waiting for an ACK for (or could be Immediate reply) FROM the AUN machine
+	struct __econet_packet_aun_cache *aun_head, *aun_tail; // Output queue for AUN clients, so that we can re-tx unacknowledged packets a few times
+	uint32_t ackimm_seq_tosend; // Sequence number FROM the AUN machine which needs acknowledging
 };
+
+// Wire packet queue & priority system
+
+struct __econet_packet_aun_cache *wire_head = NULL, *wire_tail = NULL;
+short wire_prio_out_srcnet, wire_prio_out_srcstn, wire_prio_out_dstnet, wire_prio_out_dststn, wire_prio_out_auntype, wire_prio_out_port; // -1 = value unused. Used to allow a packet headed for this machine to jump the queue and go first, e.g. an immediate reply the machine is waiting for. Basically used to decide whether we put a new packet destined for this machine on the head or the tail of the queue
+struct timeval wire_prio_expiry; // Time at which the priority values in the line above expire and become invalid
+
+// Econet hosts lists & FD pointers back into the various arrays
 
 struct econet_hosts network[65536]; // Hosts we know about / listen for / bridge for
 short econet_ptr[256][256]; /* [net][stn] pointer into network[] array. */
 short fd_ptr[65536]; /* Index is a file descriptor - yields index into network[] */
 short trunk_fd_ptr[65536]; /* Index is a file descriptor - pointer to index in trunks[] */
+int stations; // How many entries in network[]
+unsigned long aun_queued = 0; // Number of packets in AUN network[] entries
+unsigned char queue_debug = 0; // Whether we produce verbose queueing diagnostics
 
 struct timeval last_bridge_reset;
 
-struct __econet_packet_aun_cache *cache_head, *cache_tail;
-// This next cache is a cache of packets which didn't transmit onto the wire, so that they can be retransmitted. It is kept in order to avoid concurrency issues
-struct __econet_packet_aun_cache *wire_cache_head, *wire_cache_tail;
 
-int stations; // How many entries in network[]
-
+// Bridge control arrays
 unsigned char wire_advertizable[256]; /* AUN/IP and local networks - for replying to wire bridge queries */
 unsigned char trunk_advertizable[256]; /* Networks we know about which have wire or local stations on them, since we do not advertise AUN/IP stations on trunks */
 
@@ -195,6 +209,7 @@ struct __trunk {
 };
 
 struct __trunk trunks[256];
+struct __econet_packet_aun_cache *trunk_head = NULL, *trunk_tail = NULL;
 
 // The network number we report in a first bridge reply. It's the first distant network we learn about from the config
 // Eventually we may listen for bridge announcements and update it from that
@@ -233,7 +248,6 @@ unsigned long timediffmsec(struct timeval *s, struct timeval *d)
 
 }
 
-unsigned long queued_packets = 0; // Number of packets in all queues for all stations in network[]. Indicates whether the main loop needs to do work.
 
 #define QUEUE_HEAD 1
 #define QUEUE_TAIL 2
@@ -243,7 +257,7 @@ unsigned long queued_packets = 0; // Number of packets in all queues for all sta
 // on whether the current priority settings for this host require it to be prioritised
 // ptr is a pointer into the network[] array for the host in question, so we can find the priority settings
 // This will COPY p from its current memory and malloc a new structure for the queue
-void econet_enqueue (int ptr, struct __econet_packet_aun *p, int len, unsigned char headortail)
+void econet_enqueue (struct __econet_packet_aun *p, int len, unsigned char headortail)
 {
 
 	struct timeval now;
@@ -253,57 +267,139 @@ void econet_enqueue (int ptr, struct __econet_packet_aun *p, int len, unsigned c
 
 	gettimeofday(&now, 0);
 
+	if (queue_debug)	fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X request  wire   enqueue mode %02X ",
+		p->p.dstnet, p->p.dststn,
+		p->p.srcnet, p->p.srcstn,
+		len,
+		headortail);
+
 	if (headortail == QUEUE_AUTO) // See if it's prioritized
 	{
 		if (
-			((network[ptr].prio_out_srcnet != -1 || network[ptr].prio_out_srcstn != -1 || network[ptr].prio_out_auntype != -1 || network[ptr].prio_out_port == -1)) // Some sort of priority set
-		&&	(timediffmsec(&(network[ptr].prio_expiry), &now) < 0) // I.e. now is before expiry
+			((wire_prio_out_srcnet != -1 || wire_prio_out_srcstn != -1 || wire_prio_out_dstnet != -1 || wire_prio_out_dststn != -1 || wire_prio_out_auntype != -1 || wire_prio_out_port == -1)) // Some sort of priority set
+		&&	(timediffmsec(&(wire_prio_expiry), &now) < 0) // I.e. now is before expiry
 		&&	(
-				(network[ptr].prio_out_srcnet == -1 || (network[ptr].prio_out_srcnet == p->p.srcnet))
-			&&	(network[ptr].prio_out_srcstn == -1 || (network[ptr].prio_out_srcstn == p->p.srcstn))
-			&&	(network[ptr].prio_out_auntype == -1 || (network[ptr].prio_out_auntype == p->p.aun_ttype))
-			&&	(network[ptr].prio_out_port == -1 || (network[ptr].prio_out_port == p->p.port))
+				(wire_prio_out_srcnet == -1 || (wire_prio_out_srcnet == p->p.srcnet))
+			&&	(wire_prio_out_srcstn == -1 || (wire_prio_out_srcstn == p->p.srcstn))
+			&&	(wire_prio_out_dstnet == -1 || (wire_prio_out_dstnet == p->p.dstnet))
+			&&	(wire_prio_out_dststn == -1 || (wire_prio_out_dststn == p->p.dststn))
+			&&	(wire_prio_out_auntype == -1 || (wire_prio_out_auntype == p->p.aun_ttype))
+			&&	(wire_prio_out_port == -1 || (wire_prio_out_port == p->p.port))
 			)
 		)
 			placeat = QUEUE_HEAD;
+		if (queue_debug) fprintf (stderr, "placing on %s ", (placeat == QUEUE_HEAD ? "head" : "tail"));
 	
 	}
 
 	p_entry = malloc(len);
 	if (!p_entry) // Malloc failed
+	{
+		if (queue_debug)	fprintf (stderr, ": main malloc failed!\n");
 		return;
+	}
 
 	q_entry = malloc(sizeof(struct __econet_packet_aun_cache));
 	if (!q_entry) // Malloc failed
 	{
+		if (queue_debug)	fprintf (stderr, ": packet malloc failed!\n");
 		free(p_entry);
 		return;
 	}
 
 	memcpy(p_entry, p, len);
 	q_entry->p = p_entry;
-	q_entry->size = len-4;
+	q_entry->size = len;
 	q_entry->next = NULL;
 	q_entry->tx_count = 0;
 	memcpy(&(q_entry->tstamp), &now, sizeof(struct timeval));
 
 	// Is the queue empty so it doesn't matter where we put this?
-	if (network[ptr].output_head == NULL)
-		network[ptr].output_head = network[ptr].output_tail = q_entry;
+	if (wire_head == NULL)
+		wire_head = wire_tail = q_entry;
 	else if (placeat == QUEUE_HEAD)
 	{
-		q_entry->next = network[ptr].output_head;
-		network[ptr].output_head = q_entry;
+		q_entry->next = wire_head;
+		wire_head = q_entry;
 	}
 	else
 	{
-		network[ptr].output_tail->next = q_entry;
-		network[ptr].output_tail = q_entry;
+		wire_tail->next = q_entry;
+		wire_tail = q_entry;
 	}
 
-	queued_packets++; // Increment counter of total packets in all queues so we know if there is something to look for
+	if (queue_debug) fprintf (stderr, "- queued\n");
 
 	return;
+
+}
+
+int econet_general_enqueue(struct __econet_packet_aun_cache **head, struct __econet_packet_aun_cache **tail, struct __econet_packet_aun *p, int len)
+{
+
+	struct timeval now;
+	struct __econet_packet_aun *p_entry;
+	struct __econet_packet_aun_cache *q_entry;
+
+	if (queue_debug)	fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X request general enqueue\n",
+		p->p.dstnet, p->p.dststn,
+		p->p.srcnet, p->p.srcstn,
+		len);
+
+	gettimeofday(&now, 0);
+	p_entry = malloc(len);
+	if (!p_entry) // Malloc failed
+	{
+		if (queue_debug)	fprintf (stderr, "QUEUE: main malloc failed!\n");
+		return 0;
+	}
+
+	q_entry = malloc(sizeof(struct __econet_packet_aun_cache));
+	if (!q_entry) // Malloc failed
+	{
+		if (queue_debug)	fprintf (stderr, "QUEUE: packet malloc failed!\n");
+		free(p_entry);
+		return 0;
+	}
+
+	memcpy(p_entry, p, len);
+	q_entry->p = p_entry;
+	q_entry->size = len;
+	q_entry->next = NULL;
+	q_entry->tx_count = 0;
+	memcpy(&(q_entry->tstamp), &now, sizeof(struct timeval));
+
+	// Is the queue empty so it doesn't matter where we put this?
+	if (*head == NULL)
+		*head = *tail = q_entry;
+	else
+	{
+		(*tail)->next = q_entry;
+		(*tail) = q_entry;
+	}
+
+	return 1;
+
+}
+
+void econet_general_dumphead(struct __econet_packet_aun_cache **head, struct __econet_packet_aun_cache **tail) // see econet_dumphead() - this is the trunk equivalent
+{
+
+	struct __econet_packet_aun_cache *q_entry;
+
+	q_entry = *head;
+
+	if (queue_debug) fprintf (stderr, "QUEUE: Dumping packet at queue head %p\n", *head);
+
+	if (q_entry)
+	{
+		*head = (*head)->next;
+		if (!(*head))
+			*tail = NULL;
+		free (q_entry->p);
+		free (q_entry);
+	}
+
 
 }
 
@@ -312,11 +408,8 @@ unsigned int econet_write_wire(struct __econet_packet_aun *p, int len, int cache
 {
 
 	int err = ECONET_TX_JAMMED; // Default
-	uint8_t counter = 0;
 	int result;
 
-	while (counter++ < 50)
-	{
 		result = write(econet_fd, p, len);
 	
 		err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
@@ -339,70 +432,66 @@ unsigned int econet_write_wire(struct __econet_packet_aun *p, int len, int cache
 				err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
 			}
 
-			if (err == ECONET_TX_JAMMED)
-			{
-				ioctl(econet_fd, ECONETGPIO_IOC_READMODE); // Try a reset
-			}
-			else if (err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS) // Stalled in some way
-			{
-				ioctl(econet_fd, ECONETGPIO_IOC_READMODE);
-				counter = 51;
-			}
-			else if (err != ECONET_TX_SUCCESS && err != ECONET_TX_COLLISION) // Failed - reset the chip
-			{
-				//ioctl(econet_fd, ECONETGPIO_IOC_READMODE);
-				return (-1 * err);
-			}
-			else if (err == ECONET_TX_SUCCESS)
+			if (err == ECONET_TX_SUCCESS)
 			{
 				return len;
 			}
 
 		}
 
-		// Almost Everything else, try again
-	
-		//usleep((2500 * (p->p.srcstn)));
-
-	}
-
-	if (err == ECONET_TX_DATAPROGRESS || err == ECONET_TX_COLLISION || err == ECONET_TX_BUSY) // - Put this on the wire cache
-	{
-		struct __econet_packet_aun_cache *c;
-
-		if ((c = malloc(sizeof(struct __econet_packet_aun_cache))))
-		{
-			gettimeofday(&(c->tstamp), 0);
-			c->size = len;
-			c->next = NULL;
-			if ((c->p = malloc(len)))
-			{
-				memcpy(c->p, p, len);
-		
-				fprintf (stderr, "CACHE: to %3d.%3d from %3d.%3d Caching packet on collision - onto %s of cache\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, (cache_pos ? "head" : "tail"));
-				if (!wire_cache_head) // DOesn't matter whether we want to be on tail or head - there is no cache at present
-				{
-					wire_cache_head = wire_cache_tail = c;
-				}
-				else if (cache_pos == 0) // Put this on the tail
-				{
-					wire_cache_tail->next = c;
-					wire_cache_tail = c;
-				}
-				else // There must by here by a cache, and we aren't putting on tail, so it's going on the head 
-				{
-					c->next = wire_cache_head;
-					wire_cache_head = c;
-				}	
-						
-
-			}
-			else	free(c); // Free main struct - couldn't allocate packet data
-		}
-		// else we couldn't allocate memory so don't bother
-	}
-	
 	return (-1 * err);
+
+}
+
+int econet_write_general(struct __econet_packet_aun *p, int len)
+{
+	int trunk, ptr;
+
+	trunk = trunk_find(p->p.dstnet);
+	ptr = econet_ptr[p->p.dstnet][p->p.dststn];
+
+	if (ptr != -1) // A station we know
+	{
+		// What sort of destination?
+		
+		if (network[ptr].type & ECONET_HOSTTYPE_TWIRE) // WIRE
+			return econet_write_wire(p, len, 0); // Will eventually get rid of parameter 3!
+		else if (network[ptr].type & ECONET_HOSTTYPE_TDIS) // AUN
+		{
+			struct sockaddr_in n;
+			int sender;
+			int result;
+
+			n.sin_family = AF_INET;
+			n.sin_port = htons(network[ptr].port);
+			n.sin_addr = network[ptr].s_addr;
+
+			// Since AUN hosts can't talk to trunks, we should be able to safely look up the sending host
+
+			sender = econet_ptr[p->p.srcnet][p->p.srcstn];
+
+			result = sendto(network[sender].listensocket, &(p->p.aun_ttype), len-4, MSG_DONTWAIT, (struct sockaddr *)&n, sizeof(n));
+			
+			if (result == len-4) return len; // Because we drop the 4 header bytes off!
+			else return result;
+
+		}
+		else if (network[ptr].type & ECONET_HOSTTYPE_TNAMEDPIPE) // Named Pipe
+			return write(network[ptr].listensocket, p, len);
+		else
+		{
+			fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d Unknown destination type (0x%02x) - cannot route\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, network[ptr].type);
+			return -1;
+		} // NB, Local transmission handled on arrival
+
+	}
+	else if (trunk >= 0) // On a trunk
+		return aun_trunk_send(p, len);
+	else
+	{
+		fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d Cannot route\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
+		return -1;
+	}
 
 }
 
@@ -618,8 +707,11 @@ void econet_readconfig(void)
 			if (nativebridgenet == 0 && network[networkp].network != 0)
 				nativebridgenet = network[networkp].network;
 			
-			network[networkp].output_head = network[networkp].output_tail = NULL;
-			network[networkp].prio_out_srcnet = network[networkp].prio_out_srcstn = network[networkp].prio_out_auntype = network[networkp].prio_out_port = -1;
+			network[networkp].aun_head = network[networkp].aun_tail = NULL;
+			network[networkp].aun_last_tx.tv_sec = network[networkp].aun_last_tx.tv_usec = 0;
+			network[networkp].aun_last_rx.tv_sec = network[networkp].aun_last_rx.tv_usec = 0;
+			network[networkp].ackimm_seq_awaited = 0; // Sequence number we're waiting to be acked / immediate replied
+			network[networkp].ackimm_seq_tosend = 0; // Sequence number the host is waiting to be responded to with ACK / NAK / IMMREP
 
 			networkp++;
 		}
@@ -730,10 +822,6 @@ void econet_readconfig(void)
 					}
 
 					econet_ptr[net][stn] = networkp;
-
-					// Probably unnecessary because we probably won't queue for named pipes
-					network[networkp].output_head = network[networkp].output_tail = NULL;
-					network[networkp].prio_out_srcnet = network[networkp].prio_out_srcstn = network[networkp].prio_out_auntype = network[networkp].prio_out_port = -1;
 
 					networkp++;
 				}
@@ -885,10 +973,6 @@ void econet_readconfig(void)
 
 				econet_ptr[net][stn] = networkp;
 
-				// Probably not needed because we probably won't queue for locally emulated hosts
-				network[networkp].output_head = network[networkp].output_tail = NULL;
-				network[networkp].prio_out_srcnet = network[networkp].prio_out_srcstn = network[networkp].prio_out_auntype = network[networkp].prio_out_port = -1;
-
 				networkp++;
 			}
 	
@@ -975,9 +1059,6 @@ void econet_readconfig(void)
 				trunk_advertizable[network[networkp].network] = 0xff;
 	
                         pset[pmax++].fd = network[networkp].listensocket; // Fill in our poll structure
-
-			network[networkp].output_head = network[networkp].output_tail = NULL;
-			network[networkp].prio_out_srcnet = network[networkp].prio_out_srcstn = network[networkp].prio_out_auntype = network[networkp].prio_out_port = -1;
 
                         networkp++;
                 }
@@ -1426,6 +1507,7 @@ void aun_acknowledge (struct __econet_packet_aun *a, unsigned char ptype)
 {
 
 	struct __econet_packet_aun reply;
+	int ptr;
 
 	reply.p.aun_ttype = ptype;
 	reply.p.port = a->p.port;
@@ -1437,10 +1519,15 @@ void aun_acknowledge (struct __econet_packet_aun *a, unsigned char ptype)
 	reply.p.dstnet = a->p.srcnet;
 	reply.p.dststn = a->p.srcstn;
 
-	if (econet_ptr[reply.p.dstnet][reply.p.dststn] == -1)
-		aun_trunk_send(&reply, 12);
-	else
-		aun_send (&reply, 12); // TODO. Need to write to the correct place here and not use aun_send.
+	econet_write_general(&reply, 12);
+
+	ptr = econet_ptr[a->p.srcnet][a->p.srcstn]; // src used here because that's the src in the packet we are acknowledging, so the src is actually the station we're sending the ack *to* - so it's that station's tracker we need to look at
+		
+	if (ptr != -1 && (network[ptr].type & ECONET_HOSTTYPE_TDIS) && reply.p.seq == network[ptr].ackimm_seq_tosend)
+	{
+		network[ptr].ackimm_seq_tosend = 0; // We have just acknowledged a packet from this machine - clear off the tracker
+		if (queue_debug) fprintf (stderr, "QUEUE: Clearing ACK tracker on network[%d] - seq 0x%08X\n", ptr, network[ptr].ackimm_seq_tosend);
+	}
 
 }
 
@@ -2045,46 +2132,11 @@ int aun_trunk_send(struct __econet_packet_aun *p, int len)
 
 }
 
-void aun_clear_cache (unsigned char net, unsigned char stn)
-{
-
-	struct __econet_packet_aun_cache *q, *q_parent;
-	int found;
-
-	q_parent = NULL;
-	q = cache_head;
-
-	found = 0;
-
-	while (q && !found)
-	{
-		if ((q->p->p.srcnet == net) && (q->p->p.srcstn == stn)) // If the station we just transmitted to has a packet in the cache, splice it out
-		{
-			found = 1;
-			if (q != cache_head)
-				q_parent->next = q->next;
-			else	cache_head = q->next; // Works even if p->next is null (only one packet on queue)
-
-			free (q->p); free(q); // free both the packet inside the queue entry, and the queue entry
-		}
-		else
-		{
-			q_parent = q;
-			q = q_parent->next;
-		}
-	}
-
-}
-
 // Source is only used to pass to local handler to process broadcasts so we know where they came from
 int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 {
 
 	int d, s, result; // d, s are pointers into network[]; result is number of bytes written or error return
-	unsigned short count; // Transmission attempt counter
-	unsigned char acknowledged = 0;
-	struct sockaddr_in n;
-	struct __econet_packet_aun *ack;
 
 	if (p->p.aun_ttype == ECONET_AUN_BCAST)
 		p->p.dstnet = p->p.dststn = 0xff;
@@ -2125,13 +2177,6 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 	}
 	else
 	{
-/* ALLOW TRUNK TO TRUNK
-		if (d == -1 && s == -1 && (p->p.srcstn != 0 && p->p.srcnet != nativebridgenet) && (p->p.aun_ttype != ECONET_AUN_BCAST)) // Trunk to trunk - dump it - unless it's from our bridge query system, or a broadcast
-		{
-			if (pkt_debug) fprintf (stderr, "ILOCK: to %3d.%3d from %3d.%3d I refuse to forward.\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
-			return result;
-		}
-*/
 		if (d == -1 && (s != -1) && (network[s].type & ECONET_HOSTTYPE_TDIS)) // AUN/IP source to Trunk - dump it
 		{
 			if (pkt_debug) fprintf (stderr, "ILOCK: to %3d.%3d from %3d.%3d I refuse to forward AUN traffic to trunk\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
@@ -2144,122 +2189,67 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 		}
 	}
 
+	if (s != -1 && (p->p.aun_ttype == ECONET_AUN_DATA || p->p.aun_ttype == ECONET_AUN_IMM)) // Particular source
+	{
+		if (network[s].type & ECONET_HOSTTYPE_TDIS || network[s].type & ECONET_HOSTTYPE_TNAMEDPIPE) // AUN or named Pipe
+		{
+			gettimeofday(&(network[s].aun_last_rx), 0); // Flag the packet receipt time so we know when to expire the ACK / IMMREP timer
+			network[s].ackimm_seq_tosend = p->p.seq;
+		}
+
+		if (network[s].type & ECONET_HOSTTYPE_TWIRE && p->p.aun_ttype == ECONET_AUN_IMM) // Wire host sending immediate - prioritise the reply
+		{
+			wire_prio_out_srcnet = p->p.dstnet;
+			wire_prio_out_srcstn = p->p.dststn;
+			wire_prio_out_dstnet = p->p.srcnet;
+			wire_prio_out_dststn = p->p.srcstn;
+			wire_prio_out_port = 0;
+			wire_prio_out_auntype = ECONET_AUN_IMMREP;
+		}
+
+	}
+
 	// If trunk destination, the trunk send routine does NAT and works out which trunk
 
 	// Now, where's it going?
 
-	count = 0;
-
-	//aun_clear_cache (p->p.dstnet, p->p.dststn);
-
-	while (count < 1 && !acknowledged) // Was 2
-	{
-		if (d == -1 && (p->p.aun_ttype != ECONET_AUN_BCAST))
+		if (d == -1 && (p->p.aun_ttype != ECONET_AUN_BCAST)) // Trunk send
 		{
 			p->p.ctrl &= 0x7f; // Strip high bit from control an AUN transmission
 
-/*
-			// Restore sequence number if we are sending an immediate reply
-
-			if (p->p.aun_ttype == ECONET_AUN_IMMREP)
-				p->p.seq = network[d].last_imm_seq_sent; // Override the sequence number from the kernel to match what was last sent to this host 
-*/
-
-			result = aun_trunk_send (p, len);
-
-			// Wait for ack / immrep here. if the traffic didn't come from another trunk - in which case the other end can deal with waiting around for replies
-
-			if ((s != -1) && p->p.aun_ttype == ECONET_AUN_DATA) // Wait for ack
-			{
-				if (aun_wait(p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, ECONET_AUN_ACK, p->p.seq, ECONET_AUN_ACK_WAIT_TIME * 2, NULL))
-					acknowledged = 1;
-			}
-                        else if ((s != -1) && p->p.aun_ttype == ECONET_AUN_IMM) // Wait for immediate reply - see note above about why we need not check immediate_spoof here
-                        {
-                                int acklen;
-
-                                if ((acklen = aun_wait(p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, ECONET_AUN_IMMREP, p->p.seq, ECONET_AUN_ACK_WAIT_TIME * 2, &ack)))
-                                {
-                                        acknowledged = 1;
-                                        // Can only sensibly be going on the wire
-                                        //	write (econet_fd, ack, acklen);
-					econet_write_wire (ack, acklen, 0);
-                                }
-                                else    ioctl(econet_fd, ECONETGPIO_IOC_READMODE); // Force read mode on a timeout otherwise the kernel stops listening...
-
-                                if (ack) free(ack);
-                        }
-			else acknowledged = 1; // Treat as acknowledged
-
+			if (s == -1) // Trunk to trunk - straight out
+				result = aun_trunk_send (p, len);
+			else
+				econet_general_enqueue(&trunk_head, &trunk_tail, p, len);
 		}
 		else if ((network[d].type & ECONET_HOSTTYPE_TLOCAL) || p->p.aun_ttype == ECONET_AUN_BCAST) // Probably need to forward broadcasts received off the wire to AUN/IP hosts on same net, but we don't at the moment
 		{
 			econet_handle_local_aun(p, len, source);
 			result = len;
-			acknowledged = 1;
 		}
 		else if ((network[d].type & ECONET_HOSTTYPE_TNAMEDPIPE)) // Named pipe client
 		{
-			unsigned char buffer[65536];
-
 			result = write(network[d].listensocket, p, len);
-			// Do a dummy read to get rid of that traffic coming back to us
-		
-			read(network[d].listensocket, &buffer, len);
-
-			acknowledged = 1;
 		}
 		else if (network[d].type & ECONET_HOSTTYPE_TDIS)
 		{
 			p->p.ctrl &= 0x7f; // Strip high bit from control an AUN transmission
 
-			// Transmit here - TODO
-			
-			n.sin_family = AF_INET;
-			n.sin_port = htons(network[d].port);
-			n.sin_addr = network[d].s_addr;
-		
-			if (p->p.aun_ttype != ECONET_AUN_BCAST) // Need to work on sending broadcasts on AUN
+			// We shouldn't see ACK or NAK here because they are caught on input and processed.
+
+			if (p->p.aun_ttype != ECONET_AUN_BCAST) // Ignore broadcasts to AUN for now
 			{
-
-/*
-				if (p->p.aun_ttype == ECONET_AUN_IMMREP)
-					p->p.seq = network[d].last_imm_seq_sent; // Override the sequence number from the kernel to match what was last sent to this host 
-*/
-
-				result = sendto(network[s].listensocket, &(p->p.aun_ttype), len-4, MSG_DONTWAIT, (struct sockaddr *)&n, sizeof(n)); // Strip first four bytes off - p is now a full internal format packet, so we ditch the first four.
-				
-			}
-
-			if (p->p.aun_ttype == ECONET_AUN_DATA) // Wait for ack
-			{
-				int t;
-				if ((t = aun_wait(p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, ECONET_AUN_ACK, p->p.seq, ECONET_AUN_ACK_WAIT_TIME, NULL)))
+				if (econet_general_enqueue(&(network[d].aun_head), &(network[d].aun_tail), p, len))
 				{
-					acknowledged = 1;
+					result = len;
+					aun_queued++;
 				}
+				else	result = 0;
 			}
-			else if (p->p.aun_ttype == ECONET_AUN_IMM) // Wait for immediate reply - see note above about why we need not check immediate_spoof here
-			{
-				int acklen;
-
-				if ((acklen = aun_wait(p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, ECONET_AUN_IMMREP, p->p.seq, ECONET_AUN_ACK_WAIT_TIME * 2, &ack)))
-				{
-					acknowledged = 1;
-					// Can only sensibly be going on the wire
-					//write (econet_fd, ack, acklen);
-					econet_write_wire (ack, acklen, 0);
-				}
-				else	ioctl(econet_fd, ECONETGPIO_IOC_READMODE); // Force read mode on a timeout otherwise the kernel stops listening...
-			
-				if (ack) free(ack);
-			}
-			else // Treat as acknowledged
-				acknowledged = 1;
+			else result = len;
 		}
 		else if (network[d].type & ECONET_HOSTTYPE_TWIRE) // Wire
 		{
-
 			// Is it a wired fileserver we might want to know about?
 
 			if ((network[d].type & ECONET_HOSTTYPE_TWIRE) && (p->p.port == 0x99) && (!(network[d].is_wired_fs))) // Fileserver traffic on a wire station
@@ -2272,36 +2262,14 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 			if (p->p.aun_ttype == ECONET_AUN_IMM)
 				network[d].last_imm_seq_sent = p->p.seq;
 
-			result = econet_write_wire (p, len, 0);
+			econet_enqueue(p, len, QUEUE_AUTO);
+			result = len;
 
-			if (result == len) 
-				acknowledged = 1;
-			
 		}
 		else // Unknown destination type
 		{
 			fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d Unknown destination\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
-			break;
 		}
-
-		count++;
-	}
-
-	if (!acknowledged)
-	{
-		if ((d != -1) && (network[d].type & ECONET_HOSTTYPE_TWIRE)) // Wire destination - specific types of error
-		{
-			if (result < 0)
-				fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d %s (%02x)\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, econet_strtxerr(result), -result);	
-			else if (result < len && result >= 0)
-				fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - only %d of %d bytes written\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, result, len);	
-		}
-		else // Non-wire
-		{
-			fprintf(stderr, "ERROR: to %3d.%3d from %3d.%3d No %s received\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, (p->p.aun_ttype == ECONET_AUN_IMM ? "immediate reply" : "acknowledgment"));
-			result = 0;
-		}
-	}
 
 	return result;
 
@@ -2416,239 +2384,6 @@ int trunk_xlate_fw(struct __econet_packet_aun *p, int trunk, unsigned char dir)
 
 }
 
-// Wait up to timeout ms for a packet from srcnet.srcstn to dstnet.dststn matching AUN type aun_type with 
-// sequence number seq. If it arrives, put the packet in *p (if p is not null) and return packet length. Otherwise set *p = NULL and return 0. Any other
-// traffic arriving gets put on the packet cache for later processing.
-// If returns 1, caller MUST free *p after use.
-
-short aun_wait (unsigned char srcnet, unsigned char srcstn, unsigned char dstnet, unsigned char dststn, unsigned char aun_type, uint32_t seq, short timeout, struct __econet_packet_aun **p)
-{
-
-	struct timeval start, now;
-	struct __econet_packet_aun in; // Structure we read from the network into
-	int r; // Return value from read
-	struct pollfd pwait; // Poll structure for waiting for traffic
-	struct sockaddr addr;
-	int dptr, sptr, trunk; // Pointers into network[] and the trunk number
-	int policy; // Result of firewall policy procedure
-	unsigned char aun_check_dstnet;
-
-	short received = 0;
-	unsigned long diff;
-	
-	if (p)
-		*p = NULL; // Initialize
-
-	sptr = econet_ptr[srcnet][srcstn];
-	dptr = econet_ptr[dstnet][dststn];
-
-	trunk = 0; 
-
-	if (sptr == -1)
-		trunk = trunk_find(srcnet);
-
-	if ((sptr == -1) && (trunk == -1)) // Source from trunk. Find it, and barf otherwise
-		return 0;
-	
-	if (!is_aun(srcnet, srcstn)) // Shouldn't be being called - barf
-	{
-		fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - aun_wait() called when distant station is not AUN\n", dstnet, dststn, srcnet, srcstn);
-		return 0;
-	}
-
-	aun_check_dstnet = dstnet; 
-
-	// Do address trnslation if receiving from trunk
-	if (trunk != -1)
-	{
-		aun_check_dstnet = trunks[trunk].xlate_dst[dstnet];
-		if (aun_check_dstnet == 0xff) // No mapping
-			aun_check_dstnet = dstnet; // Restore original
-		if (aun_check_dstnet == localnet)
-			aun_check_dstnet = 0; // net 0 in the config
-	}
-
-	if (is_aun(aun_check_dstnet, dststn)) // Shouldn't be being called if destination is AUN. Should be wire or local.
-	{
-		fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d - aun_wait() called when local station is AUN and we cannot relay (xlate_dstnet = %d)\n", dstnet, dststn, srcnet, srcstn, aun_check_dstnet);
-		return 0;
-	}
-
-	gettimeofday(&start, 0);
-
-	gettimeofday(&now, 0);
-
-	diff = timediffmsec(&start, &now);
-
-	while ((diff < timeout) && !received)
-	{
-		if (trunk)
-			pwait.fd = trunks[trunk].listensocket;
-		else
-			pwait.fd = network[dptr].listensocket;
-
-		pwait.events = POLLIN;
-
-		if (poll(&pwait, 1, (timeout - diff)) && (pwait.revents & POLLIN))
-		{
-			int net_src;
-
-			if (dptr == -1) // Trunk
-				r = udp_receive(trunks[trunk].listensocket, &in, ECONET_MAX_PACKET_SIZE+4, &addr);
-			else
-			{
-				r = udp_receive(network[dptr].listensocket, &(in.p.aun_ttype), ECONET_MAX_PACKET_SIZE, &addr);
-				if (r > 0) r +=4; // Fake the extra four bytes received so it matches a trunk receipt
-			}
-
-			if (r >= 0)
-			{
-				if (!trunk)
-				{
-					net_src = econet_find_source_station((struct sockaddr_in *) &addr);
-					policy = FW_ACCEPT; // Always accept inbound from configure AUN/IP hosts
-				}
-				else
-					policy = trunk_xlate_fw(&in, trunk, 0); // 0 = Inbound
-
-				if (pkt_debug && !dumpmode_brief) fprintf (stderr, "CACHE: to %3d.%3d from %3d.%3d AUN type %02X, seq %08" PRIx32 ", len %04X received ", 
-					network[dptr].network, network[dptr].station,
-					(trunk ? in.p.srcnet : (net_src == 0xffff ? 0:network[net_src].network)), 
-					(trunk ? in.p.srcstn : (net_src == 0xffff ? 0:network[net_src].station)), 
-					in.p.aun_ttype, in.p.seq, r-4);
-
-				if ((policy == FW_ACCEPT) && (trunk || (net_src != 0xffff))) // We know where the traffic arrived from and we're prepared to accept it
-				{
-	
-					if (!trunk) // If not from a trunk, complete the four bytes on the front of the packet
-					{
-						in.p.dstnet = network[dptr].network; // This is fine, because we were listening on a socket for a single destination station
-						in.p.dststn = network[dptr].station;
-						in.p.srcnet = network[net_src].network; // The one we found above
-						in.p.srcstn = network[net_src].station;
-					}
-	
-					// Wsa this the traffic we were looking for?
-
-					if ((srcnet == in.p.srcnet) && (srcstn == in.p.srcstn) && (aun_check_dstnet == in.p.dstnet) && (dststn == in.p.dststn) && (in.p.aun_ttype == aun_type) && ((in.p.aun_ttype == ECONET_AUN_IMMREP) || in.p.seq == seq)) // Temp - we should make the other bridges put the right reply sequence number on immediate replies...
-					{
-						if (pkt_debug && !dumpmode_brief) fprintf (stderr, "MATCHED");
-	
-						in.p.ctrl |= 0x80; 
-
-						// Found the packet we want
-						if (p) 
-						{
-							*p = malloc(r);
-							if (*p)
-								memcpy(*p, &in, r);
-							else // Barf - can't malloc
-								return 0;
-							dump_udp_pkt_aun(*p, r);
-						}
-
-						received = r; // Flag the match
-					}
-					else if (in.p.aun_ttype == ECONET_AUN_IMM || in.p.aun_ttype == ECONET_AUN_IMMREP || in.p.aun_ttype == ECONET_AUN_DATA) // Cache useful packets
-					{
-						struct __econet_packet_aun_cache *entry;
-	
-						// Dear purists, you will not like the next two lines. They acknowledge a data packet before transmission to local or wire.
-						// Since the kernel module collapses a 4-way handshake to 2-way in the other direction, so that a sending wire station
-						// thinks its packet has got to its destination before the AUN packet hits the UDP stack, still less before it has been
-						// acknowledged, then in *this* direction it is hardly much different to acknoweldge an incoming UDP AUN packet before
-						// it has gone where it is going... The former is necessary in order to collect a whole packet before an AUN datagram
-						// could even be sent, and is thus a necesary compromise for this to work at all. The latter is simply a comparable and
-						// consistent compromise in the opposite direction!
-
-						if (in.p.aun_ttype == ECONET_AUN_DATA)
-							aun_acknowledge(&in, ECONET_AUN_ACK);
-
-						// By here, any necessary trunk translation / firewalling has happened, so what we put in the cache is a *translated* packet in internal form
-
-						entry = malloc (sizeof(struct __econet_packet_aun_cache));
-	
-						if (!entry)
-							return 0; 
-	
-						entry->p = malloc(r);
-						if (!entry->p) // Can't malloc
-						{
-							free(entry);
-							return 0;
-						}
-	
-						memcpy(entry->p, &in, r); // Copy the packet
-
-						entry->next = NULL;
-						entry->size = r; // Size of p inc 4 bytes for the AUN header - i.e. the value we pass to aun_send to send the packet
-
-						gettimeofday(&(entry->tstamp), 0);
-	
-						if (pkt_debug && !dumpmode_brief) fprintf (stderr, "CACHED ");
-	
-						if (!cache_head) // Cache is empty
-						{
-							if (pkt_debug && !dumpmode_brief) fprintf (stderr, "as first cache entry");
-							cache_head = entry;
-							cache_tail = entry;
-						}
-						else
-						{
-							// We only want the last packet from each source station in the cache because they retransmit stuff, so have a look and see if we can find it. If we find it, replace the existing entry - doing some free()ing along the way
-
-							struct __econet_packet_aun_cache *q;
-							short found = 0;
-
-							q = cache_head;
-
-							while (q && !found)
-							{
-								if ((q->p->p.srcnet == entry->p->p.srcnet) && (q->p->p.srcstn == entry->p->p.srcstn))
-								{
-									if (pkt_debug && !dumpmode_brief) fprintf (stderr, "by replacing packet cache entry at %p", q);
-									// Free existing packet
-									free (q->p);
-									q->size = entry->size;
-									q->p = entry->p;
-									found = 1;
-								}
-								q = q->next;
-							}
-
-							if (!q && !found) // Source not found in cache, put it on the tail
-							{
-								if (pkt_debug && !dumpmode_brief) fprintf (stderr, "on the cache tail");
-								cache_tail->next = entry;
-								cache_tail = entry;
-							}
-						}
-					}
-					else if (pkt_debug && !dumpmode_brief) fprintf (stderr, "DISCARDED");
-
-					if (pkt_debug && !dumpmode_brief) fprintf (stderr, "\n");
-				}
-				else if (pkt_debug && !dumpmode_brief) fprintf (stderr, "JETTISONED\n");
-			}
-			else
-			{
-				if (pkt_debug && !dumpmode_brief) fprintf (stderr, "CACHE: Network read error\n");
-					return 0; // Read error
-			}
-
-		}	
-
-		gettimeofday(&now, 0);
-
-	        diff = timediffmsec(&start, &now);
-
-	}
-	
-
-	return received;
-
-}
-
 // Returns 1 if net.stn is either AUN/IP or trunk (use is_on_trunk() to work out whether it's on a trunk)
 
 unsigned short is_aun(unsigned char net, unsigned char stn)
@@ -2696,14 +2431,11 @@ int main(int argc, char **argv)
 
 	// Clear the packet cache
 
-	cache_head = cache_tail = NULL;
-	wire_cache_head = wire_cache_tail = NULL;
-
 	seq = 0x46; /* Random number */
 
 	fs_sevenbitbodge = 1; // On by default
 
-	while ((opt = getopt(argc, argv, "bc:dfilnqsxzh7")) != -1)
+	while ((opt = getopt(argc, argv, "bc:dfilnqrsxzh7")) != -1)
 	{
 		switch (opt) {
 			case 'b': dumpmode_brief = 1; break;
@@ -2714,12 +2446,13 @@ int main(int argc, char **argv)
 				pkt_debug = 1;
 				break;
 			case 'f': fs_quiet = 1; fs_noisy = 0; break;
-			case 'i': spoof_immediate = 1; break;
+			case 'i': spoof_immediate = 0; break;
 			case 'l': wire_enabled = 0; break;
 			case 'n': fs_noisy = 1; fs_quiet = 0; break;
 			case 'q':
 				bridge_query = 0;
 				break;
+			case 'r': queue_debug = 1; break;
 			case 's': dump_station_table = 1; break;
 			case 'z': wired_eject = 0; break;
                         case 'x': use_xattr = 0; break;
@@ -2740,6 +2473,7 @@ Options:\n\
 \t-i\tSpoof immediate responses in-kernel (will break *REMOTE, *VIEW etc.)\n\
 \t-l\tLocal only - do not connect to kernel module (uses /dev/null instead)\n\
 \t-q\tDisable bridge query responses\n\
+\t-r\tEnable queue debugging (only if you know what you're doing)\n\
 \t-s\tDump station table on startup\n\
 \t-x\tNever use filesystem extended attributes and force use of dotfiles\n\
 \t-z\tDisable wired fileserver eject on dynamic allocation (see readme)\n\
@@ -2924,27 +2658,11 @@ Options:\n\
 
 	srand(time(NULL));
 
-	while (wire_cache_head || cache_head || fs_bulk_traffic || poll((struct pollfd *)&pset, pmax+(wire_enabled ? 1 : 0), -1)) // If there are packets in the cache, process them. If there's cache or bulk traffic, only poll for 10ms so that we pick up traffic quickly if it's there.
+	while (wire_head || aun_queued || trunk_head || poll((struct pollfd *)&pset, pmax+(wire_enabled ? 1 : 0), -1)) // AUN queued packets, wire queued packets, or something arriving
 	{
 
-/*
-		struct timeval now;
-
-		// See if it's time for a bridge reset
-
-		gettimeofday(&now, 0);
-
-		if ((timediffmsec(&last_bridge_reset, &now)/1000) > (ECONET_BRIDGE_RESET_FREQ))
-		{
-			econet_bridge_process (NULL, 0, -1); // Self-initiated reset
-			gettimeofday(&last_bridge_reset, 0);
-		}
-*/
-
-		// If there is cached or fs_bulk traffic, do a poll anyway and see if there is anything to come - but make it snappy
-
-		if (cache_head || fs_bulk_traffic)
-			poll((struct pollfd *)&pset, pmax+(wire_enabled ? 1 : 0), 10);
+		if (wire_head || aun_queued || trunk_head) // Do a poll just in case something turns up, but do it quickly
+			poll((struct pollfd *) &pset, pmax+(wire_enabled ? 1 : 0), 10);
 
 		if (wire_enabled && (pset[pmax].revents & POLLIN)) // Let the wire take a back seat sometimes
 		{
@@ -2970,81 +2688,11 @@ Options:\n\
 				if (rx.p.aun_ttype == ECONET_AUN_IMM && rx.p.ctrl == 0x85) // Fudge-a-rama. This deals with the fact that NFS & ANFS in fact do a 4-way handshake on immediate $85, but with 4 data bytes on the "Scout". Those four bytes are put as the first four bytes in the data packet, and a receiving bridge will strip them off, detect the ctrl byte, and do a 4-way with the 4 bytes on the Scout, and the remainder of the data in the "data" packet (packet 3/4 in the 4-way). This enables things like *remote, *view and *notify to work.
 					rx.p.aun_ttype = ECONET_AUN_DATA;
 
-				aun_send_internal (&rx, r, 0);
-
-			}
-		}
-
-		// Now see if there are any outbound wire packets that have been cached - dump one of them off the head of the queue (because if it collides, it'll get put back there so we don't want to sit trying over and over)
-
-		if (wire_cache_head)
-		{
-			struct __econet_packet_aun a;
-			struct __econet_packet_aun_cache *o;
-			int size, nothing_sent = 1;
-
-			while (wire_cache_head && nothing_sent)
-			{
+				// This will be from a known wire station, flag priority output if need be (note - there is a concurrency issue with other wire stations since they have their own priority flags. maybe change that to a global wire priority?)
 				
-				struct timeval now;
+				aun_send (&rx, r);
 
-				gettimeofday(&now, 0);
-
-				if (timediffmsec(&(wire_cache_head->tstamp), &now) <= 30000) // 20 seconds or we dump it  - Beebs seem to wait a looooonnnnnggg time...
-				{
-					memcpy(&a, wire_cache_head->p, wire_cache_head->size);
-
-					// Must free it and update the cache because it might get stuck back on the front
-	
-					free (wire_cache_head->p);
-
-					o = wire_cache_head->next;
-					size = wire_cache_head->size;
-
-					free(wire_cache_head);
-
-					wire_cache_head = o;
-
-					if (!wire_cache_head)	wire_cache_tail = NULL;
-
-					econet_write_wire (&a, size, 1); // 1 == Put back on head of queue to maintain concurrency
-					nothing_sent = 0;
-				}
-				else // Dump this entry
-				{
-					o = wire_cache_head;
-					wire_cache_head = o->next;
-					if (!wire_cache_head) wire_cache_tail = NULL;
-					free (o->p);
-					free (o);
-					// Have a look at next entry - via the while loop
-				}
 			}
-
-		}
-
-		// Next, see if there are any cache entries to deal with
-
-		while (cache_head) // If packet in cache, deal with it
-		{
-			struct __econet_packet_aun_cache *p;
-			struct timeval now;
-
-			p = cache_head;
-
-			cache_head = cache_head->next;
-
-			gettimeofday(&now, 0);
-
-			if (timediffmsec(&(p->tstamp), &now) <= 500) // If newer than0.5s 
-			{
-				if (pkt_debug && !dumpmode_brief)	fprintf (stderr, "CACHE: to %3d.%3d from %3d.%3d packet type %02X length %04X RETRIEVED from cache\n", p->p->p.dstnet, p->p->p.dststn, p->p->p.srcnet, p->p->p.srcstn, p->p->p.aun_ttype, p->size);
-				aun_send(p->p, p->size);
-			}
-
-			free(p->p); // Frees the cache structure entry
-			free(p); // Frees the malloc on the packet
-
 		}
 
 		/* See if anything turned up on UDP */
@@ -3101,16 +2749,17 @@ Options:\n\
 
 				policy = trunk_xlate_fw(&p, count, 0); // 0 = inbound translation && firewalling
 
-				if (p.p.aun_ttype == ECONET_AUN_DATA)
-					aun_acknowledge(&p, ECONET_AUN_ACK);
-
 				if ((p.p.aun_ttype == ECONET_AUN_BCAST) && from_found != 0xffff) // Dump to local in case it's bridge stuff - but only if we knew where it came from
 					econet_handle_local_aun(&p, r, from_found);
 
 				// Note that aun_send now dumps traffic we refuse to forward so we don't need to check here
 
 				if ((policy == FW_ACCEPT) && ((p.p.aun_ttype == ECONET_AUN_DATA) || (p.p.aun_ttype == ECONET_AUN_IMM) || (p.p.aun_ttype == ECONET_AUN_IMMREP)))
+				{
+					if (p.p.aun_ttype == ECONET_AUN_DATA && (econet_ptr[p.p.dstnet][p.p.dststn] != -1)) // DATA, and it's going to a known host (can't be AUN because AUN hosts don't talk to trunks) - Proxy acknowledge, even for Named Pipes
+						aun_acknowledge(&p, ECONET_AUN_ACK);
 					aun_send(&p, r);
+				}
 			}
 			else if (pset[realfd].revents & POLLIN) // Boggo standard AUN/IP traffic from single station, or on a named pipe
 			{
@@ -3126,26 +2775,21 @@ Options:\n\
 			
 					if (r < 0) continue; // Something went wrong
 
-					// The received packet will have a valid destination on it, but we will need to fille in the source
+					// The received packet will have a valid destination on it, but we will need to fill in the source
 
 					p.p.srcnet = network[fd_ptr[pset[realfd].fd]].network;
 					p.p.srcstn = network[fd_ptr[pset[realfd].fd]].station;
 
 					network[fd_ptr[realfd]].last_transaction = time(NULL);
 					
-					if (p.p.aun_ttype == ECONET_AUN_DATA)
-						aun_acknowledge(&p, ECONET_AUN_ACK); // Yes, I know...
+					/* This sends ACK & NAK that might arise from the named pipe - they can ignore it if they want */
+					aun_send(&p, r); // Send ACK & NAK as well because that's handled properly now.
 
-					if (p.p.seq > network[fd_ptr[realfd]].last_seq_ack)
-						network[fd_ptr[pset[realfd].fd]].last_seq_ack = p.p.seq;	
-
-					if ( !( (p.p.aun_ttype == ECONET_AUN_ACK) || (p.p.aun_ttype == ECONET_AUN_NAK) ) ) // Ignore those sorts of packets - we don't care. If we're interested in them, we pick them up in aun_wait
-						aun_send(&p, r); // No +4 here because we got a full sized packet to start with
-				
 				}
 				else
 				{
-					// From here on is non-named pipe code
+
+					// This is all UDP receiver code - AUN only (trunks dealt with above)
 	
 					r = udp_receive(pset[realfd].fd, (void *) &(p.p.aun_ttype), sizeof(p)-4, (struct sockaddr * restrict) &src_address);
 	
@@ -3159,6 +2803,8 @@ Options:\n\
 		
 					to_found = fd_ptr[pset[realfd].fd];
 	
+					/* TODO - If this is an ACK for something we sent, check it against ackimm_seq_awaited */
+
 					if ((from_found == 0xFFFF) && (learned_net != -1) & (to_found != 0xFFFF)) // See if we can dynamically allocate a station number to this unknown traffic source, since we know where the traffic going, and we have learning mode on, but we don't know where the traffic came *from* 
 					{
 						unsigned short stn_count;
@@ -3204,10 +2850,6 @@ Options:\n\
 								
 								if (wired_eject)
 								{
-									struct pollfd p;
-									short preturn;
-									unsigned char buffer[ECONET_MAX_PACKET_SIZE];
-									
 									if (pkt_debug) fprintf (stderr, "  DYN:%12s             Spoofing *bye to known wired fileservers...", "");
 	
 									for (netcount = 0; netcount < stations; netcount++)
@@ -3219,16 +2861,6 @@ Options:\n\
 											bye.p.dstnet = network[netcount].network;
 											
 											aun_send(&bye, 16);
-	
-											// Rough and ready, but ditch the next packet off the wire, in the hope it's the FS doing an ack of the bye. Should be fine unless the FS has gone away...
-	
-											p.fd=econet_fd;
-											p.events = POLLIN;
-	
-											preturn = poll(&p, 1, 100);
-	
-											if (preturn == 1) // Data available
-												read(econet_fd, buffer, ECONET_MAX_PACKET_SIZE);
 										}
 			
 									}
@@ -3245,7 +2877,7 @@ Options:\n\
 	
 					}
 	
-					if ((from_found != 0xffff) && (to_found != 0xffff)) // We know source & destination stations
+					if ((from_found != 0xffff) && (to_found != 0xffff)) // We know source & destination stations (necessary because this is AUN traffic, so it can't be going to a trunk!)
 					{
 	
 						// Complete the internal format packet
@@ -3257,14 +2889,32 @@ Options:\n\
 	
 						network[from_found].last_transaction = time(NULL);
 						
-						if (p.p.aun_ttype == ECONET_AUN_DATA)
-							aun_acknowledge(&p, ECONET_AUN_ACK); // Yes, I know...
+						if (p.p.aun_ttype == ECONET_AUN_ACK || p.p.aun_ttype == ECONET_AUN_IMMREP || p.p.aun_ttype == ECONET_AUN_NAK)
+						{
+							if (p.p.seq == network[from_found].ackimm_seq_awaited) // Found the ACK or IMMREP sequence this host was supposed to produce
+							{
+								if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X seq 0x%08X found ack/imm rep which was awaited\n",
+									p.p.srcnet, p.p.srcstn, p.p.dstnet, p.p.dststn, r+4, p.p.seq);
+
+								network[from_found].ackimm_seq_awaited = 0;
+								network[from_found].aun_last_tx.tv_sec = network[from_found].aun_last_rx.tv_usec = 0;
+			
+								// And dump the packet off the head if it's the same sequence
 	
-						if (p.p.seq > network[from_found].last_seq_ack)
-							network[from_found].last_seq_ack = p.p.seq;	
-	
-						if ( !( (p.p.aun_ttype == ECONET_AUN_ACK) || (p.p.aun_ttype == ECONET_AUN_NAK) ) ) // Ignore those sorts of packets - we don't care. If we're interested in them, we pick them up in aun_wait
+								if (network[from_found].aun_head && p.p.seq == network[from_found].aun_head->p->p.seq)
+									econet_general_dumphead (&(network[from_found].aun_head), &(network[from_found].aun_tail));
+
+							}
+						}
+
+						/* Put it on the queue using AUN_SEND() */
+						if ((network[to_found].type & ECONET_HOSTTYPE_TNAMEDPIPE) || (!( (p.p.aun_ttype == ECONET_AUN_ACK) || (p.p.aun_ttype == ECONET_AUN_NAK) ))) // Ignore those sorts of packets unless going to named pipe. (I.e. if going to local emulation or wire, we drop them)
 							aun_send(&p, r+4);
+/* DISABLED. We now acknowledge all incoming AUN data because otherwise we get too rapid retransmits on a busy Econet wire 
+						if (p.p.aun_ttype == ECONET_AUN_DATA && (network[to_found].type & ECONET_HOSTTYPE_TNAMEDPIPE || network[to_found].type & ECONET_HOSTTYPE_TLOCAL)) // If AUN was sending to local or named pipe, we'll do the ACK (wire and trunk do their own)
+*/
+						if (p.p.aun_ttype == ECONET_AUN_DATA)
+							aun_acknowledge(&p, ECONET_AUN_ACK);
 	
 					}
 					else	
@@ -3282,7 +2932,239 @@ Options:\n\
 
 		start_fd = rand() % pmax;
 
-		//start_fd = (start_fd + 1) % pmax;
+		// Now see if we have queues to empty
+
+		// First the wire
+
+		if (wire_head) // On successful TX, we'll send an ACK if the source was AUN or trunk & dump the packet off the queue. Unsuccessful tx, we'll increment the tx counter. We dump packets that are more than 2s old or have had 10 tx attempts
+		{
+			struct timeval now;
+
+			gettimeofday(&now, 0);
+
+			if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X retrieved from wire queue (tx count %02d) ", 
+				wire_head->p->p.dstnet,
+				wire_head->p->p.dststn,
+				wire_head->p->p.srcnet,
+				wire_head->p->p.srcstn,
+				wire_head->size,
+				wire_head->tx_count);
+
+			if (wire_head->tx_count++ < ECONET_WIRE_MAX_TX) // we'll have a go at transmitting
+			{
+				int err;
+
+				if (econet_write_wire(wire_head->p, wire_head->size, 0) == wire_head->size || (ioctl(econet_fd, ECONETGPIO_IOC_TXERR) == 0)) // successful tx
+				{
+					if (queue_debug) fprintf (stderr, "Sent ");
+					if (is_aun(wire_head->p->p.srcnet, wire_head->p->p.srcstn) && wire_head->p->p.aun_ttype == ECONET_AUN_DATA) // Send ACK if we've just successfully sent a DATA packet and the sender is AUN
+					{
+/* Disabled because we ack an AUN on receipt now to avoid rapid retransmits from BeebEm
+						if (queue_debug) fprintf (stderr, " AUN ack sent ");
+						aun_acknowledge(wire_head->p, ECONET_AUN_ACK);	
+*/
+					}
+					if (queue_debug) fprintf (stderr, "\n");
+					econet_general_dumphead(&wire_head, &wire_tail);
+					wire_tx_errors = 0;
+				}
+				else 
+				{
+					err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
+					if (err == ECONET_TX_HANDSHAKEFAIL) // Receiver not present
+						econet_general_dumphead(&wire_head, &wire_tail);
+
+					if (wire_tx_errors++ > 300)
+						ioctl(econet_fd, ECONETGPIO_IOC_READMODE);
+
+					if (queue_debug) fprintf (stderr, "TX FAIL - %s (0x%02X)\n", econet_strtxerr(-1 * err), err);
+				}
+			}
+			else	
+			{
+				if (queue_debug) fprintf (stderr, "DUMPED - old or tx count exceeded\n");
+/*
+				if (wire_head->tx_count >= ECONET_WIRE_MAX_TX) // Reset the chip just in case
+					ioctl(econet_fd, ECONETGPIO_IOC_READMODE);
+*/
+
+				econet_general_dumphead(&wire_head, &wire_tail);
+				
+			}
+	
+
+		}
+
+		// AUN traffic
+	
+		if (aun_queued)
+		{
+			int count;
+
+			//if (queue_debug) fprintf (stderr, "QUEUE: Attempting to find AUN output entries\n");
+
+			for (count = 0; count < stations; count++)
+			{
+				if ((network[count].type & ECONET_HOSTTYPE_TDIS) && (network[count].aun_head)) // This is an AUN host and it has queued packets
+				{
+					struct timeval now;
+				 	long tdiff, rx_tdiff;
+
+					gettimeofday(&now, 0);
+
+					tdiff = timediffmsec(&(network[count].aun_last_tx), &now);
+					rx_tdiff = timediffmsec(&(network[count].aun_last_rx), &now); // Used so that when we want to transmit, it is not too close to the last received packet from this host, because it seems to cause problems
+
+					//if (queue_debug) fprintf (stderr, "QUEUE: Examining queue on AUN host at network[%d]\n", count);
+
+					// First, if there is a sequence number this host is waiting for an ACK on and this packet is not an IMMREP with that sequence number, don't send anything - just move on, unless it's timed out.
+
+					if ((network[count].ackimm_seq_tosend) && (timediffmsec(&(network[count].aun_last_rx), &now) > 2000)) // Ditch the last RX / Seq tracker
+					{
+						if (queue_debug) fprintf (stderr, "QUEUE: Last receipt from station > 2s ago - dumping ACK tracker (seq %08X) for packets to network[%d]\n", network[count].ackimm_seq_tosend, count);
+						network[count].aun_last_rx.tv_sec = network[count].aun_last_rx.tv_usec = 0;
+						network[count].ackimm_seq_tosend = 0;
+					}
+
+					if (network[count].ackimm_seq_tosend && (network[count].aun_head->p->p.aun_ttype != ECONET_AUN_IMMREP || network[count].aun_head->p->p.seq != network[count].ackimm_seq_tosend)) // If this host is waiting for an IMM REP, and this one either isn't one of those, or isn't the right sequence number, then ignore it.
+					{
+						//if (queue_debug) fprintf (stderr, "QUEUE: network[%d] expecting sequence 0x%08X but this wasn't it\n", count, network[count].ackimm_seq_tosend);
+						continue; // Next host please!
+					}
+
+					// Similarly, if we haven't had an ACK from this host for something we needed, then don't send anything
+		
+					if (network[count].ackimm_seq_awaited) // If we are waiting for an ACK or IMMREP *from* this host, don't send it anything unless we need to re-tx a data packet
+					{
+						if (tdiff > 0 && tdiff < ECONET_AUN_ACK_WAIT_TIME)
+						{
+							if (queue_debug) fprintf (stderr, "QUEUE: network[%d] hasn't yet acked sequence 0x%08X - skipping\n", count, network[count].ackimm_seq_awaited);
+							continue;
+						}
+
+						// else drop through and let it retransmit if necessary
+					}
+
+					// If we are sending, then send it, increase tx_count and if it went OK then drop it off the queue and decrement the counter.
+
+					if (network[count].aun_head) // This might have broken things && (network[count].ackimm_seq_awaited == 0 || network[count].ackimm_seq_awaited == network[count].aun_head->p->p.seq)) // If we have a queue for this host and either we aren't waiting for a particular ACK to come back OR the one we ARE waiting for matches the packet on the queue head so that we might need to retransmit it...
+					{
+						if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X type 0x%02X seq 0x%08X retrieved from network[%d] queue (tx count %02X) (tdiff = %ld)", 
+							network[count].aun_head->p->p.dstnet,
+							network[count].aun_head->p->p.dststn,
+							network[count].aun_head->p->p.srcnet,
+							network[count].aun_head->p->p.srcstn,
+							network[count].aun_head->size,
+							network[count].aun_head->p->p.aun_ttype,
+							network[count].aun_head->p->p.seq,
+							count, network[count].aun_head->tx_count, tdiff);
+
+						if (network[count].aun_head->tx_count++ > ECONET_AUN_MAX_TX) // Dump
+						{
+
+							if (queue_debug) fprintf (stderr, " - dumped (too many retries)\n");
+							/* Next two lines commented because if we dump the head packet on the queue, the comparison in the if statement below is meaningless */
+							//econet_general_dumphead(&(network[count].aun_head), &(network[count].aun_tail));
+							//aun_queued--;
+							// Clear the ACK wait if it was this packet
+							if (network[count].aun_head && network[count].ackimm_seq_awaited == network[count].aun_head->p->p.seq)	
+							{
+								network[count].aun_last_tx.tv_sec = network[count].aun_last_tx.tv_usec = 0;
+								network[count].ackimm_seq_awaited = 0;
+								// And dump the rest of the queue because it probably won't respond
+								while (network[count].aun_head)
+								{
+									struct __econet_packet_aun_cache *p;
+
+									p = network[count].aun_head->next;
+									free (network[count].aun_head->p); // Free the packet
+									free (network[count].aun_head); // And the structure itself
+									network[count].aun_head = p;
+									aun_queued--;
+								}
+
+								network[count].aun_head = network[count].aun_tail = NULL; // Reset
+							}
+
+						}
+						else if (network[count].ackimm_seq_awaited && (network[count].ackimm_seq_awaited != network[count].aun_head->p->p.seq) && tdiff > 0 && tdiff < ECONET_AUN_ACK_WAIT_TIME) // Waiting for an ACK from this host and this wasn't it and we haven't waited long enough yet and the packet on the head of the queue is not the same one, so not to be retransmitted (the timeout check is done above!)
+						{
+							if (queue_debug) fprintf (stderr, "\n");
+							continue;
+						}
+						else if ( 	
+/*
+								(
+								((tdiff > ECONET_AUN_INTERPACKET_GAP) && (rx_tdiff > ECONET_AUN_INTERPACKET_GAP)) || (usleep(ECONET_AUN_INTERPACKET_GAP * 1000))
+						   	  	) && 
+*/
+							econet_write_general(network[count].aun_head->p, network[count].aun_head->size) == network[count].aun_head->size
+						)
+						{
+							if (queue_debug) fprintf (stderr, " - sent ");
+							if (network[count].aun_head->p->p.aun_ttype == ECONET_AUN_DATA || network[count].aun_head->p->p.aun_ttype == ECONET_AUN_IMM)
+							{
+								if (queue_debug) fprintf (stderr, " - tracking seq for ack from AUN ");
+								network[count].ackimm_seq_awaited = network[count].aun_head->p->p.seq; // This is the Ack we are waiting for before we send anything else
+								gettimeofday(&(network[count].aun_last_tx), 0);
+							}
+
+							// If this was the priority packet, clear ackimm_seq_tosend
+							if (network[count].aun_head->p->p.seq == network[count].ackimm_seq_tosend)
+							{
+								if (queue_debug) fprintf (stderr, " - found seq the AUN machine was awaiting ");
+								network[count].ackimm_seq_tosend = 0; // Blank off
+							}
+
+							// Dump the queue entry if we don't need to retransmit it
+							if (network[count].aun_head->p->p.aun_ttype != ECONET_AUN_DATA)
+							{
+								if (queue_debug) fprintf (stderr, " - dumping from queue (not a data packet we might re-tx) ");
+								econet_general_dumphead(&(network[count].aun_head), &(network[count].aun_tail));
+								aun_queued--;
+							}
+
+							// If we are more than the ACK time since transmitting a packet we were waiting on an ACK for, and that packet isn't on the queue head, then ditch the 'awaited' tracker because it's not going to come
+							if (tdiff > ECONET_AUN_ACK_WAIT_TIME && ((!network[count].aun_head) || (network[count].ackimm_seq_awaited != network[count].aun_head->p->p.seq)))
+							{
+								network[count].aun_last_tx.tv_sec = network[count].aun_last_tx.tv_usec = 0;
+								network[count].ackimm_seq_awaited = 0;
+							}
+
+							if (queue_debug) fprintf (stderr, "\n");
+						}
+						else if (queue_debug) fprintf (stderr, "FAILED\n");
+
+					}
+
+				}
+
+			}
+
+		}
+
+		// Then trunks - One packet at a time for now. Maybe more sophisticated later
+
+		if (trunk_head)
+		{
+			struct timeval now;
+
+			if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d length 0x%04X retrieved from trunk queue\n", 
+				trunk_head->p->p.dstnet,
+				trunk_head->p->p.dststn,
+				trunk_head->p->p.srcnet,
+				trunk_head->p->p.srcstn,
+				trunk_head->size);
+
+			gettimeofday(&now, 0);
+
+			if (timediffmsec(&(trunk_head->tstamp), &now) < 2000) // Dump traffic older than 2s
+				aun_trunk_send(trunk_head->p, trunk_head->size);
+
+			// We're going to dump it either way - if the send didn't work, we don't want to hold the trunk up
+
+			econet_general_dumphead(&trunk_head, &trunk_tail);
+		}
 
 		// Fileserver garbage collection
 
@@ -3305,8 +3187,6 @@ Options:\n\
 			pset[s].revents = 0; // Need to re-set because we might go round the loop because of the cache not poll()
 		}
 		
-		//fprintf (stderr, "Wire cache head is %s\n", (wire_cache_head ? "NOT EMPTY" : "empty"));
-
 	}
 }
 

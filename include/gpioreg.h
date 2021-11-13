@@ -3,8 +3,8 @@
 #define __ECONETGPIO_REG_H
 
 #define PERIBASE 0xFE000000 /* Pi 4 */
-//#define PERIBASE 0x3F000000 /* Pi 2, 3 */
-//#define PERIBASE 0x20000000 /* Pi Zero */
+//#define PERIBASE 0x3F000000 /* Pi 2, 3, Zero model 2 */
+//#define PERIBASE 0x20000000 /* Pi Zero (original version) */
 
 #define GPIO_PERI_BASE (PERIBASE + 0x200000)
 

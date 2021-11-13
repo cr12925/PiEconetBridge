@@ -144,7 +144,7 @@ enum econet_aunstate {
 struct __econet_data {
 
         int irq;
-	short irq_state;
+	atomic_t irq_state;
         struct device *dev;
         struct cdev c_dev;
         int major;
