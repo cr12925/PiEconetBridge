@@ -2220,7 +2220,10 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 			if (s == -1) // Trunk to trunk - straight out
 				result = aun_trunk_send (p, len);
 			else
+			{
 				econet_general_enqueue(&trunk_head, &trunk_tail, p, len);
+				result = len;
+			}
 		}
 		else if ((network[d].type & ECONET_HOSTTYPE_TLOCAL) || p->p.aun_ttype == ECONET_AUN_BCAST) // Probably need to forward broadcasts received off the wire to AUN/IP hosts on same net, but we don't at the moment
 		{
@@ -3172,7 +3175,7 @@ Options:\n\
 		{
 			if (network[s].servertype & ECONET_SERVER_FILE) 
 			{
-				if (fs_noisy) fprintf(stderr, "   FS: Garbage collect on server %d\n", network[s].fileserver_index);
+				//if (fs_noisy) fprintf(stderr, "   FS: Garbage collect on server %d\n", network[s].fileserver_index);
 				fs_garbage_collect(network[s].fileserver_index);
 			}
 		
