@@ -667,12 +667,10 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 	{
 		uint8_t count, outercount, seized = 0;
 
-/*
 		outercount = 0;
 
 		while (outercount++ < 10 && !seized)
 		{
-*/
 			// Attempt to seize line
 			econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT1);
 			sr2 = econet_read_sr(2);
@@ -686,11 +684,10 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 			{
 				count = 0;
 
-/* Was a loop to 10 */
-				while (count++ < 3 && (!(sr2 & ECONET_GPIO_S2_RX_IDLE)))
+				while (count++ < 5 && (!(sr2 & ECONET_GPIO_S2_RX_IDLE)))
 				{
 					econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT1);
-					mdelay(1);
+					udelay(500);
 					sr2 = econet_read_sr(2);
 				}
 
@@ -706,9 +703,7 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 						seized = 1;
 				}
 			}
-/*
 		}	
-*/
 
 
 		if (!seized) // Jammed - give up
@@ -1571,7 +1566,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 			unsigned short aun_state;
 
 			// Commented 25.07.21
-			//econet_data->aun_last_tx = ktime_get_ns(); // Used to check if we have fallen out of bed on receiving a packet
+			econet_data->aun_last_tx = ktime_get_ns(); // Used to check if we have fallen out of bed on receiving a packet
 
 			aun_state = econet_get_aunstate();
 
@@ -2010,11 +2005,21 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	
 	econet_data->aun_last_writefd = ktime_get_ns();
 
+	// Now go back to AUN idle if our last transmission was more than say 100ms ago and we seem to be stuck in state
+
+	if (econet_data->aun_mode && (aunstate == EA_W_READFIRSTACK || aunstate == EA_W_READFINALACK) && (ktime_get_ns() - econet_data->aun_last_tx) > 100000000)
+	{
+		econet_set_tx_status(ECONET_TX_SUCCESS);
+		econet_set_aunstate(EA_IDLE); 
+		econet_set_chipstate(EM_IDLE);
+		aunstate = EA_IDLE;
+	}
+
 	// Next, see if we are idle
 
 	if (econet_data->aun_mode && aunstate != EA_IDLE) // Not idle
 	{
-		printk (KERN_INFO "ECONET-GPIO: Flag busy because AUN state machine busy\n");
+		printk (KERN_INFO "ECONET-GPIO: Flag busy because AUN state machine busy (state = 0x%02x)\n", aunstate);
 		econet_set_tx_status(ECONET_TX_BUSY);
 		spin_unlock(&econet_irqstate_spin);
 		mutex_unlock(&econet_writefd_mutex);

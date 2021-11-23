@@ -2422,6 +2422,7 @@ int main(int argc, char **argv)
 	int opt;
 	int dump_station_table = 0;
 	short fs_bulk_traffic = 0;
+	int last_active_fd = 0;
 
 	unsigned short from_found, to_found; // Used to see if we know a station or not
 
@@ -2706,6 +2707,9 @@ Options:\n\
 	
 			realfd = (s + start_fd) % pmax; // Offset our start to "start_fd"
 
+			if (pset[realfd].revents & POLLIN)
+				last_active_fd = realfd;
+
 			if ((pset[realfd].revents & POLLIN) && (trunk_fd_ptr[pset[realfd].fd] != -1)) // Traffic arriving on trunk
 			{
 				struct __econet_packet_aun p;
@@ -2933,7 +2937,6 @@ Options:\n\
 	
 		fs_bulk_traffic = fs_dequeuable(); // Reset flag for next while() loop check
 
-		start_fd = rand() % pmax;
 
 		// Now see if we have queues to empty
 
@@ -3190,6 +3193,7 @@ Options:\n\
 			pset[s].revents = 0; // Need to re-set because we might go round the loop because of the cache not poll()
 		}
 		
+		start_fd = last_active_fd;
 	}
 }
 
