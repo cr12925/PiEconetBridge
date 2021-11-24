@@ -81,6 +81,8 @@
 /* Timeouts for 4-way handshake */
 #define ECONET_4WAY_TIMEOUT 200000000000 /* 2s (in ns) - timeout beyond which we will decide that our last transmission as part of a 4-way handshake was so long ago that the data we just received cannot be part of it and must be a new incoming exchange */
 
+#define ECONET_AUN_DATA_TIMEOUT 500000000 /* 0.5s - if the data packet after a received scout turns up after this length of time, we assume it can't be the data packet and reset the statemachine */
+
 /* Internal functions */
 
 /* Function declarations */
@@ -159,6 +161,7 @@ struct __econet_data {
 	short spoof_immediate;
 	long aun_seq;
 	u64 aun_last_tx;
+	u64 aun_last_rx;
 	u64 aun_last_writefd;
 	u64 aun_last_statechange;
 	short last_tx_user_error;

@@ -612,6 +612,7 @@ void econet_reset(void)
 	/* Take us out of AUN mode and set the chip to read */
 
 	econet_data->aun_mode = 0;
+	econet_data->aun_last_tx = econet_data->aun_last_rx = 0;
 
 	econet_set_read_mode(); // Required in addition to the cleadown, because this sets the ADLC up to read, where as cleardown doesn't.
 
@@ -669,7 +670,7 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 
 		outercount = 0;
 
-		while (outercount++ < 10 && !seized)
+		while (outercount++ < 1 && !seized)
 		{
 			// Attempt to seize line
 			econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT1);
@@ -684,10 +685,10 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 			{
 				count = 0;
 
-				while (count++ < 5 && (!(sr2 & ECONET_GPIO_S2_RX_IDLE)))
+				while (count++ < 50 && (!(sr2 & ECONET_GPIO_S2_RX_IDLE)))
 				{
 					econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT1);
-					udelay(500);
+					udelay(5);
 					sr2 = econet_read_sr(2);
 				}
 
@@ -1101,8 +1102,17 @@ void econet_irq_read(void)
 #ifdef ECONET_GPIO_DEBUG_AUN
 				//printk (KERN_INFO "ECONET-GPIO: AUN debug - packet from %d.%d, length = 0x%08x, Port %02x, Ctrl %02x\n", econet_pkt_rx.d.p.srcnet, econet_pkt_rx.d.p.srcstn, econet_pkt_rx.length, econet_pkt_rx.d.p.port, econet_pkt_rx.d.p.ctrl);
 #endif
-
 				aun_state = econet_get_aunstate();
+
+				/* Catch a data packet that is so long after the scout that it mustn't be a data packet */
+
+				if ((econet_data->aun_mode) && (aun_state == EA_R_READDATA) && ((ktime_get_ns() - econet_data->aun_last_rx) > ECONET_AUN_DATA_TIMEOUT))
+				{
+							printk (KERN_ERR "ECONET-GPIO: econet_irq_read(): AUN: Valid frame received, length %04x, but was expecting data packet from %d.%d and this was so late it couldn't be one\n", econet_pkt_rx.length, econet_pkt_rx.d.p.srcnet, econet_pkt_rx.d.p.srcstn);
+							econet_set_aunstate(EA_IDLE);
+				}
+
+				econet_data->aun_last_rx = ktime_get_ns();
 
 				switch (aun_state)
 				{
@@ -1304,7 +1314,7 @@ unexpected_scout:
 				
 					break;
 						
-					case EA_W_READFIRSTACK: // This should be an ack to the Scout we have written; Implement later.
+					case EA_W_READFIRSTACK: // This should be an ack to the Scout we have written.
 					{
 						// What we should have is an Ack from our Scout whilst sending a data packet, so we need to make sure it's from the right station and looks like an ACK
 
@@ -1565,6 +1575,13 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 			unsigned short aun_state;
 
+/*
+			// See what the TX status is
+
+			if (econet_get_tx_status() != ECONET_TX_SUCCESS) // Go back to idle if TX failed
+				econet_set_aunstate(EA_IDLE);
+	
+*/
 			// Commented 25.07.21
 			econet_data->aun_last_tx = ktime_get_ns(); // Used to check if we have fallen out of bed on receiving a packet
 
@@ -2007,7 +2024,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	// Now go back to AUN idle if our last transmission was more than say 100ms ago and we seem to be stuck in state
 
-	if (econet_data->aun_mode && (aunstate == EA_W_READFIRSTACK || aunstate == EA_W_READFINALACK) && (ktime_get_ns() - econet_data->aun_last_tx) > 100000000)
+	if (econet_data->aun_mode && (aunstate == EA_W_READFIRSTACK || aunstate == EA_W_READFINALACK || aunstate == EA_I_READREPLY || aunstate == EA_R_READDATA) && (ktime_get_ns() - econet_data->aun_last_tx) > 100000000)
 	{
 		econet_set_tx_status(ECONET_TX_SUCCESS);
 		econet_set_aunstate(EA_IDLE); 
