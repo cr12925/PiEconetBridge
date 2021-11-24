@@ -3014,12 +3014,12 @@ Options:\n\
 				if ((network[count].type & ECONET_HOSTTYPE_TDIS) && (network[count].aun_head)) // This is an AUN host and it has queued packets
 				{
 					struct timeval now;
-				 	long tdiff, rx_tdiff;
+				 	long tdiff; // , rx_tdiff;
 
 					gettimeofday(&now, 0);
 
 					tdiff = timediffmsec(&(network[count].aun_last_tx), &now);
-					rx_tdiff = timediffmsec(&(network[count].aun_last_rx), &now); // Used so that when we want to transmit, it is not too close to the last received packet from this host, because it seems to cause problems
+					//rx_tdiff = timediffmsec(&(network[count].aun_last_rx), &now); // Used so that when we want to transmit, it is not too close to the last received packet from this host, because it seems to cause problems
 
 					//if (queue_debug) fprintf (stderr, "QUEUE: Examining queue on AUN host at network[%d]\n", count);
 

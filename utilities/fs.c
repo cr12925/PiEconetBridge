@@ -52,7 +52,6 @@
 #define FSREGEX "[]\\*\\#A-Za-z0-9\\+_;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 
 extern int aun_send (struct __econet_packet_aun *, int);
-uint32_t local_seq;
 
 extern uint32_t get_local_seq(unsigned char, unsigned char);
 
@@ -2716,7 +2715,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 				{
 					
 					r.p.data[replylen++] = examined+start;
-					snprintf(&(r.p.data[replylen]), 11, "%-10s", e->acornname);
+					snprintf(&(r.p.data[replylen]), 10, "%-10.10s", e->acornname);
 					replylen += 10;
 					r.p.data[replylen] = htole32(e->load); replylen += 4;
 					r.p.data[replylen] = htole32(e->exec); replylen += 4;
@@ -5251,6 +5250,7 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn)
 
 	if (fs_aun_send(l->pq_head->packet, server, l->pq_head->len, l->net, l->stn) <= 0) // If this fails, dump the rest of the enqueued traffic
 	{
+		if (fs_noisy) fprintf (stderr, "CACHE: fs_aun_send() failed in fs_load_sequeue() - dumping rest of queue\n");
 		fs_enqueue_dump(l); // Also closes file
 		return -1;
 
@@ -5313,7 +5313,7 @@ short fs_dequeuable(void)
 		l = l->next;
 	}
 
-	if (fs_noisy)	fprintf (stderr, "CACHE: There is%s data in the bulk transfer queue (%d entries)\n", (fs_load_queue ? "" : " no"), count);
+	//if (fs_noisy)	fprintf (stderr, "CACHE: There is%s data in the bulk transfer queue (%d entries)\n", (fs_load_queue ? "" : " no"), count);
 
 	if (fs_load_queue)
 		 return 1;
@@ -5423,7 +5423,7 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 	{
 		// Send data burst
 
-		int collected;
+		int collected, enqueue_result;
 
 		r.p.ctrl = 0x80;
 		r.p.port = data_port;
@@ -5434,9 +5434,14 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		while (!feof(f))
 		{
 			collected = fread(&(r.p.data), 1, 1280, f);
+			
+			if (collected > 0) enqueue_result = fs_load_enqueue(server, &r, collected, net, stn, internal_handle, 1); else enqueue_result = 0;
 
-			if (collected < 0 || (fs_load_enqueue(server, &r, collected, net, stn, internal_handle, 1) < 0))
+			if (collected < 0 || enqueue_result < 0)
+			{
+				if (!fs_quiet)	fprintf(stderr, "   FS: Data burst enqueue failed\n");
 				return; // Failed in some way
+			}
 	
 
 		}
@@ -5445,6 +5450,7 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 	
 		r.p.data[0] = r.p.data[1] = 0x00;
 		r.p.port = reply_port;
+		r.p.ctrl = rxctrl;
 
 		fs_load_enqueue(server, &r, 2, net, stn, internal_handle, 1);
 
