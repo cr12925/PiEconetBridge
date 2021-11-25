@@ -432,6 +432,10 @@ You must:
 
   (Thanks to @sweh on stardot.org.uk for the above patch & suggestion.)
 
+Please see the section on "Advanced network configuration" in the NETWORK
+file for another way of configuring port numbers, and which helps with
+RiscOS AUN clients.
+
 A word on port numbers
 ----------------------
 
@@ -461,6 +465,10 @@ A n s host p
 
 This tells the bridge that AUN host n.s is available on host 'host' (can be DNS
 name or IP address) port p.
+
+Please see the section on "Advanced network configuration" in the NETWORK
+file for another way of configuring port numbers, and which helps with
+RiscOS AUN clients.
 
 The bridge will ONLY bridge to hosts you have told it about in this way.
 
