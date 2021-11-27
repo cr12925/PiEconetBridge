@@ -2714,8 +2714,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 				case 0: // Machine readable format
 				{
 					
-					r.p.data[replylen++] = examined+start;
-					snprintf(&(r.p.data[replylen]), 10, "%-10.10s", e->acornname);
+					snprintf(&(r.p.data[replylen]), 11, "%-10.10s", e->acornname); // 11 because the 11th byte (null) gets overwritten two lines below because we only add 10 to replylen.
 					replylen += 10;
 					r.p.data[replylen] = htole32(e->load); replylen += 4;
 					r.p.data[replylen] = htole32(e->exec); replylen += 4;
@@ -2762,7 +2761,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 				case 2: // 10 character filename format (short)
 				{
 					r.p.data[replylen++] = 0x0a;
-					sprintf((char *) &(r.p.data[replylen]), "%-10s", e->acornname);
+					sprintf((char *) &(r.p.data[replylen]), "%-10.10s", e->acornname);
 					replylen += 10;
 
 				} break;
@@ -2950,7 +2949,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 	r.p.data[replylen++] = 0x80;
 	r.p.data[2] = (examined & 0xff);
 	if (arg != 0) // Cycle number repeats in arg = 0 it looks like
-		r.p.data[3] = (examined & 0xff); // Can't work out how L3 is calculating this number
+		r.p.data[3] = (dirsize & 0xff); // Can't work out how L3 is calculating this number
 
 /* OLD non-wildcard code
 	closedir (d);
