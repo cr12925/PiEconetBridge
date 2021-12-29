@@ -685,10 +685,10 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 			{
 				count = 0;
 
-				while (count++ < 50 && (!(sr2 & ECONET_GPIO_S2_RX_IDLE)))
+				while (count++ < 25 && (!(sr2 & ECONET_GPIO_S2_RX_IDLE)))
 				{
 					econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT1);
-					udelay(5);
+					udelay(10);
 					sr2 = econet_read_sr(2);
 				}
 

@@ -426,7 +426,7 @@ unsigned int econet_write_wire(struct __econet_packet_aun *p, int len, int cache
 
 			// Wait for TX to complete
 			err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
-			while ((err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS) && (timediffmsec(&start, &now) < 1500)) // 1Kb on the wire is < 50ms. So 30Kb is < 1500ms.
+			while ((err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS) && (timediffmsec(&start, &now) < ((2 + ((len+1024) / 1024) * 41)) )) // 1Kb on the wire is < 50ms. So 30Kb is < 150ms.
 			{
 				gettimeofday(&now, 0);
 				err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
@@ -2107,6 +2107,9 @@ int aun_trunk_send_internal (struct __econet_packet_aun *p, int len, int t)
 
 	if (trunk_xlate_fw(p, t, 1) == FW_ACCEPT) // returns 0 for drop traffic (param 3 = 1 means outbound)
 		result = sendto(trunks[t].listensocket, p, len, MSG_DONTWAIT, trunks[t].addr->ai_addr, trunks[t].addr->ai_addrlen); 
+	else
+		fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d Unknown destination\n", 
+			p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 
 	return result;
 }
