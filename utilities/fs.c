@@ -5405,12 +5405,12 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 
 	r.p.data[2] = (p.load & 0xff);
 	r.p.data[3] = (p.load & 0xff00) >> 8;
-	r.p.data[4] = (p.load & 0xff00) >> 16;
-	r.p.data[5] = (p.load & 0xff0000) >> 24;
+	r.p.data[4] = (p.load & 0xff0000) >> 16;
+	r.p.data[5] = (p.load & 0xff000000) >> 24;
 	r.p.data[6] = (p.exec & 0xff);
 	r.p.data[7] = (p.exec & 0xff00) >> 8;
-	r.p.data[8] = (p.exec & 0xff00) >> 16;
-	r.p.data[9] = (p.exec & 0xff0000) >> 24;
+	r.p.data[8] = (p.exec & 0xff0000) >> 16;
+	r.p.data[9] = (p.exec & 0xff000000) >> 24;
 	r.p.data[10] = p.length & 0xff;
 	r.p.data[11] = (p.length & 0xff00) >> 8;
 	r.p.data[12] = (p.length & 0xff0000) >> 16;
