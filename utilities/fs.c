@@ -2948,8 +2948,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 */	
 	r.p.data[replylen++] = 0x80;
 	r.p.data[2] = (examined & 0xff);
-	if (arg != 0) // Cycle number repeats in arg = 0 it looks like
-		r.p.data[3] = (dirsize & 0xff); // Can't work out how L3 is calculating this number
+	r.p.data[3] = (dirsize & 0xff); // Can't work out how L3 is calculating this number
 
 /* OLD non-wildcard code
 	closedir (d);
@@ -4723,6 +4722,7 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 		{
 			fs_free_wildcard_list(&p); // Free up the mallocs
 			fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
+			return;
 		}
 	}
 
