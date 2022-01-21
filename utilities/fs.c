@@ -331,8 +331,8 @@ void fs_date_to_two_bytes(unsigned short day, unsigned short month, unsigned sho
 	}
 	else // use top three bits of day as low three bits of year
 	{
-		*dday |= ((year_internal & 0x07) << 5);
-		*monthyear |= (((year_internal & 0x78) << 1) & 0xf0);
+		*dday |= ((year_internal & 0x70) << 1);
+		*monthyear |= ((year_internal & 0x0f) << 4);
 		//fprintf (stderr, "Converted %02d/%02d/%04d to MY=%02X, D=%02X\n", day, month, year, *monthyear, *dday);
 	}
 
@@ -346,7 +346,7 @@ unsigned short fs_year_from_two_bytes(unsigned char day, unsigned char monthyear
 	if (!fs_sevenbitbodge)
 		r = ((((monthyear & 0xf0) >> 4) + 81) % 100);
 	else
-		r = ((( ((monthyear & 0xf0) >> 1) | ((day & 0xe0) >> 5) ) + 81) % 100);
+		r = ((( ((monthyear & 0xf0) >> 4) | ((day & 0xe0) >> 1) ) + 81) % 100);
 
 	//fprintf (stderr, "year_from2byte (%02x, %02x) = %02d\n", day, monthyear, r);
 
@@ -3241,10 +3241,12 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 
 	unsigned char incoming_port, ack_port;
 	unsigned long load, exec, length;
+	unsigned char create_only;
 	char filename[1024];
 
 	struct __econet_packet_udp r;
 
+	create_only = (*(data+1) == 0x1d ? 1 : 0); // Function 29 just creates a file of the requisite length - no data transfer phase.
 	ack_port = *(data+2);	
 	
 	// Anyone know what the bytes at data+3, 4 are?
@@ -3257,9 +3259,9 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 	
 	length = (*(data+13)) + ((*(data+14)) << 8) + ((*(data+15)) << 16);
 
-	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d SAVE %s %08lx %08lx %06lx\n", "", net, stn, filename, load, exec, length);
+	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d %s %s %08lx %08lx %06lx\n", "", net, stn, (create_only ? "CREATE" : "SAVE"), filename, load, exec, length);
 
-	if ((incoming_port = fs_find_bulk_port(server)))
+	if (create_only || (incoming_port = fs_find_bulk_port(server)))
 	{
 		struct path p;
 
@@ -3312,9 +3314,15 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 						r.p.data[3] = (1280 & 0xff); // maximum tx size
 						r.p.data[4] = (1280 & 0xff00) >> 8;
 				
-						fs_aun_send (&r, server, 5, net, stn);
+						if (!create_only) fs_aun_send (&r, server, 5, net, stn);
+						else
+						{
+							// Write 'length' bytes of garbage to the file (probably nulls)
 
-						if (length == 0)
+							ftruncate(fileno(fs_files[server][internal_handle].handle), length);
+						}
+						
+						if (create_only || length == 0)
 						{
 
 							// Send a closing ACK
@@ -4981,12 +4989,13 @@ void fs_cat_header(int server, unsigned short reply_port, int active_id, unsigne
 			r.p.ctrl = 0x80;
 			r.p.data[0] = r.p.data[1] = 0;
 
-			sprintf((char * ) &(r.p.data[2]), "%-10s%c   %-15s%c%c", (char *) (p.npath == 0 ? "$" : (char *) p.path[p.npath-1]),
+// MDFS manual has 10 character path, but Acorn traffic shows pad to 11! Similarly, disc name should be 15 but Acorn traffic has 16.
+			sprintf((char * ) &(r.p.data[2]), "%-11s%c   %-16s%c%c", (char *) (p.npath == 0 ? "$" : (char *) p.path[p.npath-1]),
 				(p.owner == active[server][active_id].userid ? 'O' : 'P'),
 				fs_discs[server][active[server][active_id].current_disc].name,
 				0x0d, 0x80);
 	
-			fs_aun_send(&r, server, 33, net, stn);	
+			fs_aun_send(&r, server, 35, net, stn);	 // would be length 33 if Acorn server was within spec...
 		}
 
 	}
@@ -5620,7 +5629,7 @@ void fs_get_random_access_info(int server, unsigned char reply_port, unsigned ch
 		case 0: // Cursor position
 			r.p.data[2] = (active[server][active_id].fhandles[handle].cursor & 0xff);
 			r.p.data[3] = (active[server][active_id].fhandles[handle].cursor & 0xff00) >> 8;
-			r.p.data[4] = (active[server][active_id].fhandles[handle].cursor & 0xff00) >> 16;
+			r.p.data[4] = (active[server][active_id].fhandles[handle].cursor & 0xff0000) >> 16;
 			if (fs_noisy) fprintf (stderr, "   FS:%12sfrom %3d.%3d  - cursor %06lX\n", "", net, stn, active[server][active_id].fhandles[handle].cursor);
 			break;
 		case 1: // Fall through extent / allocation - going to assume this is file size but might be wrong
@@ -7018,7 +7027,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_examine(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x04: // Catalogue header
-			if (fs_stn_logged_in(server, net, stn) >= 0) fs_cat_header(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+			if (fs_stn_logged_in(server, net, stn) >= 0) fs_cat_header(server, reply_port, active_id, net, stn, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x05: if (fs_stn_logged_in(server, net, stn) >= 0) fs_load(server, reply_port, net, stn, active_id, data, datalen, 1, ctrl); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?"); // Load with library search
 			break;
@@ -7089,6 +7098,9 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			break;
 		case 0x1b: // Create directory ??
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_cdir(server, reply_port, active_id, net, stn, *(data+3), (data+6)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+			break;
+		case 0x1d: // Create file
+			if (fs_stn_logged_in(server, net, stn) >= 0) fs_save(server, reply_port, net, stn, active_id, data, datalen, ctrl); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?"); // fs_save works out whether it is handling a real save, or a 0x1d create
 			break;
 		// According to the excellent Arduino Filestore code, 28 is set FS clock, 29 is create file, 30 read user free space, 31 set user free space, 32 read client id, 33 read current users extended, 34 read user information extended,
 		// 35 reserved, 36 "manager interface", 37 reserved.
