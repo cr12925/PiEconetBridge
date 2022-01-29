@@ -860,16 +860,21 @@ void fs_free_wildcard_list(struct path *p)
 // mallocs a linked chain of struct path_entrys, and puts the address of the head in *head and the tail in *tail
 // The calling function MUST free those up on or after return.
 // The needle must already be converted from wildcards to regex-compatible text.
+// 
 int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needle, struct path_entry **head, struct path_entry **tail)
 {
 
-	unsigned short results, counter;
+	unsigned short counter;
+	short results;
 	struct path_entry *p, *new_p;
 	char needle_wildcard[2048];
 	struct dirent **namelist;
 	struct stat statbuf;
 	struct objattr oa, oa_parent;
 	struct tm ct;
+
+	counter = 0;
+	*head = *tail = p = NULL;
 
 	fs_acorn_to_unix(needle);
 
@@ -881,12 +886,10 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 	results = scandir(haystack, &namelist, fs_scandir_filter, fs_alphacasesort);
 
 	if (results == -1) // Error - e.g. not found, or not a directory
-		return 0;
+		return -1;
 
 	// Convert to a path_entry chain here and assign head & tail.
 
-	counter = 0;
-	*head = *tail = p = NULL;
 
 	fs_read_xattr(haystack, &oa_parent);
 	
@@ -1368,12 +1371,13 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 				// searched for wasn't there so that it can be written to. Obviously if it did contain wildcards then it can't be so we
 				// return 0
 
-				if (normalize_debug) fprintf (stderr, "Work out whether to return 1 or 0 when nothing found: count = %d, result->npath-1=%d, search for wildcards is %s\n", count, result->npath-1, (strchr(result->path[count], '*') == NULL && strchr(result->path[count], '#') == NULL) ? "in vain" : "successful");
-				if ((count == result->npath-1)  
+				if (normalize_debug) fprintf (stderr, "Work out whether to return 1 or 0 when nothing found: num_entries returned %d, count = %d, result->npath-1=%d, search for wildcards is %s\n", num_entries, count, result->npath-1, (strchr(result->path[count], '*') == NULL && strchr(result->path[count], '#') == NULL) ? "in vain" : "successful");
+				if ((count == result->npath-1) && (num_entries != -1) // Soft error if on last path entry unless we got an error from the wildcard search
 					// && ((strchr(result->path[count], '*') == NULL) && (strchr(result->path[count], '#') == NULL))
 				) // Only give a hard fail if we are not in last path segment
 					return 1;
 
+				if (normalize_debug) fprintf (stderr, "Signal a hard fail\n");
 				result->error = FS_PATH_ERR_NODIR;
 				return 0; // If not on last segment, this is a hard fail.
 			}
