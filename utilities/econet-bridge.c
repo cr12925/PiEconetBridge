@@ -504,8 +504,8 @@ void econet_readconfig(void)
 	// The local machine if some sort of emulator is running - e.g. BeebEm
 	
 	FILE *configfile;
-	char linebuf[256];
-	regex_t r_comment, r_entry_distant, r_entry_local, r_entry_server, r_entry_wire, r_entry_trunk, r_entry_xlate, r_entry_fw, r_entry_learn, r_entry_namedpipe, r_entry_filter;
+	char linebuf[256], basenet[20];
+	regex_t r_comment, r_entry_distant, r_entry_local, r_entry_server, r_entry_wire, r_entry_trunk, r_entry_xlate, r_entry_fw, r_entry_learn, r_entry_namedpipe, r_entry_filter, r_entry_basenet;
 	regmatch_t matches[9];
 	int count;
 	short j, k;
@@ -525,6 +525,7 @@ void econet_readconfig(void)
 	memset(&wire_adv_out, 0, sizeof(wire_adv_out));
 	memset(&wire_filter_in, 0, sizeof(wire_filter_in));
 	memset(&wire_filter_out, 0, sizeof(wire_filter_out));
+	*basenet='\0';
 
 	configfile = fopen(cfgpath, "r");
 	if (configfile == NULL)
@@ -559,13 +560,19 @@ void econet_readconfig(void)
 		exit(EXIT_FAILURE);
 	}
 
+	if (regcomp(&r_entry_basenet, "^\\s*([Bb])\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s*$", REG_EXTENDED) != 0)
+	{
+		fprintf(stderr, "Unable to compile base network regex.\n");
+		exit(EXIT_FAILURE);
+	}
+
 	if (regcomp(&r_entry_local, "^\\s*([Nn]|LOCALNET)\\s+([[:digit:]]{1,3})\\s*$", REG_EXTENDED) != 0)
 	{
 		fprintf(stderr, "Unable to compile full local config regex.\n");
 		exit(EXIT_FAILURE);
 	}
 
-	if (regcomp(&r_entry_server, "^\\s*([FfPpSs])\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{4,5})\\s+(.+)\\s*$", REG_EXTENDED) != 0)
+	if (regcomp(&r_entry_server, "^\\s*([FfPpSs])\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{4,5}|AUTO)\\s+(.+)\\s*$", REG_EXTENDED) != 0)
 	{
 		fprintf(stderr, "Unable to compile server regex.\n");
 		exit(EXIT_FAILURE);
@@ -714,6 +721,25 @@ void econet_readconfig(void)
 			network[networkp].ackimm_seq_tosend = 0; // Sequence number the host is waiting to be responded to with ACK / NAK / IMMREP
 
 			networkp++;
+		}
+		else if (regexec(&r_entry_basenet, linebuf, 3, matches, 0) == 0)
+		{
+			char 	tmp[300];
+			int	ptr;
+
+			for (count = 2; count <= 2; count++)
+			{
+				ptr = 0;
+				while (ptr < (matches[count].rm_eo - matches[count].rm_so))
+				{
+					tmp[ptr] = linebuf[ptr + matches[count].rm_so];
+					ptr++;
+				}
+				tmp[ptr] = 0x00;
+
+				if (count == 2)
+					strcpy(basenet,tmp);
+			}
 		}
 		else if (regexec(&r_entry_local, linebuf, 3, matches, 0) == 0)
 		{
@@ -875,8 +901,13 @@ void econet_readconfig(void)
 						//network[networkp].station = stn;
 						break;
 					case 4:
+						// we cheat here; AUTO automatically will parse as "0"
 						port = atoi(tmp);
 						//network[networkp].port = atoi(tmp);
+						if (port == 0 && !*basenet)
+							fprintf (stderr, "Warning: use of AUTO mode for station %d.%d with no base network will generate a random port\n", net, stn);
+						if (port == 32768 && *basenet)
+							fprintf (stderr, "Warning: direct use of port 32768 for station %d.%d may prevent AUTO in base network mode from working\n", net, stn);
 						break;		
 					case 5:
 						strncpy(datastring, tmp, 199);
@@ -946,10 +977,18 @@ void econet_readconfig(void)
                         	}
 	
                         	service.sin_family = AF_INET;
-                        	service.sin_addr.s_addr = INADDR_ANY;
+				if (*basenet && port == 0)
+				{
+					sprintf(tmp,"%s.%d",basenet,network[networkp].station);
+					service.sin_addr.s_addr = inet_addr(tmp);
+					port = 32768;
+				}
+				else
+				{
+					service.sin_addr.s_addr = INADDR_ANY;
+				}
 				network[networkp].port = port;
                         	service.sin_port = htons(network[networkp].port);
-	
 	
                         	if (bind(network[networkp].listensocket, (struct sockaddr *) &service, sizeof(service)) != 0)
                         	{
@@ -1012,12 +1051,18 @@ void econet_readconfig(void)
                                         case 4:
 						if (!strcmp(tmp,"AUTO"))
 						{
-							if (network[networkp].network > 127)
+							if (*basenet)
 							{
-								fprintf(stderr, "Network must be under 128 for AUTO to work: %s\n",linebuf);
-								exit(EXIT_FAILURE);
+								network[networkp].port = 0;
 							}
-                                                	network[networkp].port = 10000+network[networkp].network*256+network[networkp].station;
+							else {
+								if (network[networkp].network > 127)
+								{
+									fprintf(stderr, "Network must be under 128 for AUTO to work: %s\n",linebuf);
+									exit(EXIT_FAILURE);
+								}
+								network[networkp].port = 10000+network[networkp].network*256+network[networkp].station;
+							}
 						}
                                                 else
                                                 	network[networkp].port = atoi(tmp);	
@@ -1039,8 +1084,17 @@ void econet_readconfig(void)
                         }
 
                         service.sin_family = AF_INET;
-                        service.sin_addr.s_addr = INADDR_ANY;
-                        service.sin_port = htons(network[networkp].port);
+			if (*basenet && network[networkp].port == 0)
+			{
+				sprintf(tmp,"%s.%d",basenet,network[networkp].station);
+				service.sin_addr.s_addr = inet_addr(tmp);
+				service.sin_port = htons(32768);
+			}
+			else
+			{
+				service.sin_addr.s_addr = INADDR_ANY;
+				service.sin_port = htons(network[networkp].port);
+			}
 
                         if (bind(network[networkp].listensocket, (struct sockaddr *) &service, sizeof(service)) != 0)
                         {

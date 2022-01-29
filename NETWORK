@@ -1,0 +1,294 @@
+Advanced network configuration
+------------------------------
+
+RiscOS AUN clients present a challenge.  They will only talk on port
+32768 (both source and destination) and the station ID maps to the IP
+address.  So if your network was 192.168.0.0/24 then station 254 would
+be on 192.168.0.254 port 32768.  This introduces a challenge for the Bridge
+because only one service can listen to port 32768 at a time.
+
+The bridge supports an alternate network mode where we define a whole
+subnet on the Raspberry Pi, and then the clients need to have their
+IP routing tables updated to be able to reach this network.
+
+Setting up the Raspberry Pi
+---------------------------
+In these examples, the IP address of the Pi on the network is 10.0.0.178.
+
+We will create a new network, 192.168.140.0/24 that is local to the Pi.
+
+This can be done in /etc/rc.local so it is created at boot time.  It
+needs to be done _before_ the bridge code starts.
+
+    BASE=192.168.140
+    INT=lo
+
+    for a in {2..254}
+    do
+      ip address add $BASE.$a/24 dev $INT
+    done
+
+You can verify these addresses exist
+
+$ ip -4 addr | head
+    1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+        inet 127.0.0.1/8 scope host lo
+           valid_lft forever preferred_lft forever
+        inet 192.168.140.2/24 scope global lo
+           valid_lft forever preferred_lft forever
+        inet 192.168.140.3/24 scope global secondary lo
+           valid_lft forever preferred_lft forever
+        inet 192.168.140.4/24 scope global secondary lo
+           valid_lft forever preferred_lft forever
+        inet 192.168.140.5/24 scope global secondary lo
+
+And we can pick one:
+
+    $ ping -c 1 192.168.140.55
+    PING 192.168.140.55 (192.168.140.55) 56(84) bytes of data.
+    64 bytes from 192.168.140.55: icmp_seq=1 ttl=64 time=0.088 ms
+
+    --- 192.168.140.55 ping statistics ---
+    1 packets transmitted, 1 received, 0% packet loss, time 0ms
+    rtt min/avg/max/mdev = 0.088/0.088/0.088/0.000 ms
+
+Configuring RiscOS
+------------------
+
+RiscOS needs to told how to send traffic to this network.  This step must
+be completed before it can talk to the bridge.
+
+We use the *route command
+
+    *route add -net 192.168.140.0/24 10.0.0.178
+
+(recall that in this example 10.0.0.178 is the Pi's IP address on the network).
+
+You can verify the RiscOS machine can talk to the private network with
+*ping
+
+    *ping -c 1 192.168.140.55
+    PING 192.168.140.55 (192.168.140.55) 56(84) bytes of data.
+    64 bytes from 192.168.140.55: icmp_seq=0 ttl=64 time=22.000 ms
+
+    --- 192.168.140.55 ping statistics ---
+    1 packets transmitted, 1 packets received, 0% packet loss
+    route-trip min/avg/max = 22.000/22.000/22.000 ms
+
+This route command can be made permanent by adding it to the "Routes" file
+(via !Configure / Network / Internet / Routing).
+
+We now need to configure AUN for this network. Modify the AUNMap file
+(!Configure / Network / Econet ) to add a line such as:
+
+    AddMap 192.168.140.0 140
+
+This will tell RiscOS that traffic for network 140 will be sent to the
+private network.  Thus station 140.254 would be on 192.168.140.254
+
+Configuring Windows (for BeebEm)
+--------------------------------
+
+BeebEm Econet AUN uses the host Operating System (typically Windows)
+to route the IP traffic, so the Windows host needs to be told how to
+reach this network:
+
+    C:\>route -p add 192.168.140.0 mask 255.255.255.0 10.0.0.178
+
+The "-p" option makes this change persistent over reboots
+
+Again we can verify it works:
+
+    C:\>ping 192.168.140.55
+
+    Pinging 192.168.140.55 with 32 bytes of data:
+
+    Reply from 192.168.140.55: bytes=32 time=6ms TTL=64
+    Reply from 192.168.140.55: bytes=32 time=2ms TTL=64
+    Reply from 192.168.140.55: bytes=32 time=2ms TTL=64
+    Reply from 192.168.140.55: bytes=32 time=2ms TTL=64
+
+    Ping statistics for 192.168.140.55:
+        Packets: Sent = 4, Received = 4, Lost = 0 (0% loss),
+    Approximate round trip times in milli-seconds:
+        Minimum = 2ms, Maximum = 6ms, Average = 3ms
+
+Configuring Linux (for BeebEm/Wine/rpcemu/etc etc)
+--------------------------------------------------
+
+Unfortunately this very much depends on the operating system.  The
+simple command would be something like
+
+    # route add -net 192.168.140.0/24 gw 10.0.0.178
+
+However to make this persistent depends on a lot of features (eg are
+you using NetworkManager, or RedHat, or Debian... and the version!)
+
+For Network manager the following might help:
+
+    $ nmcli con edit "Wired connection 1"
+
+    ===| nmcli interactive connection editor |===
+
+    Editing existing '802-3-ethernet' connection: 'Wired connection 1'
+
+    Type 'help' or '?' for available commands.
+    Type 'print' to show all the connection properties.
+    Type 'describe [<setting>.<prop>]' for detailed property description.
+
+    You may edit the following settings: connection, 802-3-ethernet (ethernet), 802-1x, dcb, sriov, ethtool, match, ipv4, ipv6, tc, proxy
+    nmcli> set ipv4.routes 192.168.140.0/24 10.0.0.178
+    nmcli> save persistent
+    Connection 'Wired connection 1' (54de4fd4-a7e2-494b-a6bd-dd37e818773f) successfully updated.
+    nmcli> print ipv4.routes
+    ipv4.routes: { ip = 192.168.140.0/24, nh = 10.0.0.178 }
+    nmcli> quit
+
+From the command line you can see current routes:
+
+    % netstat -rn
+    Kernel IP routing table
+    Destination     Gateway         Genmask         Flags   MSS Window  irtt Iface
+    0.0.0.0         10.0.0.1        0.0.0.0         UG        0 0          0 enp2s0
+    10.0.0.0        0.0.0.0         255.255.255.0   U         0 0          0 enp2s0
+    169.254.0.0     0.0.0.0         255.255.0.0     U         0 0          0 enp2s0
+    192.168.140.0   10.0.0.178      255.255.255.0   UG        0 0          0 enp2s0
+
+And, of course
+
+    % ping -c 1 192.168.140.55
+    PING 192.168.140.55 (192.168.140.55) 56(84) bytes of data.
+    64 bytes from 192.168.140.55: icmp_seq=1 ttl=64 time=1.67 ms
+
+    --- 192.168.140.55 ping statistics ---
+    1 packets transmitted, 1 received, 0% packet loss, time 0ms
+    rtt min/avg/max/mdev = 1.674/1.674/1.674/0.000 ms
+
+Configuring BeebEm
+------------------
+BeebEm needs to be told about the hosts it can talk to.  We can pretend
+they're all on the local network and not need to worry about AUNMap.
+
+This is defined in Econet.cfg (typically in My Documents\BeebEm).
+
+e.g
+
+    AUNMODE 1
+    LEARN 0
+    AUNSTRICT 0  
+    SINGLESOCKET 1
+    MASSAGENETS 1
+    FLAGFILLTIMEOUT 500000 
+    SCACKTIMEOUT 500
+    TIMEBETWEENBYTES 128
+    FOURWAYTIMEOUT 500000
+
+    # My host is 10.0.0.141 so I have this entry
+    0 141 10.0.0.141 32768
+
+    # These are remote hosts BeebEm can talk to, all configured on the Bridge
+    0 235 192.168.140.235 32768
+    0 253 192.168.140.253 32768
+    0 254 192.168.140.254 32768
+
+Bridge configuration (Finally!)
+-------------------------------
+
+Now we have the network and clients configured, we need to set up the
+bridge.
+
+We have a command "B" that sets the Base Network address ("Basenet") for
+the bridge.  When in Basenet mode the AUTO commmand changes functionality
+and will set the listening IP address to be based on the station ID and
+the port to 32768.  AUTO also now works with File and Print servers.
+
+Here's an example:
+
+    # For RiscOS support, add a base network.  This will let AUTO generate
+    # a unique network address for each station
+    B 192.168.140
+
+    # We are station 254 and running a file server
+    F 0 254 AUTO /econet
+
+    # We are also a printer
+    P 0 235 AUTO lp
+
+    #### Wired devices we know about.
+
+    # Main Beeb
+    W 0 195 AUTO
+
+    # Master 128
+    W 0 227 AUTO
+
+    # Old Fileserver (M128 L3FS)
+    W 0 253 AUTO
+
+    #### AUN hosts we know about
+
+    # BeebEm instances
+    A 0 140 10.0.0.140 32768
+    A 0 141 10.0.0.141 32768
+
+    # pi400
+    A 0 222 10.0.0.222 32768
+
+    # rpcemu
+    A 0 10 192.168.99.10 32768
+
+With this configuration running we can look at the ports the bridge listens
+on:
+
+    $ sudo netstat -anp | grep econet | sort
+    udp        0      0 192.168.140.195:32768   0.0.0.0:*   3075/./econet-bridg 
+    udp        0      0 192.168.140.227:32768   0.0.0.0:*   3075/./econet-bridg 
+    udp        0      0 192.168.140.235:32768   0.0.0.0:*   3075/./econet-bridg 
+    udp        0      0 192.168.140.253:32768   0.0.0.0:*   3075/./econet-bridg 
+    udp        0      0 192.168.140.254:32768   0.0.0.0:*   3075/./econet-bridg 
+
+We can easily see the 5 services (2 local and 3 wired) are now visible on
+the network.
+
+From my BeebEm client I can login to the PiBridge server (station 254)
+
+    *I AM 254 SYST
+
+Or I can login to the Master 128 Fileserver (station 253)
+
+    *I AM 253 SYST
+
+Similarly, on RiscOS I can access them as 140.254 and 140.253
+
+Caveats
+-------
+
+There are a couple of subtle interactions to be careful of.  Typically
+these won't be a problem, but are documented for awareness.
+
+When using basenet you can still define services locally, e.g
+
+    F 0 254 12345 /econet
+
+If you do this then that port 12345 will be visible on every IP address.
+
+But if you attempt to use port 32768 then this may block AUTO from working
+for other services.  You will get a warning if you try this.  e.g.
+
+    B 192.168.140
+    F 0 254 32768 /econet
+    W 0 195 AUTO
+
+Will cause this result:
+
+    Warning: direct use of port 32768 for station 0.254 may prevent AUTO in base network mode from working
+       FS: Server 0 successfully initialized
+    Failed to bind listening socket for econet net/stn 0/195: Address already in use.
+
+
+If you define a service (eg fileserver or printserver) with AUTO but do
+not have basenet enabled then this will cause the server to appear on a
+random port.  You will get a warning such as:
+
+    Warning: use of AUTO mode for station 0.254 with no base network will generate a random port
+
