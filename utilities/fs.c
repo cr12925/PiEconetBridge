@@ -2717,7 +2717,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 			{
 				case 0: // Machine readable format
 				{
-					
+					r.p.data[replylen++] = examined; // "Cycle number";	
 					snprintf(&(r.p.data[replylen]), 11, "%-10.10s", e->acornname); // 11 because the 11th byte (null) gets overwritten two lines below because we only add 10 to replylen.
 					replylen += 10;
 					r.p.data[replylen] = htole32(e->load); replylen += 4;
