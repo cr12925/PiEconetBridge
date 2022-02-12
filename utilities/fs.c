@@ -6465,7 +6465,7 @@ void fs_eject_station(unsigned char net, unsigned char stn)
 void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsigned char ctrl, unsigned char *data, unsigned int datalen)
 {
 
-	unsigned char fsop, reply_port; // , root_dir, current_dir, lib_dir;
+	unsigned char fsop, reply_port; 
 	unsigned int userid;
 	int active_id;
 
@@ -6475,34 +6475,35 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		return;
 	}
 
-
 	reply_port = *data;
 	fsop = *(data+1);
-	//root_dir = *(data+2);
-	//current_dir = *(data+3);
-	//lib_dir = *(data+4);
 
 	active_id = fs_stn_logged_in(server, net, stn);
-
-	if ((active_id < 0) && (fsop != 0) && (fsop != 0x0e) && (fsop != 0x19)) // Not logged in and not OSCLI (so can't be *I AM) or two opcodes which are fine for unauthenticated users
-	{
-		fs_error(server, reply_port, net, stn, 0xbf, "Who are you?");
-		return;
-	}
-
-	if (fsop != 0x09) // Not a putbyte
-		active[server][active_id].sequence = 2; // Reset so that next putbyte will be taken to be in sequence.
-
 	userid = fs_find_userid(server, net, stn);
 
-	if ((userid < 0) && (fsop != 0) && (fsop != 0x0e) && (fsop != 0x19)) // Don't bother with user not known if it's operations we allow from unauthenticated useres, or which might arrive as broadcasts
-		fs_error(server, reply_port, net, stn, 0xBC, "User not known");
+	if (fsop != 0 && fsop != 0x0e && fsop != 0x19) // Things we can do when not logged in
+	{
+		if ((active_id < 0)) // Not logged in and not OSCLI (so can't be *I AM) or two opcodes which are fine for unauthenticated users
+		{
+			fs_error(server, reply_port, net, stn, 0xbf, "Who are you?");
+			return;
+		}
+
+		if (userid < 0)
+		{
+			fs_error(server, reply_port, net, stn, 0xBC, "User not known");
+			return;
+		}
+	}
 
 	if (active_id >= 0) // If logged in, update handles from the incoming packet
 	{
 		active[server][active_id].root = *(data+2);
 		active[server][active_id].current = *(data+3);
 		active[server][active_id].lib = *(data+4);
+	
+		if (fsop != 0x09) // Not a putbyte
+			active[server][active_id].sequence = 2; // Reset so that next putbyte will be taken to be in sequence.
 	}
 
 	switch (fsop)
