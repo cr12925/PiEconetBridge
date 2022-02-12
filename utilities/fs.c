@@ -2706,8 +2706,10 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 		e = e->next;
 	}
 
+/* This is wrong. FS3 puts out 27 bytes per entry. If we put the cycle number in each time, it's 28.
 	if (arg == 0) // Looks like the cycle number gets repeated in arg=0 replies
 		replylen--;
+*/
 
 	while (examined < n && (e != NULL))
 	{	
@@ -2717,7 +2719,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 			{
 				case 0: // Machine readable format
 				{
-					r.p.data[replylen++] = examined; // "Cycle number";	
+					//r.p.data[replylen++] = examined; // "Cycle number";	
 					snprintf(&(r.p.data[replylen]), 11, "%-10.10s", e->acornname); // 11 because the 11th byte (null) gets overwritten two lines below because we only add 10 to replylen.
 					replylen += 10;
 					r.p.data[replylen] = htole32(e->load); replylen += 4;
@@ -6492,7 +6494,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 	userid = fs_find_userid(server, net, stn);
 
-	if (userid < 0)
+	if ((userid < 0) && (fsop != 0) && (fsop != 0x0e) && (fsop != 0x19)) // Don't bother with user not known if it's operations we allow from unauthenticated useres, or which might arrive as broadcasts
 		fs_error(server, reply_port, net, stn, 0xBC, "User not known");
 
 	if (active_id >= 0) // If logged in, update handles from the incoming packet
