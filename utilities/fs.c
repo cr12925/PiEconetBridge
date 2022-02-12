@@ -2722,14 +2722,15 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 					//r.p.data[replylen++] = examined; // "Cycle number";	
 					snprintf(&(r.p.data[replylen]), 11, "%-10.10s", e->acornname); // 11 because the 11th byte (null) gets overwritten two lines below because we only add 10 to replylen.
 					replylen += 10;
-					r.p.data[replylen] = htole32(e->load); replylen += 4;
-					r.p.data[replylen] = htole32(e->exec); replylen += 4;
-					r.p.data[replylen++] = e->perm;
+					r.p.data[replylen] = (e->ftype == FS_FTYPE_DIR ? 0 : htole32(e->load)); replylen += 4;
+					r.p.data[replylen] = (e->ftype == FS_FTYPE_DIR ? 0 : htole32(e->exec)); replylen += 4;
+					r.p.data[replylen++] = fs_perm_to_acorn(e->perm, e->ftype);
 					r.p.data[replylen++] = e->day;
 					r.p.data[replylen++] = e->monthyear;
 					r.p.data[replylen++] = e->internal & 0xff;
 					r.p.data[replylen++] = (e->internal & 0xff00) >> 8;
 					r.p.data[replylen++] = (e->internal & 0xff00) >> 16;
+					if (e->ftype == FS_FTYPE_DIR)	e->length = 0x200; // Dir length in FS3
 					r.p.data[replylen++] = e->length & 0xff;
 					r.p.data[replylen++] = (e->length & 0xff00) >> 8;
 					r.p.data[replylen++] = (e->length & 0xff00) >> 16;
