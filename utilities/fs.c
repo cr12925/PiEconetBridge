@@ -2553,7 +2553,7 @@ void fs_read_user_env(int server, unsigned short reply_port, unsigned char net, 
 	int replylen = 0;
 	unsigned short disclen;
 
-	if (fs_noisy) fprintf (stderr, "   FS:%12sfrom %3d.%3d Read user environment\n", "", net, stn);
+	if (fs_noisy) fprintf (stderr, "   FS:%12sfrom %3d.%3d Read user environment - current user handle %d, current lib handle %d\n", "", net, stn, active[server][active_id].current, active[server][active_id].lib);
 
 	r.p.port = reply_port;
 	r.p.ctrl = 0x80;
@@ -2564,7 +2564,7 @@ void fs_read_user_env(int server, unsigned short reply_port, unsigned char net, 
 
 	// If either current or library handle is invalid, barf massively.
 
-	//fprintf (stderr, "Current.is_dir = %d, handle = %d, Lib.is_dir = %d, handle = %d\n", active[server][active_id].fhandles[active[server][active_id].current].is_dir, active[server][active_id].fhandles[active[server][active_id].current].handle, active[server][active_id].fhandles[active[server][active_id].lib].is_dir, active[server][active_id].fhandles[active[server][active_id].lib].handle);
+	if (fs_noisy) fprintf (stderr, "Current.is_dir = %d, handle = %d, Lib.is_dir = %d, handle = %d\n", active[server][active_id].fhandles[active[server][active_id].current].is_dir, active[server][active_id].fhandles[active[server][active_id].current].handle, active[server][active_id].fhandles[active[server][active_id].lib].is_dir, active[server][active_id].fhandles[active[server][active_id].lib].handle);
 
 	if (!(active[server][active_id].fhandles[active[server][active_id].current].is_dir) ||
 	    !(active[server][active_id].fhandles[active[server][active_id].lib].is_dir) ||
@@ -4949,7 +4949,7 @@ void fs_read_user_info(int server, unsigned short reply_port, unsigned char net,
 }
 
 // Read fileserver version number
-void fs_read_version(int server, unsigned short reply_port, unsigned char net, unsigned char stn, int active_id, unsigned char *data, int datalen)
+void fs_read_version(int server, unsigned short reply_port, unsigned char net, unsigned char stn, unsigned char *data, int datalen)
 {
 	struct __econet_packet_udp r;
 	
@@ -6481,7 +6481,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 	active_id = fs_stn_logged_in(server, net, stn);
 
-	if ((active_id < 0) && (fsop != 0)) // Not logged in and not OSCLI (so can't be *I AM)
+	if ((active_id < 0) && (fsop != 0) && (fsop != 0x0e) && (fsop != 0x19)) // Not logged in and not OSCLI (so can't be *I AM) or two opcodes which are fine for unauthenticated users
 	{
 		fs_error(server, reply_port, net, stn, 0xbf, "Who are you?");
 		return;
@@ -7062,7 +7062,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			fs_set_random_access_info(server, reply_port, net, stn, active_id, *(data+5), data, datalen);
 			break;
 		case 0x0e: // Read disc names
-			if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_discs(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+			fs_read_discs(server, reply_port, net, stn, active_id, data, datalen);
 			break;
 		case 0x0f: // Read logged on users
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_logged_on_users(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
@@ -7095,7 +7095,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_user_info(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x19: // Read FS version
-			if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_version(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+			fs_read_version(server, reply_port, net, stn, data, datalen);
 			break;
 		case 0x1a: // Read free space
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_free(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
