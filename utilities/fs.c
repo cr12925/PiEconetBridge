@@ -4890,7 +4890,8 @@ void fs_read_logged_on_users(int server, unsigned short reply_port, unsigned cha
 				char *spaceptr;
 				strncpy((char * ) username, (const char * ) users[server][active[server][active_ptr].userid].username, 10);
 				spaceptr = strchr(username, ' ');
-				*(spaceptr) = (char) 0x00; // Terminate early
+				if (spaceptr) *(spaceptr) = (char) 0x00; // Terminate early
+				else username[10] = (char) 0x00; 
 				found++;
 				deliver_count++;
 				sprintf((char * ) &(r.p.data[ptr]), "%c%c%-s%c%c", 
@@ -4898,7 +4899,7 @@ void fs_read_logged_on_users(int server, unsigned short reply_port, unsigned cha
 					username, (char) 0x0d,
 					((active[server][active_ptr].priv & FS_PRIV_SYSTEM) ? 1 : 0) );
 
-				ptr +=13;
+				ptr += 4 + strlen(username); // 2 byte net/stn, 1 byte priv, 1 x 0x0d + the characters in the username
 			}
 
 			active_ptr++;
