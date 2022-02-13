@@ -4887,12 +4887,15 @@ void fs_read_logged_on_users(int server, unsigned short reply_port, unsigned cha
 			if (active[server][active_ptr].net != 0 || active[server][active_ptr].stn != 0)
 			{
 				char username[11];
+				char *spaceptr;
 				strncpy((char * ) username, (const char * ) users[server][active[server][active_ptr].userid].username, 10);
+				spaceptr = strchr(username, ' ');
+				*(spaceptr) = (char) 0x00; // Terminate early
 				found++;
 				deliver_count++;
-				sprintf((char * ) &(r.p.data[ptr]), "%c%c%-10s%c", 
+				sprintf((char * ) &(r.p.data[ptr]), "%c%c%-s%c%c", 
 					active[server][active_ptr].stn, active[server][active_ptr].net,
-					username,
+					username, (char) 0x0d,
 					((active[server][active_ptr].priv & FS_PRIV_SYSTEM) ? 1 : 0) );
 
 				ptr +=13;
