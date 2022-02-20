@@ -3081,6 +3081,7 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 				break;
 			case 0x40: // MDFS set update, create date & time
 				{
+					// TODO: Implement this.
 					// Nothing for now
 				}
 
@@ -6542,6 +6543,12 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 	reply_port = *data;
 	fsop = *(data+1);
 
+	if (fsop >= 64 && !fs_sjfunc) // SJ Functions turned off
+	{
+		fs_error(server, reply_port, net, stn, 0xFF, "Unsupported");
+		return;
+	}
+
 	active_id = fs_stn_logged_in(server, net, stn);
 	userid = fs_find_userid(server, net, stn);
 
@@ -7218,6 +7225,109 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				
                                 fs_aun_send (&reply, server, counter+1, net, stn);
 			}
+		case 0x40: // Read account information (SJ Only) - i.e. free space on a particular disc
+			{
+				if (fs_stn_logged_in(server, net, stn) >= 0)
+				{
+
+					unsigned int start, count;
+				
+					unsigned char disc;
+
+                                	struct __econet_packet_udp reply;
+
+					start = *(data+7) + (*(data + 8) << 8);
+					count = *(data + 9) + (*(data + 10) << 8);
+					disc = *(data + 11);
+
+                                	reply.p.port = reply_port;
+                                	reply.p.ctrl = 0x80;
+
+					if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d SJ Read Account information from %d for %d entries on disc no. %d - Not yet implemented\n", "", net, stn, start, count, disc);
+
+					// For now, return a dummy entry
+			
+					reply.p.data[0] = reply.p.data[1] = 0x00; // Normal OK result
+					reply.p.data[2] = reply.p.data[3] = 0xff; // Next account to try
+					reply.p.data[4] = reply.p.data[5] = 0x00; // Number of accounts returned
+			
+					fs_aun_send (&reply, server, 6, net, stn);
+
+				}
+				else
+					fs_error(server, reply_port, net, stn, 0xff, "Insufficient access");
+			}
+			break;
+		case 0x41: // Read/write system information (SJ Only)
+			{
+				// Read operations are unprivileged; write operations are privileged
+				unsigned char rw_op;
+				unsigned int reply_length;
+	
+                                struct __econet_packet_udp reply;
+
+				rw_op = *(data+6); // 0 - reset print server info; 1 - read current printer state; 2 - write current printer state; 3 - read auto printer priority; 4 - write auto printer priority ; 5 - read system msg channel; 6 - write system msg channel; 7 - read message level; 8 - set message level; 9 - read default printer; 10 - set default printer; 11 - read priv required to set time; 12 - set priv required to set time; IE ALL THE READ OPERATIONS HAVE LOW BIT SET
+
+                                reply.p.port = reply_port;
+                                reply.p.ctrl = 0x80;
+		
+				reply.p.data[0] = reply.p.data[1] = 0; // Normal OK result
+				reply_length = 2;
+
+				if (rw_op > 12)
+					fs_error(server, reply_port, net, stn, 0xff, "Unsupported");
+				else if ((fs_stn_logged_in(server, net, stn) >= 0) && (rw_op & 0x01 || active[server][active_id].priv & FS_PRIV_SYSTEM))
+				{
+					switch (rw_op)
+					{
+						case 0: // Reset print server information	
+						{
+							// Later we might code this to put the priority things back in order etc.
+							break; // Do nothing - no data in reply
+						}
+						// To implement - codes 1--10 except 7, 8!
+						case 7: // Read current FS message level
+						{
+							unsigned char level = 0;
+
+							if (!fs_quiet) level = 130; // "Function codes"
+							if (fs_noisy) level = 255; // "All activity"
+
+							reply.p.data[2] = level;
+							reply_length++;
+						} break;
+						case 8: // Set current FS message level
+						{
+							unsigned char level = *(data+7);
+	
+							if (level > 0) fs_quiet = 0;
+							if (level > 130) fs_noisy = 1;
+						
+						} break;
+						case 11: // Read priv required to change system time
+						{
+							reply.p.data[2] = 0; // Always privileged;
+							reply_length++;
+						} break;
+						case 12: // Write priv required to change system time
+						{
+							// Silently ignore - we are not going to let Econet users change the system time...
+						} break;
+						default:
+						{
+							fs_error(server, reply_port, net, stn, 0xff, "Unsupported");
+							return;
+							break;
+						}
+
+					}	
+
+					fs_aun_send (&reply, server, reply_length, net, stn);
+				}
+				else
+					fs_error(server, reply_port, net, stn, 0xff, "Insufficient access");
+			}
+			break;
 		default: // Send error
 		{
 			if (!fs_quiet) fprintf (stderr, "   FS: to %3d.%3d FS Error - Unknown operation 0x%02x\n", net, stn, fsop);
