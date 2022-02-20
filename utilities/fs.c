@@ -7180,6 +7180,23 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		case 0x1b: // Create directory ??
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_cdir(server, reply_port, active_id, net, stn, *(data+3), (data+6)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
+		case 0x1c: // Set real time clock
+			if ((fs_stn_logged_in(server, net, stn) >= 0) && (active[server][active_id].priv & FS_PRIV_SYSTEM))
+			{
+				// Silently accept but ignore
+                                struct __econet_packet_udp reply;
+
+                                reply.p.port = reply_port;
+                                reply.p.ctrl = 0x80;
+
+                                reply.p.data[0] = 0;
+                                reply.p.data[1] = 0;
+	
+				fs_aun_send (&reply, server, 2, net, stn);
+			}
+			else
+				fs_error(server, reply_port, net, stn, 0xff, "Insufficient access");
+			break;
 		case 0x1d: // Create file
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_save(server, reply_port, net, stn, active_id, data, datalen, ctrl); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?"); // fs_save works out whether it is handling a real save, or a 0x1d create
 			break;
@@ -7266,7 +7283,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 	
                                 struct __econet_packet_udp reply;
 
-				rw_op = *(data+6); // 0 - reset print server info; 1 - read current printer state; 2 - write current printer state; 3 - read auto printer priority; 4 - write auto printer priority ; 5 - read system msg channel; 6 - write system msg channel; 7 - read message level; 8 - set message level; 9 - read default printer; 10 - set default printer; 11 - read priv required to set time; 12 - set priv required to set time; IE ALL THE READ OPERATIONS HAVE LOW BIT SET
+				rw_op = *(data+5); // 0 - reset print server info; 1 - read current printer state; 2 - write current printer state; 3 - read auto printer priority; 4 - write auto printer priority ; 5 - read system msg channel; 6 - write system msg channel; 7 - read message level; 8 - set message level; 9 - read default printer; 10 - set default printer; 11 - read priv required to set time; 12 - set priv required to set time; IE ALL THE READ OPERATIONS HAVE LOW BIT SET
 
                                 reply.p.port = reply_port;
                                 reply.p.ctrl = 0x80;
