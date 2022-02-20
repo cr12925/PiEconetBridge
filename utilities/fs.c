@@ -7291,7 +7291,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				reply.p.data[0] = reply.p.data[1] = 0; // Normal OK result
 				reply_length = 2;
 
-				if (rw_op > 12)
+				if (rw_op > 12 && rw_op != 15)
 					fs_error(server, reply_port, net, stn, 0xff, "Unsupported");
 				else if ((fs_stn_logged_in(server, net, stn) >= 0) && (rw_op & 0x01 || active[server][active_id].priv & FS_PRIV_SYSTEM))
 				{
@@ -7299,36 +7299,68 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					{
 						case 0: // Reset print server information	
 						{
+							if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d SJ Reset printer information\n", "", net, stn);
 							// Later we might code this to put the priority things back in order etc.
 							break; // Do nothing - no data in reply
 						}
-						// To implement - codes 1--10 except 7, 8!
+						// To implement - codes 1--10 except 5-8!
+						case 5: // Read system message channel
+						case 6: // Set system message channel (deliberate fall through)
+						{
+							if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d SJ %s system message channel\n", "", net, stn, (rw_op == 5 ? "Read" : "Set"));
+							if (rw_op == 5)
+							{
+								reply.p.data[2] = 1; // Always 1 (Parallel)
+								reply_length++;
+							}
+		
+	
+							// We ignore the set request.
+
+						} break;
 						case 7: // Read current FS message level
 						{
 							unsigned char level = 0;
 
+							if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d SJ Read system message level\n", "", net, stn);
 							if (!fs_quiet) level = 130; // "Function codes"
-							if (fs_noisy) level = 255; // "All activity"
+							if (fs_noisy) level = 150; // "All activity"
 
 							reply.p.data[2] = level;
 							reply_length++;
 						} break;
 						case 8: // Set current FS message level
 						{
-							unsigned char level = *(data+7);
+							unsigned char level = *(data+6);
 	
+							if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d SJ Set system message level = %d\n", "", net, stn, level);
+							fs_quiet = 1; fs_noisy = 0;
 							if (level > 0) fs_quiet = 0;
 							if (level > 130) fs_noisy = 1;
+
+							
 						
 						} break;
 						case 11: // Read priv required to change system time
 						{
+							if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d SJ Read privilege required to set system time\n", "", net, stn);
 							reply.p.data[2] = 0; // Always privileged;
 							reply_length++;
 						} break;
 						case 12: // Write priv required to change system time
 						{
+							if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d SJ Set privilege required to set system time (ignored)\n", "", net, stn);
 							// Silently ignore - we are not going to let Econet users change the system time...
+						} break;
+						case 15: // Read printer info. Always return 0 printers for now
+						{
+
+							unsigned char start, number;
+
+							number = *(data+6); start = *(data+7);
+							if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d SJ Read printer information, starting at %d (max %d entries) (ignored)\n", "", net, stn, start, number);
+							reply.p.data[2] = 0; reply_length++;
+
 						} break;
 						default:
 						{
