@@ -52,7 +52,7 @@ extern short fs_dequeuable();
 extern void sks_poll(int);
 short aun_wait (unsigned char, unsigned char, unsigned char, unsigned char, unsigned char, uint32_t, short, struct __econet_packet_aun **);
 extern unsigned short fs_quiet, fs_noisy;
-extern short fs_sevenbitbodge;
+extern short fs_sevenbitbodge, fs_sjfunc; // 7-bit acorn date bodge, fs_sjfunc turns on MDFS-only functionality in the fileserver(s)
 extern short use_xattr; // When set use filesystem extended attributes, otherwise use a dotfile
 
 #define ECONET_LEARNED_HOST_IDLE_TIMEOUT 3600 // 1 hour
@@ -122,41 +122,111 @@ struct __econet_packet_aun_cache {
 	// tx_count is also used to work out, based on tstamp, whether it's time for another retransmission (e.g. tx_count = 2, next transmission needs to be at tstamp+(2 x ECONET_RETX_INTERVAL_MSEC) msecs
 };
 
+// Printer status
+
+// Input status
+#define PRN_IN_READY 	0x00
+#define PRN_IN_BUSY 	0x01
+#define PRN_IN_JAMMED_SOFTWARE	0x02
+#define PRN_IN_JAMMED_OFFLINE	0x03
+#define PRN_IN_JAMMED_DISCFULL	0x04
+#define PRN_IN_UNAUTHORISED	0x05
+#define PRN_IN_GOINGOFFLINE	0x06
+#define PRN_IN_RESERVED		0x07
+
+// Output status (from server to printer)
+#define PRN_OUT_READY	0x00
+#define PRN_OUT_OFFLINE	0x08
+#define PRN_OUT_JAMMED	0x10
+
+// Client to Printer server port &9f Query codes
+
+#define PRN_QUERY_NAME	6
+#define PRN_QUERY_STATUS	1
+
+// Maximum printers per emulated server
+#define MAX_PRINTERS 8
+
+// FS Function code 65 defines (printer control) // Read are unprivileged; Write are privileged
+
+// ARG values for FS function 65
+#define FS65_RESET 0x00
+#define FS65_READSPRNSTATE 0x01
+#define FS65_WRITEPRNSTATE 0x02
+#define FS65_READPRIORITY 0x03
+#define FS65_WRITEPRIORITY 0x04
+#define FS65_READSYSMSGPRN 0x05
+#define FS65_WRITESYSMSGPRN 0x06
+#define FS65_READMSGLEVEL 0x07
+#define FS65_WRITEMSGLEVEL 0x08
+
+struct __printer {
+	char name[7]; // printer name - max 6 characters + null
+	uint8_t status; // Status bits - see defs above
+	unsigned short user; // Only this user can use the printer
+	char unixname[100]; // Unix printer name
+};
+
 // Holds data from econet.cfg file
 struct econet_hosts {							// what we we need to find a beeb?
+// Econet net & station of this host
 	unsigned char station;
 	unsigned char network;
+
+// IP Address / port data
 	struct in_addr s_addr;
 	char hostname[250];
 	unsigned int port;
 	int listensocket; /* One socket for each thing on the Econet wire - -2 if on UDP because we don't listen "for" those, we only transmit /to/ them */
-	int pipewritesocket; /* file descriptor for the socket we write to when this connection is a named pipe */
+
+// Host type information
 	short type;
+
+// Locally emulated server type(s)
 	short servertype;
+
+// File server variables
 	char fs_serverparam[1024];
+	int fileserver_index;
+
+// Print server variables
 	char print_serverparam[1024];
+	uint8_t numprinters;
+	struct __printer printers[MAX_PRINTERS]; // Defined printers. All valid up to printers[numprinters-1]
+	uint8_t printer_priorities[MAX_PRINTERS]; // List of indices into printers[] to indicate auto priority - see FS 65 function 0x03, 0x04
+	
+// Socket server parameter
 	char socket_serverparam[1024];
+	int sks_index;
+
+// PSet index
 	int pind; /* Index into pset for this host, if it has a socket */
+
+// AUN ACK / IMM tracking
 	uint32_t seq, last_imm_seq_sent; // Our local sequence number, and the last immediate sequence number sent to this host (for wire hosts) so that we acknowledge with the same immediate sequence number
 	uint32_t last_seq_ack; // The last sequence number which was acknowledged to this host if it is AUN. If we have already acknoweldged a given sequence number, we *don't* attempt to re-transmit the data onto the Econet Wire, but we do acknowledge the packet again
 	unsigned char last_imm_ctrl, last_imm_net, last_imm_stn; // Designed to try and avoid adding high bit back on where it's an immediate transmitting a characer for *NOTIFY - net & stn are source net & stn of the last immediate going to this host
-	int fileserver_index, sks_index;
 	struct timespec last_wire_tx;
-	unsigned char is_dynamic; // 0 = ordinary fixed host; 1 = host which can be assigned to unknown incoming traffic
-	unsigned char is_wired_fs; // 0 = not a fileserver; 1 = we have seen port &99 traffic to this host and it is on the wire, so we think it's a fileserver. This is used to spoof *bye equivalents when a station number of dynamically allocated to an unknown AUN source, so that the previous user of the same address's login cannot be re-used
-	unsigned long last_transaction;
-	struct timeval last_bridge_reply;
-	// These only apply to wire hosts
-	unsigned char adv_in[256], adv_out[256]; // Advertised networks. _in received from other end, _out is last advert sent by us
-	unsigned char filter_in[256], filter_out[256]; // Filter masks for in & out
-	// Named pipe filename
-	char named_pipe_filename[200];
-	// Some sequence number tracking for AUN hosts
 	struct timeval aun_last_tx; // Last AUN tx to an AUN machine. Used to time out the ACK/IMM wait below. (The 'awaited' value.)
 	struct timeval aun_last_rx; // When we received a packet from the AUN machine so we can time out the ACK / IMMREP timer on our own transmits to it
 	uint32_t ackimm_seq_awaited; // Sequence number we are waiting for an ACK for (or could be Immediate reply) FROM the AUN machine
 	struct __econet_packet_aun_cache *aun_head, *aun_tail; // Output queue for AUN clients, so that we can re-tx unacknowledged packets a few times
 	uint32_t ackimm_seq_tosend; // Sequence number FROM the AUN machine which needs acknowledging
+
+	unsigned char is_dynamic; // 0 = ordinary fixed host; 1 = host which can be assigned to unknown incoming traffic
+	unsigned char is_wired_fs; // 0 = not a fileserver; 1 = we have seen port &99 traffic to this host and it is on the wire, so we think it's a fileserver. This is used to spoof *bye equivalents when a station number of dynamically allocated to an unknown AUN source, so that the previous user of the same address's login cannot be re-used
+	unsigned long last_transaction;
+	struct timeval last_bridge_reply;
+// These only apply to wire hosts - Bridge announcements
+	unsigned char adv_in[256], adv_out[256]; // Advertised networks. _in received from other end, _out is last advert sent by us
+
+// Trunk variables
+	unsigned char filter_in[256], filter_out[256]; // Filter masks for in & out
+
+// Named pipe filename if this is a named pipe host
+	char named_pipe_filename[200];
+	int pipewritesocket; /* file descriptor for the socket we write to when this connection is a named pipe */
+
 };
 
 // Wire packet queue & priority system
@@ -169,6 +239,8 @@ struct timeval wire_prio_expiry; // Time at which the priority values in the lin
 
 struct econet_hosts network[65536]; // Hosts we know about / listen for / bridge for
 short econet_ptr[256][256]; /* [net][stn] pointer into network[] array. */
+uint16_t last_ps[256][256]; // Last print (emulated) print server used by each station. Used to re-set default printer if the station uses a new print server
+uint8_t last_prn[256][256]; // Last printer index used by a station on the current print server. Gets re-set to 0 on change of PS (i.e. when a job gets sent to an emulated PS which is not the current one in last_ps).
 short fd_ptr[65536]; /* Index is a file descriptor - yields index into network[] */
 short trunk_fd_ptr[65536]; /* Index is a file descriptor - pointer to index in trunks[] */
 int stations; // How many entries in network[]
@@ -234,9 +306,17 @@ struct printjob {
 	short ctrl; // Oscillates betwen &81, &80
 	short port;
 	FILE *spoolfile;
+	unsigned char printer_index;
 };
 
 struct printjob printjobs[MAXPRINTJOBS];
+
+struct last_printer {
+	short networkp; // Index into network[] of the last emulated print server this station used
+	unsigned char printer_index; // Index into the printer list in networkp[] entry for the emulated server (not the priority number)
+};
+
+struct last_printer last_printers[256][256];
 
 // Local bridge query status
 int bridge_query = 1;
@@ -495,6 +575,32 @@ int econet_write_general(struct __econet_packet_aun *p, int len)
 
 }
 
+// Get index number of printer (not priority number, but the index into network[].printers)
+// Or return -1 if no such printer.
+
+uint8_t get_printer(unsigned char net, unsigned char stn, char *pname) 
+{
+
+	uint8_t printindex;
+
+	int netindex;
+
+	netindex = econet_ptr[net][stn];
+
+	if (netindex == -1) return -1; // Can't find that station defined locally.
+
+	printindex = 0;
+
+	while (printindex < network[netindex].numprinters)
+	{
+		if (!strcasecmp(network[netindex].printers[printindex].name, pname))
+			return printindex;
+		printindex++;
+	}
+
+	return -1; // not found if we get here
+}
+
 void econet_readconfig(void) 
 {
 	// This reads a config file in like the BeebEm One.
@@ -526,6 +632,9 @@ void econet_readconfig(void)
 	memset(&wire_filter_in, 0, sizeof(wire_filter_in));
 	memset(&wire_filter_out, 0, sizeof(wire_filter_out));
 	*basenet='\0';
+
+// Set all the networkp entries within the last printer table to 65535.
+	memset(&last_printers, 255, sizeof(last_printers));
 
 	configfile = fopen(cfgpath, "r");
 	if (configfile == NULL)
@@ -640,6 +749,9 @@ void econet_readconfig(void)
 
 		strcpy(network[networkp].fs_serverparam, "");
 		strcpy(network[networkp].print_serverparam, "");
+		memset(&(network[networkp].printers), 0, sizeof(network[networkp].printers));
+		memset(&(network[networkp].printer_priorities), 255, sizeof(network[networkp].printer_priorities));
+		network[networkp].numprinters = 0; // i.e. last index+1, so start at 0
 		strcpy(network[networkp].socket_serverparam, "");
 		network[networkp].is_dynamic = 0;
 		network[networkp].last_transaction = 0;
@@ -925,6 +1037,7 @@ void econet_readconfig(void)
 				network[networkp].network = net;
 				network[networkp].station = stn;
 				network[networkp].port = port;
+				network[networkp].numprinters = 0;
 			}
 			else	network[entry].servertype |= servertype;
 
@@ -935,7 +1048,46 @@ void econet_readconfig(void)
 				strcpy(network[(entry == -1) ? networkp : entry].fs_serverparam, datastring);
 			}
 			else if (servertype == ECONET_SERVER_PRINT)
-				strcpy(network[(entry == -1) ? networkp : entry].print_serverparam, datastring);
+			{
+				char pname[7];
+				char *at;
+				char *colon; // Location of divider between Unix printer name and Econet printer name
+				uint8_t index;
+
+				if (network[(entry == -1) ? networkp : entry].numprinters == MAX_PRINTERS)
+				{
+					fprintf (stderr, "Maximum number of printers exceeded for this emulated server.\n");
+					exit(EXIT_FAILURE);
+				}
+
+				colon = strchr(datastring, ':');
+
+				if (colon)
+				{
+					strncpy(pname, colon+1, 6);
+					*colon = (char) '\0'; // Terminate the data string early now we have the pname
+				}
+				else if ((at = strchr(datastring, '@')) && (*(at+1) != (char) '\0')) // Email address and @ is not last char
+					strncpy(pname, at+1, 6);
+				else
+					strncpy(pname, datastring, 6);
+
+				// Convert pname to upper
+				index = 0;
+				while (pname[index] != (char) 0x00 && index < 7)
+				{
+					pname[index] = (char) (pname[index] & 0xdf);
+					index++;
+				}
+
+				strcpy(network[(entry == -1) ? networkp : entry].print_serverparam, datastring); // Old printer code
+				strcpy(network[(entry == -1) ? networkp : entry].printers[network[(entry == -1) ? networkp : entry].numprinters].unixname, datastring); // If there was a colon, then this will have terminated where the colon was
+				snprintf(network[(entry == -1) ? networkp : entry].printers[network[(entry == -1) ? networkp : entry].numprinters].name, 7, "%-6.6s", pname); // copies first up to six characters and pads with spaces
+				network[(entry == -1) ? networkp : entry].printer_priorities[network[(entry == -1) ? networkp : entry].numprinters] = network[(entry == -1) ? networkp : entry].numprinters; // Initially set the priority list to match the order in the file
+			
+				network[(entry == -1) ? networkp : entry].numprinters++;
+				
+			}
 			else if (servertype == ECONET_SERVER_SOCKET)
 				strcpy(network[(entry == -1) ? networkp : entry].socket_serverparam, datastring);
 
@@ -1898,8 +2050,6 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 	}
 	else if (a->p.aun_ttype == ECONET_AUN_BCAST) // Broadcast - See if we need to do a bridge query reply
 	{
-		//fprintf (stderr, "Bridge query %s, port %02x, BRIDGE check %s, localnet %s\n", (bridge_query ? "on" : "off"), a->p.port, (!strncmp("BRIDGE", (const char *) a->p.data, 6) ? "match" : "not matched"), localnet ? "set" : "not set");
-
 		if (bridge_query && (a->p.port == 0x9C) && (a->p.ctrl == 0x80 || a->p.ctrl == 0x81) && (source >= 0)) // bridge reset/update broadcast
 			econet_bridge_process (a, packlen, source);
 
@@ -1945,16 +2095,79 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 			}
 	
 		}
+		else if (a->p.port == 0x99) // Handle broadcasts to fileservers
+		{
+
+			int count;
+
+			for (count = 0; count < stations; count++)
+			{
+				if ((network[count].servertype & ECONET_SERVER_FILE) && (network[count].fileserver_index >= 0))
+					handle_fs_traffic(network[count].fileserver_index, a->p.srcnet, a->p.srcstn, a->p.ctrl, a->p.data, packlen-12);
+			}
+		}
 	}
 	else if (a->p.aun_ttype == ECONET_AUN_DATA) // Data packet
 	{
 		if ((a->p.port == 0x99) && (network[d_ptr].servertype & ECONET_SERVER_FILE) && (network[d_ptr].fileserver_index >= 0))
 			handle_fs_traffic(network[d_ptr].fileserver_index, a->p.srcnet, a->p.srcstn, a->p.ctrl, a->p.data, packlen-12);
 
-		else if ((a->p.port == 0x9f) && ((network[d_ptr].servertype) & ECONET_SERVER_PRINT) && (!strncmp((const char *)&(a->p.data), "PRINT", 5))) // Looks like only ANFS does this... // Print server handling
+		else if ((a->p.port == 0x9f) && ((network[d_ptr].servertype) & ECONET_SERVER_PRINT)) // Looks like only ANFS does this... // Print server handling - this looks like it is just printer selection
 		{
-			int count, found;; 
+			//int count, found;; 
 		
+			char printer_selected[10];
+
+			memset(printer_selected, 0, sizeof(printer_selected));
+
+			strncpy(printer_selected, (const char *) a->p.data, 6);
+
+			fprintf (stderr, "PRINT: to %3d.%3d from %3d.%3d Select printer %s\n", 
+				a->p.dstnet, a->p.dststn, a->p.srcnet, a->p.srcstn, printer_selected);
+
+			reply.p.srcnet = a->p.dstnet;
+			reply.p.srcstn = a->p.dststn;
+			reply.p.dstnet = a->p.srcnet;
+			reply.p.dststn = a->p.srcstn;
+			reply.p.aun_ttype = ECONET_AUN_DATA;
+			reply.p.port = 0x9e;
+			reply.p.ctrl = 0x80;
+			reply.p.seq = get_local_seq(a->p.dstnet, a->p.dststn);
+			reply.p.data[0] = 0x00;
+
+			last_printers[a->p.srcnet][a->p.srcstn].networkp = d_ptr;
+
+			if (!strcmp(printer_selected, "PRINT"))
+			{
+				last_printers[a->p.srcnet][a->p.srcstn].printer_index = 0;
+			}
+			else
+			{
+				// See if we have a matching printer
+				int count = 0, found = 0;
+
+				while (count < network[d_ptr].numprinters)
+				{
+					if (strlen(network[d_ptr].printers[count].name) != strlen(printer_selected))
+						count++;
+					else if (!strncasecmp(network[d_ptr].printers[count].name, printer_selected, strlen(printer_selected)))
+						found = 1;
+
+					else count++;
+				}	
+
+				if (found)
+				{
+					last_printers[a->p.srcnet][a->p.srcstn].printer_index = -1;
+					reply.p.data[0] = 0xff; // Error
+				}
+				else	last_printers[a->p.srcnet][a->p.srcstn].printer_index = count;
+				
+			}
+
+			aun_send (&reply, 13);
+
+/* Old code before we discovered &9f was printer select
 			count = 0; found = -1;
 
 			// See if we can find a spare print job
@@ -1968,23 +2181,12 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 
 			if (found != -1)
 			{
-				char filename[100];
-
+				//char filename[100];
 				printjobs[found].stn = a->p.srcstn;
 				printjobs[found].net = a->p.srcnet;
 				printjobs[found].ctrl = 0x80; 
 				
-				reply.p.srcnet = a->p.dstnet;
-				reply.p.srcstn = a->p.dststn;
-				reply.p.dstnet = a->p.srcnet;
-				reply.p.dststn = a->p.srcstn;
-				reply.p.aun_ttype = ECONET_AUN_DATA;
-				reply.p.port = 0x9e;
-				reply.p.ctrl = 0x80;
-				reply.p.seq = get_local_seq(a->p.dstnet, a->p.dststn);
-				reply.p.data[0] = 0x00;
 
-				aun_send (&reply, 13);
 
 				sprintf(filename, SPOOLFILESPEC, found);
 
@@ -2005,9 +2207,9 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 					}
 					fprintf (printjobs[count].spoolfile, PRINTHEADER, a->p.srcnet, a->p.srcstn);
 				}
-				
 			}
 			else	fprintf(stderr, "PRINT: No resources for job from %d.%d\n", network[s_ptr].network, network[s_ptr].station);
+*/
 
 		}
 		else if ((a->p.port == 0xd1) && (network[d_ptr].servertype & ECONET_SERVER_PRINT)) // Actual printing
@@ -2044,6 +2246,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 					printjobs[found].stn = a->p.srcstn;
 					printjobs[found].net = a->p.srcnet;
 					printjobs[found].ctrl = 0x80; 
+					
 					sprintf(filename, SPOOLFILESPEC, found);
 	
 					printjobs[found].spoolfile = fopen(filename, "w");
@@ -2055,10 +2258,26 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 					}
 					else
 					{
-						fprintf (stderr, "PRINT: Starting spooler job for %d.%d - %s\n", a->p.srcnet, a->p.srcstn, network[d_ptr].print_serverparam);
-						if (strstr(network[d_ptr].print_serverparam, "@")) // Email print job, not send to printer
+
+						unsigned char printer_index;
+
+						// Which printer?
+
+						if (last_printers[a->p.srcnet][a->p.srcstn].networkp != d_ptr) // If last print server wasn't us (and it will be if the station has expressly selected a printer...)
 						{
-							fprintf(printjobs[count].spoolfile, "To: %s\n", network[d_ptr].print_serverparam);
+							last_printers[a->p.srcnet][a->p.srcstn].networkp = d_ptr;
+							// Select highest priority printer
+							printer_index = network[d_ptr].printer_priorities[0]; 
+							last_printers[a->p.srcnet][a->p.srcstn].printer_index = printer_index;
+							printjobs[count].printer_index = printer_index; 
+						}
+						else printer_index = last_printers[a->p.srcnet][a->p.srcstn].printer_index;
+
+						fprintf (stderr, "PRINT: Starting spooler job for %d.%d - %s (%s)\n", a->p.srcnet, a->p.srcstn, network[d_ptr].printers[printer_index].name, network[d_ptr].printers[printer_index].unixname);
+
+						if (strstr(network[d_ptr].printers[printer_index].unixname, "@")) // Email print job, not send to printer
+						{
+							fprintf(printjobs[count].spoolfile, "To: %s\n", network[d_ptr].printers[printer_index].unixname);
 							fprintf(printjobs[count].spoolfile, "Subject: Econet print job from station %d.%d\n\n", a->p.srcnet, a->p.srcstn);
 						}
 						fprintf (printjobs[count].spoolfile, PRINTHEADER, a->p.srcnet, a->p.srcstn);
@@ -2077,60 +2296,67 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 				reply.p.aun_ttype = ECONET_AUN_DATA;
 				reply.p.port = 0xd1;
 				reply.p.ctrl = printjobs[count].ctrl;
-				printjobs[count].ctrl ^= 0x01;
 
 				reply.p.seq = get_local_seq(a->p.dstnet, a->p.dststn);
 
 				// The control low bit alternation is to avoid duplicated packets. Need to implement a check... TODO.
 
-				switch (a->p.ctrl)
+				if ((printjobs[count].ctrl & 0x01) == (a->p.ctrl & 0x01))
 				{
-					case 0x83: // Fall through
-					case 0x82: // Print job start
+					switch (a->p.ctrl)
 					{
-						reply.p.data[0] = 0x2a;
-						aun_send (&reply, 13);
+						case 0x83: // Fall through
+						case 0x82: // Print job start
+						{
+							reply.p.data[0] = 0x2a;
+						}
+						break;
+						case 0x80: // Fall through
+						case 0x81: // Print data
+						{
+							fwrite(&(a->p.data), packlen-12, 1, printjobs[count].spoolfile);
+							reply.p.data[0] = a->p.data[0];	
+						}
+						break;
+						case 0x86: // Fall through
+						case 0x87: // Final packet
+						{
+							char command_string[2000];
+							char filename_string[200];
+							char unixname[100];
+	
+							// There is a rogue byte on the end of the last printjob packet it would seem
+							fwrite(&(a->p.data), packlen-12-1, 1, printjobs[count].spoolfile);
+							fprintf(printjobs[count].spoolfile, PRINTFOOTER);
+							reply.p.data[0] = a->p.data[0];	
+	
+							fclose(printjobs[count].spoolfile);
+							sprintf(filename_string, SPOOLFILESPEC, found);
+							
+							strncpy(unixname, network[d_ptr].printers[last_printers[a->p.srcnet][a->p.srcstn].printer_index].unixname, 99);
+
+							if (strstr(unixname, "@")) // Email address not printername
+								sprintf(command_string, MAILCMDSPEC, unixname, filename_string);
+							else
+								sprintf(command_string, PRINTCMDSPEC, unixname, filename_string);
+	
+							fprintf (stderr, "PRINT: Sending print job with %s\n", command_string);
+							
+							if (!fork())
+								execl("/bin/sh", "sh", "-c", command_string, (char *)0);
+	
+							printjobs[count].stn = printjobs[count].net = 0; // Free the resource	
+
+						}
+						break;
 					}
-					break;
-					case 0x80: // Fall through
-					case 0x81: // Print data
-					{
-						fwrite(&(a->p.data), packlen-12, 1, printjobs[count].spoolfile);
-						reply.p.data[0] = a->p.data[0];	
-						aun_send (&reply, 13);
-					}
-					break;
-					case 0x86: // Fall through
-					case 0x87: // Final packet
-					{
-						char command_string[2000];
-						char filename_string[200];
 
-						// There is a rogue byte on the end of the last printjob packet it would seem
-						fwrite(&(a->p.data), packlen-12-1, 1, printjobs[count].spoolfile);
-						fprintf(printjobs[count].spoolfile, PRINTFOOTER);
-						reply.p.data[0] = a->p.data[0];	
-
-						aun_send (&reply, 13);
-						fclose(printjobs[count].spoolfile);
-						sprintf(filename_string, SPOOLFILESPEC, found);
-						
-						if (strstr(network[d_ptr].print_serverparam, "@")) // Email address not printername
-							sprintf(command_string, MAILCMDSPEC, network[d_ptr].print_serverparam, filename_string);
-						else
-							sprintf(command_string, PRINTCMDSPEC, network[d_ptr].print_serverparam, filename_string);
-
-						fprintf (stderr, "PRINT: Sending print job with %s\n", command_string);
-						
-						if (!fork())
-							execl("/bin/sh", "sh", "-c", command_string, (char *)0);
-
-						printjobs[count].stn = printjobs[count].net = 0; // Free the resource	
-
-					}
-					break;
+				
+					printjobs[count].ctrl ^= 0x01;
 
 				}
+
+				aun_send (&reply, 13);
 			}
 			else
 				fprintf (stderr, "PRINT: Spooler not found for print request from %d.%d\n", network[s_ptr].network, network[s_ptr].station);
@@ -2489,14 +2715,16 @@ int main(int argc, char **argv)
 	memset(&econet_ptr, 0xff, sizeof(econet_ptr));
 	memset(&fd_ptr, 0xff, sizeof(fd_ptr));
 	memset(&trunk_fd_ptr, 0xff, sizeof(trunk_fd_ptr));
+	memset(&last_ps, 0x00, sizeof(last_ps));
+	memset(&last_prn, 0x00, sizeof(last_prn));
 
 	// Clear the packet cache
 
 	seq = 0x46; /* Random number */
 
-	fs_sevenbitbodge = 1; // On by default
+	fs_sevenbitbodge = fs_sjfunc = 1; // On by default 
 
-	while ((opt = getopt(argc, argv, "bc:dfilnqrsxzh7")) != -1)
+	while ((opt = getopt(argc, argv, "bc:dfijlnqrsxzh7")) != -1)
 	{
 		switch (opt) {
 			case 'b': dumpmode_brief = 1; break;
@@ -2508,6 +2736,7 @@ int main(int argc, char **argv)
 				break;
 			case 'f': fs_quiet = 1; fs_noisy = 0; break;
 			case 'i': spoof_immediate = 0; break;
+			case 'j': fs_sjfunc = 0; break; // Turn off MDFS / SJ functionality in FS
 			case 'l': wire_enabled = 0; break;
 			case 'n': fs_noisy = 1; fs_quiet = 0; break;
 			case 'q':
@@ -2532,6 +2761,7 @@ Options:\n\
 \t-d\tTurn on packet debug (you won't see much without!)\n\
 \t-f\tSilence fileserver log output\n\
 \t-i\tSpoof immediate responses in-kernel (will break *REMOTE, *VIEW etc.)\n\
+\t-j\tTurn off SJ Research MDFS functionality in file server\n\
 \t-l\tLocal only - do not connect to kernel module (uses /dev/null instead)\n\
 \t-q\tDisable bridge query responses\n\
 \t-r\tEnable queue debugging (only if you know what you're doing)\n\
@@ -2582,7 +2812,7 @@ Options:\n\
 						snprintf(buffer, 6, "%5d", network[p].listensocket);
 					else	snprintf(buffer, 6, "%5s", "     ");
 
-					fprintf (stderr, "%3d %3d %5s %-5s %-4s %-30s %5d %c %c %c %s%s%s%s%s%s%s\n",
+					fprintf (stderr, "%3d %3d %5s %-5s %-4s %-30s %5d %c %c %c %s%s%s%s%s\n",
 						network[p].network,
 						network[p].station,
 						buffer,
@@ -2597,12 +2827,21 @@ Options:\n\
 						((network[p].servertype & ECONET_SERVER_SOCKET) ? 'S' : ' '),
 						((network[p].servertype & ECONET_SERVER_FILE) ? network[p].fs_serverparam : ""),
 						((network[p].servertype & ECONET_SERVER_FILE) ? " " : ""),
-						((network[p].servertype & ECONET_SERVER_PRINT) ? network[p].print_serverparam : ""),
-						((network[p].servertype & ECONET_SERVER_PRINT) ? " " : ""),
+						//((network[p].servertype & ECONET_SERVER_PRINT) ? network[p].print_serverparam : ""),
+						//((network[p].servertype & ECONET_SERVER_PRINT) ? " " : ""),
 						((network[p].servertype & ECONET_SERVER_SOCKET) ? network[p].socket_serverparam : ""),
 						((network[p].servertype & ECONET_SERVER_SOCKET) ? " " : ""),
 						((network[p].type & ECONET_HOSTTYPE_TNAMEDPIPE) ? network[p].named_pipe_filename : "")
 					);
+
+					if (network[p].servertype & ECONET_SERVER_PRINT)
+					{
+						int c;
+
+						for (c = 0; c < network[p].numprinters; c++)
+							fprintf(stderr, "%64s%c %1d %s : %s\n", "", 'P', c, network[p].printers[c].name, network[p].printers[c].unixname);
+
+					}
 				}
 			}
 		}
@@ -3036,6 +3275,10 @@ Options:\n\
 					err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
 					if (err == ECONET_TX_HANDSHAKEFAIL) // Receiver not present
 						econet_general_dumphead(&wire_head, &wire_tail);
+
+					/* Inserted because on *REMOTE traffic where the remoted station is talking to the server, we tend to get lots of module busy for some reason, so we'll pretend they didn't happen. */
+
+					if (err == ECONET_TX_BUSY) wire_head->tx_count--;
 
 					if (wire_tx_errors++ > 300)
 						ioctl(econet_fd, ECONETGPIO_IOC_READMODE);

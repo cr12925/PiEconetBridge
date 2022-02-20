@@ -55,7 +55,11 @@ extern int aun_send (struct __econet_packet_aun *, int);
 
 extern uint32_t get_local_seq(unsigned char, unsigned char);
 
+// routine in econet-bridge.c to find a printer definition
+extern int get_printer(unsigned char, unsigned char, char*);
+
 short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for extra year information
+short fs_sjfunc; // Whether SJ MDFS functionality is turned on (global - not per fileserver)
 short use_xattr=1 ; // When set use filesystem extended attributes, otherwise use a dotfile
 
 short fs_open_interlock(int, unsigned char *, unsigned short, unsigned short);
@@ -109,6 +113,7 @@ struct {
 	unsigned int home_disc, current_disc, lib_disc; // Currently selected disc for each of the three handles
 	unsigned char bootopt;
 	unsigned char priv;
+	uint8_t printer; // Index into this station's printer array which shows which printer has been selected - defaults to &ff to signal 'none'.
 	struct {
 		short handle; // Pointer into fs_files
 		unsigned long cursor; // Our pointer into the file
@@ -303,6 +308,23 @@ unsigned char fs_perm_to_acorn(unsigned char fs_perm, unsigned char ftype)
 	//if (!fs_quiet) fprintf (stderr, "Converted perms %02X (ftype %02d) to Acorn %02X\n", fs_perm, ftype, r);
 	return r;
 	
+
+}
+
+// Convert acorn / MDFS perm to our format
+unsigned char fs_perm_from_acorn(unsigned char acorn_perm)
+{
+	unsigned char r;
+
+	r = 0;
+
+	r |= (acorn_perm & 0x10) ? FS_PERM_L : 0; // Locked
+	r |= (acorn_perm & 0x08) ? FS_PERM_OWN_W : 0; // Owner write
+	r |= (acorn_perm & 0x04) ? FS_PERM_OWN_R : 0; // Owner read
+	r |= (acorn_perm & 0x02) ? FS_PERM_OTH_W : 0; // Other write
+	r |= (acorn_perm & 0x01) ? FS_PERM_OTH_R : 0; // Other read
+
+	return r;
 
 }
 
@@ -2353,6 +2375,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 
 				active[server][usercount].net = net;
 				active[server][usercount].stn = stn;
+				active[server][usercount].printer = 0xff; // No current printer selected
 				active[server][usercount].userid = counter;
 				active[server][usercount].bootopt = users[server][counter].bootopt;
 				active[server][usercount].priv = users[server][counter].priv;
@@ -2983,7 +3006,11 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 	command = *(data+5);
 	relative_to = *(data+3);
 
-	// So what's in 4?
+	if (command == 0x40 && !fs_sjfunc)
+	{
+		fs_error(server, reply_port, net, stn, 0xff, "MDFS Unsupported");
+		return;
+	}
 
 	switch (command)
 	{
@@ -2991,9 +3018,11 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 		case 4: filenameposition = 7; break;
 		case 2: // Fall through
 		case 3: // Fall through
-		case 5: filenameposition = 10; break;
+		case 5: filenameposition = 8; break;
+		case 0x40: filenameposition = 16; break;
 		default:
 			fs_error(server, reply_port, net, stn, 0xFF, "FS Error");
+			return;
 			break;
 	}
 
@@ -3028,7 +3057,7 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 				attr.load = (*(data+6)) + (*(data+7) << 8) + (*(data+8) << 16) + (*(data+9) << 24);
 				attr.exec = (*(data+10)) + (*(data+11) << 8) + (*(data+12) << 16) + (*(data+13) << 24);
 				// We need to make sure our bitwise stuff corresponds with Acorns before we do this...
-				// attr.perm = (*(data+14));
+				attr.perm = fs_perm_from_acorn(*(data+14));
 				break;
 			
 			case 2: // Set load address
@@ -3040,14 +3069,20 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 				break;
 	
 			case 4: // Set attributes only
-				// attr.perm = (*(data+6));
+				// Need to convert acorn to PiFS
+				attr.perm = fs_perm_from_acorn(*(data+6));
 				break;
 
 			case 5: // Set file date
-			{
-				// Not sure what is in *(data+6 .. 9) yet! Do nothing for now.	
-			}
+				{
+					// There should be, in *(data+6, 7) a two byte date.
+					// We'll implement this later
+				}
 				break;
+			case 0x40: // MDFS set update, create date & time
+				{
+					// Nothing for now
+				}
 
 			// No default needed - we caught it above
 		}
@@ -6268,6 +6303,31 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 
 }
 
+// Handle *PRINTER from authenticated users
+void fs_select_printer(int server, unsigned char reply_port, unsigned int active_id, unsigned char net, unsigned char stn, char *pname)
+{
+
+	int printerindex = 0xff;
+	struct __econet_packet_udp reply;
+
+	reply.p.ptype = ECONET_AUN_DATA;
+	reply.p.port = reply_port;
+	reply.p.ctrl = 0x80;
+	reply.p.data[0] = reply.p.data[1] = 0;
+
+	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Select printer %s\n", "", net, stn, pname);
+
+	printerindex = get_printer(fs_stations[server].net, fs_stations[server].stn, pname);
+
+	if (printerindex == -1) // Failed
+		fs_error(server, reply_port, net, stn, 0xFF, "Unknown printer");
+	else
+	{
+		active[server][active_id].printer = printerindex;
+		fs_aun_send(&reply, server, 2, net, stn);
+	}
+}
+
 // Check if a user exists. Return index into users[server] if it does; -1 if not
 int fs_user_exists(int server, unsigned char *username)
 {
@@ -6595,6 +6655,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					else	fs_error(server, reply_port, net, stn, 0xA8, "Bad library");
 				}
 			}
+			else if (!strncasecmp("PRINTER ", (const char *) command, 8))
+				fs_select_printer(server, reply_port, active_id, net, stn, command+8);
 			else if (!strncasecmp("PASS ", (const char *) command, 5))
 				fs_change_pw(server, reply_port, userid, net, stn, command+5);
 			else if (!strncasecmp("CHOWN ", (const char *) command, 6))
