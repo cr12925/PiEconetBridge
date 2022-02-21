@@ -578,10 +578,11 @@ int econet_write_general(struct __econet_packet_aun *p, int len)
 // Get index number of printer (not priority number, but the index into network[].printers)
 // Or return -1 if no such printer.
 
-uint8_t get_printer(unsigned char net, unsigned char stn, char *pname) 
+int8_t get_printer(unsigned char net, unsigned char stn, char *pname) 
 {
 
 	uint8_t printindex;
+	char pnamepad[7];
 
 	int netindex;
 
@@ -589,11 +590,13 @@ uint8_t get_printer(unsigned char net, unsigned char stn, char *pname)
 
 	if (netindex == -1) return -1; // Can't find that station defined locally.
 
+	snprintf(pnamepad, 7, "%-6.6s", pname);
+
 	printindex = 0;
 
 	while (printindex < network[netindex].numprinters)
 	{
-		if (!strcasecmp(network[netindex].printers[printindex].name, pname))
+		if (!strncasecmp(network[netindex].printers[printindex].name, pnamepad, 6))
 			return printindex;
 		printindex++;
 	}
@@ -2106,23 +2109,48 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 					handle_fs_traffic(network[count].fileserver_index, a->p.srcnet, a->p.srcstn, a->p.ctrl, a->p.data, packlen-12);
 			}
 		}
+		else if (a->p.port == 0x9f) // Print Server Broadcast query
+		{
+
+			int count;
+
+			for (count = 0; count < stations; count++)
+			{
+				if (network[count].servertype & ECONET_SERVER_PRINT) 
+				{
+					reply.p.srcnet = network[count].network;
+					reply.p.srcstn = network[count].station;
+					reply.p.dstnet = a->p.srcnet;
+					reply.p.dststn = a->p.srcstn;
+					reply.p.aun_ttype = ECONET_AUN_DATA;
+					reply.p.port = 0x9e;
+					reply.p.ctrl = 0x80;
+					reply.p.seq = get_local_seq(a->p.dstnet, a->p.dststn);
+					reply.p.data[0] = 0x00; // Printer input state (Read) // We can change this when we can bar input etc.
+					reply.p.data[1] = 0x00; // Printer output state (Ready) // We can change this when we can put printers offline!
+					aun_send (&reply, 14);
+				}
+			}
+
+		}
 	}
 	else if (a->p.aun_ttype == ECONET_AUN_DATA) // Data packet
 	{
 		if ((a->p.port == 0x99) && (network[d_ptr].servertype & ECONET_SERVER_FILE) && (network[d_ptr].fileserver_index >= 0))
 			handle_fs_traffic(network[d_ptr].fileserver_index, a->p.srcnet, a->p.srcstn, a->p.ctrl, a->p.data, packlen-12);
 
-		else if ((a->p.port == 0x9f) && ((network[d_ptr].servertype) & ECONET_SERVER_PRINT)) // Looks like only ANFS does this... // Print server handling - this looks like it is just printer selection
+		else if ((a->p.port == 0x9f) && ((network[d_ptr].servertype) & ECONET_SERVER_PRINT)) // Looks like only ANFS does this... // Print server handling - this looks like it is just printer state query
 		{
-			//int count, found;; 
 		
 			char printer_selected[10];
+			char *spaceptr;
+			unsigned char querytype;
 
 			memset(printer_selected, 0, sizeof(printer_selected));
 
 			strncpy(printer_selected, (const char *) a->p.data, 6);
 
-			fprintf (stderr, "PRINT: to %3d.%3d from %3d.%3d Select printer %s\n", 
+			fprintf (stderr, "PRINT: to %3d.%3d from %3d.%3d Printer status enquiry %s\n", 
 				a->p.dstnet, a->p.dststn, a->p.srcnet, a->p.srcstn, printer_selected);
 
 			reply.p.srcnet = a->p.dstnet;
@@ -2133,13 +2161,18 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 			reply.p.port = 0x9e;
 			reply.p.ctrl = 0x80;
 			reply.p.seq = get_local_seq(a->p.dstnet, a->p.dststn);
-			reply.p.data[0] = 0x00;
+			reply.p.data[0] = 0x00; // Printer input state (Read) // We can change this when we can bar input etc.
+			reply.p.data[1] = 0x00; // Printer output state (Ready) // We can change this when we can put printers offline!
 
-			last_printers[a->p.srcnet][a->p.srcstn].networkp = d_ptr;
+
+			if ((spaceptr = strchr(printer_selected, ' ')))
+				*spaceptr = (char) 0; // Terminate
+		
+			querytype = a->p.data[6];
 
 			if (!strcmp(printer_selected, "PRINT"))
 			{
-				last_printers[a->p.srcnet][a->p.srcstn].printer_index = 0;
+				aun_send (&reply, 14);
 			}
 			else
 			{
@@ -2160,56 +2193,17 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 				{
 					last_printers[a->p.srcnet][a->p.srcstn].printer_index = -1;
 					reply.p.data[0] = 0xff; // Error
+					aun_send (&reply, 14);
 				}
-				else	last_printers[a->p.srcnet][a->p.srcstn].printer_index = count;
+				else	
+				{
+					reply.p.data[0] = 0xff;
+					strcpy((char *) &(reply.p.data[2]), "Unkonwn printer");
+					aun_send(&reply, 14 + strlen("Unknown printer") + 1);
+				}
 				
 			}
 
-			aun_send (&reply, 13);
-
-/* Old code before we discovered &9f was printer select
-			count = 0; found = -1;
-
-			// See if we can find a spare print job
-
-			while (count < MAXPRINTJOBS && found == -1)
-			{
-				if (printjobs[count].net == 0 && printjobs[count].stn == 0) // Found one
-					found = count;
-				else	count++;
-			}
-
-			if (found != -1)
-			{
-				//char filename[100];
-				printjobs[found].stn = a->p.srcstn;
-				printjobs[found].net = a->p.srcnet;
-				printjobs[found].ctrl = 0x80; 
-				
-
-
-				sprintf(filename, SPOOLFILESPEC, found);
-
-				printjobs[found].spoolfile = fopen(filename, "w");
-
-				if (!printjobs[found].spoolfile)
-				{
-					printjobs[count].net = printjobs[count].stn = 0;  // Free this up - couldn't open file	
-					fprintf (stderr, "Unable to open spool file for print job from station %d.%d\n", a->p.srcnet, a->p.srcstn);
-				}
-				else
-				{
-					fprintf (stderr, "PRINT: Starting spooler job for %d.%d - %s\n", a->p.srcnet, a->p.srcstn, network[d_ptr].print_serverparam);
-					if (strstr(network[d_ptr].print_serverparam, "@")) // Email print job, not send to printer
-					{
-						fprintf(printjobs[count].spoolfile, "To: %s\n", network[d_ptr].print_serverparam);
-						fprintf(printjobs[count].spoolfile, "Subject: Econet print job from station %d.%d\n\n", a->p.srcnet, a->p.srcstn);
-					}
-					fprintf (printjobs[count].spoolfile, PRINTHEADER, a->p.srcnet, a->p.srcstn);
-				}
-			}
-			else	fprintf(stderr, "PRINT: No resources for job from %d.%d\n", network[s_ptr].network, network[s_ptr].station);
-*/
 
 		}
 		else if ((a->p.port == 0xd1) && (network[d_ptr].servertype & ECONET_SERVER_PRINT)) // Actual printing
@@ -2706,6 +2700,7 @@ int main(int argc, char **argv)
 	int dump_station_table = 0;
 	short fs_bulk_traffic = 0;
 	int last_active_fd = 0;
+	int poll_timeout; // Used in order to reset the chip if we send an immediate to an AUN station and it doesn't reply
 
 	unsigned short from_found, to_found; // Used to see if we know a station or not
 
@@ -2958,8 +2953,15 @@ Options:\n\
 
 	srand(time(NULL));
 
-	while (wire_head || aun_queued || trunk_head || poll((struct pollfd *)&pset, pmax+(wire_enabled ? 1 : 0), -1)) // AUN queued packets, wire queued packets, or something arriving
+   while (1) // Loop to allow reset of chip if we have an immediate timeout
+   {
+
+	poll_timeout = -1;
+
+	while (wire_head || aun_queued || trunk_head || poll((struct pollfd *)&pset, pmax+(wire_enabled ? 1 : 0), poll_timeout)) // AUN queued packets, wire queued packets, or something arriving. The 1 is because we now have a timeout on poll() in case we need to reset the module to make sure that immediates to AUN stations which are not present doesn't cause a hang!
 	{
+	
+		//fprintf (stderr, "DEBUG: wire_haed = %p, aun_queued = %ld, trunk_head = %p\n", wire_head, aun_queued, trunk_head);
 
 		if (wire_head || aun_queued || trunk_head) // Do a poll just in case something turns up, but do it quickly
 			poll((struct pollfd *) &pset, pmax+(wire_enabled ? 1 : 0), 10);
@@ -2967,6 +2969,7 @@ Options:\n\
 		if (wire_enabled && (pset[pmax].revents & POLLIN)) // Let the wire take a back seat sometimes
 		{
 			int r;
+
 
 			// Collect the packet
 			r = read(econet_fd, &rx, ECONET_MAX_PACKET_SIZE);
@@ -3202,6 +3205,8 @@ Options:\n\
 								network[from_found].ackimm_seq_awaited = 0;
 								network[from_found].aun_last_tx.tv_sec = network[from_found].aun_last_rx.tv_usec = 0;
 			
+								poll_timeout = -1;  // Go back to normal timeout if we find the packet we want
+
 								// And dump the packet off the head if it's the same sequence
 	
 								if (network[from_found].aun_head && p.p.seq == network[from_found].aun_head->p->p.seq)
@@ -3413,6 +3418,9 @@ Options:\n\
 								if (queue_debug) fprintf (stderr, " - tracking seq for ack from AUN ");
 								network[count].ackimm_seq_awaited = network[count].aun_head->p->p.seq; // This is the Ack we are waiting for before we send anything else
 								gettimeofday(&(network[count].aun_last_tx), 0);
+					
+								if (network[count].aun_head->p->p.aun_ttype == ECONET_AUN_IMM) // If we just sent an immediate to an AUN host, set the poll_timeout
+									poll_timeout = 500;
 							}
 
 							// If this was the priority packet, clear ackimm_seq_tosend
@@ -3495,5 +3503,10 @@ Options:\n\
 		
 		start_fd = last_active_fd;
 	}
+
+
+	ioctl(econet_fd, ECONETGPIO_IOC_READMODE); // Reset the module - we have got here because an Immediate to AUN went unresponded to, so the chip will not be in read mode any more.
+
+   }
 }
 

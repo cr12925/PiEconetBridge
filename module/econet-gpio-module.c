@@ -688,7 +688,8 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 				while (count++ < 25 && (!(sr2 & ECONET_GPIO_S2_RX_IDLE)))
 				{
 					econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT1);
-					udelay(10);
+					// udelay(10);
+					udelay(count << 2);
 					sr2 = econet_read_sr(2);
 				}
 
@@ -1155,11 +1156,6 @@ unexpected_scout:
 								printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): Valid frame received, length %04x, %04x AUN bytes copied to kernel FIFO\n", econet_pkt_rx.ptr, copied_to_fifo);
 #endif
 								econet_rx_cleardown();
-							/*
-								econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // See if this fixes the crashes
-								econet_write_cr(ECONET_GPIO_CR2, C2_READ);
-								econet_write_cr(ECONET_GPIO_CR1, C1_READ);
-							*/
 								econet_flagfill();
 								econet_set_aunstate(EA_IDLE); // Wait and see what turns up next - probably an immediate reply
 								econet_set_chipstate(EM_FLAGFILL);
@@ -1714,11 +1710,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 		if (tmp_status == EM_IDLE) // Only if we were in IDLE
 		{
 			econet_rx_cleardown();
-		/*
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // Maybe try commenting this out to see if we pick up receptions immediately after transmissions?
-			econet_write_cr(ECONET_GPIO_CR2, C2_READ); // We use this here to clear the RX status
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ);
-		*/
 		}
 	}
 	else if (econet_get_chipstate() == EM_IDLE || econet_get_chipstate() == EM_IDLEINIT) // We seem to get these when the chip gets its pants tangled. (With sr1=0 - but we've handled reading and writing above, so just clear status)
@@ -1729,11 +1720,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 		if (sr2 & ~(ECONET_GPIO_S2_AP | ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_RDA)) // Errors
 		{
 			econet_rx_cleardown();
-		/*
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // Maybe try commenting this out to see if we pick up receptions immediately after transmissions?
-			econet_write_cr(ECONET_GPIO_CR2, C2_READ); // We use this here to clear the RX status
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ);
-		*/
 		}
 		else
 			econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Just clear status
@@ -1744,11 +1730,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 		if (sr2 & ~(ECONET_GPIO_S2_AP | ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_RDA)) // Errors
 		{
 			econet_rx_cleardown();
-		/*
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // Maybe try commenting this out to see if we pick up receptions immediately after transmissions?
-			econet_write_cr(ECONET_GPIO_CR2, C2_READ);
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ);
-		*/
 		}
 		else	econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 	}
@@ -1787,7 +1768,6 @@ const struct of_device_id econet_of_match[] = {
 	{ }
 };
 
-/*
 struct platform_driver econet_driver = {
 	.driver = {
 			.name = DEVICE_NAME,
@@ -1796,7 +1776,6 @@ struct platform_driver econet_driver = {
 	.probe = econet_probe,
 	.remove = econet_remove
 };
-*/
 
 
 /* When a process reads from our device, this gets called. */
@@ -2190,6 +2169,7 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 			printk (KERN_INFO "ECONET-GPIO: ioctl(set read mode) called\n");
 #endif
 			econet_adlc_cleardown(0); // 0 = not in IRQ
+			econet_set_read_mode(); // Required in addition to the cleadown, because this sets the ADLC up to read, where as cleardown doesn't.
 
 			break;
                 case ECONETGPIO_IOC_SET_STATIONS:
@@ -2442,6 +2422,15 @@ static int __init econet_init(void)
 
 }
 
+/* This is known to be nasty. It should really pick all the GPIOs up from the DT - but that's the next stage... */
+
+static int econet_probe (struct platform_device *pdev)
+{
+
+	return econet_init();
+
+}
+
 /* Exit routine */
 
 //int econet_remove (struct platform_device *pdev)
@@ -2460,9 +2449,16 @@ static void __exit econet_exit(void)
 //	return 0;
 
 }
-/* Register module functions */
-module_init(econet_init);
-module_exit(econet_exit);
 
-//module_platform_driver(econet_driver);
-//MODULE_DEVICE_TABLE(of, econet_of_match);
+/* See comment above econet_probe() */
+
+int econet_remove (struct platform_device *pdev)
+{
+	econet_exit();
+	return 0;
+}
+
+/* Register module functions */
+//module_init(econet_init);
+//module_exit(econet_exit);
+module_platform_driver(econet_driver);
