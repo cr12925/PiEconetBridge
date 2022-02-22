@@ -693,41 +693,41 @@ void econet_readconfig(void)
 		exit(EXIT_FAILURE);
 	}
 
-        if (regcomp(&r_entry_wire, "^\\s*([Ww]|WIRE)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{4,5}|AUTO)\\s*$", REG_EXTENDED) != 0)
-        {
-                fprintf(stderr, "Unable to compile full wire station regex.\n");
-                exit(EXIT_FAILURE);
-        }
+	if (regcomp(&r_entry_wire, "^\\s*([Ww]|WIRE)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3}|\\*)\\s+([[:digit:]]{4,5}|AUTO)\\s*$", REG_EXTENDED) != 0)
+	{
+		fprintf(stderr, "Unable to compile full wire station regex.\n");
+		exit(EXIT_FAILURE);
+	}
 
-        if (regcomp(&r_entry_learn, "^\\s*([Ll]|LEARN|DYNAMIC)\\s+([[:digit:]]{1,3})\\s*$", REG_EXTENDED) != 0)
-        {
-                fprintf(stderr, "Unable to compile full wire station regex.\n");
-                exit(EXIT_FAILURE);
-        }
+	if (regcomp(&r_entry_learn, "^\\s*([Ll]|LEARN|DYNAMIC)\\s+([[:digit:]]{1,3})\\s*$", REG_EXTENDED) != 0)
+	{
+		fprintf(stderr, "Unable to compile full wire station regex.\n");
+		exit(EXIT_FAILURE);
+	}
 
-        if (regcomp(&r_entry_trunk, "^\\s*([T]|TRUNK)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{4,5})\\s+([^[:space:]]+)\\s+([[:digit:]]{4,5})\\s*$", REG_EXTENDED | REG_ICASE) != 0)
-        {
-                fprintf(stderr, "Unable to compile trunk regex.\n");
-                exit(EXIT_FAILURE);
-        }
+	if (regcomp(&r_entry_trunk, "^\\s*([T]|TRUNK)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{4,5})\\s+([^[:space:]]+)\\s+([[:digit:]]{4,5})\\s*$", REG_EXTENDED | REG_ICASE) != 0)
+	{
+		fprintf(stderr, "Unable to compile trunk regex.\n");
+		exit(EXIT_FAILURE);
+	}
 
-        if (regcomp(&r_entry_xlate, "^\\s*([X]|XLATE|TRANSLATE)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s*$", REG_EXTENDED | REG_ICASE) != 0)
-        {
-                fprintf(stderr, "Unable to compile network translation regex.\n");
-                exit(EXIT_FAILURE);
-        }
+	if (regcomp(&r_entry_xlate, "^\\s*([X]|XLATE|TRANSLATE)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s*$", REG_EXTENDED | REG_ICASE) != 0)
+	{
+		fprintf(stderr, "Unable to compile network translation regex.\n");
+		exit(EXIT_FAILURE);
+	}
 
-        if (regcomp(&r_entry_fw, "^\\s*([Y]|FIREWALL)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+(DROP|ACCEPT)\\s*$", REG_EXTENDED | REG_ICASE) != 0)
-        {
-                fprintf(stderr, "Unable to compile network firewall regex.\n");
-                exit(EXIT_FAILURE);
-        }
+	if (regcomp(&r_entry_fw, "^\\s*([Y]|FIREWALL)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+(DROP|ACCEPT)\\s*$", REG_EXTENDED | REG_ICASE) != 0)
+	{
+		fprintf(stderr, "Unable to compile network firewall regex.\n");
+		exit(EXIT_FAILURE);
+	}
 
-        if (regcomp(&r_entry_filter, "^\\s*FILTER\\s+(IN|OUT)\\s+([[:digit:]]{1,3})\\s+NET\\s+([[:digit:]]{1,3})\\s*$", REG_EXTENDED | REG_ICASE) != 0)
-        {
-                fprintf(stderr, "Unable to compile network filter regex.\n");
-                exit(EXIT_FAILURE);
-        }
+	if (regcomp(&r_entry_filter, "^\\s*FILTER\\s+(IN|OUT)\\s+([[:digit:]]{1,3})\\s+NET\\s+([[:digit:]]{1,3})\\s*$", REG_EXTENDED | REG_ICASE) != 0)
+	{
+		fprintf(stderr, "Unable to compile network filter regex.\n");
+		exit(EXIT_FAILURE);
+	}
 
 	while (!feof(configfile))
 	{
@@ -945,11 +945,11 @@ void econet_readconfig(void)
 
 				if (network[networkp].pipewritesocket != -1)
 				{
-                        		network[networkp].pind = pmax; // Index into pset from the network[] array
+					network[networkp].pind = pmax; // Index into pset from the network[] array
 
-                       			fd_ptr[network[networkp].listensocket] = networkp; // Create the index to find a station from its FD
+					fd_ptr[network[networkp].listensocket] = networkp; // Create the index to find a station from its FD
 	
-                       			pset[pmax++].fd = network[networkp].listensocket; // Fill in our poll structure
+					pset[pmax++].fd = network[networkp].listensocket; // Fill in our poll structure
 	
 					ECONET_SET_STATION(econet_stations, net, stn); // Put it in our list of AUN bridges
 
@@ -1118,17 +1118,17 @@ void econet_readconfig(void)
 				trunk_advertizable[network[networkp].network] = 0xff;
 			}
 
-                        // Set up the listener
+			// Set up the listener
 
 			if (entry == -1) // Doesn't presently exist
 			{
-                        	if ( (network[networkp].listensocket = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
-                        	{
-                                	fprintf(stderr, "Failed to open listening socket for local emulation %d/%d: %s.", network[networkp].network, network[networkp].station, strerror(errno));
-                                	exit(EXIT_FAILURE);
-                        	}
+				if ( (network[networkp].listensocket = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+				{
+					fprintf(stderr, "Failed to open listening socket for local emulation %d/%d: %s.", network[networkp].network, network[networkp].station, strerror(errno));
+					exit(EXIT_FAILURE);
+				}
 	
-                        	service.sin_family = AF_INET;
+				service.sin_family = AF_INET;
 				if (*basenet && port == 0)
 				{
 					sprintf(tmp,"%s.%d",basenet,network[networkp].station);
@@ -1140,19 +1140,19 @@ void econet_readconfig(void)
 					service.sin_addr.s_addr = INADDR_ANY;
 				}
 				network[networkp].port = port;
-                        	service.sin_port = htons(network[networkp].port);
+				service.sin_port = htons(network[networkp].port);
 	
-                        	if (bind(network[networkp].listensocket, (struct sockaddr *) &service, sizeof(service)) != 0)
-                        	{
-                                	fprintf(stderr, "Failed to bind listening socket for local emulation %d/%d: %s.", network[networkp].network, network[networkp].station, strerror(errno));
-                                	exit(EXIT_FAILURE);
-                        	}
+				if (bind(network[networkp].listensocket, (struct sockaddr *) &service, sizeof(service)) != 0)
+				{
+					fprintf(stderr, "Failed to bind listening socket for local emulation %d/%d: %s.", network[networkp].network, network[networkp].station, strerror(errno));
+					exit(EXIT_FAILURE);
+				}
 
-                        	network[networkp].pind = pmax; // Index into pset from the network[] array
+				network[networkp].pind = pmax; // Index into pset from the network[] array
 
-                        	fd_ptr[network[networkp].listensocket] = networkp; // Create the index to find a station from its FD
+				fd_ptr[network[networkp].listensocket] = networkp; // Create the index to find a station from its FD
 
-                        	pset[pmax++].fd = network[networkp].listensocket; // Fill in our poll structure
+				pset[pmax++].fd = network[networkp].listensocket; // Fill in our poll structure
 
 				ECONET_SET_STATION(econet_stations, net, stn); // Put it in our list of AUN bridges
 
@@ -1169,109 +1169,136 @@ void econet_readconfig(void)
 	
 		}
 		else if (regexec(&r_entry_wire, linebuf, 5, matches, 0) == 0)
-                {
-                        char	tmp[300];
+		{
+			char	tmp[300];
 			int	ptr;
+			short this_type;
+			unsigned char this_stn, this_net;
+			unsigned int this_port;
 
-                        /* Find our matches */
-                        for (count = 1; count <= 4; count++)
-                        {
-                                ptr = 0;
-                                while (ptr < (matches[count].rm_eo - matches[count].rm_so))
-                                {
-                                        tmp[ptr] = linebuf[ptr + matches[count].rm_so];
-                                        ptr++;
-                                }
-                                tmp[ptr] = 0x00;
+			/* Find our matches */
+			for (count = 1; count <= 4; count++)
+			{
+				ptr = 0;
+				while (ptr < (matches[count].rm_eo - matches[count].rm_so))
+				{
+					tmp[ptr] = linebuf[ptr + matches[count].rm_so];
+					ptr++;
+				}
+				tmp[ptr] = 0x00;
 
-                                switch (count)
-                                {
-                                        case 1: // W (Wire machine, listen for RAW packets), X (Wire machine, listen for AUN)
-                                                switch (tmp[0]) {
-                                                        case 'W':
-                                                        case 'w':
-                                                                network[networkp].type = ECONET_HOSTTYPE_WIRE_AUN;
-                                                                break;
-                                                }
-                                                break;
-                                        case 2:
-                                                network[networkp].network = atoi(tmp);
-                                                break;
-                                        case 3:
-                                                network[networkp].station = atoi(tmp);
-                                                break;
-                                        case 4:
-						if (!strcmp(tmp,"AUTO"))
-						{
-							if (*basenet)
-							{
-								network[networkp].port = 0;
-							}
-							else {
-								if (network[networkp].network > 127)
-								{
-									fprintf(stderr, "Network must be under 128 for AUTO to work: %s\n",linebuf);
-									exit(EXIT_FAILURE);
-								}
-								network[networkp].port = 10000+network[networkp].network*256+network[networkp].station;
-							}
+				switch (count)
+				{
+					case 1: // W (Wire machine, listen for RAW packets), X (Wire machine, listen for AUN)
+						switch (tmp[0]) {
+							case 'W':
+							case 'w':
+								this_type = ECONET_HOSTTYPE_WIRE_AUN;
+								break;
 						}
-                                                else
-                                                	network[networkp].port = atoi(tmp);	
-                                                break;
-                                }
-                        }
-
-                        // Stop this being a server
-                        network[networkp].servertype = 0;
-
-                        econet_ptr[network[networkp].network][network[networkp].station] = networkp;
-
-                        // Set up the listener
-
-                        if ( (network[networkp].listensocket = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
-                        {
-                                fprintf(stderr, "Failed to open listening socket for econet net/stn %d/%d: %s.", network[networkp].network, network[networkp].station, strerror(errno));
-                                exit(EXIT_FAILURE);
-                        }
-
-                        service.sin_family = AF_INET;
-			if (*basenet && network[networkp].port == 0)
-			{
-				sprintf(tmp,"%s.%d",basenet,network[networkp].station);
-				service.sin_addr.s_addr = inet_addr(tmp);
-				service.sin_port = htons(32768);
-			}
-			else
-			{
-				service.sin_addr.s_addr = INADDR_ANY;
-				service.sin_port = htons(network[networkp].port);
+						break;
+					case 2:
+						this_net = atoi(tmp);
+						break;
+					case 3:
+						// We cheat and let station 0 mean *
+						this_stn = atoi(tmp);
+						break;
+					case 4:
+						// We cheat and let port 0 mean AUTO
+						this_port = atoi(tmp);
+						if (this_port == 0 && this_net > 127)
+						{
+							fprintf(stderr, "Network must be under 128 for AUTO to work: %s\n",linebuf);
+							exit(EXIT_FAILURE);
+						}
+						break;
+				}
 			}
 
-                        if (bind(network[networkp].listensocket, (struct sockaddr *) &service, sizeof(service)) != 0)
-                        {
-                                fprintf(stderr, "Failed to bind listening socket for econet net/stn %d/%d: %s.", network[networkp].network, network[networkp].station, strerror(errno));
-                                exit(EXIT_FAILURE);
-                        }
+			// Build a simple array of all defined stations on this network
+			unsigned char inuse[255] = {'\0'};
+			for (short i=0;i<networkp;i++)
+			{
+				if (network[i].network == this_net)
+					inuse[network[i].station]=1;
+			}
 
-                        network[networkp].pind = pmax;
-			network[networkp].seq = 0x00004000;
+			// Now if a station has not been specificed we want to set all possible
+			// unused stations, otherwise we just set the one asked
+			// We can simplify the logic by using a loop in both
+			// cases and just set the range accordingly.
+			unsigned char stn_low=this_stn?this_stn:1, stn_high=this_stn?this_stn:254;
 
-			gettimeofday(&(network[networkp].last_bridge_reply),0);
-			clock_gettime (CLOCK_MONOTONIC, &(network[networkp].last_wire_tx));
-                        fd_ptr[network[networkp].listensocket] = networkp; // Create the index to find a station from its FD
+			for (this_stn=stn_low;this_stn<=stn_high;this_stn++)
+			{
+				if (inuse[this_stn])
+				{
+					if (!fs_quiet) fprintf(stderr, "   Skipping station %d because previously defined\n", this_stn);
+					continue;
+				}
 
-			if (network[networkp].network != 0)
-				trunk_advertizable[network[networkp].network] = 0xff;
+				// Stop this being a server
+				network[networkp].servertype = 0;
+
+				network[networkp].port = this_port;
+				if (this_port == 0 && !*basenet)
+				{
+					network[networkp].port = 10000+this_net*256+this_stn;
+				}
+
+				network[networkp].station = this_stn;
+				network[networkp].network = this_net;
+				network[networkp].type = this_type;
+
+				econet_ptr[network[networkp].network][network[networkp].station] = networkp;
+
+				// Set up the listener
+
+				if ( (network[networkp].listensocket = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+				{
+					fprintf(stderr, "Failed to open listening socket for econet net/stn %d/%d: %s.", network[networkp].network, network[networkp].station, strerror(errno));
+					exit(EXIT_FAILURE);
+				}
+
+				service.sin_family = AF_INET;
+				if (*basenet && network[networkp].port == 0)
+				{
+					sprintf(tmp,"%s.%d",basenet,network[networkp].station);
+					service.sin_addr.s_addr = inet_addr(tmp);
+					service.sin_port = htons(32768);
+				}
+				else
+				{
+					service.sin_addr.s_addr = INADDR_ANY;
+					service.sin_port = htons(network[networkp].port);
+				}
+
+				if (bind(network[networkp].listensocket, (struct sockaddr *) &service, sizeof(service)) != 0)
+				{
+					fprintf(stderr, "Failed to bind listening socket for econet net/stn %d/%d: %s.", network[networkp].network, network[networkp].station, strerror(errno));
+					exit(EXIT_FAILURE);
+				}
+
+				network[networkp].pind = pmax;
+				network[networkp].seq = 0x00004000;
+
+				gettimeofday(&(network[networkp].last_bridge_reply),0);
+				clock_gettime (CLOCK_MONOTONIC, &(network[networkp].last_wire_tx));
+				fd_ptr[network[networkp].listensocket] = networkp; // Create the index to find a station from its FD
+
+				if (network[networkp].network != 0)
+					trunk_advertizable[network[networkp].network] = 0xff;
 	
-                        pset[pmax++].fd = network[networkp].listensocket; // Fill in our poll structure
+				pset[pmax++].fd = network[networkp].listensocket; // Fill in our poll structure
 
-                        networkp++;
-                }
+				networkp++;
+			}
+		}
 		else if (regexec(&r_entry_learn, linebuf, 3, matches, 0) == 0) // Learn. Unknown sources will get put into this network temporarily, and garbage-collected out when they have been idle for a while
 		{
 
-                        char	tmp[300];
+			char	tmp[300];
 			int	ptr;
 
 			/* Find our match */
@@ -1327,15 +1354,15 @@ void econet_readconfig(void)
 			for (count = 2; count < 7; count++)
 			{
 				ptr = 0;
-                                while (ptr < (matches[count].rm_eo - matches[count].rm_so))
-                                {
-                                        tmp[ptr] = linebuf[ptr + matches[count].rm_so];
-                                        ptr++;
-                                }
-                                tmp[ptr] = 0x00;
+				while (ptr < (matches[count].rm_eo - matches[count].rm_so))
+				{
+					tmp[ptr] = linebuf[ptr + matches[count].rm_so];
+					ptr++;
+				}
+				tmp[ptr] = 0x00;
 
-                                switch (count)
-                                {
+				switch (count)
+				{
 					case 2: // Trunk number
 						trunknum = atoi(tmp);
 						break;
@@ -1362,21 +1389,21 @@ void econet_readconfig(void)
 			memset (trunks[trunknum].xlate_src, 0xff, sizeof(trunks[trunknum].xlate_src));
 			memset (trunks[trunknum].xlate_dst, 0xff, sizeof(trunks[trunknum].xlate_dst));
 
-                        if ( (trunks[trunknum].listensocket = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
-                        {
-                                fprintf(stderr, "Failed to open listening socket for trunk %d: %s.", trunknum, strerror(errno));
-                                exit(EXIT_FAILURE);
-                        }
+			if ( (trunks[trunknum].listensocket = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+			{
+				fprintf(stderr, "Failed to open listening socket for trunk %d: %s.", trunknum, strerror(errno));
+				exit(EXIT_FAILURE);
+			}
 
-                        service.sin_family = AF_INET;
-                        service.sin_addr.s_addr = INADDR_ANY;
-                        service.sin_port = htons(localport);
+			service.sin_family = AF_INET;
+			service.sin_addr.s_addr = INADDR_ANY;
+			service.sin_port = htons(localport);
 
-                        if (bind(trunks[trunknum].listensocket, (struct sockaddr *) &service, sizeof(service)) != 0)
-                        {
-                                fprintf(stderr, "Failed to bind listening socket for trunk %d: %s.", trunknum, strerror(errno));
-                                exit(EXIT_FAILURE);
-                        }
+			if (bind(trunks[trunknum].listensocket, (struct sockaddr *) &service, sizeof(service)) != 0)
+			{
+				fprintf(stderr, "Failed to bind listening socket for trunk %d: %s.", trunknum, strerror(errno));
+				exit(EXIT_FAILURE);
+			}
 
 			memset (&hints, 0, sizeof(hints));
 			hints.ai_family=AF_INET;
@@ -1395,7 +1422,7 @@ void econet_readconfig(void)
 
 			trunks[trunknum].port = port;
 
-                        pset[pmax++].fd = trunks[trunknum].listensocket; // Fill in our poll structure
+			pset[pmax++].fd = trunks[trunknum].listensocket; // Fill in our poll structure
 			trunk_fd_ptr[trunks[trunknum].listensocket] = trunknum; // Map the Trunk FD array
 
 			// Populate our advertizable structure
@@ -1412,16 +1439,16 @@ void econet_readconfig(void)
 
 			for (count = 2; count < 5; count++)
 			{
-                                ptr = 0;
-                                while (ptr < (matches[count].rm_eo - matches[count].rm_so))
-                                {
-                                        tmp[ptr] = linebuf[ptr + matches[count].rm_so];
-                                        ptr++;
-                                }
-                                tmp[ptr] = 0x00;
+				ptr = 0;
+				while (ptr < (matches[count].rm_eo - matches[count].rm_so))
+				{
+					tmp[ptr] = linebuf[ptr + matches[count].rm_so];
+					ptr++;
+				}
+				tmp[ptr] = 0x00;
 
-                                switch (count)
-                                {
+				switch (count)
+				{
 					case 2:  // Trunk number
 						trunknum = atoi(tmp);
 						break;
@@ -1438,8 +1465,8 @@ void econet_readconfig(void)
 		}
 		else if (regexec(&r_entry_fw, linebuf, 8, matches, 0) == 0)
 		{
-                        int ptr;
-                        char tmp[300];
+			int ptr;
+			char tmp[300];
 
 			unsigned short trunknum;
 
@@ -1449,15 +1476,15 @@ void econet_readconfig(void)
 
 			e->next = NULL;
 
-                        for (count = 2; count < 8; count++)
-                        {
-                                ptr = 0;
-                                while (ptr < (matches[count].rm_eo - matches[count].rm_so))
-                                {
-                                        tmp[ptr] = linebuf[ptr + matches[count].rm_so];
-                                        ptr++;
-                                }
-                                tmp[ptr] = 0x00;
+			for (count = 2; count < 8; count++)
+			{
+				ptr = 0;
+				while (ptr < (matches[count].rm_eo - matches[count].rm_so))
+				{
+					tmp[ptr] = linebuf[ptr + matches[count].rm_so];
+					ptr++;
+				}
+				tmp[ptr] = 0x00;
 
 				switch (count)
 				{
@@ -2576,19 +2603,19 @@ int econet_find_source_station (struct sockaddr_in *src_address)
 	int from_found = 0xffff;
 	int count = 0;
 
-        while ((from_found == 0xffff) && (count < stations))
-        {
+	while ((from_found == 0xffff) && (count < stations))
+	{
 
 		if ( (network[count].s_addr.s_addr == src_address->sin_addr.s_addr) &&
-             		(network[count].port == ntohs(src_address->sin_port)) &&
-             		(	network[count].is_dynamic == 0 ||
-                		(network[count].last_transaction > (time(NULL) - ECONET_LEARNED_HOST_IDLE_TIMEOUT))
-             		)
-            	   )
-  	          	from_found = count;
+			(network[count].port == ntohs(src_address->sin_port)) &&
+			(	network[count].is_dynamic == 0 ||
+				(network[count].last_transaction > (time(NULL) - ECONET_LEARNED_HOST_IDLE_TIMEOUT))
+			)
+		   )
+			from_found = count;
 
-                 count++;
-        }
+		 count++;
+	}
 
 	return from_found;
 }
@@ -2624,13 +2651,13 @@ int trunk_xlate_fw(struct __econet_packet_aun *p, int trunk, unsigned char dir)
 
 	if (dir == 1) // Outbound
 	{
-                if ((p->p.dstnet != p->p.srcnet) && (p->p.srcnet == 0)) // If traffic coming from net 0 (as it will be until AUN devices have a "default route" system), and we are not sending to dstnet which is the same as srcnet, substitute the local network number. Note that this allows a trunk to carry net 0 from one wired econet to another.
-                        p->p.srcnet = localnet;
+		if ((p->p.dstnet != p->p.srcnet) && (p->p.srcnet == 0)) // If traffic coming from net 0 (as it will be until AUN devices have a "default route" system), and we are not sending to dstnet which is the same as srcnet, substitute the local network number. Note that this allows a trunk to carry net 0 from one wired econet to another.
+			p->p.srcnet = localnet;
 
-                // Next do address translation
+		// Next do address translation
 
-                if (trunks[trunk].xlate_src[p->p.srcnet] != 0xff) // Translate our network number if there is a translation entry
-                        p->p.srcnet = trunks[trunk].xlate_src[p->p.srcnet];
+		if (trunks[trunk].xlate_src[p->p.srcnet] != 0xff) // Translate our network number if there is a translation entry
+			p->p.srcnet = trunks[trunk].xlate_src[p->p.srcnet];
 	}
 	else // Inbound - do firewalling here (no firewalling on outbound traffic)
 	{
@@ -2745,7 +2772,7 @@ int main(int argc, char **argv)
 			case 'r': queue_debug = 1; break;
 			case 's': dump_station_table = 1; break;
 			case 'z': wired_eject = 0; break;
-                        case 'x': use_xattr = 0; break;
+			case 'x': use_xattr = 0; break;
 			case '7': fs_sevenbitbodge = 0; break;
 			case 'h':	
 				fprintf(stderr, " \n\
@@ -3314,7 +3341,7 @@ Options:\n\
 				if ((network[count].type & ECONET_HOSTTYPE_TDIS) && (network[count].aun_head)) // This is an AUN host and it has queued packets
 				{
 					struct timeval now;
-				 	long tdiff; // , rx_tdiff;
+					long tdiff; // , rx_tdiff;
 
 					gettimeofday(&now, 0);
 
@@ -3402,7 +3429,7 @@ Options:\n\
 /*
 								(
 								((tdiff > ECONET_AUN_INTERPACKET_GAP) && (rx_tdiff > ECONET_AUN_INTERPACKET_GAP)) || (usleep(ECONET_AUN_INTERPACKET_GAP * 1000))
-						   	  	) && 
+								) && 
 */
 							econet_write_general(network[count].aun_head->p, network[count].aun_head->size) == network[count].aun_head->size
 						)
