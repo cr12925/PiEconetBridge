@@ -1768,6 +1768,7 @@ const struct of_device_id econet_of_match[] = {
 	{ }
 };
 
+/*
 struct platform_driver econet_driver = {
 	.driver = {
 			.name = DEVICE_NAME,
@@ -1776,7 +1777,7 @@ struct platform_driver econet_driver = {
 	.probe = econet_probe,
 	.remove = econet_remove
 };
-
+*/
 
 /* When a process reads from our device, this gets called. */
 ssize_t econet_readfd(struct file *flip, char *buffer, size_t len, loff_t *offset) {
@@ -2434,7 +2435,7 @@ static int econet_probe (struct platform_device *pdev)
 /* Exit routine */
 
 //int econet_remove (struct platform_device *pdev)
-static void __exit econet_exit(void)
+static void econet_exit(void)
 {
 	econet_gpio_release();
 	
@@ -2459,6 +2460,6 @@ int econet_remove (struct platform_device *pdev)
 }
 
 /* Register module functions */
-//module_init(econet_init);
-//module_exit(econet_exit);
-module_platform_driver(econet_driver);
+module_init(econet_init);
+module_exit(econet_exit);
+//module_platform_driver(econet_driver);
