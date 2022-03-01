@@ -45,8 +45,8 @@
    6		... data
 */
 struct __econet_packet {
-        int ptr; /* Read/Write pointer - holds the index of the *next* byte to be read/written, so always starts at 0 */
-        char data[ECONET_MAX_PACKET_SIZE];
+	int ptr; /* Read/Write pointer - holds the index of the *next* byte to be read/written, so always starts at 0 */
+	char data[ECONET_MAX_PACKET_SIZE];
 };
 
 
@@ -61,17 +61,17 @@ struct __econet_packet {
 
 struct __econet_packet_wire {
 	union {
-                unsigned char data[ECONET_MAX_PACKET_SIZE];
-                struct {
-                        unsigned char dststn;
-                        unsigned char dstnet;
-                        unsigned char srcstn;
-                        unsigned char srcnet;
-                        unsigned char ctrl; // Ctrl & Port are the other way round on the wire from an AUN packet
-                        unsigned char port;
-                        unsigned char data[ECONET_MAX_PACKET_SIZE-6];
-                } p;
-        };
+		unsigned char data[ECONET_MAX_PACKET_SIZE];
+		struct {
+			unsigned char dststn;
+			unsigned char dstnet;
+			unsigned char srcstn;
+			unsigned char srcnet;
+			unsigned char ctrl; // Ctrl & Port are the other way round on the wire from an AUN packet
+			unsigned char port;
+			unsigned char data[ECONET_MAX_PACKET_SIZE-6];
+		} p;
+	};
 };
 
 /* AUN Packet Types */
@@ -114,17 +114,17 @@ struct __econet_packet_aun {
 };
 
 struct __econet_packet_udp {
-        union {
-                unsigned char raw[ECONET_MAX_PACKET_SIZE];
-                struct {
-                        unsigned char ptype;
-                        unsigned char port; /* Yes, port first on AUN; it's CB first on the Econet wire! */
-                        unsigned char ctrl;
-                        unsigned char pad;
+	union {
+		unsigned char raw[ECONET_MAX_PACKET_SIZE];
+		struct {
+			unsigned char ptype;
+			unsigned char port; /* Yes, port first on AUN; it's CB first on the Econet wire! */
+			unsigned char ctrl;
+			unsigned char pad;
 			uint32_t seq;
 			unsigned char data[ECONET_MAX_PACKET_SIZE-4];
-                } p;
-        };
+		} p;
+	};
 };
 
 /* IOCTL Magic */

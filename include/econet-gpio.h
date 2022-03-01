@@ -87,7 +87,7 @@
 
 /* Function declarations */
 
-int econet_probe(struct platform_device *);
+static int econet_probe(struct platform_device *);
 int econet_remove(struct platform_device *);
 int econet_open(struct inode *, struct file *);
 int econet_release(struct inode *, struct file *);
@@ -145,13 +145,13 @@ enum econet_aunstate {
 
 struct __econet_data {
 
-        int irq;
+	int irq;
 	atomic_t irq_state;
-        struct device *dev;
-        struct cdev c_dev;
-        int major;
+	struct device *dev;
+	struct cdev c_dev;
+	int major;
 	dev_t majorminor;
-        atomic_t mode; // IRQ handler state machine IDLEINIT -> IDLE -> (READ / WRITE_START); WRITE_START -> WRITE -> WRITE_WAIT or IDLE. Only IRQ space writes to this.
+	atomic_t mode; // IRQ handler state machine IDLEINIT -> IDLE -> (READ / WRITE_START); WRITE_START -> WRITE -> WRITE_WAIT or IDLE. Only IRQ space writes to this.
 	short userspacemode; // READ, WRITE or TEST. Tells the IRQ handler what it's supposed to be doing. Only userspace writes to this.
 	short open_count;
 	wait_queue_head_t econet_read_queue;
@@ -171,9 +171,9 @@ struct __econet_data {
 };
 
 struct __econet_pkt_buffer {
-        struct __econet_packet_wire d;
-        unsigned int ptr;
-        unsigned int length;
+	struct __econet_packet_wire d;
+	unsigned int ptr;
+	unsigned int length;
 //	char tx_status;
 };
 

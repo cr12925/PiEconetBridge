@@ -40,59 +40,59 @@ int dumpmode_brief = 0;
 void econet_test(void)
 {
 
-        printf("Issuing ioctl() to go into test mode, in case not already there.\n");
-        ioctl(econet_fd, ECONETGPIO_IOC_TEST);
+	printf("Issuing ioctl() to go into test mode, in case not already there.\n");
+	ioctl(econet_fd, ECONETGPIO_IOC_TEST);
 
-        printf("Setting Address lines to A1A0 = 10. Test & press a key.");
-        ioctl(econet_fd, ECONETGPIO_IOC_SETA, 0x2);
-        fgetc(stdin);
+	printf("Setting Address lines to A1A0 = 10. Test & press a key.");
+	ioctl(econet_fd, ECONETGPIO_IOC_SETA, 0x2);
+	fgetc(stdin);
 
-        printf("Setting Address lines to A1A0 = 11. Test & press a key.");
-        ioctl(econet_fd, ECONETGPIO_IOC_SETA, 0x3);
-        fgetc(stdin);
+	printf("Setting Address lines to A1A0 = 11. Test & press a key.");
+	ioctl(econet_fd, ECONETGPIO_IOC_SETA, 0x3);
+	fgetc(stdin);
 
-        printf("Setting Address lines to A1A0 = 01. Test & press a key.");
-        ioctl(econet_fd, ECONETGPIO_IOC_SETA, 0x1);
-        fgetc(stdin);
+	printf("Setting Address lines to A1A0 = 01. Test & press a key.");
+	ioctl(econet_fd, ECONETGPIO_IOC_SETA, 0x1);
+	fgetc(stdin);
 
-        printf("Setting Bus Write Mode (R/W and DIR LOW.) Test & press a key.");
-        ioctl(econet_fd, ECONETGPIO_IOC_WRITEMODE, ECONET_GPIO_WRITE);
-        fgetc(stdin);
+	printf("Setting Bus Write Mode (R/W and DIR LOW.) Test & press a key.");
+	ioctl(econet_fd, ECONETGPIO_IOC_WRITEMODE, ECONET_GPIO_WRITE);
+	fgetc(stdin);
 
-        printf("Setting Bus Read Mode. (R/W and DIR HIGH.) Test & press a key.");
-        ioctl(econet_fd, ECONETGPIO_IOC_WRITEMODE, ECONET_GPIO_READ);
-        fgetc(stdin);
+	printf("Setting Bus Read Mode. (R/W and DIR HIGH.) Test & press a key.");
+	ioctl(econet_fd, ECONETGPIO_IOC_WRITEMODE, ECONET_GPIO_READ);
+	fgetc(stdin);
 
-        printf("Setting Chip Select to Selected (/CS LOW.) Test & press a key.");
-        ioctl(econet_fd, ECONETGPIO_IOC_SETCS, ECONET_GPIO_CS_ON);
-        fgetc(stdin);
+	printf("Setting Chip Select to Selected (/CS LOW.) Test & press a key.");
+	ioctl(econet_fd, ECONETGPIO_IOC_SETCS, ECONET_GPIO_CS_ON);
+	fgetc(stdin);
 
-        printf("Setting Chip Select to UnSelected (/CS HIGH.) Test & press a key.");
-        ioctl(econet_fd, ECONETGPIO_IOC_SETCS, ECONET_GPIO_CS_OFF);
-        fgetc(stdin);
+	printf("Setting Chip Select to UnSelected (/CS HIGH.) Test & press a key.");
+	ioctl(econet_fd, ECONETGPIO_IOC_SETCS, ECONET_GPIO_CS_OFF);
+	fgetc(stdin);
 
-        printf("Setting Data Lines to 10011001. Test & press a key.");
-        ioctl(econet_fd, ECONETGPIO_IOC_SETBUS, 0x99);
-        fgetc(stdin);
+	printf("Setting Data Lines to 10011001. Test & press a key.");
+	ioctl(econet_fd, ECONETGPIO_IOC_SETBUS, 0x99);
+	fgetc(stdin);
 
-        printf("Setting Data Lines to 01100110. Test & press a key.");
-        ioctl(econet_fd, ECONETGPIO_IOC_SETBUS, 0x66);
-        fgetc(stdin);
+	printf("Setting Data Lines to 01100110. Test & press a key.");
+	ioctl(econet_fd, ECONETGPIO_IOC_SETBUS, 0x66);
+	fgetc(stdin);
 
-        printf("Setting Data Lines to D7-0 10101010. Test & press a key.");
-        ioctl(econet_fd, ECONETGPIO_IOC_SETBUS, 0xaa);
-        fgetc(stdin);
+	printf("Setting Data Lines to D7-0 10101010. Test & press a key.");
+	ioctl(econet_fd, ECONETGPIO_IOC_SETBUS, 0xaa);
+	fgetc(stdin);
 
-        printf("Going into flag fill mode for oscilloscope check. Test & press a key");
-        ioctl(econet_fd, ECONETGPIO_IOC_FLAGFILL, 1);
-        fgetc(stdin);
+	printf("Going into flag fill mode for oscilloscope check. Test & press a key");
+	ioctl(econet_fd, ECONETGPIO_IOC_FLAGFILL, 1);
+	fgetc(stdin);
 
-        printf("Calling test packet ioctl(). Press Q to quit. Any other key to retransmit.");
-        do {
-                ioctl(econet_fd, ECONETGPIO_IOC_TESTPACKET);
-        } while (fgetc(stdin) != 'Q');
+	printf("Calling test packet ioctl(). Press Q to quit. Any other key to retransmit.");
+	do {
+		ioctl(econet_fd, ECONETGPIO_IOC_TESTPACKET);
+	} while (fgetc(stdin) != 'Q');
 
-        printf("Tests completed.\n\n");
+	printf("Tests completed.\n\n");
 
 
 }

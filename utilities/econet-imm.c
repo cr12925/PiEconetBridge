@@ -60,44 +60,44 @@ char * econet_strtxerr(int e)
 
 void dump_pkt_data(unsigned char *a, int len, unsigned long start_index)
 {
-        int count;
+	int count;
 
-        count = 0;
-        while (count < len)
-        {
-                char dbgstr[200];
-                char tmpstr[200];
-                int z;
+	count = 0;
+	while (count < len)
+	{
+		char dbgstr[200];
+		char tmpstr[200];
+		int z;
 
-                sprintf (dbgstr, "%08x ", count + start_index);
-                z = 0;
-                while (z < 32)
-                {
-                        if ((count+z) < len)
-                        {
-                                sprintf(tmpstr, "%02x ", *(a+count+z));
-                                strcat(dbgstr, tmpstr);
-                        }
-                        else    strcat(dbgstr, "   ");
-                        z++;
-                }
+		sprintf (dbgstr, "%08x ", count + start_index);
+		z = 0;
+		while (z < 32)
+		{
+			if ((count+z) < len)
+			{
+				sprintf(tmpstr, "%02x ", *(a+count+z));
+				strcat(dbgstr, tmpstr);
+			}
+			else    strcat(dbgstr, "   ");
+			z++;
+		}
 
-                z = 0;
-                while (z < 32)
-                {
-                        if ((count+z) < len)
-                        {
-                                sprintf(tmpstr, "%c", (*(a+count+z) >= 32 && *(a+count+z) < 127) ? *(a+count+z) : '.');
-                                strcat(dbgstr, tmpstr);
-                        }
-                        z++;
-                }
+		z = 0;
+		while (z < 32)
+		{
+			if ((count+z) < len)
+			{
+				sprintf(tmpstr, "%c", (*(a+count+z) >= 32 && *(a+count+z) < 127) ? *(a+count+z) : '.');
+				strcat(dbgstr, tmpstr);
+			}
+			z++;
+		}
 
-                fprintf(stderr, "%s\n", dbgstr);
+		fprintf(stderr, "%s\n", dbgstr);
 
-                count += 32;
+		count += 32;
 
-        }
+	}
 }
 
 void machinepeek(void)
