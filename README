@@ -432,6 +432,23 @@ You must:
 
   (Thanks to @sweh on stardot.org.uk for the above patch & suggestion.)
 
+- If the station ID is a * (e.g. W 0 * AUTO) then the bridge will
+  automatically define all unused stations as being wired, as if you had
+  entered
+    W 0 1 AUTO
+    W 0 2 AUTO
+    ...
+    W 0 254 AUTO
+  This entry should be last in the configuration file (definitely after any
+  Server or Printer lines).
+  e.g.
+    F 0 254 AUTO /econet
+    P 0 235 AUTO lp
+    A 0 100 10.0.0.100 32768
+    W 0 * AUTO
+  would skip stations 100, 235, 254 because these are already defined, and
+  define all the rest as wired.
+
 Please see the section on "Advanced network configuration" in the NETWORK
 file for another way of configuring port numbers, and which helps with
 RiscOS AUN clients.
