@@ -49,22 +49,22 @@
 /* Pin numbering index */
 
 enum econet_gpio_pin_index {
-        EGP_D0 = 0,
-        EGP_D1,
-        EGP_D2,
-        EGP_D3,
-        EGP_D4,
-        EGP_D5,
-        EGP_D6,
-        EGP_D7,
-        EGP_A0,
-        EGP_A1,
-        EGP_RST,
-        EGP_CS,
-        EGP_CLK,
-        EGP_RW,
-        EGP_DIR,
-        EGP_IRQ,
+	EGP_D0 = 0,
+	EGP_D1,
+	EGP_D2,
+	EGP_D3,
+	EGP_D4,
+	EGP_D5,
+	EGP_D6,
+	EGP_D7,
+	EGP_A0,
+	EGP_A1,
+	EGP_RST,
+	EGP_CS,
+	EGP_CLK,
+	EGP_RW,
+	EGP_DIR,
+	EGP_IRQ,
 	EGP_CSRETURN };
 
 #endif

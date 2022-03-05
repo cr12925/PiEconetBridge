@@ -56,7 +56,7 @@ extern int aun_send (struct __econet_packet_aun *, int);
 extern uint32_t get_local_seq(unsigned char, unsigned char);
 
 // routine in econet-bridge.c to find a printer definition
-extern int get_printer(unsigned char, unsigned char, char*);
+extern int8_t get_printer(unsigned char, unsigned char, char*);
 
 short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for extra year information
 short fs_sjfunc; // Whether SJ MDFS functionality is turned on (global - not per fileserver)
@@ -686,8 +686,8 @@ void fs_read_xattr(unsigned char *path, struct objattr *r)
 {
 	// Default values
 	r->owner=0; // syst
-        r->load=0;
-        r->exec=0;
+	r->load=0;
+	r->exec=0;
 	r->perm=FS_PERM_OWN_R | FS_PERM_OWN_W | FS_PERM_OTH_R;
 
 	char *dotfile=pathname_to_dotfile(path);
@@ -1413,7 +1413,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			//
 			//
 
-		 	strncpy(result->ownername, result->paths->ownername, 10);
+			strncpy(result->ownername, result->paths->ownername, 10);
 			result->ownername[10] = '\0';
 
 			result->ftype = result->paths->ftype;
@@ -1828,9 +1828,9 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 	sprintf(regex, "^(%s{1,16})", FSREGEX);
 	if (regcomp(&r_discname, regex, REG_EXTENDED) != 0)
 	{
-                fprintf(stderr, "Unable to compile regex for disc names.\n");
-                exit (EXIT_FAILURE);
-        }
+		fprintf(stderr, "Unable to compile regex for disc names.\n");
+		exit (EXIT_FAILURE);
+	}
 
 	// Ensure serverparam begins with /
 	if (serverparam[0] != '/')
@@ -4079,8 +4079,8 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	if (p_root.ftype == FS_FTYPE_NOTFOUND && !fs_normalize_path(server, active_id, tmppath2, -1, &p_root))
 	{
 		if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Failed to map URD on %s, even %s\n", "", net, stn, discname, tmppath2);
-                fs_error(server, reply_port, net, stn, 0xFF, "Cannot map root directory on new disc");
-                return;
+		fs_error(server, reply_port, net, stn, 0xFF, "Cannot map root directory on new disc");
+		return;
 
 	}
 
@@ -4127,39 +4127,39 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 
 	if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Successfully mapped new URD - uHandle %02X, full path %s\n", "", net, stn, root, active[server][active_id].fhandles[root].acornfullpath);
 
-        strcpy(active[server][active_id].fhandles[cur].acornfullpath, p_root.acornfullpath);
-        fs_store_tail_path(active[server][active_id].fhandles[cur].acorntailpath, p_root.acornfullpath);
-        active[server][active_id].fhandles[cur].mode = 1;
+	strcpy(active[server][active_id].fhandles[cur].acornfullpath, p_root.acornfullpath);
+	fs_store_tail_path(active[server][active_id].fhandles[cur].acorntailpath, p_root.acornfullpath);
+	active[server][active_id].fhandles[cur].mode = 1;
 
 	if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d Successfully mapped new CWD - uHandle %02X, full path %s\n", "", net, stn, cur, active[server][active_id].fhandles[cur].acornfullpath);
 
 	sprintf(tmppath, ":%s.%s", discname, lib_dir);
 
 	// If we find library directory on new disc, use it. Otherwise leave it alone
-        if (fs_normalize_path(server, active_id, tmppath, -1, &p_lib) && p_lib.ftype == FS_FTYPE_DIR)
-        {
+	if (fs_normalize_path(server, active_id, tmppath, -1, &p_lib) && p_lib.ftype == FS_FTYPE_DIR)
+	{
 
 		if ((internal_lib_handle = fs_open_interlock(server, p_lib.unixpath, 1, active[server][active_id].userid)) == -1)
-               	{
-                       	fs_error(server, reply_port, net, stn, 0xFF, "Library directory inaccessible!");
-                       	fs_deallocate_user_dir_channel(server, active_id, root);
-                       	fs_deallocate_user_dir_channel(server, active_id, cur);
-                       	fs_close_interlock(server, internal_root_handle, 1);
-                       	fs_close_interlock(server, internal_cur_handle, 1);
-                       	return;
-               	}
+		{
+			fs_error(server, reply_port, net, stn, 0xFF, "Library directory inaccessible!");
+			fs_deallocate_user_dir_channel(server, active_id, root);
+			fs_deallocate_user_dir_channel(server, active_id, cur);
+			fs_close_interlock(server, internal_root_handle, 1);
+			fs_close_interlock(server, internal_cur_handle, 1);
+			return;
+		}
 	
-        	if ((lib = fs_allocate_user_dir_channel(server, active_id, internal_lib_handle)) == -1) // Can't allocate handle
-        	{
-                	fs_error(server, reply_port, net, stn, 0xFF, "Library directory channel ?");
-                       	fs_error(server, reply_port, net, stn, 0xFF, "Library directory inaccessible!");
-                       	fs_deallocate_user_dir_channel(server, active_id, root);
-                       	fs_deallocate_user_dir_channel(server, active_id, cur);
-                       	fs_close_interlock(server, internal_root_handle, 1);
-                       	fs_close_interlock(server, internal_cur_handle, 1);
+		if ((lib = fs_allocate_user_dir_channel(server, active_id, internal_lib_handle)) == -1) // Can't allocate handle
+		{
+			fs_error(server, reply_port, net, stn, 0xFF, "Library directory channel ?");
+			fs_error(server, reply_port, net, stn, 0xFF, "Library directory inaccessible!");
+			fs_deallocate_user_dir_channel(server, active_id, root);
+			fs_deallocate_user_dir_channel(server, active_id, cur);
+			fs_close_interlock(server, internal_root_handle, 1);
+			fs_close_interlock(server, internal_cur_handle, 1);
 			fs_close_interlock(server, internal_lib_handle, 1);
-                	return;
-        	}
+			return;
+		}
 
 		strcpy(active[server][active_id].fhandles[lib].acornfullpath, p_lib.acornfullpath);
 		fs_store_tail_path(active[server][active_id].fhandles[lib].acorntailpath, p_lib.acornfullpath);
@@ -4465,7 +4465,7 @@ void fs_delete(int server, unsigned short reply_port, int active_id, unsigned ch
 			if ( 
 					((e->ftype == FS_FTYPE_FILE) && unlink((const char *) e->unixpath)) ||
 				((e->ftype == FS_FTYPE_DIR) && rmdir((const char *) e->unixpath))
-		   		) // Failed
+				) // Failed
 				{	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Failed to unlink %s\n", "", net, stn, e->unixpath);
 					fs_free_wildcard_list(&p);
 					fs_error(server, reply_port, net, stn, 0xFF, "FS Error");
@@ -5793,26 +5793,26 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 		{
 			if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Set file extent on channel %02X to %06lX, current extent %06lX%s\n", "", net, stn, handle, value, extent, (value > extent) ? " so adding bytes to end of file" : "");
 			if (value > extent)
-                        {
-                                unsigned char buffer[4096];
-                                unsigned long to_write, written;
+			{
+				unsigned char buffer[4096];
+				unsigned long to_write, written;
 
-                                memset (&buffer, 0, 4096);
-                                fseek(f, 0, SEEK_END);
+				memset (&buffer, 0, 4096);
+				fseek(f, 0, SEEK_END);
 
-                                to_write = value - extent;
+				to_write = value - extent;
 
-                                while (to_write > 0)
-                                {
-                                        written = fwrite(buffer, (to_write > 4096 ? 4096 : to_write), 1, f);
-                                        if (written != (to_write > 4096 ? 4096 : to_write))
-                                        {
-                                                fs_error(server, reply_port, net, stn, 0xFF, "FS Error extending file");
-                                                return;
-                                        }
-                                        to_write -= written;
-                                }
-                        }
+				while (to_write > 0)
+				{
+					written = fwrite(buffer, (to_write > 4096 ? 4096 : to_write), 1, f);
+					if (written != (to_write > 4096 ? 4096 : to_write))
+					{
+						fs_error(server, reply_port, net, stn, 0xFF, "FS Error extending file");
+						return;
+					}
+					to_write -= written;
+				}
+			}
 
 			fflush(f);
 
@@ -5821,8 +5821,8 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 				if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom%3d.%3d   - Truncating file accordingly\n", "", net, stn);
 				if (ftruncate(fileno(f), value)) // Error if non-zero
 				{
-                                        fs_error(server, reply_port, net, stn, 0xFF, "FS Error truncating file");
-                                        return;
+					fs_error(server, reply_port, net, stn, 0xFF, "FS Error truncating file");
+					return;
 				}
 			}
 
@@ -6108,10 +6108,10 @@ void fs_eof(int server, unsigned char reply_port, unsigned char net, unsigned ch
 
 	unsigned char result = 0;
 
-        if (handle < 1 || handle >= FS_MAX_OPEN_FILES || active[server][active_id].fhandles[handle].handle == -1) // Invalid handle
-                fs_error(server, reply_port, net, stn, 0xDE, "Channel ?");
-        else // Valid handle it appears
-        {
+	if (handle < 1 || handle >= FS_MAX_OPEN_FILES || active[server][active_id].fhandles[handle].handle == -1) // Invalid handle
+		fs_error(server, reply_port, net, stn, 0xDE, "Channel ?");
+	else // Valid handle it appears
+	{
 		FILE *h;
 		struct __econet_packet_udp r;
 
@@ -6316,9 +6316,11 @@ void fs_select_printer(int server, unsigned char reply_port, unsigned int active
 	reply.p.ctrl = 0x80;
 	reply.p.data[0] = reply.p.data[1] = 0;
 
-	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Select printer %s\n", "", net, stn, pname);
+	if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Select printer %s", "", net, stn, pname);
 
 	printerindex = get_printer(fs_stations[server].net, fs_stations[server].stn, pname);
+
+	if (!fs_quiet) fprintf (stderr, " %s\n", (printerindex == -1) ? "UNKNOWN" : "Succeeded");
 
 	if (printerindex == -1) // Failed
 		fs_error(server, reply_port, net, stn, 0xFF, "Unknown printer");
@@ -6327,6 +6329,7 @@ void fs_select_printer(int server, unsigned char reply_port, unsigned int active
 		active[server][active_id].printer = printerindex;
 		fs_aun_send(&reply, server, 2, net, stn);
 	}
+
 }
 
 // Check if a user exists. Return index into users[server] if it does; -1 if not
@@ -6380,7 +6383,7 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 	// Do you know this man?
 
 	if (		(fs_bulk_ports[server][port].handle != -1) && 
-		 	(fs_bulk_ports[server][port].net == net) &&
+			(fs_bulk_ports[server][port].net == net) &&
 			(fs_bulk_ports[server][port].stn == stn) 
 	)
 	{
@@ -6858,7 +6861,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						{
 							users[server][uid].home[0] = '\0';
 							fs_write_user(server, uid, (unsigned char *) &(users[server][uid]));
-                                                        fs_reply_ok(server, reply_port, net, stn);
+							fs_reply_ok(server, reply_port, net, stn);
 						}
 						else if (fs_normalize_path(server, active_id, dir, *(data+3), &p) && (p.ftype == FS_FTYPE_DIR) && strlen((const char *) p.path_from_root) < 94)
 						{
@@ -7184,13 +7187,13 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			if ((fs_stn_logged_in(server, net, stn) >= 0) && (active[server][active_id].priv & FS_PRIV_SYSTEM))
 			{
 				// Silently accept but ignore
-                                struct __econet_packet_udp reply;
+				struct __econet_packet_udp reply;
 
-                                reply.p.port = reply_port;
-                                reply.p.ctrl = 0x80;
+				reply.p.port = reply_port;
+				reply.p.ctrl = 0x80;
 
-                                reply.p.data[0] = 0;
-                                reply.p.data[1] = 0;
+				reply.p.data[0] = 0;
+				reply.p.data[1] = 0;
 	
 				fs_aun_send (&reply, server, 2, net, stn);
 			}
@@ -7230,17 +7233,17 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		case 0x20: // Read client ID
 			if (fs_stn_logged_in(server, net, stn) >= 0)
 			{
-                                struct __econet_packet_udp reply;
+				struct __econet_packet_udp reply;
 				unsigned short counter;
 
-                                reply.p.port = reply_port;
-                                reply.p.ctrl = 0x80;
+				reply.p.port = reply_port;
+				reply.p.ctrl = 0x80;
 				strncpy(reply.p.data, users[server][active[server][active_id].userid].username, 10);
 				counter = 0;
 				while (counter < 10 && reply.p.data[counter] != ' ') counter++;
 					reply.p.data[counter] = 0x0d;
 				
-                                fs_aun_send (&reply, server, counter+1, net, stn);
+				fs_aun_send (&reply, server, counter+1, net, stn);
 			}
 		case 0x40: // Read account information (SJ Only) - i.e. free space on a particular disc
 			{
@@ -7251,14 +7254,14 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				
 					unsigned char disc;
 
-                                	struct __econet_packet_udp reply;
+					struct __econet_packet_udp reply;
 
 					start = *(data+7) + (*(data + 8) << 8);
 					count = *(data + 9) + (*(data + 10) << 8);
 					disc = *(data + 11);
 
-                                	reply.p.port = reply_port;
-                                	reply.p.ctrl = 0x80;
+					reply.p.port = reply_port;
+					reply.p.ctrl = 0x80;
 
 					if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d SJ Read Account information from %d for %d entries on disc no. %d - Not yet implemented\n", "", net, stn, start, count, disc);
 
@@ -7281,12 +7284,12 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				unsigned char rw_op;
 				unsigned int reply_length;
 	
-                                struct __econet_packet_udp reply;
+				struct __econet_packet_udp reply;
 
 				rw_op = *(data+5); // 0 - reset print server info; 1 - read current printer state; 2 - write current printer state; 3 - read auto printer priority; 4 - write auto printer priority ; 5 - read system msg channel; 6 - write system msg channel; 7 - read message level; 8 - set message level; 9 - read default printer; 10 - set default printer; 11 - read priv required to set time; 12 - set priv required to set time; IE ALL THE READ OPERATIONS HAVE LOW BIT SET
 
-                                reply.p.port = reply_port;
-                                reply.p.ctrl = 0x80;
+				reply.p.port = reply_port;
+				reply.p.ctrl = 0x80;
 		
 				reply.p.data[0] = reply.p.data[1] = 0; // Normal OK result
 				reply_length = 2;

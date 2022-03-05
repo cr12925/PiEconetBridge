@@ -83,12 +83,12 @@ unsigned short econet_gpio_reg_obtained[17];
 unsigned short econet_gpio_pins[17];
 	
 struct file_operations econet_fops = {
-        .open = econet_open,
-        .release = econet_release,
-        .unlocked_ioctl = econet_ioctl,
-        .poll = econet_poll,
-        .read = econet_readfd,
-        .write = econet_writefd
+	.open = econet_open,
+	.release = econet_release,
+	.unlocked_ioctl = econet_ioctl,
+	.poll = econet_poll,
+	.read = econet_readfd,
+	.write = econet_writefd
 };
 
 /* KFIFOs */
@@ -446,27 +446,27 @@ short econet_gpio_init(void)
 
 	/* Set up the pins */
 
-        t = (readl(GPIO_PORT) & ~(0x707)) | 0x401;
-        writel(t, GPIO_PORT); /* Set 0, 6 to output */
+	t = (readl(GPIO_PORT) & ~(0x707)) | 0x401;
+	writel(t, GPIO_PORT); /* Set 0, 6 to output */
 
 	/* Note we must set input first and then output if ultimately we want the pin to be an output */
 	econet_set_dir(ECONET_GPIO_READ);
 
-        INP_GPIO(ECONET_GPIO_PIN_ADDR);
-        INP_GPIO(ECONET_GPIO_PIN_ADDR + 1);
-        OUT_GPIO(ECONET_GPIO_PIN_ADDR);
-        OUT_GPIO(ECONET_GPIO_PIN_ADDR + 1);
+	INP_GPIO(ECONET_GPIO_PIN_ADDR);
+	INP_GPIO(ECONET_GPIO_PIN_ADDR + 1);
+	OUT_GPIO(ECONET_GPIO_PIN_ADDR);
+	OUT_GPIO(ECONET_GPIO_PIN_ADDR + 1);
 
-        INP_GPIO(ECONET_GPIO_PIN_RST);
-        OUT_GPIO(ECONET_GPIO_PIN_RST);
+	INP_GPIO(ECONET_GPIO_PIN_RST);
+	OUT_GPIO(ECONET_GPIO_PIN_RST);
 
-        INP_GPIO(ECONET_GPIO_PIN_IRQ);
+	INP_GPIO(ECONET_GPIO_PIN_IRQ);
 
-        INP_GPIO(ECONET_GPIO_PIN_CS);
-        OUT_GPIO(ECONET_GPIO_PIN_CS);
+	INP_GPIO(ECONET_GPIO_PIN_CS);
+	OUT_GPIO(ECONET_GPIO_PIN_CS);
 
-        INP_GPIO(ECONET_GPIO_PIN_RW);
-        OUT_GPIO(ECONET_GPIO_PIN_RW);
+	INP_GPIO(ECONET_GPIO_PIN_RW);
+	OUT_GPIO(ECONET_GPIO_PIN_RW);
 
 	INP_GPIO(ECONET_GPIO_PIN_CSRETURN);
 
@@ -552,16 +552,16 @@ void econet_adlc_cleardown(unsigned short in_irq)
 	econet_write_cr(ECONET_GPIO_CR1, 0x01);
 	
 	/* CR4 is in the same register as the second write data FIFO (the one
-         * which is written to and automatically flags "last byte of frame"
+	 * which is written to and automatically flags "last byte of frame"
 	 * but when CR1b0 (AC) is set, it is CR4 instead
-         */
+	 */
 
 	econet_write_cr(ECONET_GPIO_CR4, C4_READ);
 
 	/* CR3, however, is in the same address as CR2, but that "becomes"
-         * CR3 when AC=1
+	 * CR3 when AC=1
 	 * So here, we are writing to CR3, but we write to the CR2
-         * address 
+	 * address 
 	 */
 	econet_write_cr(ECONET_GPIO_CR2, C3_READ);
 
@@ -688,7 +688,8 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 				while (count++ < 25 && (!(sr2 & ECONET_GPIO_S2_RX_IDLE)))
 				{
 					econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT1);
-					udelay(10);
+					// udelay(10);
+					udelay(count << 2);
 					sr2 = econet_read_sr(2);
 				}
 
@@ -879,7 +880,7 @@ void econet_irq_write(void)
 			tdra_flag = (sr1  & ECONET_GPIO_S1_TDRA);
 
 #ifdef ECONET_GPIO_DEBUG_TX
-		 	printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): Loop % 2d - TDRA FLAG IS %s. SR1 = 0x%02x, SR2 = 0x%02x\n", loopcount, (sr1 & ECONET_GPIO_S1_TDRA) ? "SET" : "UNSET", sr1, (sr2 = econet_read_sr(2)));
+			printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): Loop % 2d - TDRA FLAG IS %s. SR1 = 0x%02x, SR2 = 0x%02x\n", loopcount, (sr1 & ECONET_GPIO_S1_TDRA) ? "SET" : "UNSET", sr1, (sr2 = econet_read_sr(2)));
 
 #endif 
 			tdra_counter = 0;
@@ -1155,11 +1156,6 @@ unexpected_scout:
 								printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): Valid frame received, length %04x, %04x AUN bytes copied to kernel FIFO\n", econet_pkt_rx.ptr, copied_to_fifo);
 #endif
 								econet_rx_cleardown();
-							/*
-								econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // See if this fixes the crashes
-								econet_write_cr(ECONET_GPIO_CR2, C2_READ);
-								econet_write_cr(ECONET_GPIO_CR1, C1_READ);
-							*/
 								econet_flagfill();
 								econet_set_aunstate(EA_IDLE); // Wait and see what turns up next - probably an immediate reply
 								econet_set_chipstate(EM_FLAGFILL);
@@ -1714,11 +1710,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 		if (tmp_status == EM_IDLE) // Only if we were in IDLE
 		{
 			econet_rx_cleardown();
-		/*
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // Maybe try commenting this out to see if we pick up receptions immediately after transmissions?
-			econet_write_cr(ECONET_GPIO_CR2, C2_READ); // We use this here to clear the RX status
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ);
-		*/
 		}
 	}
 	else if (econet_get_chipstate() == EM_IDLE || econet_get_chipstate() == EM_IDLEINIT) // We seem to get these when the chip gets its pants tangled. (With sr1=0 - but we've handled reading and writing above, so just clear status)
@@ -1729,11 +1720,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 		if (sr2 & ~(ECONET_GPIO_S2_AP | ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_RDA)) // Errors
 		{
 			econet_rx_cleardown();
-		/*
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // Maybe try commenting this out to see if we pick up receptions immediately after transmissions?
-			econet_write_cr(ECONET_GPIO_CR2, C2_READ); // We use this here to clear the RX status
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ);
-		*/
 		}
 		else
 			econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Just clear status
@@ -1744,11 +1730,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 		if (sr2 & ~(ECONET_GPIO_S2_AP | ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_RDA)) // Errors
 		{
 			econet_rx_cleardown();
-		/*
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); // Maybe try commenting this out to see if we pick up receptions immediately after transmissions?
-			econet_write_cr(ECONET_GPIO_CR2, C2_READ);
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ);
-		*/
 		}
 		else	econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 	}
@@ -1798,7 +1779,6 @@ struct platform_driver econet_driver = {
 };
 */
 
-
 /* When a process reads from our device, this gets called. */
 ssize_t econet_readfd(struct file *flip, char *buffer, size_t len, loff_t *offset) {
 
@@ -1810,12 +1790,12 @@ ssize_t econet_readfd(struct file *flip, char *buffer, size_t len, loff_t *offse
 	// See if we can get the lock
 	econet_irq_mode(0);
 	
-        if (!spin_trylock(&econet_irqstate_spin))
-        {
-                printk (KERN_INFO "ECONET-GPIO: Flag busy on read because cannot get IRQ spinlock\n");
-                econet_irq_mode(1);
-                return -1;
-        }
+	if (!spin_trylock(&econet_irqstate_spin))
+	{
+		printk (KERN_INFO "ECONET-GPIO: Flag busy on read because cannot get IRQ spinlock\n");
+		econet_irq_mode(1);
+		return -1;
+	}
 
 */
 	ret = kfifo_to_user(&econet_rx_queue, buffer, len, &copied);
@@ -1991,21 +1971,21 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	if (!mutex_trylock(&econet_writefd_mutex))
 	{
 		printk (KERN_INFO "ECONET-GPIO: Flag busy because cannot get writefd mutex\n");
-                econet_set_tx_status(ECONET_TX_BUSY);
-                return -1;
+		econet_set_tx_status(ECONET_TX_BUSY);
+		return -1;
 	}
 
 	// IRQs off, see if we can get the lock
 	econet_irq_mode(0);
 	
-        if (!spin_trylock(&econet_irqstate_spin))
-        {
-                printk (KERN_INFO "ECONET-GPIO: Flag busy because cannot get IRQ spinlock\n");
-                econet_irq_mode(1);
-                econet_set_tx_status(ECONET_TX_BUSY);
+	if (!spin_trylock(&econet_irqstate_spin))
+	{
+		printk (KERN_INFO "ECONET-GPIO: Flag busy because cannot get IRQ spinlock\n");
+		econet_irq_mode(1);
+		econet_set_tx_status(ECONET_TX_BUSY);
 		mutex_unlock(&econet_writefd_mutex);
-                return -1;
-        }
+		return -1;
+	}
 
 	// Next, see if we are mid TX but it started so long ago that it must have stalled
 
@@ -2152,107 +2132,108 @@ int econet_release(struct inode *inode, struct file *file) {
 unsigned int econet_poll (struct file *filp, poll_table *wait)
 {
 
-        unsigned int mask = 0;
+	unsigned int mask = 0;
 
-        poll_wait (filp, &(econet_data->econet_read_queue), wait);
+	poll_wait (filp, &(econet_data->econet_read_queue), wait);
 
-        if (!kfifo_is_empty(&econet_rx_queue))
-                mask |= POLLIN | POLLRDNORM;
+	if (!kfifo_is_empty(&econet_rx_queue))
+		mask |= POLLIN | POLLRDNORM;
 
-        return mask;
+	return mask;
 }
 
 /* IOCTL routine */
 long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 {
 
-        // unsigned char w; // Disused after removal of use of econet_write_bus() in data bus test harness ioctl()
+	// unsigned char w; // Disused after removal of use of econet_write_bus() in data bus test harness ioctl()
 
 #ifdef ECONET_GPIO_DEBUG_IOCTL
-        printk (KERN_DEBUG "ECONET-GPIO: IOCTL(%d, %lu)\n", cmd, arg);
+	printk (KERN_DEBUG "ECONET-GPIO: IOCTL(%d, %lu)\n", cmd, arg);
 #endif
 
-        switch(cmd){
-                case ECONETGPIO_IOC_RESET:
+	switch(cmd){
+		case ECONETGPIO_IOC_RESET:
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "ECONET-GPIO: ioctl(reset) called\n");
 #endif
-                        econet_reset();
-                        break;
-                case ECONETGPIO_IOC_PACKETSIZE: /* Return max packet size */
+			econet_reset();
+			break;
+		case ECONETGPIO_IOC_PACKETSIZE: /* Return max packet size */
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "ECONET-GPIO: ioctl(max_packet_size) called\n");
 #endif
-                        return ECONET_MAX_PACKET_SIZE;
-                        break;
+			return ECONET_MAX_PACKET_SIZE;
+			break;
 		case ECONETGPIO_IOC_READMODE: /* Go back to read mode - used after an immediate off the wire went unresponded to, but could be handy at other times */
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "ECONET-GPIO: ioctl(set read mode) called\n");
 #endif
 			econet_adlc_cleardown(0); // 0 = not in IRQ
+			econet_set_read_mode(); // Required in addition to the cleadown, because this sets the ADLC up to read, where as cleardown doesn't.
 
 			break;
-                case ECONETGPIO_IOC_SET_STATIONS:
+		case ECONETGPIO_IOC_SET_STATIONS:
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "ECONET-GPIO: ioctl(set stations) called\n");
 #endif
-                        /* Copy station bitmap from user memory */
-                        if ((!access_ok(arg, 8192)) || copy_from_user(econet_stations, (void *) arg, 8192))
+			/* Copy station bitmap from user memory */
+			if ((!access_ok(arg, 8192)) || copy_from_user(econet_stations, (void *) arg, 8192))
 			{
 				printk (KERN_INFO "ECONET-GPIO: Unable to update station set.\n");
-                                return -EFAULT;
+				return -EFAULT;
 			}
-                        printk(KERN_INFO "ECONET-GPIO: Station set updated - Switching on AUN mode\n");
+			printk(KERN_INFO "ECONET-GPIO: Station set updated - Switching on AUN mode\n");
 			econet_data->aun_mode = 1; // Turn this on if we get a station set
 			econet_set_aunstate(EA_IDLE);
-                        break;
-                case ECONETGPIO_IOC_AVAIL:
+			break;
+		case ECONETGPIO_IOC_AVAIL:
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "ECONET-GPIO: ioctl(rx queue availablity) called\n");
 #endif
 			return 0;
-                        //return kfifo_avail(&econet_rx_queue);
+			//return kfifo_avail(&econet_rx_queue);
 /* Routines for testing only */
-                case ECONETGPIO_IOC_SETA:
+		case ECONETGPIO_IOC_SETA:
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "ECONET-GPIO: ioctl(set address, %02lx) called\n", (arg & 0x03));
 #endif
 			if (econet_data->hwver >= 2) while (econet_isbusy());
-                        econet_set_addr((arg & 0x2) >> 1, (arg & 0x1));
-                        break;
-                case ECONETGPIO_IOC_WRITEMODE:
+			econet_set_addr((arg & 0x2) >> 1, (arg & 0x1));
+			break;
+		case ECONETGPIO_IOC_WRITEMODE:
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "ECONET-GPIO: ioctl(set write mode, %02lx) called\n", (arg & 0x01));
 #endif
-                        econet_set_dir(arg & 0x01);
-                        break;
-                case ECONETGPIO_IOC_SETCS:
+			econet_set_dir(arg & 0x01);
+			break;
+		case ECONETGPIO_IOC_SETCS:
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "ECONET-GPIO: ioctl(set /CS, %02lx) called\n", (arg & 0x01));
 #endif
-                        econet_set_cs(arg & 0x01);
-                        break;
-                case ECONETGPIO_IOC_SETBUS:
+			econet_set_cs(arg & 0x01);
+			break;
+		case ECONETGPIO_IOC_SETBUS:
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "ECONET-GPIO: ioctl(set bus, %02lx) called\n", (arg & 0xff));
 #endif
 			// Commented to remove reliance on write bus. This ioctl() only for hardware test harness, so no nCS testing required etc.
-                        //w = econet_write_bus((char) (arg & 0xff));
+			//w = econet_write_bus((char) (arg & 0xff));
 
 			econet_set_dir(ECONET_GPIO_WRITE);
 			
 			// Put it on the bus
 			writel((arg << ECONET_GPIO_PIN_DATA), GPIO_PORT + GPSET0);
 			writel((~(arg << ECONET_GPIO_PIN_DATA)) & ECONET_GPIO_CLRMASK_DATA, GPIO_PORT + GPCLR0);
-                        break;
-                case ECONETGPIO_IOC_TEST:
+			break;
+		case ECONETGPIO_IOC_TEST:
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "ECONET-GPIO: ioctl(set test mode) called\n");
 #endif
 			econet_reset();
 			econet_set_chipstate(EM_TEST);
-                        econet_irq_mode(0);
-                        break;
+			econet_irq_mode(0);
+			break;
 		case ECONETGPIO_IOC_TXERR:
 
 #ifdef ECONET_GPIO_DEBUG_IOCTL
@@ -2260,14 +2241,14 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 #endif
 			return (econet_get_tx_status());
 			break;
-                case ECONETGPIO_IOC_FLAGFILL: /* Go into flag fill */
+		case ECONETGPIO_IOC_FLAGFILL: /* Go into flag fill */
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "ECONET-GPIO: ioctl(set flag fill) called\n");
 #endif
-                        if (arg)
-                                econet_flagfill();
-                        else    econet_set_read_mode();
-                        break;
+			if (arg)
+				econet_flagfill();
+			else    econet_set_read_mode();
+			break;
 
 		case ECONETGPIO_IOC_AUNMODE:
 			if (arg != 1 && arg != 0)
@@ -2312,11 +2293,11 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 			econet_pkt.ptr = 0; /* Start at the beginning */
 			econet_set_write_mode(&econet_pkt, 6);
 			break;
-                default:
-                        return -ENOTTY;
-        }
+		default:
+			return -ENOTTY;
+	}
 
-        return 0;
+	return 0;
 
 }
 
@@ -2383,7 +2364,7 @@ static int __init econet_init(void)
 	econet_data->major=register_chrdev(0, DEVICE_NAME, &econet_fops);
 	if (econet_data->major < 0)
 	{
-	 	printk (KERN_INFO "ECONET-GPIO: Failed to obtain major device number.\n");
+		printk (KERN_INFO "ECONET-GPIO: Failed to obtain major device number.\n");
 		return econet_data->major;
 	}
 
@@ -2412,7 +2393,7 @@ static int __init econet_init(void)
 	}
 		
 
- 	printk(KERN_INFO "ECONET-GPIO: Loaded. Major number %d\n", econet_data->major);
+	printk(KERN_INFO "ECONET-GPIO: Loaded. Major number %d\n", econet_data->major);
 
 	init_waitqueue_head(&(econet_data->econet_read_queue));
 
@@ -2438,31 +2419,47 @@ static int __init econet_init(void)
 
 	printk (KERN_ERR "ECONET-GPIO: %s (SR1 = 0x%02x, SR2 = 0x%02x)\n", (sr2 & ECONET_GPIO_S2_DCD) ? "No clock!" : "Clock detected", sr1, sr2);
 
- 	return 0;
+	return 0;
+
+}
+
+/* This is known to be nasty. It should really pick all the GPIOs up from the DT - but that's the next stage... */
+
+static int econet_probe (struct platform_device *pdev)
+{
+
+	return econet_init();
 
 }
 
 /* Exit routine */
 
 //int econet_remove (struct platform_device *pdev)
-static void __exit econet_exit(void)
+static void econet_exit(void)
 {
 	econet_gpio_release();
 	
 	device_destroy(econet_class, MKDEV(econet_data->major, 0));
 	class_destroy(econet_class);
- 	unregister_chrdev(econet_data->major, DEVICE_NAME);
+	unregister_chrdev(econet_data->major, DEVICE_NAME);
 	kfree(econet_data);
 	kfifo_free(&econet_rx_queue);
 	kfifo_free(&econet_tx_queue);
- 	printk(KERN_INFO "ECONET-GPIO: Unloaded.");
+	printk(KERN_INFO "ECONET-GPIO: Unloaded.");
 
 //	return 0;
 
 }
+
+/* See comment above econet_probe() */
+
+int econet_remove (struct platform_device *pdev)
+{
+	econet_exit();
+	return 0;
+}
+
 /* Register module functions */
 module_init(econet_init);
 module_exit(econet_exit);
-
 //module_platform_driver(econet_driver);
-//MODULE_DEVICE_TABLE(of, econet_of_match);

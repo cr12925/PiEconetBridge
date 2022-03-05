@@ -203,7 +203,7 @@ void main(int argc, char **argv)
 
 	while (poll(&p, 1, -1))
 	{
-		if ((p.revents & POLLIN) && (s = read(econet_fd, &wire_pkt_rx, ECONET_MAX_PACKET_SIZE)) && (s > 0))
+		if ((p.revents & POLLIN) && (s = read(econet_fd, &wire_pkt_rx, sizeof(wire_pkt_rx))) && (s > 0))
 			dump_eco_pkt(s, &wire_pkt_rx);
 		else break;
 		p.events = POLLIN;
