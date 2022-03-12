@@ -58,6 +58,11 @@ extern uint32_t get_local_seq(unsigned char, unsigned char);
 // routine in econet-bridge.c to find a printer definition
 extern int8_t get_printer(unsigned char, unsigned char, char*);
 
+// printer information routines in econet-bridge.c
+extern uint8_t get_printer_info (unsigned char, unsigned char, uint8_t, char *, char *, uint8_t *, uint8_t *, short *);
+extern uint8_t set_printer_info (unsigned char, unsigned char, uint8_t, char *, char *, uint8_t, short);
+extern uint8_t get_printer_total (unsigned char, unsigned char);
+
 short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for extra year information
 short fs_sjfunc; // Whether SJ MDFS functionality is turned on (global - not per fileserver)
 short use_xattr=1 ; // When set use filesystem extended attributes, otherwise use a dotfile
@@ -65,7 +70,7 @@ short use_xattr=1 ; // When set use filesystem extended attributes, otherwise us
 short fs_open_interlock(int, unsigned char *, unsigned short, unsigned short);
 void fs_close_interlock(int, unsigned short, unsigned short);
 
-#define FS_VERSION_STRING "PiEconetBridge FS 0.9A"
+#define FS_VERSION_STRING "PiEconetBridge FS 1.0"
 
 #define FS_DEFAULT_NAMELEN 10
 
@@ -190,7 +195,8 @@ struct path_entry {
 	unsigned short perm, parent_perm, my_perm;
 	unsigned long load, exec, length, internal;
 	unsigned char unixpath[1024], unixfname[15], acornname[15];
-	unsigned char day, monthyear;
+	unsigned char day, monthyear, hour, min, sec; // Modified date / time
+	unsigned char c_day, c_monthyear, c_hour, c_min, c_sec;
 	void *next, *parent;
 };
 
@@ -224,6 +230,8 @@ struct path {
 	unsigned char unixfname[15]; // As stored on disc, in case different case to what was requested
 	unsigned char day; // day of month last written
 	unsigned char monthyear; // Top 4 bits years since 1981; bottom four are month (Not very y2k...)
+	unsigned char hour, min, sec; // Hours mins sec of modification time
+	unsigned char c_day, c_monthyear, c_hour, c_min, c_sec; // Date/time of Creation
 	struct path_entry *paths, *paths_tail; // pointers to head and tail of a linked like of path_entry structs. These are dynamically malloced by the wildcard normalize function and must be freed by the caller. If FS_FTYPE_NOTFOUND, then both will be NULL.
 };
 	
@@ -302,6 +310,9 @@ unsigned char fs_perm_to_acorn(unsigned char fs_perm, unsigned char ftype)
 	if (fs_perm & FS_PERM_L)
 		r |= 0x10;
 
+	if (fs_sjfunc & FS_PERM_H) // SJ research Privacy bit
+		r |= ((fs_perm & (FS_PERM_H)) ? 0x40 : 0);
+
 	r |= ((fs_perm & (FS_PERM_OWN_R | FS_PERM_OWN_W)) << 2);
 	r |= ((fs_perm & (FS_PERM_OTH_R | FS_PERM_OTH_W)) >> 4);
 	
@@ -318,6 +329,7 @@ unsigned char fs_perm_from_acorn(unsigned char acorn_perm)
 
 	r = 0;
 
+	if (fs_sjfunc) r |= (acorn_perm & 0x40) ? FS_PERM_H : 0; // Hidden / Private. This is MDFS only really
 	r |= (acorn_perm & 0x10) ? FS_PERM_L : 0; // Locked
 	r |= (acorn_perm & 0x08) ? FS_PERM_OWN_W : 0; // Owner write
 	r |= (acorn_perm & 0x04) ? FS_PERM_OWN_R : 0; // Owner read
@@ -989,10 +1001,16 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 		localtime_r(&(statbuf.st_mtime), &ct);
 
 		fs_date_to_two_bytes (ct.tm_mday, ct.tm_mon+1, ct.tm_year, &(p->monthyear), &(p->day));	
-		/*
-		p->day = ct.tm_mday;
-		p->monthyear = (((ct.tm_year - 40 - 81) & 0x0f) << 4) | ((ct.tm_mon+1) & 0x0f); // Top four bits are year since 1981, so we deduct 40 from the actual year so that 2021 = 1981; then we OR-in the month
-		*/
+		p->hour = ct.tm_hour;
+		p->min = ct.tm_min;
+		p->sec = ct.tm_sec;
+
+		// Create time
+		localtime_r(&(statbuf.st_ctime), &ct);
+		fs_date_to_two_bytes(ct.tm_mday, ct.tm_mon+1, ct.tm_year, &(p->c_day), &(p->c_monthyear));
+		p->c_hour = ct.tm_hour;
+		p->c_min = ct.tm_min;
+		p->c_sec = ct.tm_sec;
 
 		p->internal = statbuf.st_ino;
 		strncpy(p->ownername, users[server][p->owner].username, 10);
@@ -1024,7 +1042,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	unsigned char adjusted[1048];
 	unsigned char path_internal[1024];
 	unsigned char unix_segment[20];
-	short normalize_debug = 0;
+	short normalize_debug = 1;
 	struct objattr attr;
 	int parent_owner = 0;
 	short found;
@@ -1044,7 +1062,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	// Cope with null path relative to dir on another disc
 	if (strlen(path) == 0 && relative_to != -1)
 		strcpy(path, active[server][user].fhandles[relative_to].acornfullpath);
-	else if (relative_to != -1 && (path[0] != ':' && path[0] != '$'))
+	else if (relative_to != -1 && (path[0] != ':' && path[0] != '$') && path[0] != '&')
 		sprintf(path, "%s.%s", active[server][user].fhandles[relative_to].acornfullpath, received_path);
 
 	if (normalize_debug && relative_to != -1) fprintf (stderr, "Path provided: '%s', relative to '%s'\n", received_path, active[server][user].fhandles[relative_to].acornfullpath);
@@ -1133,46 +1151,6 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			fprintf (stderr, "Normalize relative to nowhere.\n");
 	}
 
-/* OLD RELATIVE ADJUSTMENT CODE 
-	if (path_internal[0] == '$')
-	{
-		if (normalize_debug) fprintf (stderr, "Found $ specifier with %02x as next character\n", path_internal[1]);
-		switch (path_internal[1])
-		{
-			case '.': ptr = 2; break; 
-			case 0: ptr = 1; break; // next routine will find an empty path
-			default: return 0; break; //Anything else is invalid
-		}
-	}
-	else if (relative_to > 0 && relative_to == active[server][user].root) // Packet give root as starting point
-	{
-		if (normalize_debug) fprintf (stderr, "Adjusting relating to root\n");
-		strcpy((char * ) adjusted, (const char * ) active[server][user].root_dir);
-		if (strlen((const char *) active[server][user].root_dir) > 0 && (path_internal[0] != '\0')) strcat(adjusted, ".");
-		ptr = 0; // Start at beginning of path provided
-	}
-	else if (relative_to > 0 && relative_to == active[server][user].lib) // Packet gave lib as starting point
-	{
-		if (normalize_debug) fprintf (stderr, "Adjusting relating to lib\n");
-		strcpy((char * ) adjusted, (const char * ) active[server][user].lib_dir);
-		if (strlen((const char *) active[server][user].lib_dir) > 0 && (path_internal[0] != '\0')) strcat(adjusted, ".");
-		ptr = 0;
-	}
-	else // Covers no :DISCPATH, no $, no & and relative_to is not lib orroot 
-	{
-		if (normalize_debug) fprintf (stderr, "Adjusting relative to current (or $ if change of disc)\n");
-		if (result->disc == -1) // Relative path when no disc specified
-		{
-			strcpy((char * ) adjusted, (const char * ) active[server][user].current_dir); // current path
-			if (active[server][user].current_dir[0] != '\0' && path_internal[0] != '\0') strcat(adjusted, "."); // Only add . if not empty path
-			ptr = 0; // Reset
-		}
-		// IF there is a disc found, then the path is taken to be realtive to $ anyway
-	}
-
-	strcat (adjusted, path_internal + ptr);
-
-*/
 
 	// New relative adjustment code
 
@@ -1190,6 +1168,22 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		// Set up 'adjusted' accordingly
 		strcpy(adjusted, path_internal + ptr);
 	}
+/* This section fails because for some reason active[server][user].root is garbage! - it is intended to let NFS clients (as opposed to ANFS) use the &.XXX path nomenclature
+	else if (path_internal[0] == '&') // Append home directory
+	{
+		if (normalize_debug) fprintf (stderr, "Found & specifier with %02x as next character\n", path_internal[1]);
+		switch (path_internal[1])
+		{
+			case '.': ptr = 2; break;
+			default: result->error = FS_PATH_ERR_FORMAT; return 0; break; // Must have a . after & in a path
+		}
+		if (normalize_debug)
+		{
+			fprintf (stderr, "User id = %d, active id = %d, root handle = %d, full acorn path = %s\n", active[server][user].userid, user, active[server][user].root, active[server][user].fhandles[active[server][user].root].acornfullpath);
+		}
+		snprintf (adjusted, 1000, ":%s.%s.%s", fs_discs[server][users[server][active[server][user].userid].home_disc].name, active[server][user].fhandles[active[server][user].root].acornfullpath, path_internal + ptr);	
+	}
+*/
 	else // relative path given - so give it relative to the relevant handle
 	{
 		unsigned short fp_ptr = 0;
@@ -1327,9 +1321,18 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 		fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->day), &(result->monthyear));
 
-		//result->day = t.tm_mday;
+		result->hour = t.tm_hour;
+		result->min = t.tm_min;
+		result->sec = t.tm_sec;
+
+		// Create time
+		localtime_r(&(s.st_ctime), &t);
+		fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->c_day), &(result->c_monthyear));
+		result->c_hour = t.tm_hour;
+		result->c_min = t.tm_min;
+		result->c_sec = t.tm_sec;
 		
-		//result->monthyear = (((t.tm_year - 40 - 81) & 0x0f) << 4) | ((t.tm_mon+1) & 0x0f); // Top four bits are year since 1981, so we deduct 40 from the actual year so that 2021 = 1981; then we OR-in the month
+
 	}
 
 	if (wildcard)
@@ -1632,9 +1635,17 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 				localtime_r(&(s.st_mtime), &t);
 
 				fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->monthyear), &(result->day));
-				//result->day = t.tm_mday;
-				//result->monthyear = (((t.tm_year - 81 - 40) & 0x0f) << 4) | ((t.tm_mon+1) & 0x0f); // Top four bits are year since 1981, so we deduct 40 from the actual year so that 2021 = 1981; then we OR-in the month
-				
+				result->hour = t.tm_hour;
+				result->min = t.tm_min;
+				result->sec = t.tm_sec;
+
+				// Create time
+				localtime_r(&(s.st_ctime), &t);
+				fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->c_day), &(result->c_monthyear));
+				result->c_hour = t.tm_hour;
+				result->c_min = t.tm_min;
+				result->c_sec = t.tm_sec;
+
 				if (active[server][user].priv & FS_PRIV_SYSTEM)
 					result->my_perm = 0xff;
 				else if (active[server][user].userid != result->owner)
@@ -1706,6 +1717,16 @@ int fs_normalize_path(int server, int user, unsigned char *path, short relative_
 		localtime_r(&(s.st_mtime), &t);
 
 		fs_date_to_two_bytes (t.tm_mday, t.tm_mon+1, t.tm_year, &(result->monthyear), &(result->day));
+		result->hour = t.tm_hour;
+		result->min = t.tm_min;
+		result->sec = t.tm_sec;
+
+		// Create time
+		localtime_r(&(s.st_ctime), &t);
+		fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->c_day), &(result->c_monthyear));
+		result->c_hour = t.tm_hour;
+		result->c_min = t.tm_min;
+		result->c_sec = t.tm_sec;
 		
 		return 1;
 
@@ -2750,9 +2771,20 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 					r.p.data[replylen++] = fs_perm_to_acorn(e->perm, e->ftype);
 					r.p.data[replylen++] = e->day;
 					r.p.data[replylen++] = e->monthyear;
-					r.p.data[replylen++] = e->internal & 0xff;
-					r.p.data[replylen++] = (e->internal & 0xff00) >> 8;
-					r.p.data[replylen++] = (e->internal & 0xff00) >> 16;
+
+					if (fs_sjfunc) // Next three bytes are ownership information - main & aux. We always set aux to 0 for now.
+					{
+						r.p.data[replylen++] = (e->owner & 0xff);
+						r.p.data[replylen++] = ((e->owner & 0x700) >> 3);
+						r.p.data[replylen++] = 0; // Aux account number	
+					}
+					else
+					{
+						r.p.data[replylen++] = e->internal & 0xff;
+						r.p.data[replylen++] = (e->internal & 0xff00) >> 8;
+						r.p.data[replylen++] = (e->internal & 0xff00) >> 16;
+					}
+
 					if (e->ftype == FS_FTYPE_DIR)	e->length = 0x200; // Dir length in FS3
 					r.p.data[replylen++] = e->length & 0xff;
 					r.p.data[replylen++] = (e->length & 0xff00) >> 8;
@@ -3243,8 +3275,6 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 
 	if (command == 1 || command == 5)
 	{
-		//r.p.data[replylen++] = p.monthyear & 0x0f;
-		//r.p.data[replylen++] = p.monthyear >> 8;
 		r.p.data[replylen++] = p.day;
 		r.p.data[replylen++] = p.monthyear;
 	}
@@ -3271,6 +3301,31 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		r.p.data[replylen++] = (active[server][active_id].userid == p.owner) ? 0x00 : 0xff; 
 
 		r.p.data[replylen++] = fs_get_acorn_entries(server, active_id, p.unixpath); // Number of directory entries
+
+	}
+
+	if (command == 64) // SJ Research function
+	{
+
+		if (!fs_sjfunc)
+		{
+			fs_error(server, reply_port, net, stn, 0xff, "SJR Not enabled");
+			return;
+		}
+
+		// Create date. (File type done for all replies above)
+		r.p.data[replylen++] = p.c_day;
+		r.p.data[replylen++] = p.c_monthyear;
+		r.p.data[replylen++] = p.c_hour;
+		r.p.data[replylen++] = p.c_min;
+		r.p.data[replylen++] = p.c_sec;
+
+		// Modification date / time
+		r.p.data[replylen++] = p.day;
+		r.p.data[replylen++] = p.monthyear;
+		r.p.data[replylen++] = p.hour;
+		r.p.data[replylen++] = p.min;
+		r.p.data[replylen++] = p.sec;
 
 	}
 
@@ -6304,6 +6359,20 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 
 }
 
+// Return which printer the user has selected, or 0xff is none specific or not logged in
+int8_t fs_get_user_printer(int server, unsigned char net, unsigned char stn)
+{
+
+	int active_id;
+	
+	active_id = fs_stn_logged_in(server, net, stn);
+
+	if (active_id < 0)	return 0xff;
+
+	return active[server][active_id].printer;
+}
+
+
 // Handle *PRINTER from authenticated users
 void fs_select_printer(int server, unsigned char reply_port, unsigned int active_id, unsigned char net, unsigned char stn, char *pname)
 {
@@ -7306,6 +7375,69 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							// Later we might code this to put the priority things back in order etc.
 							break; // Do nothing - no data in reply
 						}
+						case 1: // Read current state of printer
+						{
+							uint8_t printer;
+							int account = 0;
+							char pname[7], banner[24];
+							uint8_t control, status;
+							short user;
+
+							printer = *(data+6) - 1; // we zero base; the spec is 1-8
+
+							if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d SJ Read printer information for printer %d\n", "", net, stn, printer);
+
+							if (!get_printer_info(fs_stations[server].net, fs_stations[server].stn,
+								printer,
+								pname, banner, &control, &status, &user))
+							{
+								fs_error(server, reply_port, net, stn, 0xff, "Unknown printer");
+								return;
+							}
+
+							snprintf(&(reply.p.data[reply_length]), 7, "%-6.6s", pname);
+							reply_length += 6;
+
+							reply.p.data[reply_length] = control;
+	
+							reply.p.data[reply_length++] = (account & 0xff);
+							reply.p.data[reply_length++] = ((account & 0xff00) >> 8);
+
+							snprintf(&(reply.p.data[reply_length]), 24, "%-23.23s", banner);
+
+							reply_length += strlen(banner);
+
+							break;
+
+						}
+						case 2: // Set current state of printer
+						{
+
+							uint8_t printer;
+							char pname[7], banner[24];
+							uint8_t control;
+							short user;
+
+							printer = *(data+6);
+							if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d SJ Write printer information for printer %d\n", "", net, stn, printer);
+							control = *(data+13);
+							user = *(data+14) + (*(data+15) << 8);
+
+							strncpy(banner, data+16, 23);	
+
+							if (set_printer_info(fs_stations[server].net, fs_stations[server].stn,
+								printer, pname, banner, control, user))
+							{
+								reply.p.data[reply_length++] =  0;
+								reply.p.data[reply_length++] =  0;
+							}
+							else
+							{
+								fs_error(server, reply_port, net, stn, 0xff, "PS Error");
+								return;
+							}
+
+						}
 						// To implement - codes 1--10 except 5-8!
 						case 5: // Read system message channel
 						case 6: // Set system message channel (deliberate fall through)
@@ -7344,6 +7476,14 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							
 						
 						} break;
+						case 9: // Read default printer
+						case 10: // Write default printer
+						{
+
+							if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d SJ %s system default printer\n", "", net, stn, (rw_op == 9 ? "Read" : "Set"));
+							if (rw_op == 9) reply.p.data[reply_length++] = 1; // Always 1...
+							// We always just accept the set command
+						}
 						case 11: // Read priv required to change system time
 						{
 							if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d SJ Read privilege required to set system time\n", "", net, stn);
@@ -7359,10 +7499,48 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						{
 
 							unsigned char start, number;
+							uint8_t count;
+
+							uint8_t numret = 0; // Number returned
+
+							char pname[7], banner[24];
+							uint8_t status, control;
+							short account;
 
 							number = *(data+6); start = *(data+7);
-							if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d SJ Read printer information, starting at %d (max %d entries) (ignored)\n", "", net, stn, start, number);
-							reply.p.data[2] = 0; reply_length++;
+							if (!fs_quiet) fprintf(stderr, "   FS:%12sfrom %3d.%3d SJ Read printer information, starting at %d (max %d entries)\n", "", net, stn, start, number);
+							reply.p.data[2] = 0; reply_length++; // Number of entries
+
+// This broke EDITPRINT							if ((start + number) > get_printer_total(fs_stations[server].net, fs_stations[server].stn)) reply.p.data[1] = 0x80; // Attempt to flag end of list (guessing here)
+
+							for (count = start; count < (start + number); count++)
+							{
+								if (get_printer_info(fs_stations[server].net, fs_stations[server].stn,
+									count, pname, banner, &control, &status, &account))
+								{
+									numret++;
+									snprintf(&(reply.p.data[reply_length]), 7, "%6.6s", pname);
+									reply_length += 6;
+									reply.p.data[reply_length] = 0;
+									if ((control & 0x01) == 0) reply.p.data[reply_length] = 0; // Off - the enable bit
+									else reply.p.data[reply_length] = 1;
+									reply_length++;
+									reply.p.data[reply_length++] = 0; // Not default
+									reply.p.data[reply_length++] = (control & 0x02) >> 1; // Anonymous use
+									reply.p.data[reply_length++] = (control & 0x04) >> 2; // Account required;
+									reply.p.data[reply_length++] = account & 0xff;
+									reply.p.data[reply_length++] = (account & 0xff00) >> 8;
+									reply.p.data[reply_length++] = 1; // Always say Parallel
+									reply.p.data[reply_length++] = 0; // 2nd auto number
+									reply.p.data[reply_length++] = 0; // reserved
+									reply.p.data[reply_length++] = 0; // reserved
+
+								}
+
+							}
+					
+							reply.p.data[2] = numret;
+							if (numret == 0) reply_length--; // Don't send the count. See if that sorts it out?
 
 						} break;
 						default:
