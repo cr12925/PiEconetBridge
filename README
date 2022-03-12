@@ -407,6 +407,8 @@ Notes on each type of configuration line:
 N n
 ---
 
+(Long form: use 'LOCALNET' instead of 'N' for readability.)
+
 This sets the network number of the local wire Econet which the bridge will
 (when the Bridge Query code is finished) be announced to other bridges. If you
 don't have this, the bridge won't deal with bridge queries. This will not stop
@@ -414,6 +416,8 @@ it bridging network 0 (your local Econet) to AUN stations in network 0.
 
 W n s p
 -------
+
+(Long form: use 'WIRE' instead of 'W' for readability.)
 
 This creates an AUN listener on port p (on each IP address available on your
 bridge machine) for host n.s on your local hardware Econet wire. (Note, because
@@ -480,6 +484,8 @@ station 0.1 is no problem.
 A n s host p
 ------------
 
+(Long form: use 'IP' instead of 'A' for readability.)
+
 This tells the bridge that AUN host n.s is available on host 'host' (can be DNS
 name or IP address) port p.
 
@@ -491,6 +497,8 @@ The bridge will ONLY bridge to hosts you have told it about in this way.
 
 L n
 ---
+
+(Long form: use 'DYNAMIC' or 'LEARN' instead of 'L' for readability.)
 
 The bridge will dynamically assign a station number between 1 & 254 in network
 'n' (which needs to be not in use elsewhere!) to AUN traffic received from
@@ -525,6 +533,7 @@ station number to a new user, it will
 
 That is to prevent a newcomer accidentally inheriting access to a
 fileserver from a previous dynamic user.
+
 P n s p printer
 ---------------
 
@@ -674,6 +683,37 @@ you can send what you like. If the other end filters it, so be it.
 NOTE: Network or host 255 is used as the wildcard to mean "anything".
 It does NOT mean broadcast.
 
+Broadly speaking:
+
+TRUNK n port host port - defines trunk 'n' on local port 'port'
+      connected to distant host 'host' on port 'port' (the 2nd one)
+      These are UDP ports.
+
+XLATE n x y - on trunk 'n', translate inbound advertisement of network x
+      to network y - so your local machines will use y.XXX not x.XXX to
+      talk to machines on this network over the trunk.
+
+FIREWALL n snet sstn dnet dstn DROP|ACCEPT
+      Filter inbound traffic on trunk 'n' so that sources matching
+      snet.sstn will either have their traffic dropped or accepted
+      (depending on the final parameter) when sending traffic to 
+      hosts matching dnet.dstn. 
+
+      Each of snet, sstn, dnet, dstn can be 255, which is a wildcard
+      for 'all nets' / 'all stations'.
+
+FILTER IN|OUT n net 
+      Filters adverts for net 'net' on trunk 'n' either inbound
+      or outbound - less granular than 'FIREWALL' for security
+      purposes - this prevents reception of the inbound advert
+      altogether or, for 'OUT', prevents the bridge from advertising
+      the network outbound at all.
+
+      Can be useful if you think there's a bridge loop somewhere,
+      although the bridge will make efforts not to accept an inbound
+      advert on a trunk or the wire if it thinks the same network
+      is reachable by the same route.
+
 TO DO
 -----
 
@@ -750,6 +790,24 @@ P 0 251 32768 matrix
 
 P 0 251 32768 user@example.com
 ... will email them in plain text to the given address
+
+As the 'printer' parameter can be specified as NNNNNN:dddddd, where
+NNNNNN is the Econet name of the pritner, and 'dddddd' is the unix printer
+name or email address, this allows multiple printers to be established
+on a single virtual server. Configuration-wise, that is achieved by
+putting multiple P lines in the config, e.g.:
+
+P 0 251 32768 LASER:samsung
+P 0 251 32768 MATRIX:panasonic
+P 0 251 32768 EMAIL:someone@somewhere.com
+
+NOTE: the 'NNNNNN' has a maximum length of 6 characters.
+
+The purpose of this is that when the SJ functionality is turned on (which
+is the default - you can turn it off with the -j switch), the *PRINTER
+command will let you select which printer your station prints to when
+it sends a print job.
+
 
 THE FILESERVER
 --------------
@@ -940,6 +998,17 @@ Non-privileged commands:
 *PASS <old password> <: or new password>
 	- Change password
 
+*PRINTER <printer>
+	- Select one of several printers on the fileserver. Note,
+	  this command only works if your print server is also a
+	  fileserver, because the *PRINTER command operates only on
+	  printers which are configured on the same local server as
+	  the fileserver you are logged into. This mirrors what I
+	  understand to be the SJ Research functionality of the
+	  command.
+	  ALSO only works if the SJ functionality is turned on
+	  (which is the default; turned off with the -j switch)
+
 *RENAME <old filename> <new filename>
 	- Does what it says on the tin.
 	- Can be abbreviated to *REN.
@@ -972,8 +1041,11 @@ Privileged commands:
 
 *NEWUSER <username>
 	- Create new user.
-	- Will also create & set ownership on home directory on disc 0.
-	- If home already exists, expect problems.
+	- At the moment, this does not create a home directory.
+	- You will need to manually create one, set its ownership with *CHOWN
+	- ... and then use *SETHOME to assign that directory to a user.
+	- Note that a user *can* have a home directory which he/she does
+	- ... not own!
 	- To delete a user, see *PRIV
 
 *PRIV <user> <priv>

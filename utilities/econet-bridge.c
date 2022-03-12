@@ -50,6 +50,7 @@ extern void fs_eject_station(unsigned char, unsigned char); // Used to get rid o
 extern void fs_dequeue();
 extern short fs_dequeuable();
 extern void sks_poll(int);
+extern int8_t fs_get_user_printer(int, unsigned char, unsigned char);
 short aun_wait (unsigned char, unsigned char, unsigned char, unsigned char, unsigned char, uint32_t, short, struct __econet_packet_aun **);
 extern unsigned short fs_quiet, fs_noisy;
 extern short fs_sevenbitbodge, fs_sjfunc; // 7-bit acorn date bodge, fs_sjfunc turns on MDFS-only functionality in the fileserver(s)
@@ -139,6 +140,16 @@ struct __econet_packet_aun_cache {
 #define PRN_OUT_OFFLINE	0x08
 #define PRN_OUT_JAMMED	0x10
 
+#define PRN_STATUS_DEFAULT (PRN_IN_READY | PRN_OUT_READY)
+
+// Printer control
+#define PRNCTRL_SPOOL 0x08 // Spool to disc or direct to printer (we always spool)
+#define PRNCTRL_ACCOUNT 0x04 // Account ownership required
+#define PRNCTRL_ANON 0x02 // Anonymouse use allowed. We set this by default
+#define PRNCTRL_ENABLE 0x01 // Printing enabled or not. We default to yes.
+
+#define PRNCTRL_DEFAULT (PRNCTRL_SPOOL | PRNCTRL_ANON | PRNCTRL_ENABLE)
+
 // Client to Printer server port &9f Query codes
 
 #define PRN_QUERY_NAME	6
@@ -147,24 +158,13 @@ struct __econet_packet_aun_cache {
 // Maximum printers per emulated server
 #define MAX_PRINTERS 8
 
-// FS Function code 65 defines (printer control) // Read are unprivileged; Write are privileged
-
-// ARG values for FS function 65
-#define FS65_RESET 0x00
-#define FS65_READSPRNSTATE 0x01
-#define FS65_WRITEPRNSTATE 0x02
-#define FS65_READPRIORITY 0x03
-#define FS65_WRITEPRIORITY 0x04
-#define FS65_READSYSMSGPRN 0x05
-#define FS65_WRITESYSMSGPRN 0x06
-#define FS65_READMSGLEVEL 0x07
-#define FS65_WRITEMSGLEVEL 0x08
-
 struct __printer {
 	char name[7]; // printer name - max 6 characters + null
 	uint8_t status; // Status bits - see defs above
+	uint8_t control; // Control bits
 	unsigned short user; // Only this user can use the printer
 	char unixname[100]; // Unix printer name
+	char banner[24]; // Banner filename. SJ has this max 23 characters
 };
 
 // Holds data from econet.cfg file
@@ -307,6 +307,7 @@ struct printjob {
 	short port;
 	FILE *spoolfile;
 	unsigned char printer_index;
+	char unixname[20];
 };
 
 struct printjob printjobs[MAXPRINTJOBS];
@@ -1086,8 +1087,10 @@ void econet_readconfig(void)
 				strcpy(network[(entry == -1) ? networkp : entry].print_serverparam, datastring); // Old printer code
 				strcpy(network[(entry == -1) ? networkp : entry].printers[network[(entry == -1) ? networkp : entry].numprinters].unixname, datastring); // If there was a colon, then this will have terminated where the colon was
 				snprintf(network[(entry == -1) ? networkp : entry].printers[network[(entry == -1) ? networkp : entry].numprinters].name, 7, "%-6.6s", pname); // copies first up to six characters and pads with spaces
+				network[(entry == -1) ? networkp : entry].printers[network[(entry == -1) ? networkp : entry].numprinters].control = PRNCTRL_DEFAULT;
+				network[(entry == -1) ? networkp : entry].printers[network[(entry == -1) ? networkp : entry].numprinters].status = PRN_STATUS_DEFAULT;
+				strncpy(network[(entry == -1) ? networkp : entry].printers[network[(entry == -1) ? networkp : entry].numprinters].banner, "", 23);
 				network[(entry == -1) ? networkp : entry].printer_priorities[network[(entry == -1) ? networkp : entry].numprinters] = network[(entry == -1) ? networkp : entry].numprinters; // Initially set the priority list to match the order in the file
-			
 				network[(entry == -1) ? networkp : entry].numprinters++;
 				
 			}
@@ -1639,6 +1642,9 @@ void dump_udp_pkt_aun(struct __econet_packet_aun *a, int s)
 	sd_sift(src, src_c);
 	sd_sift(dst, dst_c);
 	
+	if (wire_adv_in[a->p.srcnet]) src_c = 'W';
+	if (wire_adv_in[a->p.dstnet]) dst_c = 'W';
+
 	if (src_c == 'E' && (a->p.dstnet == 0xff && a->p.dststn == 0xff))
 		dst_c = 'B';
 
@@ -1655,8 +1661,8 @@ void dump_udp_pkt_aun(struct __econet_packet_aun *a, int s)
 	}
 	else
 	{
-		fprintf (stderr, "\n%08x --- PACKET %s TO %s ---\n", packetsize, (src_c == 'T' ? "TRUNK" : (src_c == 'E' ? "ECONET" : (src_c == 'L' ? "LOCAL" : "AUN"))),
-			(dst_c == 'T' ? "TRUNK" : (dst_c == 'E' ? "ECONET" : (dst_c == 'L' ? "LOCAL" : "AUN"))));
+		fprintf (stderr, "\n%08x --- PACKET %s TO %s ---\n", packetsize, (src_c == 'T' ? "TRUNK" : (src_c == 'E' ? "ECONET" : (src_c == 'L' ? "LOCAL" : (dst_c == 'W' ? "BDGED" : "AUN")))),
+			(dst_c == 'T' ? "TRUNK" : (dst_c == 'E' ? "ECONET" : (dst_c == 'L' ? "LOCAL" : (dst_c == 'W' ? "BDGED" : "AUN")))));
 		switch (a->p.aun_ttype)
 		{
 			case ECONET_AUN_DATA:
@@ -1910,7 +1916,7 @@ void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
 
 			for (other = 1; other < 255; other++)
 			{
-				if (trunk_advertizable[other])
+				if (trunk_advertizable[other] || wire_adv_in[other]) // Copy what's in trunk_advertizable, and what we've had from wire adverts
 				{
 					unsigned char xlated;
 
@@ -1952,7 +1958,8 @@ void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
 	// Now spit out a broadcast with port &9C and ctrl byte as appropriate
 
 	// First to the wire
-	if (nativebridgenet) // Can't send this unless we have *something* on the far side of local...
+	// Unless the source *was* the wire or it was a reset. So if this was a reset, or source > 0 (because wire is 0) then spit it out
+	if (nativebridgenet && (is_reset || (source > 0))) // Can't send this unless we have *something* on the far side of local...
 	{
 
 		unsigned char net, count;
@@ -2247,7 +2254,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 				else count++;
 			}
 
-			if (found == -1) // BBC B starting new job ?
+			if (found == -1) // New Print Job
 			{
 				char filename[100];
 
@@ -2280,19 +2287,15 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 					else
 					{
 
-						unsigned char printer_index;
+						unsigned char printer_index = 0xff;
 
 						// Which printer?
 
-						if (last_printers[a->p.srcnet][a->p.srcstn].networkp != d_ptr) // If last print server wasn't us (and it will be if the station has expressly selected a printer...)
-						{
-							last_printers[a->p.srcnet][a->p.srcstn].networkp = d_ptr;
-							// Select highest priority printer
-							printer_index = network[d_ptr].printer_priorities[0]; 
-							last_printers[a->p.srcnet][a->p.srcstn].printer_index = printer_index;
-							printjobs[count].printer_index = printer_index; 
-						}
-						else printer_index = last_printers[a->p.srcnet][a->p.srcstn].printer_index;
+						if (network[d_ptr].servertype & ECONET_SERVER_FILE) // Is fileserver, so it might have a printer selected
+							printer_index = fs_get_user_printer(network[d_ptr].fileserver_index, a->p.srcnet, a->p.srcstn);
+
+						if (printer_index == 0xff)
+							printer_index = network[d_ptr].printer_priorities[0];
 
 						fprintf (stderr, "PRINT: Starting spooler job for %d.%d - %s (%s)\n", a->p.srcnet, a->p.srcstn, network[d_ptr].printers[printer_index].name, network[d_ptr].printers[printer_index].unixname);
 
@@ -2302,6 +2305,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 							fprintf(printjobs[count].spoolfile, "Subject: Econet print job from station %d.%d\n\n", a->p.srcnet, a->p.srcstn);
 						}
 						fprintf (printjobs[count].spoolfile, PRINTHEADER, a->p.srcnet, a->p.srcstn);
+						strcpy (printjobs[count].unixname, network[d_ptr].printers[printer_index].unixname);
 					}
 
 				}
@@ -2344,7 +2348,6 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 						{
 							char command_string[2000];
 							char filename_string[200];
-							char unixname[100];
 	
 							// There is a rogue byte on the end of the last printjob packet it would seem
 							fwrite(&(a->p.data), packlen-12-1, 1, printjobs[count].spoolfile);
@@ -2354,12 +2357,10 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 							fclose(printjobs[count].spoolfile);
 							sprintf(filename_string, SPOOLFILESPEC, found);
 							
-							strncpy(unixname, network[d_ptr].printers[last_printers[a->p.srcnet][a->p.srcstn].printer_index].unixname, 99);
-
-							if (strstr(unixname, "@")) // Email address not printername
-								sprintf(command_string, MAILCMDSPEC, unixname, filename_string);
+							if (strstr(printjobs[count].unixname, "@")) // Email address not printername
+								sprintf(command_string, MAILCMDSPEC, printjobs[count].unixname, filename_string);
 							else
-								sprintf(command_string, PRINTCMDSPEC, unixname, filename_string);
+								sprintf(command_string, PRINTCMDSPEC, printjobs[count].unixname, filename_string);
 	
 							fprintf (stderr, "PRINT: Sending print job with %s\n", command_string);
 							
@@ -2441,6 +2442,7 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 {
 
 	int d, s, result; // d, s are pointers into network[]; result is number of bytes written or error return
+	int is_on_wirebridge = 0;
 
 	if (p->p.aun_ttype == ECONET_AUN_BCAST)
 		p->p.dstnet = p->p.dststn = 0xff;
@@ -2448,6 +2450,11 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 	d = econet_ptr[p->p.dstnet][p->p.dststn];
 	s = econet_ptr[p->p.srcnet][p->p.srcstn];
 
+	// Probably need to pick up here if the destination is on a network advertised to us by a wire bridge - if so, then if the source is not on the wire as well (and not on a wire bridge either!) then we should treat it as going onto the wire. Maybe a new variable wire_bridged which we can use in the logic below. Otherwise stuff which ought to go on the wire which has come from AUN (most likely via a trunk, but it could also be a W statement) will end up heading for an unknown trunk and failing.
+
+	if (wire_adv_in[p->p.dstnet] == 0xff)  // If this is a network we know is via a bridge on the wire, flag that up.
+		is_on_wirebridge = 1;
+	
 	if (d != -1) network[d].last_transaction = time(NULL);
 
 	p->p.ctrl |= 0x80; // In case we're going to wire or local
@@ -2481,6 +2488,11 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 	}
 	else
 	{
+		if (is_on_wirebridge && source == 0) // Wire to wire
+		{
+			if (pkt_debug) fprintf (stderr, "ILOCK: to %3d.%3d from %3d.%3d I refuse to forward wire traffic via a wire bridge\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
+			return result;
+		}
 		if (d == -1 && (s != -1) && (network[s].type & ECONET_HOSTTYPE_TDIS)) // AUN/IP source to Trunk - dump it
 		{
 			if (pkt_debug) fprintf (stderr, "ILOCK: to %3d.%3d from %3d.%3d I refuse to forward AUN traffic to trunk\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
@@ -2513,70 +2525,98 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 
 	}
 
+	// Broadcasts
+
+	if (p->p.aun_ttype == ECONET_AUN_BCAST && p->p.port != 0x9c) // We don't retransmit bridge traffic because we tinker with that elsewhere
+	{
+
+		int trunk;
+
+		result = len;
+
+		// Dump it locally if it wasn't local
+		if (s != -1 && (!(network[s].type & ECONET_HOSTTYPE_TLOCAL)))
+			econet_handle_local_aun(p, len, source);
+
+		// if it didn't come from the wire, put it on the wire
+		if (source != 0)	
+			econet_enqueue(p, len, QUEUE_AUTO);
+
+		// And on every trunk it didn't come from
+	
+		for (trunk = 0; trunk < numtrunks; trunk++)
+		{
+			if (trunk != source)
+				aun_trunk_send_internal (p, len+12, trunk);
+		}
+
+	}
+
 	// If trunk destination, the trunk send routine does NAT and works out which trunk
 
 	// Now, where's it going?
 
-		if (d == -1 && (p->p.aun_ttype != ECONET_AUN_BCAST)) // Trunk send
-		{
-			p->p.ctrl &= 0x7f; // Strip high bit from control an AUN transmission
+	else if (p->p.aun_ttype == ECONET_AUN_BCAST || (d != -1 && (network[d].type & ECONET_HOSTTYPE_TLOCAL))) // Probably need to forward broadcasts received off the wire to AUN/IP hosts on same net, but we don't at the moment; We catch broadcasts here again because we don't process BRIDGE broadcasts above, so they need to go to the local handler
+	{
+		econet_handle_local_aun(p, len, source);
+		// probably need to forward broadcasts to trunks / wire depending on source - TODO
+		result = len;
+	}
+	else if (!is_on_wirebridge && d == -1) // Trunk send (we will now send broadcasts on trunks as well)
+	{
+		p->p.ctrl &= 0x7f; // Strip high bit from control an AUN transmission
 
-			if (s == -1) // Trunk to trunk - straight out
-				result = aun_trunk_send (p, len);
-			else
+		if (s == -1) // Trunk to trunk - straight out
+			result = aun_trunk_send (p, len);
+		else
+		{
+			econet_general_enqueue(&trunk_head, &trunk_tail, p, len);
+			result = len;
+		}
+	}
+	else if (is_on_wirebridge || network[d].type & ECONET_HOSTTYPE_TWIRE) // Wire - and we prevent material received from the wire going back onto the wire
+	{
+		// Is it a wired fileserver we might want to know about? To cope with wired filservers that are via wired bridges, we probably need a separate list of wired fileservers now - TODO
+
+		if (!is_on_wirebridge && (network[d].type & ECONET_HOSTTYPE_TWIRE) && (p->p.port == 0x99) && (!(network[d].is_wired_fs))) // Fileserver traffic on a wire station
+		{
+			network[d].is_wired_fs = 1;
+			fprintf (stderr, "  DYN:%12s             Station %d.%d identified as wired fileserver\n", "", p->p.dstnet, p->p.dststn);
+		}
+
+		// Update this even if we don't get to transmit - what's the harm?
+		if (!is_on_wirebridge && p->p.aun_ttype == ECONET_AUN_IMM)
+			network[d].last_imm_seq_sent = p->p.seq;
+
+		econet_enqueue(p, len, QUEUE_AUTO);
+		result = len;
+
+	}
+	else if ((network[d].type & ECONET_HOSTTYPE_TNAMEDPIPE)) // Named pipe client
+	{
+		result = write(network[d].listensocket, p, len);
+	}
+	else if (network[d].type & ECONET_HOSTTYPE_TDIS)
+	{
+		p->p.ctrl &= 0x7f; // Strip high bit from control an AUN transmission
+
+		// We shouldn't see ACK or NAK here because they are caught on input and processed.
+
+		if (p->p.aun_ttype != ECONET_AUN_BCAST) // Ignore broadcasts to AUN for now
+		{
+			if (econet_general_enqueue(&(network[d].aun_head), &(network[d].aun_tail), p, len))
 			{
-				econet_general_enqueue(&trunk_head, &trunk_tail, p, len);
 				result = len;
+				aun_queued++;
 			}
+			else	result = 0;
 		}
-		else if ((network[d].type & ECONET_HOSTTYPE_TLOCAL) || p->p.aun_ttype == ECONET_AUN_BCAST) // Probably need to forward broadcasts received off the wire to AUN/IP hosts on same net, but we don't at the moment
-		{
-			econet_handle_local_aun(p, len, source);
-			result = len;
-		}
-		else if ((network[d].type & ECONET_HOSTTYPE_TNAMEDPIPE)) // Named pipe client
-		{
-			result = write(network[d].listensocket, p, len);
-		}
-		else if (network[d].type & ECONET_HOSTTYPE_TDIS)
-		{
-			p->p.ctrl &= 0x7f; // Strip high bit from control an AUN transmission
-
-			// We shouldn't see ACK or NAK here because they are caught on input and processed.
-
-			if (p->p.aun_ttype != ECONET_AUN_BCAST) // Ignore broadcasts to AUN for now
-			{
-				if (econet_general_enqueue(&(network[d].aun_head), &(network[d].aun_tail), p, len))
-				{
-					result = len;
-					aun_queued++;
-				}
-				else	result = 0;
-			}
-			else result = len;
-		}
-		else if (network[d].type & ECONET_HOSTTYPE_TWIRE) // Wire
-		{
-			// Is it a wired fileserver we might want to know about?
-
-			if ((network[d].type & ECONET_HOSTTYPE_TWIRE) && (p->p.port == 0x99) && (!(network[d].is_wired_fs))) // Fileserver traffic on a wire station
-			{
-				network[d].is_wired_fs = 1;
-				fprintf (stderr, "  DYN:%12s             Station %d.%d identified as wired fileserver\n", "", p->p.dstnet, p->p.dststn);
-			}
-
-			// Update this even if we don't get to transmit - what's the harm?
-			if (p->p.aun_ttype == ECONET_AUN_IMM)
-				network[d].last_imm_seq_sent = p->p.seq;
-
-			econet_enqueue(p, len, QUEUE_AUTO);
-			result = len;
-
-		}
-		else // Unknown destination type
-		{
-			fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d Unknown destination\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
-		}
+		else result = len;
+	}
+	else // Unknown destination type
+	{
+		fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d Unknown destination\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
+	}
 
 	return result;
 
@@ -3006,21 +3046,30 @@ Options:\n\
 				if (r < 12)
 					fprintf(stderr, "Runt packet length %d received off Econet wire\n", r);
 
-				rx.p.seq = get_local_seq(rx.p.srcnet, rx.p.srcstn);
+				if (!wire_adv_in[rx.p.srcnet]) // This was not a network advertised inbound on the wire - i.e. we should have a network[] entry for it
+				{
+					rx.p.seq = get_local_seq(rx.p.srcnet, rx.p.srcstn);
 
-				if (rx.p.aun_ttype == ECONET_AUN_IMMREP) // Fudge - assume the immediate we have received is a reply to the last one we sent. Maybe make this more intelligent.
-					rx.p.seq = network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_imm_seq_sent;
+					if (rx.p.aun_ttype == ECONET_AUN_IMMREP) // Fudge - assume the immediate we have received is a reply to the last one we sent. Maybe make this more intelligent.
+						rx.p.seq = network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_imm_seq_sent;
 
-				network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_transaction = time(NULL);
+					network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_transaction = time(NULL);
+
+				}
+				else
+				{
+					// Need to track sequence and immediate sequence and last transaction somehow... TODO
+
+				}
 
 				// Fudge the AUN type on port 0 ctrl 0x85, which is done as some sort of weird special 4 way handshake with 4 data bytes on the Scout - done as "data" and the kernel module works out that the first 4 bytes in the packet go on the scout and the rest go in the 3rd packet in the 4-way
 
 				if (rx.p.aun_ttype == ECONET_AUN_IMM && rx.p.ctrl == 0x85) // Fudge-a-rama. This deals with the fact that NFS & ANFS in fact do a 4-way handshake on immediate $85, but with 4 data bytes on the "Scout". Those four bytes are put as the first four bytes in the data packet, and a receiving bridge will strip them off, detect the ctrl byte, and do a 4-way with the 4 bytes on the Scout, and the remainder of the data in the "data" packet (packet 3/4 in the 4-way). This enables things like *remote, *view and *notify to work.
 					rx.p.aun_ttype = ECONET_AUN_DATA;
 
-				// This will be from a known wire station, flag priority output if need be (note - there is a concurrency issue with other wire stations since they have their own priority flags. maybe change that to a global wire priority?)
+				// This will be from a known wire station or a station from over a bridge, flag priority output if need be (note - there is a concurrency issue with other wire stations since they have their own priority flags. maybe change that to a global wire priority?)
 				
-				aun_send (&rx, r);
+				aun_send_internal (&rx, r, 0);
 
 			}
 		}
@@ -3537,3 +3586,65 @@ Options:\n\
    }
 }
 
+// Printer information functions for the fileserver (but we have all the variables...)
+uint8_t get_printer_info(unsigned char net, unsigned char stn, uint8_t printer, char *pname, char *banner, uint8_t *control, uint8_t *status, short *user)
+{
+
+	int p; // network pointer
+
+	p = econet_ptr[net][stn]; // Look up the network entry
+
+	*control = *status = *user = 0; // Initialize
+	snprintf(banner, 24, "%23s", "");
+	snprintf(pname, 7, "%6s", "");  // Puts a null in pname[0]
+
+	if (p == -1) // Unknown station
+		return 0; // So will return empty data
+
+	if (!(network[p].servertype & ECONET_SERVER_PRINT)) // not a print server at all
+		return 0; 
+
+	if (network[p].numprinters < printer) // Unknown printer index
+		return 0;
+
+	snprintf(pname, 7, "%6.6s", network[p].printers[printer].name);
+	snprintf(banner, 24, "%23.23s", network[p].printers[printer].banner);
+	*control = network[p].printers[printer].control;
+	*status = network[p].printers[printer].status;
+	*user = network[p].printers[printer].user;
+
+	return 1;
+
+}
+
+uint8_t set_printer_info(unsigned char net, unsigned char stn, uint8_t printer, char *pname, char *banner, uint8_t control, ushort user)
+{
+
+	int p; // network pointer
+
+	p = econet_ptr[net][stn]; // Look up the network entry
+
+	if ((p == -1) || (!(network[p].servertype & ECONET_SERVER_PRINT)) || (network[p].numprinters < printer)) // See logic in get_printer_info()
+		return 0;
+
+	snprintf(network[p].printers[printer].name, 7, "%6.6s", pname);
+	snprintf(network[p].printers[printer].banner, 24, "%23.23s", banner);
+	network[p].printers[printer].control = control;
+	network[p].printers[printer].user = user;
+
+	return 1;
+}
+
+uint8_t get_printer_total(unsigned char net, unsigned char stn)
+{
+
+	int p; // network pointer
+
+	p = econet_ptr[net][stn]; // Look up the network entry
+
+	if ((p == -1) || (!(network[p].servertype & ECONET_SERVER_PRINT))) // See logic in get_printer_info()
+		return 0;
+
+	return network[p].numprinters;
+
+}
