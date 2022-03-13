@@ -66,6 +66,7 @@ extern uint8_t get_printer_total (unsigned char, unsigned char);
 short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for extra year information
 short fs_sjfunc; // Whether SJ MDFS functionality is turned on (global - not per fileserver)
 short use_xattr=1 ; // When set use filesystem extended attributes, otherwise use a dotfile
+short normalize_debug = 0; // Whether we spew out loads of debug about filename normalization
 
 short fs_open_interlock(int, unsigned char *, unsigned short, unsigned short);
 void fs_close_interlock(int, unsigned short, unsigned short);
@@ -1042,7 +1043,6 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	unsigned char adjusted[1048];
 	unsigned char path_internal[1024];
 	unsigned char unix_segment[20];
-	short normalize_debug = 1;
 	struct objattr attr;
 	int parent_owner = 0;
 	short found;

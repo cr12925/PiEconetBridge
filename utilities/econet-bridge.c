@@ -51,10 +51,12 @@ extern void fs_dequeue();
 extern short fs_dequeuable();
 extern void sks_poll(int);
 extern int8_t fs_get_user_printer(int, unsigned char, unsigned char);
+
 short aun_wait (unsigned char, unsigned char, unsigned char, unsigned char, unsigned char, uint32_t, short, struct __econet_packet_aun **);
 extern unsigned short fs_quiet, fs_noisy;
 extern short fs_sevenbitbodge, fs_sjfunc; // 7-bit acorn date bodge, fs_sjfunc turns on MDFS-only functionality in the fileserver(s)
 extern short use_xattr; // When set use filesystem extended attributes, otherwise use a dotfile
+extern short normalize_debug;
 
 #define ECONET_LEARNED_HOST_IDLE_TIMEOUT 3600 // 1 hour
 #define ECONET_BRIDGE_RESET_FREQ 300 // 300s = 5 minutes. Every 5 mins we do a full reset and re-learn
@@ -2759,7 +2761,7 @@ int main(int argc, char **argv)
 
 	fs_sevenbitbodge = fs_sjfunc = 1; // On by default 
 
-	while ((opt = getopt(argc, argv, "bc:dfijlnqrsxzh7")) != -1)
+	while ((opt = getopt(argc, argv, "bc:dfijlnmqrsxzh7")) != -1)
 	{
 		switch (opt) {
 			case 'b': dumpmode_brief = 1; break;
@@ -2774,6 +2776,7 @@ int main(int argc, char **argv)
 			case 'j': fs_sjfunc = 0; break; // Turn off MDFS / SJ functionality in FS
 			case 'l': wire_enabled = 0; break;
 			case 'n': fs_noisy = 1; fs_quiet = 0; break;
+			case 'm': normalize_debug = 1; fs_noisy = 1; fs_quiet = 0; break;
 			case 'q':
 				bridge_query = 0;
 				break;
@@ -2798,6 +2801,8 @@ Options:\n\
 \t-i\tSpoof immediate responses in-kernel (will break *REMOTE, *VIEW etc.)\n\
 \t-j\tTurn off SJ Research MDFS functionality in file server\n\
 \t-l\tLocal only - do not connect to kernel module (uses /dev/null instead)\n\
+\t-n\tTurn on noisy fileserver debugging (also turns on ordinary logging)\n\
+\t-m\tTurn on FS 'normalize' debug (filename translation from Acorn to Unix) - super noisy\n\
 \t-q\tDisable bridge query responses\n\
 \t-r\tEnable queue debugging (only if you know what you're doing)\n\
 \t-s\tDump station table on startup\n\
