@@ -99,7 +99,7 @@ unsigned char last_net = 0, last_stn = 0;
 
 int start_fd = 0; // Which index number do we start looking for UDP traffic from after poll returns? We do this cyclicly so we give all stations an even chance
 
-unsigned short numtrunks;
+unsigned short numtrunks; // Only used to determine whether to display trunk info on summary at startup
 
 char cfgpath[512] = "/etc/econet-gpio/econet.cfg";
 
@@ -533,11 +533,11 @@ int econet_write_general(struct __econet_packet_aun *p, int len)
 	trunk = trunk_find(p->p.dstnet);
 	ptr = econet_ptr[p->p.dstnet][p->p.dststn];
 
-	if (ptr != -1) // A station we know
+	if (ptr != -1 || p->p.aun_ttype == ECONET_AUN_BCAST) // A station we know
 	{
 		// What sort of destination?
 		
-		if (network[ptr].type & ECONET_HOSTTYPE_TWIRE) // WIRE
+		if ((network[ptr].type & ECONET_HOSTTYPE_TWIRE) || (ptr == -1 && p->p.aun_ttype == ECONET_AUN_BCAST)) // WIRE, or an unknown station and it's a broadcast
 			return econet_write_wire(p, len, 0); // Will eventually get rid of parameter 3!
 		else if (network[ptr].type & ECONET_HOSTTYPE_TDIS) // AUN
 		{
@@ -656,7 +656,9 @@ void econet_readconfig(void)
 			econet_ptr[j][k] = -1;
 
 	for (j = 0; j < 256; j++)
+	{
 		trunks[j].listensocket = -1;
+	}
 
 	networkp = 0;
 
@@ -1620,11 +1622,11 @@ void dump_udp_pkt_aun(struct __econet_packet_aun *a, int s)
 	if (wire_adv_in[a->p.srcnet]) src_c = 'W';
 	if (wire_adv_in[a->p.dstnet]) dst_c = 'W';
 
-	if (src_c == 'E' && (a->p.dstnet == 0xff && a->p.dststn == 0xff))
+	if ((a->p.dstnet == 0xff && a->p.dststn == 0xff))
 		dst_c = 'B';
 
 	if (a->p.srcstn == 0) // Bridge query reply
-		src_c = 'L';
+		src_c = 'Z';
 
 	if (dumpmode_brief)
 	{
@@ -1636,7 +1638,7 @@ void dump_udp_pkt_aun(struct __econet_packet_aun *a, int s)
 	}
 	else
 	{
-		fprintf (stderr, "\n%08x --- PACKET %s TO %s ---\n", packetsize, (src_c == 'T' ? "TRUNK" : (src_c == 'E' ? "ECONET" : (src_c == 'L' ? "LOCAL" : (dst_c == 'W' ? "BDGED" : "AUN")))),
+		fprintf (stderr, "\n%08x --- PACKET %s TO %s ---\n", packetsize, (src_c == 'T' ? "TRUNK" : (src_c == 'E' ? "ECONET" : (src_c == 'L' ? "LOCAL" : (src_c == 'W' ? "WIRE BRIDGED" : (src_c == 'Z' ? "BRIDGE" : "AUN"))))),
 			(dst_c == 'T' ? "TRUNK" : (dst_c == 'E' ? "ECONET" : (dst_c == 'L' ? "LOCAL" : (dst_c == 'W' ? "BDGED" : "AUN")))));
 		switch (a->p.aun_ttype)
 		{
@@ -1777,8 +1779,8 @@ void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
 		if (source >= 0)
 		{
 			fprintf (stderr, "with nets ");
-			for (counter = 0; counter < len-12; counter++)
-				fprintf (stderr, "%3d ", p->p.data[counter]);
+			for (counter = 0; counter < len-18; counter++)
+				fprintf (stderr, "%3d ", p->p.data[counter+6]);
 		}
 
 		fprintf (stderr, "\n");
@@ -1826,7 +1828,7 @@ void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
 		{
 			trunks[source].adv_in[p->p.data[counter]] = 0xff ^ trunks[source].filter_in[p->p.data[counter]]; // Since the filter_in entry for a network will be 0xff if we are filtering it, this will result in 0 if the network is filtered.	
 			if (!nativebridgenet) // There wasn't anything we were already advertizing to the wire - so use this as our native network
-				nativebridgenet = (0xff ^ trunks[source].filter_in[p->p.data[counter]]) ? counter : 0;  // If this network wasn't filtered, nativebridgenet is set to it. Otherwise 0 (which is what it was before)
+				nativebridgenet = (0xff ^ trunks[source].filter_in[p->p.data[counter]]) ? p->p.data[counter] : 0;  // If this network wasn't filtered, nativebridgenet is set to it. Otherwise 0 (which is what it was before)
 		}
 	}
 
@@ -1959,7 +1961,7 @@ void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
 			}
 
 		if (pkt_debug) fprintf (stderr, "\n");
-		
+
 		econet_write_wire (&out, count+12, 0);
 	}
 
@@ -2009,6 +2011,8 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 
 	struct __econet_packet_aun reply;
 	int s_ptr, d_ptr;
+
+	//fprintf (stderr, "Local handler invoked; AUN type %d len %d\n", a->p.aun_ttype, packlen);
 
 	s_ptr = econet_ptr[a->p.srcnet][a->p.srcstn];
 	d_ptr = econet_ptr[a->p.dstnet][a->p.dststn];
@@ -2153,7 +2157,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 		
 			char printer_selected[10];
 			char *spaceptr;
-			unsigned char querytype;
+			//unsigned char querytype;
 
 			memset(printer_selected, 0, sizeof(printer_selected));
 
@@ -2177,7 +2181,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 			if ((spaceptr = strchr(printer_selected, ' ')))
 				*spaceptr = (char) 0; // Terminate
 		
-			querytype = a->p.data[6];
+			//querytype = a->p.data[6]; // TODO - Implement the different queries
 
 			if (!strcmp(printer_selected, "PRINT"))
 			{
@@ -2419,6 +2423,8 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 	int d, s, result; // d, s are pointers into network[]; result is number of bytes written or error return
 	int is_on_wirebridge = 0;
 
+	//fprintf (stderr, "aun_send_internal type %d, dst = %3d.%3d, len = %d\n", p->p.aun_ttype, p->p.dstnet, p->p.dststn, len);
+
 	if (p->p.aun_ttype == ECONET_AUN_BCAST)
 		p->p.dstnet = p->p.dststn = 0xff;
 		
@@ -2427,7 +2433,7 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 
 	// Probably need to pick up here if the destination is on a network advertised to us by a wire bridge - if so, then if the source is not on the wire as well (and not on a wire bridge either!) then we should treat it as going onto the wire. Maybe a new variable wire_bridged which we can use in the logic below. Otherwise stuff which ought to go on the wire which has come from AUN (most likely via a trunk, but it could also be a W statement) will end up heading for an unknown trunk and failing.
 
-	if (wire_adv_in[p->p.dstnet] == 0xff)  // If this is a network we know is via a bridge on the wire, flag that up.
+	if (p->p.dstnet != 0xff && wire_adv_in[p->p.dstnet] == 0xff)  // If this is a network we know is via a bridge on the wire, flag that up.
 		is_on_wirebridge = 1;
 	
 	if (d != -1) network[d].last_transaction = time(NULL);
@@ -2436,9 +2442,11 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 	
 	p->p.padding = 0x00;
 
+	//fprintf (stderr, "Got here 1\n");
 	if (p->p.aun_ttype != ECONET_AUN_ACK && p->p.aun_ttype != ECONET_AUN_NAK) // Don't dump acks...
 		dump_udp_pkt_aun(p, len);
 
+	//fprintf (stderr, "Got here 2\n");
 	result = -1;
 
 	// Perform interlock - do not send between same type of endpoints, or between trunk<->AUN/IP, and drop any RAW traffic in bridge mode
@@ -2509,20 +2517,30 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 
 		result = len;
 
+		//fprintf (stderr, "Broadcast retransmission - len = %d, s = %d\n", len, s);
+
 		// Dump it locally if it wasn't local
-		if (s != -1 && (!(network[s].type & ECONET_HOSTTYPE_TLOCAL)))
+		if ((s != -1 && (!(network[s].type & ECONET_HOSTTYPE_TLOCAL))) || (s == -1)) // Known source and it wasn't a local emulator,  or unknown source
+		{
+			//fprintf (stderr, "Sending broadcast to local\n");
 			econet_handle_local_aun(p, len, source);
+		}
 
 		// if it didn't come from the wire, put it on the wire
 		if (source != 0)	
-			econet_enqueue(p, len, QUEUE_AUTO);
+		{
+			//fprintf (stderr, "Sending broadcast to wire\n");
+			econet_write_wire(p, len, 0); // Was len+12
+		}
 
 		// And on every trunk it didn't come from
 	
-		for (trunk = 0; trunk < numtrunks; trunk++)
+		for (trunk = 1; trunk < 256; trunk++)
 		{
-			if (trunk != source)
-				aun_trunk_send_internal (p, len+12, trunk);
+			if (trunks[trunk].listensocket >= 0 && trunk != source)
+			{	//fprintf (stderr, "Sending broadcast to trunk %d\n", trunk);
+				aun_trunk_send_internal (p, len, trunk);
+			}
 		}
 
 	}
@@ -2721,11 +2739,11 @@ static inline unsigned short is_on_trunk(unsigned char net, unsigned char stn)
 {
 	if (econet_ptr[net][stn] == -1) 
 	{
-		unsigned short count = 0;
+		unsigned short count = 1;
 	
-		while (count < numtrunks)
+		while (count < 256)
 		{
-			if (trunks[count].adv_in[net] == 0xff)
+			if (trunks[count].listensocket >= 0 && trunks[count].adv_in[net] == 0xff)
 				return 1;
 			else count++;
 		}
@@ -2889,7 +2907,7 @@ Options:\n\
 		if (numtrunks > 0)
 		{
 			fprintf (stderr, "\n\nTRUNK DEFINITIONS\n");
-			for (n = 0; n < 256; n++)
+			for (n = 1; n < 256; n++)
 			{
 				if (trunks[n].listensocket >= 0) // Valid entry
 				{
@@ -3047,6 +3065,10 @@ Options:\n\
 
 				// This will be from a known wire station or a station from over a bridge, flag priority output if need be (note - there is a concurrency issue with other wire stations since they have their own priority flags. maybe change that to a global wire priority?)
 				
+				// Flag broadcasts incase the module isn't doing it
+				if (rx.p.dstnet == 0xff && rx.p.dststn == 0xff)
+					rx.p.aun_ttype = ECONET_AUN_BCAST;
+
 				aun_send_internal (&rx, r, 0);
 
 			}
@@ -3076,7 +3098,7 @@ Options:\n\
 
 				// Which peer did it turn up from?
 
-				count = 0;
+				count = 1;
 
 				while ((from_found == 0xffff) && (count < 256))
 				{
@@ -3109,8 +3131,14 @@ Options:\n\
 
 				policy = trunk_xlate_fw(&p, count, 0); // 0 = inbound translation && firewalling
 
+// Disabled - use aun_send_internal
+/*
 				if ((p.p.aun_ttype == ECONET_AUN_BCAST) && from_found != 0xffff) // Dump to local in case it's bridge stuff - but only if we knew where it came from
 					econet_handle_local_aun(&p, r, from_found);
+*/
+		
+				if (p.p.aun_ttype == ECONET_AUN_BCAST && from_found != 0xffff)
+					aun_send_internal (&p, r, from_found);
 
 				// Note that aun_send now dumps traffic we refuse to forward so we don't need to check here
 
