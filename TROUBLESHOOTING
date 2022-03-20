@@ -1,0 +1,49 @@
+Some common problems and solutions
+----------------------------------
+
+1. A BeebEm station cannot communicate with a wired Econet station, 
+   or an Econet station cannot communicate with the Pi Fileserver
+
+   Usually this is because the relevant Econet station has not been
+   defined properly in the configuration with a 'W' or 'WIRE' directive.
+
+   If the station is not defined at all, then these symptoms will occur.
+
+   If the station is on the local network, define it on network 0, not
+   the network number you are using for the local wire.
+
+
+2. I can log into the PiFS from a wired station, but cannot load files
+   of any significant length.
+
+   This is almost invariably caused by one of the following three
+   issues:
+
+   a) Lack of termination causing the Econet to be unstable. Check 
+      termination carefully and ensure it is at either end of the line.
+
+   b) Clock incorrectly set. Try setting the clock to a period of 5us and
+      a mark of 1us to see if this is the issue. Clocks which are much
+      faster (such as may be tolerated by Archimedes-class machines)
+      are unlikely to work with the Pi Econet hardware.
+
+      Note that clocks are set with period/mark, not mark/space, so
+      the period time *includes* the mark time. Thus 5/1 will have
+      4us of space time, and 1us of mark.
+
+      *Some* clock hardware has been found to have the DIP switches
+      mounted the wrong way around so as to invert either the mark or
+      period time configuration. If everything else looks right, this
+      may be worth considering.
+
+   c) Dodgy Econet cables. Try a fresh cable on each of the BBC and the
+      Pi Bridge.
+
+(More to come as things arise.)
+
+CR, March 2022
+
+  
+   
+
+
