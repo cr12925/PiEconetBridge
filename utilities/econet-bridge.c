@@ -560,7 +560,15 @@ int econet_write_general(struct __econet_packet_aun *p, int len)
 
 		}
 		else if (network[ptr].type & ECONET_HOSTTYPE_TNAMEDPIPE) // Named Pipe
-			return write(network[ptr].listensocket, p, len);
+		{
+			if (network[ptr].pipewritesocket != -1)
+				return write(network[ptr].pipewritesocket, p, len);
+			else	
+			{
+				if (pkt_debug) fprintf (stderr, "PIPE : Pipe write socket not open\n");
+				return -1; // The other end of the named pipe isn't open
+			}
+		}
 		else
 		{
 			fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d Unknown destination type (0x%02x) - cannot route\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, network[ptr].type);
@@ -689,7 +697,8 @@ void econet_readconfig(void)
 		exit(EXIT_FAILURE);
 	}
 
-	if (regcomp(&r_entry_server, "^\\s*([FfPpSs])\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{4,5}|AUTO)\\s+(.+)\\s*$", REG_EXTENDED) != 0)
+	//if (regcomp(&r_entry_server, "^\\s*([FfPpSs])\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{4,5}|AUTO)\\s+(.+)\\s*$", REG_EXTENDED) != 0)
+	if (regcomp(&r_entry_server, "^\\s*([FfPp])\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{4,5}|AUTO)\\s+(.+)\\s*$", REG_EXTENDED) != 0)
 	{
 		fprintf(stderr, "Unable to compile server regex.\n");
 		exit(EXIT_FAILURE);
@@ -937,22 +946,20 @@ void econet_readconfig(void)
 				fprintf (stderr, "Cannot initialize named pipe at %s - ignoring\n", readerfilename);
 			}
 			else
-				network[networkp].listensocket = open(readerfilename, O_RDONLY | O_NONBLOCK);
+				network[networkp].listensocket = open(readerfilename, O_RDONLY | O_NONBLOCK | O_SYNC);
 
 			if (network[networkp].listensocket != -1) // Open succeeded
 			{
 			
-				mfr = mkfifo(writerfilename, 0666);
+				mfr = mkfifo(writerfilename, 0666); // Still not keen on this
 				
 				if (mfr == -1 && (errno != EEXIST))
 				{
 					fprintf (stderr, "Cannot initialize named pipe at %s - ignoring\n", writerfilename);
 				}
 				else
-					network[networkp].pipewritesocket = open(writerfilename, O_WRONLY | O_NONBLOCK);
-
-				if (network[networkp].pipewritesocket != -1)
 				{
+					network[networkp].pipewritesocket = -1; // Rogue - we open it when we see traffic on the pipe, otherwise there's no endpoint and it won't open
 					network[networkp].pind = pmax; // Index into pset from the network[] array
 
 					fd_ptr[network[networkp].listensocket] = networkp; // Create the index to find a station from its FD
@@ -1007,9 +1014,11 @@ void econet_readconfig(void)
 							case 'p':
 								servertype = ECONET_SERVER_PRINT;
 								break;
+/*
 							case 'S':
 							case 's':
 								servertype = ECONET_SERVER_SOCKET;
+*/
 						}
 						break;
 					case 2:
@@ -1098,8 +1107,10 @@ void econet_readconfig(void)
 				network[(entry == -1) ? networkp : entry].numprinters++;
 				
 			}
+/*
 			else if (servertype == ECONET_SERVER_SOCKET)
 				strcpy(network[(entry == -1) ? networkp : entry].socket_serverparam, datastring);
+*/
 
 			if (servertype & ECONET_SERVER_FILE)
 			{
@@ -1111,6 +1122,7 @@ void econet_readconfig(void)
 				else f = -1;
 			}
 
+/*
 			if (servertype & ECONET_SERVER_SOCKET)
 			{
 				int f;
@@ -1120,7 +1132,7 @@ void econet_readconfig(void)
 					network[(entry == -1 ? networkp : entry)].sks_index = f;
 				else f = -1;
 			}
-
+*/
 			// Set up bridge adverts
 			if (network[networkp].network !=0)
 			{
@@ -1779,8 +1791,8 @@ void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
 		if (source >= 0)
 		{
 			fprintf (stderr, "with nets ");
-			for (counter = 0; counter < len-18; counter++)
-				fprintf (stderr, "%3d ", p->p.data[counter+6]);
+			for (counter = 0; counter < len-12; counter++)
+				fprintf (stderr, "%3d ", p->p.data[counter]);
 		}
 
 		fprintf (stderr, "\n");
@@ -2069,7 +2081,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 		if (bridge_query && (a->p.port == 0x9C) && (a->p.ctrl == 0x80 || a->p.ctrl == 0x81) && (source >= 0)) // bridge reset/update broadcast
 			econet_bridge_process (a, packlen, source);
 
-		else if (bridge_query && (a->p.port == 0x9c) && (!strncmp("BRIDGE", (const char *) a->p.data, 6)) && localnet && (network[econet_ptr[a->p.srcnet][a->p.srcstn]].type & ECONET_HOSTTYPE_TWIRE))
+		else if (bridge_query && (a->p.port == 0x9c) && (!strncmp("BRIDGE", (const char *) a->p.data, 6)) && localnet && (network[econet_ptr[a->p.srcnet][a->p.srcstn]].type & (ECONET_HOSTTYPE_TWIRE | ECONET_HOSTTYPE_TNAMEDPIPE)))
 		{
 			short query_net, reply_port;
 			struct timeval now;
@@ -2109,6 +2121,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 				reply.p.data[1] = query_net; 
 				aun_send (&reply, 14);
 			}
+			else if (pkt_debug) fprintf (stderr, "LOC  : BRIDGE     from %3d.%3d - didn't bother replying.\n", a->p.srcnet, a->p.srcstn);
 	
 		}
 		else if (a->p.port == 0x99) // Handle broadcasts to fileservers
@@ -2146,6 +2159,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 			}
 
 		}
+		else if (pkt_debug) fprintf (stderr, "LOC  : BROADCAST not handled\n");
 	}
 	else if (a->p.aun_ttype == ECONET_AUN_DATA) // Data packet
 	{
@@ -2513,7 +2527,7 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 	if (p->p.aun_ttype == ECONET_AUN_BCAST && p->p.port != 0x9c) // We don't retransmit bridge traffic because we tinker with that elsewhere
 	{
 
-		int trunk;
+		int trunk, count;
 
 		result = len;
 
@@ -2524,6 +2538,15 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 		{
 			//fprintf (stderr, "Sending broadcast to local\n");
 			econet_handle_local_aun(p, len, source);
+		}
+
+		// Now dump it to all the named pipes we can find
+
+		for (count = 0; count < stations;  count++)
+		{
+			if ((network[count].type & ECONET_HOSTTYPE_TNAMEDPIPE) && (s != -1 && s != count) && (network[count].pipewritesocket != -1)) // Is a named pipe, and not the one the packe came from
+				write(network[count].pipewritesocket, p, len);
+
 		}
 
 		// if it didn't come from the wire, put it on the wire
@@ -2587,7 +2610,9 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 	}
 	else if ((network[d].type & ECONET_HOSTTYPE_TNAMEDPIPE)) // Named pipe client
 	{
-		result = write(network[d].listensocket, p, len);
+		if (network[d].pipewritesocket != -1)
+			result = write(network[d].pipewritesocket, p, len);
+		else	if (pkt_debug) fprintf (stderr, "PIPE : Pipe write socket not open\n");
 	}
 	else if (network[d].type & ECONET_HOSTTYPE_TDIS)
 	{
@@ -2864,6 +2889,7 @@ Options:\n\
 				char buffer[6];
 
 				p = econet_ptr[n][s];
+
 				if (p != -1 && (network[p].is_dynamic == 0)) // Real entry exc. dynamic stations
 				{
 					if (network[p].listensocket >= 0)
@@ -3085,7 +3111,34 @@ Options:\n\
 			if (pset[realfd].revents & POLLIN)
 				last_active_fd = realfd;
 
-			if ((pset[realfd].revents & POLLIN) && (trunk_fd_ptr[pset[realfd].fd] != -1)) // Traffic arriving on trunk
+			if ((pset[realfd].revents & POLLHUP) && (network[fd_ptr[pset[realfd].fd]].type & ECONET_HOSTTYPE_TNAMEDPIPE) && (network[fd_ptr[pset[realfd].fd]].pipewritesocket != -1))
+			{
+				int fd, np;
+				char file[250];
+
+				fd = pset[realfd].fd;
+				np = fd_ptr[fd];
+				// Client went away - close the writer pipe
+				close(network[np].pipewritesocket);
+				network[np].pipewritesocket = -1;
+				if (pkt_debug) fprintf (stderr, "*PIPE:                 %3d.%3d client pipe went away.\n", 
+					network[np].network, network[np].station);
+				// Close the reader & re-open it
+				fd_ptr[network[np].listensocket] = -1;
+				snprintf(file, 249, "%s.tobridge", network[np].named_pipe_filename);
+				pset[realfd].fd = open (file, O_RDONLY | O_NONBLOCK);
+				if (pset[realfd].fd != -1)
+					fd_ptr[pset[realfd].fd] = np;
+				else 	// Barf!
+				{
+					fprintf (stderr, "*PIPE: Reader socket for %3d.%3d went away. Quitting.\n", network[np].network, network[np].station);
+					exit(EXIT_FAILURE);
+				}
+
+				network[np].listensocket = pset[realfd].fd;
+				
+			}
+			else if ((pset[realfd].revents & POLLIN) && (trunk_fd_ptr[pset[realfd].fd] != -1)) // Traffic arriving on trunk
 			{
 				struct __econet_packet_aun p;
 
@@ -3170,6 +3223,18 @@ Options:\n\
 
 					network[fd_ptr[realfd]].last_transaction = time(NULL);
 					
+					// If the pipewritesocket is not open, open it because we've received traffic
+
+					if (network[fd_ptr[pset[realfd].fd]].pipewritesocket == -1)
+					{
+						char writerfilename[250];
+		
+						snprintf(writerfilename, 249, "%s.frombridge", network[fd_ptr[pset[realfd].fd]].named_pipe_filename);
+
+						if (pkt_debug) fprintf (stderr, "*PIPE: to %3d.%3d from %3d.%3d traffic caused write pipe to open (normal)\n", p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn);
+						network[fd_ptr[pset[realfd].fd]].pipewritesocket = open(writerfilename, O_WRONLY | O_NONBLOCK | O_SYNC);
+					}
+
 					/* This sends ACK & NAK that might arise from the named pipe - they can ignore it if they want */
 					aun_send(&p, r); // Send ACK & NAK as well because that's handled properly now.
 
