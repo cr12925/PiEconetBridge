@@ -323,7 +323,7 @@ void econet_send_ip(struct __econet_packet_ip *ip, int len)
 
 	while (ip_ptr)
 	{
-		if (DEBUG) fprintf (stderr, "Comparing with %08X/%08X...", ip_ptr->ip, ip_ptr->mask);
+		if (DEBUG) fprintf (stderr, "Comparing with %08X/%d...", ip_ptr->ip, ip_ptr->mask);
 
 		if ((dest_ip & ip_ptr->mask) == (ip_ptr->ip & ip_ptr->mask)) // Match - send
 		{
@@ -727,7 +727,7 @@ Options:\n\
 			{
 				fprintf (stderr, "FD - to bridge = %d, from bridge = %d\n", tobridge, frombridge);
 				fprintf (stderr, "Tunnel name %s, FD = %d\n", tunnel, tunnel_fd);
-				fprintf (stderr, "IP address %08X/%08X\n", my_ip, mask);
+				fprintf (stderr, "IP address %08X/%d\n", my_ip, mask);
 			}
 
 			// Empty Econet ARP table here, configure IP address.

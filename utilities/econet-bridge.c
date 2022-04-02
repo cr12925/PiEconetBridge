@@ -228,6 +228,7 @@ struct econet_hosts {							// what we we need to find a beeb?
 // Named pipe filename if this is a named pipe host
 	char named_pipe_filename[200];
 	int pipewritesocket; /* file descriptor for the socket we write to when this connection is a named pipe */
+	int pipeudpsocket; /* Socket descriptor for inbound UDP AUN traffic to this host */
 
 };
 
@@ -244,6 +245,7 @@ short econet_ptr[256][256]; /* [net][stn] pointer into network[] array. */
 uint16_t last_ps[256][256]; // Last print (emulated) print server used by each station. Used to re-set default printer if the station uses a new print server
 uint8_t last_prn[256][256]; // Last printer index used by a station on the current print server. Gets re-set to 0 on change of PS (i.e. when a job gets sent to an emulated PS which is not the current one in last_ps).
 short fd_ptr[65536]; /* Index is a file descriptor - yields index into network[] */
+int pipeudpsockets[65536]; /* Array of descriptors which are actually UDP sockets receiving traffic for named pipes, so we can sift those out early */
 short trunk_fd_ptr[65536]; /* Index is a file descriptor - pointer to index in trunks[] */
 int stations; // How many entries in network[]
 unsigned long aun_queued = 0; // Number of packets in AUN network[] entries
@@ -553,7 +555,9 @@ int econet_write_general(struct __econet_packet_aun *p, int len)
 
 			sender = econet_ptr[p->p.srcnet][p->p.srcstn];
 
-			result = sendto(network[sender].listensocket, &(p->p.aun_ttype), len-4, MSG_DONTWAIT, (struct sockaddr *)&n, sizeof(n));
+			result = sendto(
+				(network[sender].type & ECONET_HOSTTYPE_TNAMEDPIPE) ? network[sender].pipeudpsocket : network[sender].listensocket,  // If it's a named pipe, we don't send from listensocket, we send from pipeudpsocket
+				&(p->p.aun_ttype), len-4, MSG_DONTWAIT, (struct sockaddr *)&n, sizeof(n));
 			
 			if (result == len-4) return len; // Because we drop the 4 header bytes off!
 			else return result;
@@ -704,7 +708,7 @@ void econet_readconfig(void)
 		exit(EXIT_FAILURE);
 	}
 
-	if (regcomp(&r_entry_namedpipe, "^\\s*(UNIX)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+(\\/.+)\\s*$", REG_EXTENDED) != 0)
+	if (regcomp(&r_entry_namedpipe, "^\\s*(UNIX)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{4,5}|AUTO)\\s+(\\/.+)\\s*$", REG_EXTENDED) != 0)
 	{
 		fprintf(stderr, "Unable to compile named pipe regex.\n");
 		exit(EXIT_FAILURE);
@@ -893,13 +897,13 @@ void econet_readconfig(void)
 					trunk_advertizable[localnet] = 0xff;
 			}
 		}
-		else if (regexec(&r_entry_namedpipe, linebuf, 5, matches, 0) == 0)
+		else if (regexec(&r_entry_namedpipe, linebuf, 6, matches, 0) == 0)
 		{
-			int stn, net, ptr, entry, mfr;
+			int stn, net, ptr, entry, mfr, port;
 			char filename[200], tmp[300];
 			char readerfilename[250], writerfilename[250];
 
-			for (count = 2; count <= 4; count++) // start at 2 - we know the first one is 'UNIX'
+			for (count = 2; count <= 5; count++) // start at 2 - we know the first one is 'UNIX'
 			{
 				ptr = 0;
 				while (ptr < (matches[count].rm_eo - matches[count].rm_so))
@@ -913,7 +917,13 @@ void econet_readconfig(void)
 				{
 					case 2: net = atoi(tmp); break;
 					case 3: stn = atoi(tmp); break;
-					case 4: strncpy(filename, tmp, 199); break;	
+					case 4: port = atoi(tmp); 
+						if (port == 0 && !*basenet)
+							fprintf (stderr, "Warning: use of AUTO mode for station %d.%d with no base network will generate a random port\n", net, stn);
+						if (port == 32768 && *basenet)
+							fprintf (stderr, "Warning: direct use of port 32768 for station %d.%d may prevent AUTO in base network mode from working\n", net, stn);
+						break;
+					case 5: strncpy(filename, tmp, 199); break;	
 				}
 
 			}
@@ -931,7 +941,6 @@ void econet_readconfig(void)
 			network[networkp].seq = 0x00004000;
 			network[networkp].network = net;
 			network[networkp].station = stn;
-			network[networkp].port = 0;
 			strcpy(network[networkp].named_pipe_filename, filename);
 
 			snprintf(readerfilename, 249, "%s.tobridge", filename);
@@ -976,10 +985,43 @@ void econet_readconfig(void)
 
 					econet_ptr[net][stn] = networkp;
 
-					networkp++;
 				}
 			}
 			else	fprintf (stderr, "Failed to initialize named pipe for station %d.%d - passively ignoring\n", net, stn);
+
+			// Set up the UDP listener
+			if ( (network[networkp].pipeudpsocket = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+			{
+				fprintf(stderr, "Failed to open listening socket for local emulation %d/%d: %s.", network[networkp].network, network[networkp].station, strerror(errno));
+				exit(EXIT_FAILURE);
+			}
+
+			service.sin_family = AF_INET;
+			if (*basenet && port == 0)
+			{
+				sprintf(tmp,"%s.%d",basenet,network[networkp].station);
+				service.sin_addr.s_addr = inet_addr(tmp);
+				port = 32768;
+			}
+			else
+			{
+				service.sin_addr.s_addr = INADDR_ANY;
+			}
+
+			network[networkp].port = port;
+			service.sin_port = htons(network[networkp].port);
+
+			if (bind(network[networkp].pipeudpsocket, (struct sockaddr *) &service, sizeof(service)) != 0)
+			{
+				fprintf(stderr, "Failed to bind listening socket for named pipe %d/%d: %s.", network[networkp].network, network[networkp].station, strerror(errno));
+				exit(EXIT_FAILURE);
+			}
+
+			pset[pmax++].fd = network[networkp].pipeudpsocket; // Fill in our poll structure
+
+			pipeudpsockets[network[networkp].pipeudpsocket] = networkp; // Mark this as a special one for UDP traffic to Named Pipes
+
+			networkp++;
 
 		}
 		else if (regexec(&r_entry_server, linebuf, 6, matches, 0) == 0)
@@ -2794,6 +2836,7 @@ int main(int argc, char **argv)
 	memset(&network, 0, sizeof(network));
 	memset(&econet_ptr, 0xff, sizeof(econet_ptr));
 	memset(&fd_ptr, 0xff, sizeof(fd_ptr));
+	memset(&pipeudpsockets, 0xff, sizeof(pipeudpsockets));
 	memset(&trunk_fd_ptr, 0xff, sizeof(trunk_fd_ptr));
 	memset(&last_ps, 0x00, sizeof(last_ps));
 	memset(&last_prn, 0x00, sizeof(last_prn));
@@ -2905,7 +2948,7 @@ Options:\n\
 							(network[p].type & ECONET_HOSTTYPE_TNAMEDPIPE) ? "Unix" : "Local",
 						(network[p].type & ECONET_HOSTTYPE_TAUN ? "AUN" : "RAW"),
 						(network[p].type & ECONET_HOSTTYPE_TDIS) ? network[p].hostname : "",
-						(network[p].type & ECONET_HOSTTYPE_TNAMEDPIPE) ? 0 : network[p].port,
+						network[p].port,
 						((network[p].servertype & ECONET_SERVER_FILE) ? 'F' : ' '),
 						((network[p].servertype & ECONET_SERVER_PRINT) ? 'P' : ' '),
 						((network[p].servertype & ECONET_SERVER_SOCKET) ? 'S' : ' '),
@@ -3202,6 +3245,43 @@ Options:\n\
 					aun_send(&p, r);
 				}
 			}
+			else if (pset[realfd].revents & POLLIN  && (pipeudpsockets[pset[realfd].fd] != -1)) // Traffic arriving on a UDP socket which is really just AUN for a named pipe client
+			{
+				int netptr, r, from_found = 0xffff;
+				struct __econet_packet_aun p;
+
+				r = udp_receive (pset[realfd].fd, (void *) &(p.p.aun_ttype), sizeof(p)-4, (struct sockaddr * restrict) &src_address);
+
+				if (r < 0) continue; // Debug produced in udp_receive
+
+				/* Look up where it came from */
+
+				from_found = econet_find_source_station (&src_address); // 0xffff;
+
+				netptr = pipeudpsockets[pset[realfd].fd]; // And this is where it's to
+	
+				p.p.dstnet = network[netptr].network;
+				p.p.dststn = network[netptr].station;
+
+				if (from_found == 0xffff)
+					fprintf (stderr, "*PIPE: to %3d.%3d              traffic from unknown AUN source.\n", p.p.dstnet, p.p.dststn);
+				else
+				{
+					p.p.srcnet = network[from_found].network;
+					p.p.srcstn = network[from_found].station;
+
+					p.p.ctrl |= 0x80; // Put the high bit back on the ctrl 
+
+					if (network[netptr].pipewritesocket != -1) // We have a live writer socket
+					{
+						dump_udp_pkt_aun(&p, r+4);
+						write (network[netptr].pipewritesocket, &p, r+4);
+					}
+					else
+						fprintf (stderr, "*PIPE: to %3d.%3d from %3d.%3d traffic received on UDP for named pipe but pipe not connected\n", p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn );
+				}
+
+			}
 			else if (pset[realfd].revents & POLLIN) // Boggo standard AUN/IP traffic from single station, or on a named pipe
 			{
 				/* Read packet off UDP here */
@@ -3231,8 +3311,8 @@ Options:\n\
 		
 						snprintf(writerfilename, 249, "%s.frombridge", network[fd_ptr[pset[realfd].fd]].named_pipe_filename);
 
-						if (pkt_debug) fprintf (stderr, "*PIPE: to %3d.%3d from %3d.%3d traffic caused write pipe to open (normal)\n", p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn);
 						network[fd_ptr[pset[realfd].fd]].pipewritesocket = open(writerfilename, O_WRONLY | O_NONBLOCK | O_SYNC);
+						if (pkt_debug) fprintf (stderr, "*PIPE: to %3d.%3d from %3d.%3d traffic caused write pipe to open (normal) - fd %d\n", p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn, network[fd_ptr[pset[realfd].fd]].pipewritesocket);
 					}
 
 					/* This sends ACK & NAK that might arise from the named pipe - they can ignore it if they want */
