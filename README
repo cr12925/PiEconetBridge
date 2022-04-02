@@ -531,6 +531,59 @@ virutalized print servers use the same command. I suppose it would be possible
 to alter the configuration format simply to specify the command to be used on a
 per-server basis.
 
+UNIX n s p path
+---------------
+
+Creates a two named pipes (path.tobridge and path.frombridge) over which the
+bridge will send and receive AUN format packets. O_SYNC must be used to ensure
+whole packets go into the pipe and come out as single units.
+
+This enables a user to create a userspace program which interacts with Econet
+and AUN hosts (including over a trunk or bridge) simply by listening for 
+AUN format traffic (with the bridge extensions for source/destination net and
+station - so 12 bytes before the data) and responding by writing traffic
+down the other (appropriately named) pipe.
+
+The station number will be n.s and external AUN-type traffic can reach the
+station in the usual way on port p, or from the Econet wire, or over a trunk.
+
+The sending userspace code which connects up to the pipe to talk to the bridge
+*does not* need to put a source address in the packets it generates. The
+bridge will overwrite any source address so included with n.s on arrival 
+before transmission.
+
+Potential uses include file or print servers, or other types of services which
+might usefully run on the bridge machine but which are not part of the bridge
+already.
+
+Some example code is provided:
+
+econet-pipe.c compiles to econet-pipe.o and is a static liability of handy
+functions for opening the pipes and getting traffic to/from the bridge from
+your new userspace application.
+
+As with all these examples, the -p command line switch indicates the base
+path of the named pipes and should match the 'path' parameter in 
+the config line above.
+
+pipe-eg is an example program which does a bridge query to find out its
+local network number (if there is a bridge handy), displays it, and will then
+respond to machine type queries (immediate $88), and will also (fake)
+responses to fileserver version enquiries, so that running this will 
+cause a response to the SJ Research *FSLIST utility. (Anything else send to
+it as a fileserver will fail.)
+
+econet-notify emulates *NOTIFY on a BBC. It, too, will do a bridge query
+just for good measure, and will then do a machine peek to see whether the
+destination machine is on the network somewhere (it can be AUN, trunked, or
+on the wire). If it is, it will send a series of Immediate $85 packets,
+each containing a character of the message (wrapped with a beep character
+and some underscores).
+
+econet-ipgw is an experimental gateway which will ultimately carry IP over
+Econet traffic from Philip Blundell's TCP/IP ROM. Further documentation in the
+TCPIP file.
+
 Running the bridge
 ------------------
 

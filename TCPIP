@@ -1,0 +1,113 @@
+Operating the TCP/IP gateway on the Pi Econet Bridge
+----------------------------------------------------
+
+First, decide on an IP subnet to be used on your Econet.
+
+e.g. 192.168.0.0/24
+
+Whilst it is not essential to do so, it makes sense to 
+use the station numbers as host numbers in that subnet.
+
+E.g. 192.168.0.1 is station 1 on the network, etc.
+
+You could use a bigger subnet if you have bridged nets.
+E.g. you could use 172.16.0.0/16 and your Econet
+machines could be numbered 172.16.n.s where n is the
+network number and s is the station number.
+
+You will first have to set up an IP tunnel interface on
+your Pi Bridge. This requires root privileges or 'sudo'.
+
+e.g.
+
+ip tuntap add dev tun0 mode tun
+
+(You can use a different tunX device if you want.)
+
+Then give it an IP address which will match the Econet
+station number you are going to run the IP gateway on.
+
+Here, I my gateway will be station 0.252.
+
+NOTE that you cannot run any other bridge services on
+the same station you are using for an IP gateway.
+
+In my examples above, the IP address for the tun0 
+interface will be either:
+
+192.168.0.252
+OR
+172.16.0.252
+
+The relevant commands will therefore be (root also
+required):
+
+ip address add 192.168.0.252/24 dev tun0
+OR
+ip address add 172.16.0.252/24 dev tun0
+
+You should now find that an extra route has appeared
+in your bridge's IP routing table if you use 'ip route'.
+The new route will match the subnet you have just assigned
+to the tun0 interface.
+
+Now configure your bridge. Add a line which looks like this
+to the config:
+
+UNIX 0 252 32768 /tmp/econet-pipe.0.252
+
+The choice of path at the end is yours, but it will help
+if you give an indication of which station it is.
+
+*** The 32768 is a port number which must be unique 
+    among all the others in use, just as with normal use
+    of the bridge. 
+
+    If the config won't work with a port number included,
+    you have an old version of the bridge - just omit the
+    port number. All it means is that AUN stations cannot
+    talk to the piped station.
+***
+
+The 0 & 252 are the network and station number of the
+IP gateway.
+
+Then turn on IP routing.
+
+To do that permanently, uncomment the following line in 
+/etc/sysctl.conf and reboot:
+net.ipv4.ip_forward = 1
+
+To do it temporarily, do the following as root:
+sysctl -w net.ipv4.ip_forward=1
+
+Then run the gateway itself.
+
+econet-ipgw -p /tmp/econet-pipe.0.252 -t tun0 -i 192.168.0.252/24
+OR
+econet-ipgw -p /tmp/econet-pipe.0.252 -t tun0 -i 172.16.0.252/16
+
+** NB: The IP address on the command line MUST match the 
+   interface address of tun0.
+
+Follow the instructions for the TCP/IP ROM and put a wired
+station on an IP address which is within the subnet above,
+but which is NOT the same as the one you've put on the bridge.
+
+A sensible first test is to try and telnet to your Bridge
+by telnet-ting to the IP address assigned to tun0.
+
+Next, set up some NAT so that your Econet IP network is hidden
+behind the bridge (if you want - otherwise you'll have to make
+sure you route the 192.168.0.0/24 or 172.16.0.0/16 subnet to
+one of the bridge's other IP interfaces).
+
+You should find that something like this will do the trick:
+
+sudo iptables -t nat -A POSTROUTING -s 192.168.0.0/24 -j MASQUERADE
+
+You should now find that if you follow PB's instructions, you
+can TELNET (or TELAPI) to hosts in the wider Internet-world.
+
+Enjoy!
+
