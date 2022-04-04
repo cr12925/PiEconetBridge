@@ -9,4 +9,6 @@ utilities/econet-bridge
 utilities/econet-imm
 utilities/econet-monitor
 utilities/econet-test
-
+utilities/econet-ipgw
+utilities/econet-notify
+utilities/pipe-eg
