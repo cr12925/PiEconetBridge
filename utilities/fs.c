@@ -2763,11 +2763,21 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 			{
 				case 0: // Machine readable format
 				{
+
+					int le_count;
+
 					//r.p.data[replylen++] = examined; // "Cycle number";	
 					snprintf(&(r.p.data[replylen]), 11, "%-10.10s", e->acornname); // 11 because the 11th byte (null) gets overwritten two lines below because we only add 10 to replylen.
 					replylen += 10;
-					r.p.data[replylen] = (e->ftype == FS_FTYPE_DIR ? 0 : htole32(e->load)); replylen += 4;
-					r.p.data[replylen] = (e->ftype == FS_FTYPE_DIR ? 0 : htole32(e->exec)); replylen += 4;
+
+					for (le_count = 0; le_count <= 3; le_count++)
+					{
+						r.p.data[replylen + le_count] = ((e->ftype == FS_FTYPE_DIR ? 0 : htole32(e->load)) >> (8 * le_count)) & 0xff;
+						r.p.data[replylen + 4 + le_count] = ((e->ftype == FS_FTYPE_DIR ? 0 : htole32(e->exec)) >> (8 * le_count)) & 0xff;
+					}
+
+					replylen += 8; // Skip past the load / exec that we just filled in
+
 					r.p.data[replylen++] = fs_perm_to_acorn(e->perm, e->ftype);
 					r.p.data[replylen++] = e->day;
 					r.p.data[replylen++] = e->monthyear;
