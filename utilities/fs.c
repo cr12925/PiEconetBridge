@@ -3231,8 +3231,6 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		return;
 	}
 
-	fprintf (stderr, "Examine: norm_return = %d, p.error = %d, p.ftype=%d\n", norm_return, p.error, p.ftype);
-
 	if ((!norm_return && p.error == FS_PATH_ERR_NODIR) || (/* norm_return && */ p.ftype == FS_FTYPE_NOTFOUND))
 	{
 		struct __econet_packet_udp reply;
