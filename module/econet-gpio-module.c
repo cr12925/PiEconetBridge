@@ -2004,7 +2004,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	// Now go back to AUN idle if our last transmission was more than say 100ms ago and we seem to be stuck in state
 
-	if (econet_data->aun_mode && (aunstate == EA_W_READFIRSTACK || aunstate == EA_W_READFINALACK || aunstate == EA_I_READREPLY || aunstate == EA_R_READDATA) && (ktime_get_ns() - econet_data->aun_last_tx) > 100000000)
+	if (econet_data->aun_mode && (aunstate == EA_W_READFIRSTACK || aunstate == EA_W_READFINALACK || aunstate == EA_I_READREPLY || aunstate == EA_R_READDATA) && ((ktime_get_ns() - econet_data->aun_last_tx) > 100000000))
 	{
 		econet_set_tx_status(ECONET_TX_SUCCESS);
 		econet_set_aunstate(EA_IDLE); 
