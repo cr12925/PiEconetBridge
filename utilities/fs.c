@@ -3231,6 +3231,8 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		return;
 	}
 
+	fprintf (stderr, "Examine: norm_return = %d, p.error = %d, p.ftype=%d\n", norm_return, p.error, p.ftype);
+
 	if ((!norm_return && p.error == FS_PATH_ERR_NODIR) || (/* norm_return && */ p.ftype == FS_FTYPE_NOTFOUND))
 	{
 		struct __econet_packet_udp reply;
@@ -3241,10 +3243,11 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		reply.p.data[0] = reply.p.data[1] = 0; // This is apparently how you flag not found on an examine...
 		if (command == 6) // Longer error block
 		{
-			memset(&(reply.p.data[2]), 0x20, 10);
-			reply.p.data[12] = 0xFF;
-			reply.p.data[13] = 0;
-			fs_aun_send(&reply, server, 14, net, stn);
+			//memset(&(reply.p.data[2]), 0x20, 10);
+			//reply.p.data[12] = 0xFF;
+			//reply.p.data[13] = 0;
+			//fs_aun_send(&reply, server, 14, net, stn);
+			fs_error(server, reply_port, net, stn, 0xd6, "Not found");
 		}
 		else
 			fs_aun_send(&reply, server, 3, net, stn);
