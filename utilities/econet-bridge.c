@@ -312,6 +312,7 @@ struct printjob {
 	FILE *spoolfile;
 	unsigned char printer_index;
 	char unixname[20];
+	short random; // random digits appended to spool file name 
 };
 
 struct printjob printjobs[MAXPRINTJOBS];
@@ -2335,9 +2336,10 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 
 					printjobs[found].stn = a->p.srcstn;
 					printjobs[found].net = a->p.srcnet;
-					printjobs[found].ctrl = 0x80; 
+					printjobs[found].ctrl = 0x80;
+					printjobs[found].random = rand() % 8196;
 					
-					sprintf(filename, SPOOLFILESPEC, found);
+					sprintf(filename, SPOOLFILESPEC, found, printjobs[found].random);
 	
 					printjobs[found].spoolfile = fopen(filename, "w");
 	
@@ -2417,7 +2419,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 							reply.p.data[0] = a->p.data[0];	
 	
 							fclose(printjobs[count].spoolfile);
-							sprintf(filename_string, SPOOLFILESPEC, found);
+							sprintf(filename_string, SPOOLFILESPEC, found, printjobs[count].random);
 							
 							if (strstr(printjobs[count].unixname, "@")) // Email address not printername
 								sprintf(command_string, MAILCMDSPEC, printjobs[count].unixname, filename_string);
