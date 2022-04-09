@@ -6361,7 +6361,8 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 				reply.p.ptype = ECONET_AUN_DATA;
 				reply.p.port = reply_port;
 				reply.p.ctrl = 0x80;
-				reply.p.data[0] = reply.p.data[1] = 0;
+				reply.p.data[0] = 0x07; // *DIR command code. FS3 does this. Not sure why
+				reply.p.data[1] = 0;
 				reply.p.data[2] = (unsigned char) (userhandle & 0xff);
 	
 				if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Opened handle %d (%s)\n", "", net, stn, userhandle, p.acornfullpath);
