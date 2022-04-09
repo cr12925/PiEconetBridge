@@ -6533,7 +6533,7 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 				fs_close_interlock(server, fs_bulk_ports[server][port].handle, 3); // We don't close on a putbytes - file stays open!
 
 				r.p.data[0] = 3; // This appears to be what FS3 does!
-				r.p.data[2] = FS_PERM_OWN_R | FS_PERM_OWN_W;
+				r.p.data[2] = fs_perm_to_acorn(FS_PERM_OWN_R | FS_PERM_OWN_W, FS_FTYPE_FILE);
 				r.p.data[3] = day;
 				r.p.data[4] = monthyear;
 
