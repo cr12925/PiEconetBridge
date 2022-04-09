@@ -161,9 +161,14 @@ int econet_openwriter()
 int aun_send (struct __econet_packet_aun *p, int len)
 {
 	int r;
+	unsigned char length[2];
+
+	length[0] = len & 0xff;
+	length[1] = (len >> 8) & 0xff;
 	p->p.seq = (seq += 4);
+	write(tobridge, &length, 2);
 	r = write(tobridge, p, len);
-	usleep (10000); // little wait to make sure it went on the pipe
+	//usleep (10000); // little wait to make sure it went on the pipe
 	return r;
 }
 
@@ -171,7 +176,13 @@ int aun_send (struct __econet_packet_aun *p, int len)
 int aun_read (struct __econet_packet_aun *p)
 {
 
-	return read(frombridge, p, ECONET_MAX_PACKET_SIZE);
+	char length[2];
+
+	read(frombridge, &length, 2);
+
+	usleep(100); // Just wait for the packet to actually arrive
+
+	return read(frombridge, p, (length[1] << 8) + length[0]);
 
 }
 

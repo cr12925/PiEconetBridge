@@ -566,7 +566,19 @@ int econet_write_general(struct __econet_packet_aun *p, int len)
 		else if (network[ptr].type & ECONET_HOSTTYPE_TNAMEDPIPE) // Named Pipe
 		{
 			if (network[ptr].pipewritesocket != -1)
-				return write(network[ptr].pipewritesocket, p, len);
+			{
+				int r;
+				unsigned char length[2];
+
+				length[0] = len & 0xff;
+				length[1] = (len >> 8) & 0xff;
+
+				write (network[ptr].pipewritesocket, &length, 2);
+
+				r = write(network[ptr].pipewritesocket, p, len);
+
+				return r;
+			}
 			else	
 			{
 				if (pkt_debug) fprintf (stderr, "PIPE : Pipe write socket not open\n");
@@ -2228,7 +2240,6 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 			}
 
 		}
-		else if (pkt_debug) fprintf (stderr, "LOC  : BROADCAST not handled\n");
 	}
 	else if (a->p.aun_ttype == ECONET_AUN_DATA) // Data packet
 	{
@@ -2614,7 +2625,14 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 		for (count = 0; count < stations;  count++)
 		{
 			if ((network[count].type & ECONET_HOSTTYPE_TNAMEDPIPE) && (s != -1 && s != count) && (network[count].pipewritesocket != -1)) // Is a named pipe, and not the one the packe came from
+			{
+				unsigned char length[2];
+
+				length[0] = len & 0xff;
+				length[1] = (len >> 8) & 0xff;
+				write(network[count].pipewritesocket, &length, 2);
 				write(network[count].pipewritesocket, p, len);
+			}
 
 		}
 
@@ -2680,7 +2698,15 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 	else if ((network[d].type & ECONET_HOSTTYPE_TNAMEDPIPE)) // Named pipe client
 	{
 		if (network[d].pipewritesocket != -1)
+		{
+			unsigned char length[2];
+		
+			length[0] = len & 0xff;
+			length[1] = (len >> 8) & 0xff;
+			write (network[d].pipewritesocket, &length, 2);
 			result = write(network[d].pipewritesocket, p, len);
+			usleep(10000);
+		}
 		else	if (pkt_debug) fprintf (stderr, "PIPE : Pipe write socket not open\n");
 	}
 	else if (network[d].type & ECONET_HOSTTYPE_TDIS)
@@ -3301,7 +3327,13 @@ Options:\n\
 
 					if (network[netptr].pipewritesocket != -1) // We have a live writer socket
 					{
+						unsigned char length[2];
+
 						dump_udp_pkt_aun(&p, r+4);
+						
+						length[0] = (r+4) & 0xff;
+						length[1] = ((r+4) >> 8) & 0xff;
+						write (network[netptr].pipewritesocket, &length, 2);
 						write (network[netptr].pipewritesocket, &p, r+4);
 					}
 					else
@@ -3319,7 +3351,14 @@ Options:\n\
 
 				if (network[fd_ptr[pset[realfd].fd]].type & ECONET_HOSTTYPE_TNAMEDPIPE)
 				{
-					r = read(pset[realfd].fd, (void *) &p, sizeof(p)); // note, we read a full 12 byte AUN+ type header here
+
+					unsigned char length[2];
+
+					read(pset[realfd].fd, (void *) &length, 2); // Get packet length
+				
+					usleep(50); // Wait for packet
+
+					r = read(pset[realfd].fd, (void *) &p, (length[1] << 8) + length[0]); // note, we read a full 12 byte AUN+ type header here
 			
 					if (r < 0) continue; // Something went wrong
 

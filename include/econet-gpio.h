@@ -168,6 +168,7 @@ struct __econet_data {
 	unsigned char clock; // 0 = no clock; anything else = clock - set when reading registers
 	unsigned char hwver;
 	unsigned char current_dir; // Current databus direction
+	unsigned char initialized; // Whether module is actually initialized
 };
 
 struct __econet_pkt_buffer {

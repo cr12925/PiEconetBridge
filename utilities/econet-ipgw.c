@@ -205,7 +205,12 @@ uint8_t econet_ip_poll(uint8_t source, int ms, struct pollresult *r)
 
 	if ((source < 2) && (p[0].revents & POLLIN)) // Econet data arrived
 	{
-		r->len = read(frombridge, &(r->aun), ECONET_MAX_PACKET_SIZE) - 12;
+		unsigned char length[2];
+
+		read(frombridge, &length, 2);
+
+		usleep(20); // wait for the traffic. This is a total fudge.
+		r->len = read(frombridge, &(r->aun), (length[1] << 8) + length[0]) - 12;
 		r->dtype = 1;
 		return 1;
 	}
@@ -466,7 +471,7 @@ void econet_ipgw_run(void)
 
 	}
 	else
-		if (noisy) fprintf (stderr, "No bridge reply received (assuming single local network\n");
+		if (noisy) fprintf (stderr, "No bridge reply received (assuming single local network)\n");
 	
 	// Ok, listen for traffic!
 
