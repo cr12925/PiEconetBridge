@@ -3248,8 +3248,12 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 			fs_error(server, reply_port, net, stn, 0xd6, "Not found");
 		}
 		else
-			fs_aun_send(&reply, server, 3, net, stn);
+		{
+			reply.p.data[2] = 0; // not found.
+			fs_aun_send(&reply, server, 3, net, stn); // This will return a single byte of &00, which from the MDFS spec means 'not found' for arg = 1-5. 6 returns a hard error it seems.
+		}
 		return;
+
 	}
 
 	replylen = 0; // Reset after temporary use above
@@ -6527,6 +6531,7 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 				
 				fs_close_interlock(server, fs_bulk_ports[server][port].handle, 3); // We don't close on a putbytes - file stays open!
 
+				r.p.data[0] = 3; // This appears to be what FS3 does!
 				r.p.data[2] = FS_PERM_OWN_R | FS_PERM_OWN_W;
 				r.p.data[3] = day;
 				r.p.data[4] = monthyear;
