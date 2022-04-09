@@ -1541,12 +1541,65 @@ irqreturn_t econet_irq(int irq, void *ident)
 {
 
 	unsigned long flags;
+	unsigned short aun_state, chip_state;
 
 	spin_lock_irqsave(&econet_irq_spin, flags);
 
 	sr1 = econet_read_sr(1);
 	// Force read sr2 to get DCD if necessary
 	sr2 = econet_read_sr(2);
+
+	aun_state = econet_get_aunstate();
+	chip_state = econet_get_chipstate();
+
+	if (sr2 & ECONET_GPIO_S2_RX_IDLE)
+	{
+
+#ifdef ECONET_GPIO_DEBUG_LINEIDLE
+		if ((econet_data->aun_mode && aun_state != EA_IDLE) || (chip_state != EM_TEST && chip_state != EM_IDLE && chip_state != EM_IDLEINIT))	
+			printk (KERN_INFO "ECONET-GPIO: econet_irq(): Line idle IRQ - aun mode = %d, aun state = %d, chip state = %d, tx_status = 0x%02x\n", 
+				econet_data->aun_mode,
+				econet_get_aunstate(),
+				econet_get_chipstate(),
+				econet_get_tx_status()
+			);	
+#endif
+	
+	
+		// If we get one of these interrupts and we're not idle (chip or AUN state) then give up and go back to read. If we were in TX (other than broadcast), set status to 'No listening', otherwise ECONET_TX_SUCCESS
+
+		if (econet_data->aun_mode && aun_state != EA_IDLE)
+		{
+			econet_rx_cleardown_reset();
+			econet_pkt_rx.length = econet_pkt_rx.ptr = econet_pkt_tx.length = econet_pkt_tx.ptr = 0;
+			econet_set_chipstate(EM_IDLE);
+
+			if (econet_data->aun_mode)
+			{
+				switch (aun_state)
+				{
+					case EA_W_WRITEBCAST:
+						econet_set_tx_status(ECONET_TX_NOTSTART);
+						break;
+					case EA_W_READFIRSTACK:
+					case EA_W_READFINALACK:
+					case EA_I_READREPLY:
+						econet_set_tx_status(ECONET_TX_NECOUTEZPAS);
+						break;
+					case EA_R_READDATA:
+					case EA_R_WRITEFIRSTACK:
+					case EA_R_WRITEFINALACK:
+						econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
+						break;
+
+				}
+
+				econet_set_aunstate(EA_IDLE);
+			}
+		}
+	}
+
+
 
 #ifdef ECONET_GPIO_DEBUG_IRQ
 	printk (KERN_INFO "ECONET-GPIO: econet_irq(): IRQ in mode %d, SR1 = 0x%02x, SR2 = 0x%02x. RX len=%d,ptr=%d, TX len=%d,ptr=%d\n", econet_get_chipstate(), sr1, sr2, econet_pkt_rx.length, econet_pkt_rx.ptr, econet_pkt_tx.length, econet_pkt_tx.ptr);
@@ -1608,7 +1661,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "ECONET-GPIO: econet_irq(): AUN: Written broadcast, signalling packet complete\n");
 #endif
-					//econet_data->tx_status = ECONET_TX_SUCCESS;
 					econet_set_tx_status(ECONET_TX_SUCCESS);
 					break;
 				}
@@ -1644,7 +1696,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 				{
 					econet_set_aunstate(EA_I_READREPLY);
 					// Because this is an immediate, we need to flag transmit success to the tx user space
-					//econet_data->tx_status = ECONET_TX_SUCCESS;
 					econet_set_tx_status(ECONET_TX_SUCCESS);
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "ECONET-GPIO: econet_irq(): AUN: Written immediate query. Signal TX success but move to READREPLY\n");
@@ -1654,7 +1705,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 				case EA_I_WRITEREPLY: // We read an immediate from the wire and have just transmitted the reply
 				{
 					// We don't update tx_status here because the immediate reply will have been generated in-kernel
-					//econet_data->tx_status = ECONET_TX_SUCCESS;
 					econet_set_tx_status(ECONET_TX_SUCCESS);
 					econet_set_aunstate(EA_IDLE);
 #ifdef ECONET_GPIO_DEBUG_AUN
@@ -1675,7 +1725,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 		}
 		else // raw mode - flag transmit success
 		{
-			//econet_data->tx_status = ECONET_TX_SUCCESS;
 			econet_set_tx_status(ECONET_TX_SUCCESS);
 #ifdef ECONET_GPIO_DEBUG_TX
 			printk (KERN_INFO "ECONET-GPIO: econet_irq(): Returning to IDLEINIT, flagging frame completed\n");
@@ -1691,13 +1740,13 @@ irqreturn_t econet_irq(int irq, void *ident)
 			econet_set_chipstate(EM_IDLEINIT);
 			econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 			econet_write_cr(ECONET_GPIO_CR1, C1_READ);
-			// econet_data->tx_status = ECONET_TX_SUCCESS; - Done above when necessary
 		//}
 		
 	}
 	// Are we either mid-read, or idle (in which case, this will be a receiver IRQ)
 	else if (econet_get_chipstate() == EM_READ || (sr2 & (ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_AP)) || (sr1 & ECONET_GPIO_S1_RDA)) // In case we get address present or data or are already in read mode
 		econet_irq_read();
+/*
 	else if (sr2 & ECONET_GPIO_S2_RX_IDLE) // We seem to occasionally get RX IDLE interrupts when preparing to transmit. We'll ignore them.
 	{
 		int tmp_status;
@@ -1712,6 +1761,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 			econet_rx_cleardown();
 		}
 	}
+*/
 	else if (econet_get_chipstate() == EM_IDLE || econet_get_chipstate() == EM_IDLEINIT) // We seem to get these when the chip gets its pants tangled. (With sr1=0 - but we've handled reading and writing above, so just clear status)
 	{
 		if (econet_get_chipstate() == EM_IDLEINIT)

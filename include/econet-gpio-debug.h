@@ -30,6 +30,9 @@
 /* IRQ debug */
 //#define ECONET_GPIO_DEBUG_IRQ 1
 
+/* Tell us when we get a line idle IRQ */
+//#define ECONET_GPIO_DEBUG_LINEIDLE 1
+
 /* General AUN debugging */
 //#define ECONET_GPIO_DEBUG_AUN 1
 

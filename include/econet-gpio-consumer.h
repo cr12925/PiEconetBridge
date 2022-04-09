@@ -161,6 +161,8 @@ struct __econet_packet_udp {
 #define ECONET_TX_BUSY 0x10
 #define ECONET_TX_JAMMED 0x40
 #define ECONET_TX_HANDSHAKEFAIL 0x41
+#define ECONET_TX_NECOUTEZPAS 0x42 // Not listening
+#define ECONET_TX_NOTLISTENING 0x42
 #define ECONET_TX_NOCLOCK 0x43
 #define ECONET_TX_UNDERRUN 0x50
 #define ECONET_TX_TDRAFULL 0x51
