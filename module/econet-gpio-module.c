@@ -1541,7 +1541,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 {
 
 	unsigned long flags;
-	unsigned short aun_state, chip_state;
 
 	spin_lock_irqsave(&econet_irq_spin, flags);
 
@@ -1549,33 +1548,49 @@ irqreturn_t econet_irq(int irq, void *ident)
 	// Force read sr2 to get DCD if necessary
 	sr2 = econet_read_sr(2);
 
-	aun_state = econet_get_aunstate();
-	chip_state = econet_get_chipstate();
 
-	if (sr2 & ECONET_GPIO_S2_RX_IDLE)
+#ifdef ECONET_GPIO_DEBUG_IRQ
+	printk (KERN_INFO "ECONET-GPIO: econet_irq(): IRQ in mode %d, SR1 = 0x%02x, SR2 = 0x%02x. RX len=%d,ptr=%d, TX len=%d,ptr=%d\n", econet_get_chipstate(), sr1, sr2, econet_pkt_rx.length, econet_pkt_rx.ptr, econet_pkt_tx.length, econet_pkt_tx.ptr);
+#endif
+
+	if (!(sr1 & ECONET_GPIO_S1_IRQ)) // No IRQ actually present - return
+	{
+		printk (KERN_INFO "ECONET-GPIO: IRQ handler called but ADLC not flagging an IRQ. What?\n");
+	}
+	else if (econet_get_chipstate() == EM_TEST) /* IRQ in Test Mode - ignore */
+	{
+		printk (KERN_INFO "ECONET-GPIO: IRQ in Test mode - how did that happen?");
+	}
+	else if ((sr2 & ECONET_GPIO_S2_RX_IDLE) && (econet_data->initialized))
 	{
 
+		unsigned short aun_state, chip_state, tx_status;
+
+		chip_state = econet_get_chipstate();
+		if (econet_data->aun_mode)
+		{
+			aun_state = econet_get_aunstate();
+			tx_status = econet_get_tx_status();
+		}
+
 #ifdef ECONET_GPIO_DEBUG_LINEIDLE
-		if ((econet_data->aun_mode && aun_state != EA_IDLE) || (chip_state != EM_TEST && chip_state != EM_IDLE && chip_state != EM_IDLEINIT))	
-			printk (KERN_INFO "ECONET-GPIO: econet_irq(): Line idle IRQ - aun mode = %d, aun state = %d, chip state = %d, tx_status = 0x%02x\n", 
-				econet_data->aun_mode,
-				econet_get_aunstate(),
-				econet_get_chipstate(),
-				econet_get_tx_status()
-			);	
+		if (econet_data->aun_mode && aun_state != EA_IDLE)	
+			printk (KERN_INFO "ECONET-GPIO: econet_irq(): Line idle IRQ - aun state = %d, chip state = %d, tx_status = 0x%02x\n", aun_state, chip_state, tx_status);	
+		else if ((!econet_data->aun_mode) && (chip_state != EM_TEST && chip_state != EM_IDLE && chip_state != EM_IDLEINIT))
+			printk (KERN_INFO "ECONET-GPIO: econet_irq(): Line idle IRQ - chip state = %d\n",  chip_state);
 #endif
 	
 	
 		// If we get one of these interrupts and we're not idle (chip or AUN state) then give up and go back to read. If we were in TX (other than broadcast), set status to 'No listening', otherwise ECONET_TX_SUCCESS
 
-		if (econet_data->aun_mode && aun_state != EA_IDLE)
-		{
-			econet_rx_cleardown_reset();
-			econet_pkt_rx.length = econet_pkt_rx.ptr = econet_pkt_tx.length = econet_pkt_tx.ptr = 0;
-			econet_set_chipstate(EM_IDLE);
+		econet_pkt_rx.length = econet_pkt_rx.ptr = econet_pkt_tx.length = econet_pkt_tx.ptr = 0;
 
-			if (econet_data->aun_mode)
+		if (econet_data->aun_mode)
+		{
+
+			if (aun_state != EA_IDLE)
 			{
+
 				switch (aun_state)
 				{
 					case EA_W_WRITEBCAST:
@@ -1595,23 +1610,12 @@ irqreturn_t econet_irq(int irq, void *ident)
 				}
 
 				econet_set_aunstate(EA_IDLE);
+
 			}
+
 		}
-	}
 
-
-
-#ifdef ECONET_GPIO_DEBUG_IRQ
-	printk (KERN_INFO "ECONET-GPIO: econet_irq(): IRQ in mode %d, SR1 = 0x%02x, SR2 = 0x%02x. RX len=%d,ptr=%d, TX len=%d,ptr=%d\n", econet_get_chipstate(), sr1, sr2, econet_pkt_rx.length, econet_pkt_rx.ptr, econet_pkt_tx.length, econet_pkt_tx.ptr);
-#endif
-
-	if (!(sr1 & ECONET_GPIO_S1_IRQ)) // No IRQ actually present - return
-	{
-		printk (KERN_INFO "ECONET-GPIO: IRQ handler called but ADLC not flagging an IRQ. What?\n");
-	}
-	else if (econet_get_chipstate() == EM_TEST) /* IRQ in Test Mode - ignore */
-	{
-		printk (KERN_INFO "ECONET-GPIO: IRQ in Test mode - how did that happen?");
+		econet_set_read_mode();
 	}
 	// Are we in the middle of writing a packet?
 	else if (econet_get_chipstate() == EM_WRITE) /* Write mode - see what there is to do */
@@ -2405,6 +2409,7 @@ static int __init econet_init(void)
 	econet_data->aun_seq = 0x4000;
 	econet_data->aun_last_tx = 0;
 	econet_data->clock = 0; // Assume no clock to start with
+	econet_data->initialized = 0; // Module not yet initialized.
 	econet_set_aunstate(EA_IDLE);
 	econet_data->spoof_immediate = 0;
 	
@@ -2469,6 +2474,7 @@ static int __init econet_init(void)
 
 	printk (KERN_ERR "ECONET-GPIO: %s (SR1 = 0x%02x, SR2 = 0x%02x)\n", (sr2 & ECONET_GPIO_S2_DCD) ? "No clock!" : "Clock detected", sr1, sr2);
 
+	econet_data->initialized = 1;
 	return 0;
 
 }
