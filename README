@@ -56,11 +56,9 @@ have a different number in your config and it should all work, thus the
 overlapping network numbers no longer matter.
 
 At the moment, each individual host on each individual network must be 
-individually configured. There is a work in progress to provide a 'trunk'
-system (with network number address translation). Examination of the code may
-show you how the configuration can be done - but in this version, whilst the
-configuration lines are read and understood by the bridge, in fact there is
-*no code* implementing that functionality at all - so don't bother trying.
+individually configured. A wildcard entry can be inserted to match 'all
+other undefined stations on a network' but it MUST come after all defined
+stations. See below.
 
 What is is NOT
 --------------
@@ -82,7 +80,8 @@ Prerequisites
 
 The system will require:
 	- Raspberry Pi 4B (anything less and timing issues mean it won't work
-          at the moment, but I am working on it!)
+          at the moment, but I am working on it!) With a version 2 board
+	  a Pi3B may work acceptably
 	- A proper RPi 4 PSU. Experimentation shows that the Econet hardware
           has quite a current draw and an underpowered PSU can lead to
           rx/tx problems
@@ -128,23 +127,6 @@ matter of regret that I have not managed to do so. In particular:
 	  that I tried for a very long time to work out how to do that from a
 	  standing start, and I got a little way but became lost. I would be
 	  very pleased if anyone can explain.
-
-Whilst the bridge appears to be relatively reliable, e.g. for a realy BBC
-accessing a file or print server on an emulator (e.g. BeebEm), and vice versa,
-there are some wrinkles which periodically crop up:
-
-	- Sometimes the AUN state machine in the kernel gets out of step -
-	  probably because of a lost packet. The solution is to quit the bridge
-	  in userspace (see below) and remove & reinsert the kernel module.
-
-	- I have had a couple of occasions where an Acorn fileserver has
-	  changed all directory permissions to "DL/" when using the bridge, and
-	  even creates new directories with that permission, and will not allow
-	  a change back to DWR/ for example. I do not know whether this is
-	  something in the bridge, or something in the Level 3 FS.
-
-	- Sometimes the kernel module gets stuck unable to transmit. Solution
-	  as for the AUN state machine.
 
 It is some time since I saw a kernel crash with this module, but you should be
 alive to the prospect that it might happen. If you use this on a production
@@ -405,7 +387,8 @@ default, but the -c switch allows you to specify an alternative.
 Notes on each type of configuration line:
 
 N n
----
+LOCALNET n
+----------
 
 (Long form: use 'LOCALNET' instead of 'N' for readability.)
 
@@ -415,7 +398,8 @@ don't have this, the bridge won't deal with bridge queries. This will not stop
 it bridging network 0 (your local Econet) to AUN stations in network 0.
 
 W n s p
--------
+WIRE n s p
+----------
 
 (Long form: use 'WIRE' instead of 'W' for readability.)
 
@@ -482,7 +466,8 @@ on the IP network. So the fact that they listen on 32768 just like we do for
 station 0.1 is no problem.
 
 A n s host p
-------------
+IP n s host p
+-------------
 
 (Long form: use 'IP' instead of 'A' for readability.)
 
@@ -496,7 +481,9 @@ RiscOS AUN clients.
 The bridge will ONLY bridge to hosts you have told it about in this way.
 
 L n
----
+DYNAMIC n
+LEARN n
+---------
 
 (Long form: use 'DYNAMIC' or 'LEARN' instead of 'L' for readability.)
 
@@ -601,6 +588,10 @@ econet-ipgw is an experimental gateway which will ultimately carry IP over
 Econet traffic from Philip Blundell's TCP/IP ROM. Further documentation in the
 TCPIP file.
 
+ecoent-remote is a Unix version of *REMOTE, for taking control of a remote
+real BBC (BeebEm does not presently support the traffic format), providing
+the BBC is not in protected mode.
+
 Running the bridge
 ------------------
 
@@ -653,9 +644,9 @@ Note that BeebEm MUST be in AUN mode and have SINGLESOCKET set to 1 (these are
 default settings as I understand it).
 
 The bridge configuration would be:
-W 0 1 32768
-W 0 2 32769
-A 0 254 5.6.7.8 32768
+WIRE 0 1 32768
+WIRE 0 2 32769
+IP 0 254 5.6.7.8 32768
 
 The tail end of the BeebEm econet.cfg file would read thus:
 
@@ -778,7 +769,8 @@ KNOWN BUGS
 ----------
 
 - Kernel module occasionally needs reloading because the AUN state machine
-  gets stuck. Seems to be rare thesedays though. YMMV.
+  gets stuck. Seems to be rare thesedays though. Recent (Apr22) fixes
+  may well have solved this. YMMV.
 
 PRINT & FILE SERVERS
 --------------------
@@ -791,15 +783,29 @@ b) 	Run the File and Print servers on the same emulated station.
 In case (b), the port number used will be ignored when the second station
 definition is used.
 
+An optional Acorn printer name (6 characters max) can be specified
+by adding ':NAME' to the printer definition where NAME is the Acorn
+printer name. The system supports multiple printers per server, and
+will respond to printer status queries from the SJ MDFS *PS utility.
+
 Example:
 
 F 0 254 32768 /econet
 P 0 254 37000 matrix
+P 0 254 37000 epson:FX80
 
 Will create one fileserver rooted at /econet, and a print server, both on
 station 0.254. However, the listener will be on 32768 - because by the time 
 the print server config is read, station 0.254 already exists and has a 
-listener on 32768, so the 37000 port number is *ignored*.
+listener on 32768, so the 37000 port number is *ignored*. The first 'P'
+line will create a printer which sends traffic to the lp subsystem printer
+called 'matrix' and, because there is no ':NAME' element, it will also
+give the printer the Acorn name 'MATRIX'. The second 'P' line will do
+likewise, but using the local print queue 'epson' and Acorn name 'FX80'.
+
+You can specify an email address as a printer name and the print server
+will send the print traffic by email *providing you have set up a mail
+delivery subsystem such as sendmail or exim*. See below.
 
 Equally, you can have two fileservers, but they must be on *different*
 emulated stations, e.g.:
@@ -815,13 +821,15 @@ is usable by Econet stations (including on AUN) whether logged in or not.
 
 Configuration line syntax is:
 
-P n s port printer
+P n s port printer[:6 character Acorn name]
 
 ... where:
 
 n, s are network and station number. (The kernel module will listen for
 traffic on the Econet wire.)
+
 port is the UDP port to listen on for AUN traffic for this emulated service
+
 printer is *either*
 
 1.	The name of a printer queue configured with 'lpadmin' (as to which
@@ -831,7 +839,6 @@ OR
 
 2.	An email address. You will need a configured, working sendmail
 	implementation on your Pi, with suitable mail routing/smart host.
-
 
 If there is an @ symbol in the printer name, the bridge will assume it is an
 email address. Avoid printer queues with @ symbols in them...
@@ -850,9 +857,9 @@ name or email address, this allows multiple printers to be established
 on a single virtual server. Configuration-wise, that is achieved by
 putting multiple P lines in the config, e.g.:
 
-P 0 251 32768 LASER:samsung
-P 0 251 32768 MATRIX:panasonic
-P 0 251 32768 EMAIL:someone@somewhere.com
+P 0 251 32768 samsung:LASER
+P 0 251 32768 epson:FX80 
+P 0 251 32768 someone@somewhere.com:EMAIL
 
 NOTE: the 'NNNNNN' has a maximum length of 6 characters.
 
