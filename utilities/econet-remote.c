@@ -131,9 +131,6 @@ uint8_t econet_remote_poll(int ms)
 		unsigned char length[2];
 
 		read(frombridge, &length, 2);
-
-		usleep(50); // Just wait for the packet
-
 		len = read(frombridge, &r, (length[1] << 8) + length[0]);
 	
 		{

@@ -131,7 +131,7 @@ void econet_pipeeg_run(void)
 
 	}
 	else
-		if (noisy) fprintf (stderr, "No bridge reply received (assuming single local network\n");
+		if (noisy) fprintf (stderr, "No bridge reply received (assuming single local network)\n");
 	
 
 	// Probe to see if station is present

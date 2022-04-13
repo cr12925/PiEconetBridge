@@ -3427,7 +3427,13 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 						r.p.data[3] = (1280 & 0xff); // maximum tx size
 						r.p.data[4] = (1280 & 0xff00) >> 8;
 				
-						if (!create_only) fs_aun_send (&r, server, 5, net, stn);
+						// if (!create_only) fs_aun_send (&r, server, 5, net, stn);
+						// Experiment to see if RiscOS likes this any better - old code was the one line above
+						snprintf (&(r.p.data[5]), 17, "%12s%c%c%c%c", p.acornname, 0x80, 0x20, '$', 0x20);
+						r.p.data[0] = 0x03; // *CAT. Heaven knows why, but a L3FS which works with RiscOS does this.
+						if (!create_only) fs_aun_send (&r, server, 21, net, stn);
+	
+						
 						else
 						{
 							// Write 'length' bytes of garbage to the file (probably nulls)

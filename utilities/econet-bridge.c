@@ -307,8 +307,9 @@ uint32_t local_seq = 0x00004000;
 
 struct printjob {
 	short net, stn;
-	short ctrl; // Oscillates betwen &81, &80
+	//short ctrl; // Oscillates betwen &81, &80
 	short port;
+	unsigned char ctrlbit; // Initialized at PS logon, and then tracked
 	FILE *spoolfile;
 	unsigned char printer_index;
 	char unixname[20];
@@ -567,17 +568,19 @@ int econet_write_general(struct __econet_packet_aun *p, int len)
 		{
 			if (network[ptr].pipewritesocket != -1)
 			{
+				struct __econet_packet_pipe delivery;
+
 				int r;
-				unsigned char length[2];
 
-				length[0] = len & 0xff;
-				length[1] = (len >> 8) & 0xff;
+				delivery.length_low = len & 0xff;
+				delivery.length_high = (len >> 8) & 0xff;
 
-				write (network[ptr].pipewritesocket, &length, 2);
+				memcpy (&(delivery.dststn), p, len);
 
-				r = write(network[ptr].pipewritesocket, p, len);
+				r = write(network[ptr].pipewritesocket, &delivery, len+2);
 
-				return r;
+				if (r == (len+2)) return r-2;
+				else return r;
 			}
 			else	
 			{
@@ -914,6 +917,7 @@ void econet_readconfig(void)
 			int stn, net, ptr, entry, mfr, port;
 			char filename[200], tmp[300];
 			char readerfilename[250], writerfilename[250];
+			unsigned char buffer[1024];
 
 			for (count = 2; count <= 5; count++) // start at 2 - we know the first one is 'UNIX'
 			{
@@ -1032,6 +1036,10 @@ void econet_readconfig(void)
 			pset[pmax++].fd = network[networkp].pipeudpsocket; // Fill in our poll structure
 
 			pipeudpsockets[network[networkp].pipeudpsocket] = networkp; // Mark this as a special one for UDP traffic to Named Pipes
+
+			// Empty the pipe
+
+			while (read(network[networkp].listensocket, buffer, 1023) > 0);
 
 			networkp++;
 
@@ -2216,15 +2224,32 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 					handle_fs_traffic(network[count].fileserver_index, a->p.srcnet, a->p.srcstn, a->p.ctrl, a->p.data, packlen-12);
 			}
 		}
-		else if (a->p.port == 0x9f) // Print Server Broadcast query
-		{
+	}
+	else if ((a->p.aun_ttype == ECONET_AUN_DATA || a->p.aun_ttype == ECONET_AUN_BCAST) && (a->p.port == 0x9f)) // Print server status protocol
+	{
 
 			int count;
+			unsigned char querytype;
+			unsigned char pname[7];
 
-			for (count = 0; count < stations; count++)
+			querytype = a->p.data[6]; // 1 == status request; 6 == name request
+	
+			for (count = 0; count < 6; count++)
+				pname[count] = a->p.data[count];
+		
+			pname[6] = 0; // NULL terminate
+
+			if (pkt_debug) fprintf (stderr, "PRINT: to %3d.%3d from %3d.%3d Printer Status Query type %d for printer %s",
+				a->p.dstnet, a->p.dststn,
+				a->p.srcnet, a->p.srcstn,
+				querytype,
+				pname);
+
+			for (count = 0; count < stations; count++) // Search them all in case it's a broadcast. Otherwise, only reply from the one which was addressed
 			{
-				if (network[count].servertype & ECONET_SERVER_PRINT) 
+				if ((network[count].servertype & ECONET_SERVER_PRINT) && (a->p.aun_ttype == ECONET_AUN_BCAST || (a->p.dstnet == network[count].network && a->p.dststn == network[count].station)))
 				{
+
 					reply.p.srcnet = network[count].network;
 					reply.p.srcstn = network[count].station;
 					reply.p.dstnet = a->p.srcnet;
@@ -2232,14 +2257,32 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 					reply.p.aun_ttype = ECONET_AUN_DATA;
 					reply.p.port = 0x9e;
 					reply.p.ctrl = 0x80;
-					reply.p.seq = get_local_seq(a->p.dstnet, a->p.dststn);
-					reply.p.data[0] = 0x00; // Printer input state (Read) // We can change this when we can bar input etc.
-					reply.p.data[1] = 0x00; // Printer output state (Ready) // We can change this when we can put printers offline!
-					aun_send (&reply, 14);
+
+					if (querytype == 1) // Status enquiry
+					{
+						reply.p.seq = get_local_seq(network[count].network, network[count].station);
+						reply.p.data[0] = 0x00; // Status byte 0 = Ready
+						reply.p.data[1] = 0x00; // Busy with station N (which we don't need if ready)
+						reply.p.data[2] = 0x00; // Busy with network N (which we don't need if ready)
+						aun_send (&reply, 15);
+					}
+					else if (querytype == 6) // Name query - we can, apparently, send multiple replies to this.
+					{
+
+						int printer = 0;
+
+						// Loop through the printers on this station and reply. Update sequence number for each reply...
+
+						while (printer < network[count].numprinters)
+						{
+							reply.p.seq = get_local_seq(network[count].network, network[count].station);
+							snprintf((char * restrict) reply.p.data, 7, "%6s", network[count].printers[printer].name);
+							aun_send (&reply, 18);
+						}
+					}
 				}
 			}
 
-		}
 	}
 	else if (a->p.aun_ttype == ECONET_AUN_DATA) // Data packet
 	{
@@ -2346,7 +2389,8 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 
 					printjobs[found].stn = a->p.srcstn;
 					printjobs[found].net = a->p.srcnet;
-					printjobs[found].ctrl = 0x80; 
+					//printjobs[found].ctrl = 0x80; 
+					printjobs[found].ctrlbit = (a->p.ctrl & 0x01) ^ 0x01; // So ctrlbit stores what we are expecting
 					
 					sprintf(filename, SPOOLFILESPEC, found);
 	
@@ -2393,31 +2437,30 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 				reply.p.dststn = a->p.srcstn;
 				reply.p.aun_ttype = ECONET_AUN_DATA;
 				reply.p.port = 0xd1;
-				reply.p.ctrl = printjobs[count].ctrl;
+				reply.p.ctrl = a->p.ctrl;
 
 				reply.p.seq = get_local_seq(a->p.dstnet, a->p.dststn);
 
 				// The control low bit alternation is to avoid duplicated packets. Need to implement a check... TODO.
 
-				if ((printjobs[count].ctrl & 0x01) == (a->p.ctrl & 0x01))
+				if ((printjobs[count].ctrlbit == (a->p.ctrl & 0x01)) || ((a->p.ctrl & 0xfe) == 0x82)) // Either matches the ctrl bit, OR is 0x82 (job start)
 				{
-					switch (a->p.ctrl)
+					printjobs[count].ctrlbit = (a->p.ctrl & 0x01) ^ 0x01;
+
+					switch (a->p.ctrl & 0xfe)
 					{
-						case 0x83: // Fall through
 						case 0x82: // Print job start
 						{
 							reply.p.data[0] = 0x2a;
 						}
 						break;
-						case 0x80: // Fall through
-						case 0x81: // Print data
+						case 0x80: // Print data
 						{
 							fwrite(&(a->p.data), packlen-12, 1, printjobs[count].spoolfile);
 							reply.p.data[0] = a->p.data[0];	
 						}
 						break;
-						case 0x86: // Fall through
-						case 0x87: // Final packet
+						case 0x86: // Final packet
 						{
 							char command_string[2000];
 							char filename_string[200];
@@ -2445,9 +2488,6 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 						}
 						break;
 					}
-
-				
-					printjobs[count].ctrl ^= 0x01;
 
 				}
 
@@ -2626,12 +2666,13 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 		{
 			if ((network[count].type & ECONET_HOSTTYPE_TNAMEDPIPE) && (s != -1 && s != count) && (network[count].pipewritesocket != -1)) // Is a named pipe, and not the one the packe came from
 			{
-				unsigned char length[2];
+				struct __econet_packet_pipe delivery;
 
-				length[0] = len & 0xff;
-				length[1] = (len >> 8) & 0xff;
-				write(network[count].pipewritesocket, &length, 2);
-				write(network[count].pipewritesocket, p, len);
+				delivery.length_low = len & 0xff;
+				delivery.length_high = (len >> 8) & 0xff;
+				
+				memcpy(&(delivery.dststn), p, len);
+				write(network[count].pipewritesocket, &delivery, len+2);
 			}
 
 		}
@@ -2699,13 +2740,13 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 	{
 		if (network[d].pipewritesocket != -1)
 		{
-			unsigned char length[2];
+			struct __econet_packet_pipe delivery;
 		
-			length[0] = len & 0xff;
-			length[1] = (len >> 8) & 0xff;
-			write (network[d].pipewritesocket, &length, 2);
-			result = write(network[d].pipewritesocket, p, len);
-			usleep(10000);
+			delivery.length_low = len & 0xff;
+			delivery.length_high = (len >> 8) & 0xff;
+			memcpy(&(delivery.dststn), p, len);
+			result = write(network[d].pipewritesocket, &delivery, len+2);
+			if (result == len+2) result -= 2;
 		}
 		else	if (pkt_debug) fprintf (stderr, "PIPE : Pipe write socket not open\n");
 	}
@@ -3211,6 +3252,7 @@ Options:\n\
 			{
 				int fd, np;
 				char file[250];
+				unsigned char buffer[1024];
 
 				fd = pset[realfd].fd;
 				np = fd_ptr[fd];
@@ -3232,6 +3274,10 @@ Options:\n\
 				}
 
 				network[np].listensocket = pset[realfd].fd;
+
+				// Empty the pipe
+
+				while (read(network[np].listensocket, buffer, 1023) > 0);
 				
 			}
 			else if ((pset[realfd].revents & POLLIN) && (trunk_fd_ptr[pset[realfd].fd] != -1)) // Traffic arriving on trunk
@@ -3327,14 +3373,14 @@ Options:\n\
 
 					if (network[netptr].pipewritesocket != -1) // We have a live writer socket
 					{
-						unsigned char length[2];
+						struct __econet_packet_pipe delivery;
 
 						dump_udp_pkt_aun(&p, r+4);
 						
-						length[0] = (r+4) & 0xff;
-						length[1] = ((r+4) >> 8) & 0xff;
-						write (network[netptr].pipewritesocket, &length, 2);
-						write (network[netptr].pipewritesocket, &p, r+4);
+						delivery.length_low = (r+4) & 0xff;
+						delivery.length_high = ((r+4) >> 8) & 0xff;
+						
+						write (network[netptr].pipewritesocket, &delivery, r+4+2);
 					}
 					else
 						fprintf (stderr, "*PIPE: to %3d.%3d from %3d.%3d traffic received on UDP for named pipe but pipe not connected\n", p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn );
@@ -3352,14 +3398,18 @@ Options:\n\
 				if (network[fd_ptr[pset[realfd].fd]].type & ECONET_HOSTTYPE_TNAMEDPIPE)
 				{
 
-					unsigned char length[2];
+					int length;
+					unsigned char c;
 
-					read(pset[realfd].fd, (void *) &length, 2); // Get packet length
-				
-					usleep(50); // Wait for packet
+					length = 0;
+					
+					read(pset[realfd].fd, &c, 1);
+					length = c;
+					read(pset[realfd].fd, &c, 1);
+					length += (c << 8);
 
-					r = read(pset[realfd].fd, (void *) &p, (length[1] << 8) + length[0]); // note, we read a full 12 byte AUN+ type header here
-			
+					r = read(pset[realfd].fd, &(p.raw), length);
+
 					if (r < 0) continue; // Something went wrong
 
 					// The received packet will have a valid destination on it, but we will need to fill in the source

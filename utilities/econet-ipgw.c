@@ -209,7 +209,6 @@ uint8_t econet_ip_poll(uint8_t source, int ms, struct pollresult *r)
 
 		read(frombridge, &length, 2);
 
-		usleep(20); // wait for the traffic. This is a total fudge.
 		r->len = read(frombridge, &(r->aun), (length[1] << 8) + length[0]) - 12;
 		r->dtype = 1;
 		return 1;
