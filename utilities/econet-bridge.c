@@ -2165,7 +2165,89 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 			}
 		}
 	}
-	else if (a->p.aun_ttype == ECONET_AUN_BCAST) // Broadcast - See if we need to do a bridge query reply
+	else if ((a->p.aun_ttype == ECONET_AUN_DATA || a->p.aun_ttype == ECONET_AUN_BCAST) && (a->p.port == 0x9f)) // Print server status protocol
+	{
+
+			int count;
+			unsigned char querytype;
+			unsigned char pname[7];
+
+			querytype = a->p.data[6]; // 1 == status request; 6 == name request
+	
+			for (count = 0; count < 6; count++)
+				pname[count] = a->p.data[count];
+		
+			pname[6] = 0; // NULL terminate
+
+			if (pkt_debug) fprintf (stderr, "PRINT: to %3d.%3d from %3d.%3d Printer Status Query (%s) for printer %s ",
+				a->p.dstnet, a->p.dststn,
+				a->p.srcnet, a->p.srcstn,
+				(querytype == PRN_QUERY_STATUS) ? "status" : "name",
+				pname);
+
+			for (count = 0; count < stations; count++) // Search them all in case it's a broadcast. Otherwise, only reply from the one which was addressed
+			{
+				if ((network[count].servertype & ECONET_SERVER_PRINT) && (a->p.aun_ttype == ECONET_AUN_BCAST || (a->p.dstnet == network[count].network && a->p.dststn == network[count].station)))
+				{
+
+					reply.p.srcnet = network[count].network;
+					reply.p.srcstn = network[count].station;
+					reply.p.dstnet = a->p.srcnet;
+					reply.p.dststn = a->p.srcstn;
+					reply.p.aun_ttype = ECONET_AUN_DATA;
+					reply.p.port = 0x9e;
+					reply.p.ctrl = 0x80;
+
+					if (querytype == PRN_QUERY_STATUS) // Status enquiry
+					{
+						/* First need to compare the name */
+
+						short found = 0, printer;
+
+						if (!strncasecmp("PRINT ", (const char *) pname, 6))
+						{
+							found = 1;
+						}
+						else
+							for (printer = 0; printer < network[count].numprinters; printer++)
+							{
+								if (!strncasecmp((const char *) network[count].printers[printer].name, (const char *) pname, 6))
+									found++;	
+							}
+						
+						if (found)
+						{
+							
+							if (pkt_debug) fprintf (stderr, " - responding with status\n");
+							reply.p.seq = get_local_seq(network[count].network, network[count].station);
+							reply.p.data[0] = 0x00; // Status byte 0 = Ready
+							reply.p.data[1] = 0x00; // Busy with station N (which we don't need if ready)
+							reply.p.data[2] = 0x00; // Busy with network N (which we don't need if ready)
+							aun_send (&reply, 15);
+						}
+						else if (pkt_debug) fprintf (stderr, " - not responding\n");
+					}
+					else if (querytype == PRN_QUERY_NAME) // Name query - we can, apparently, send multiple replies to this.
+					{
+
+						int printer = 0;
+
+						// Loop through the printers on this station and reply. Update sequence number for each reply...
+
+						while (printer < network[count].numprinters)
+						{
+							reply.p.seq = get_local_seq(network[count].network, network[count].station);
+							snprintf((char * restrict) reply.p.data, 7, "%6s", network[count].printers[printer].name);
+							aun_send (&reply, 18);
+							if (printer == 0 && pkt_debug) fprintf (stderr, " - responded with printer list\n");
+						}
+
+					}
+				}
+			}
+
+	}
+	else if (a->p.aun_ttype == ECONET_AUN_BCAST) // Broadcast - See if we need to do a bridge query reply 
 	{
 		if (bridge_query && (a->p.port == 0x9C) && (a->p.ctrl == 0x80 || a->p.ctrl == 0x81) && (source >= 0)) // bridge reset/update broadcast
 			econet_bridge_process (a, packlen, source);
@@ -2224,65 +2306,6 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 					handle_fs_traffic(network[count].fileserver_index, a->p.srcnet, a->p.srcstn, a->p.ctrl, a->p.data, packlen-12);
 			}
 		}
-	}
-	else if ((a->p.aun_ttype == ECONET_AUN_DATA || a->p.aun_ttype == ECONET_AUN_BCAST) && (a->p.port == 0x9f)) // Print server status protocol
-	{
-
-			int count;
-			unsigned char querytype;
-			unsigned char pname[7];
-
-			querytype = a->p.data[6]; // 1 == status request; 6 == name request
-	
-			for (count = 0; count < 6; count++)
-				pname[count] = a->p.data[count];
-		
-			pname[6] = 0; // NULL terminate
-
-			if (pkt_debug) fprintf (stderr, "PRINT: to %3d.%3d from %3d.%3d Printer Status Query type %d for printer %s",
-				a->p.dstnet, a->p.dststn,
-				a->p.srcnet, a->p.srcstn,
-				querytype,
-				pname);
-
-			for (count = 0; count < stations; count++) // Search them all in case it's a broadcast. Otherwise, only reply from the one which was addressed
-			{
-				if ((network[count].servertype & ECONET_SERVER_PRINT) && (a->p.aun_ttype == ECONET_AUN_BCAST || (a->p.dstnet == network[count].network && a->p.dststn == network[count].station)))
-				{
-
-					reply.p.srcnet = network[count].network;
-					reply.p.srcstn = network[count].station;
-					reply.p.dstnet = a->p.srcnet;
-					reply.p.dststn = a->p.srcstn;
-					reply.p.aun_ttype = ECONET_AUN_DATA;
-					reply.p.port = 0x9e;
-					reply.p.ctrl = 0x80;
-
-					if (querytype == 1) // Status enquiry
-					{
-						reply.p.seq = get_local_seq(network[count].network, network[count].station);
-						reply.p.data[0] = 0x00; // Status byte 0 = Ready
-						reply.p.data[1] = 0x00; // Busy with station N (which we don't need if ready)
-						reply.p.data[2] = 0x00; // Busy with network N (which we don't need if ready)
-						aun_send (&reply, 15);
-					}
-					else if (querytype == 6) // Name query - we can, apparently, send multiple replies to this.
-					{
-
-						int printer = 0;
-
-						// Loop through the printers on this station and reply. Update sequence number for each reply...
-
-						while (printer < network[count].numprinters)
-						{
-							reply.p.seq = get_local_seq(network[count].network, network[count].station);
-							snprintf((char * restrict) reply.p.data, 7, "%6s", network[count].printers[printer].name);
-							aun_send (&reply, 18);
-						}
-					}
-				}
-			}
-
 	}
 	else if (a->p.aun_ttype == ECONET_AUN_DATA) // Data packet
 	{
