@@ -127,6 +127,28 @@ struct __econet_packet_udp {
 	};
 };
 
+// Not used in the kernel module
+// Struct for carrying packets over named pipes - includes the packet length because we keep getting two stuck together!
+struct __econet_packet_pipe { 
+	unsigned char length_low; // LSB first
+	unsigned char length_high; // MSB
+			unsigned char dststn;
+			unsigned char dstnet;
+			unsigned char srcstn;
+			unsigned char srcnet;
+			unsigned char aun_ttype; // See definitions above
+			unsigned char port;
+			unsigned char ctrl; // Internally, this will have high bit set. On the UDP packet it is stripped off
+			unsigned char padding;
+#ifdef u32
+			u32 seq;
+#else
+			uint32_t seq;
+#endif
+
+			unsigned char data[ECONET_MAX_PACKET_SIZE-9];
+};
+
 /* IOCTL Magic */
 
 #define ECONETGPIO_MAGIC        (0xa9) /* LDA Opcode for a 6502 */
