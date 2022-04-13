@@ -1155,7 +1155,7 @@ void econet_readconfig(void)
 				index = 0;
 				while (pname[index] != (char) 0x00 && index < 7)
 				{
-					pname[index] = (char) (pname[index] & 0xdf);
+					pname[index] = toupper(pname[index]);
 					index++;
 				}
 
