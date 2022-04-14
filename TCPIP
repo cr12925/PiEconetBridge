@@ -109,5 +109,29 @@ sudo iptables -t nat -A POSTROUTING -s 192.168.0.0/24 -j MASQUERADE
 You should now find that if you follow PB's instructions, you
 can TELNET (or TELAPI) to hosts in the wider Internet-world.
 
+The port number problem
+-----------------------
+
+The EcoTCP ROM will only let you connect to port numbers of
+255 or under. This means you cannot connect to, say, a BBS
+running somewhere on port 6502.
+
+The kludgey fix is to use Linux's NAT to translate a port
+number less than 256 to the one you want, and then connect
+to the low numbered port.
+
+As root on your bridge, and assuming your tunnel interface for
+econet-ipgw is tun0, and your BBS machine (or whatever) is on
+IP address 192.168.0.1, you could do something like this:
+
+iptables --dport -d 192.168.0.1 --dport 24 -j DNAT --to-destination 192.168.0.1:6502
+
+Then on the BBC you could, for example, load the Prestel ROM
+and connect to the viewdata BBS on 192.168.0.1 port 6502
+as follows:
+
+>*TELAPI 192.168.0.1 24
+>*PRESTEL
+
 Enjoy!
 
