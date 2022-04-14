@@ -3282,17 +3282,16 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 	}
 
 	if (command == 4 || command == 5)
-	{
 		r.p.data[replylen++] = fs_perm_to_acorn(p.perm, p.ftype);
-		//if (p.my_perm & FS_PERM_OWN_R) r.p.data[replylen++] = 0xff; else r.p.data[replylen++] = 0x00;
-		r.p.data[replylen++] = (active[server][active_id].userid == p.owner) ? 0x00 : 0xff; 
-	}
 
 	if (command == 1 || command == 5)
 	{
 		r.p.data[replylen++] = p.day;
 		r.p.data[replylen++] = p.monthyear;
 	}
+
+	if (command == 4 || command == 5)
+		r.p.data[replylen++] = (active[server][active_id].userid == p.owner) ? 0x00 : 0xff; 
 
 	if (command == 6)
 	{
@@ -3427,13 +3426,13 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 						r.p.data[3] = (1280 & 0xff); // maximum tx size
 						r.p.data[4] = (1280 & 0xff00) >> 8;
 				
-						// if (!create_only) fs_aun_send (&r, server, 5, net, stn);
+/* Experiment didn't work
 						// Experiment to see if RiscOS likes this any better - old code was the one line above
 						snprintf (&(r.p.data[5]), 17, "%12s%c%c%c%c", p.acornname, 0x80, 0x20, '$', 0x20);
 						r.p.data[0] = 0x03; // *CAT. Heaven knows why, but a L3FS which works with RiscOS does this.
 						if (!create_only) fs_aun_send (&r, server, 21, net, stn);
-	
-						
+*/
+						if (!create_only) fs_aun_send (&r, server, 5, net, stn);
 						else
 						{
 							// Write 'length' bytes of garbage to the file (probably nulls)
@@ -6581,10 +6580,13 @@ void fs_garbage_collect(int server)
 				if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Garbage collecting stale incoming bulk port %d used %lld seconds ago\n", "", 
 					fs_bulk_ports[server][count].net, fs_bulk_ports[server][count].stn, count, ((unsigned long long) time(NULL) - fs_bulk_ports[server][count].last_receive));
 
-				fs_close_interlock(server, fs_bulk_ports[server][count].handle, fs_bulk_ports[server][count].mode);
+				// fs_close_interlock(server, fs_bulk_ports[server][count].handle, fs_bulk_ports[server][count].mode); // Commented so that bulk transfers to ordinary files don't close the file
 
-				if (fs_bulk_ports[server][count].active_id != 0) // No user handle = this was a SAVE operation, so if non zero we need to close a user handle
+				if (fs_bulk_ports[server][count].active_id != 0) // No user handle = this was a SAVE operation, so if non zero we need to close the file & a user handle
+				{
+					fs_close_interlock(server, fs_bulk_ports[server][count].handle, fs_bulk_ports[server][count].mode);
 					fs_deallocate_user_file_channel(server, fs_bulk_ports[server][count].active_id, fs_bulk_ports[server][count].user_handle);
+				}
 
 				fs_bulk_ports[server][count].handle = -1;
 			}
