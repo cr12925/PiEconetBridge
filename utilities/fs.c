@@ -5916,6 +5916,7 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 		case 1: // Set file extent
 		{
 			if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Set file extent on channel %02X to %06lX, current extent %06lX%s\n", "", net, stn, handle, value, extent, (value > extent) ? " so adding bytes to end of file" : "");
+/*
 			if (value > extent)
 			{
 				unsigned char buffer[4096];
@@ -5938,18 +5939,22 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 					to_write -= written;
 				}
 			}
-
+*/
 			fflush(f);
 
+/*
 			if (value < extent)
 			{
-				if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom%3d.%3d   - Truncating file accordingly\n", "", net, stn);
+*/
+				if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom%3d.%3d   - %s file accordingly\n", "", net, stn, ((value < extent) ? "truncating" : "extending"));
 				if (ftruncate(fileno(f), value)) // Error if non-zero
 				{
-					fs_error(server, reply_port, net, stn, 0xFF, "FS Error truncating file");
+					fs_error(server, reply_port, net, stn, 0xFF, "FS Error setting extent");
 					return;
 				}
+/*
 			}
+*/
 
 		}
 		break;
