@@ -2470,7 +2470,6 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 						if (((fserver = fs_get_server_id(a->p.dstnet, a->p.dststn)) != -1) && ((active_id = fs_stn_logged_in(fserver, a->p.srcnet, a->p.srcstn)) != -1))
 						{
 							fs_get_username(fserver, active_id, printjobs[found].username);
-							if (pkt_debug) fprintf(stderr, "PRINT: Printjob on fileserver %d, active_id %d, username %s", fserver, active_id, printjobs[found].username);
 							if (printjobs[found].username == 0) strcpy(printjobs[found].username, "ANONYMOUS");
 							
 						}
