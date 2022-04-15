@@ -1545,8 +1545,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		perm = attr.perm;
 
 		// Fudge parent perm if we own the object and permissions = &00
-		if ((active[server][user].userid == attr.owner) && (attr.perm == 0))
-			perm = attr.perm = FS_PERM_OWN_W | FS_PERM_OWN_R;
+		if ((active[server][user].userid == attr.owner) && ((attr.perm & ~FS_PERM_L) == 0))
+			perm = attr.perm |= FS_PERM_OWN_W | FS_PERM_OWN_R;
 		
 		if (count == result->npath - 1) // Last segment
 			result->parent_perm = perm;
@@ -1637,10 +1637,10 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			// If it's a directory with 0 permissions and we own it, set permissions to RW/
 
 			if (normalize_debug) fprintf (stderr, "Looking to see if this user (id %04X) is the owner (%04X), if this is a dir and if perms (%02X) are &00\n", active[server][user].userid, attr.owner, attr.perm);
-			if ((active[server][user].userid == attr.owner) && S_ISDIR(s.st_mode) && (attr.perm == 0))
+			if ((active[server][user].userid == attr.owner) && S_ISDIR(s.st_mode) && ((attr.perm & ~FS_PERM_L) == 0))
 			{
 				if (normalize_debug) fprintf (stderr, "Is a directory owned by the user with perm = 0 - setting permissions to WR/\n");
-				attr.perm = FS_PERM_OWN_W | FS_PERM_OWN_R;
+				attr.perm |= FS_PERM_OWN_W | FS_PERM_OWN_R;
 			}
 		
 			result->owner = attr.owner;
@@ -3129,7 +3129,9 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 		)
 		fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 	else if (command != 1 && command != 4 && (p.perm & FS_PERM_L)) // Locked
+	{
 		fs_error(server, reply_port, net, stn, 0xC3, "Locked");
+	}
 	else
 	{
 		struct objattr attr;
@@ -3430,9 +3432,13 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 		{
 			// Path found
 	
+/* This is an error. PERM_L just stops you deleting it.
 			if (p.perm & FS_PERM_L) // Locked - cannot write
+			{
 				fs_error(server, reply_port, net, stn, 0xC3, "Locked");
-			else if (p.ftype != FS_FTYPE_FILE && p.ftype != FS_FTYPE_NOTFOUND) // Not a file!
+			}
+			else */
+			if (p.ftype != FS_FTYPE_FILE && p.ftype != FS_FTYPE_NOTFOUND) // Not a file!
 				fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 			else
 			{
@@ -6371,7 +6377,9 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 	//else if (existingfile && p.ftype != FS_FTYPE_FILE) // Cope with weird FS3 behaviour where you can open a directory but not actually read or write from/to it
 		//fs_error(server, reply_port, net, stn, 0xBE, "Is not a file");
 	else if (!readonly && (p.perm & FS_PERM_L)) // File locked
+	{
 		fs_error(server, reply_port, net, stn, 0xC3, "Locked");
+	}
 	else if (!readonly && (p.ftype == FS_FTYPE_NOTFOUND) && 
 		(	(p.parent_owner != active[server][active_id].userid && ((p.parent_perm & FS_PERM_OTH_W) == 0)) ||
 			(p.parent_owner == active[server][active_id].userid && ((p.perm & FS_PERM_OWN_W) == 0))
