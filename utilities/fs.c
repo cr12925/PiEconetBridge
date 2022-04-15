@@ -5931,6 +5931,7 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 					written = fwrite(buffer, (to_write > 4096 ? 4096 : to_write), 1, f);
 					if (written != (to_write > 4096 ? 4096 : to_write))
 					{
+						if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Attempted to write chunk size %ld to the file, but fwrite returned %ld\n", "", net, stn, (to_write > 4096 ? 4096 : to_write), written);
 						fs_error(server, reply_port, net, stn, 0xFF, "FS Error extending file");
 						return;
 					}
