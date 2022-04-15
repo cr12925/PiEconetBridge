@@ -74,7 +74,7 @@ then
 	header="${confpath}/${acorndest}.${username}.header"
 elif [ -f "${confpath}/${acorndest}.header" ]
 then
-	header="${conf}/${dest}.header"
+	header="${confpath}/${acorndest}.header"
 elif [ -f "${confpath}/default.header" ]
 then
 	header="${confpath}/default.header"
