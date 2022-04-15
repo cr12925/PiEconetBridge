@@ -124,7 +124,7 @@ As root on your bridge, and assuming your tunnel interface for
 econet-ipgw is tun0, and your BBS machine (or whatever) is on
 IP address 192.168.0.1, you could do something like this:
 
-iptables --dport -d 192.168.0.1 --dport 24 -j DNAT --to-destination 192.168.0.1:6502
+iptables -t nat -A PREROUTING -i tun0 -d 192.168.0.1 -p tcp --dport 24 -j DNAT --to-destination 192.168.0.1:6502
 
 Then on the BBC you could, for example, load the Prestel ROM
 and connect to the viewdata BBS on 192.168.0.1 port 6502
