@@ -48,6 +48,8 @@ extern void handle_fs_bulk_traffic(int, unsigned char, unsigned char, unsigned c
 extern void fs_garbage_collect(int);
 extern void fs_eject_station(unsigned char, unsigned char); // Used to get rid of an old dynamic station
 extern void fs_dequeue();
+extern int fs_stn_logged_in(int, unsigned char, unsigned char); // Used to identify if a user is logged in
+extern void fs_get_username(int, int, char *); // Returns username or null first byte into the char* array
 extern short fs_dequeuable();
 extern void sks_poll(int);
 extern int8_t fs_get_user_printer(int, unsigned char, unsigned char);
@@ -96,6 +98,7 @@ int wired_eject = 1; // When set, and a dynamic address is allocated to an unkno
 short learned_net = -1;
 int wire_tx_errors = 0; // Count of successive errors on tx to the wire - if it gets too high, we'll do a chip reset
 unsigned char last_net = 0, last_stn = 0;
+char *printhandler = NULL; // Filename of generic print handling routine
 
 int start_fd = 0; // Which index number do we start looking for UDP traffic from after poll returns? We do this cyclicly so we give all stations an even chance
 
@@ -313,6 +316,8 @@ struct printjob {
 	FILE *spoolfile;
 	unsigned char printer_index;
 	char unixname[20];
+	char username[20];
+	char name[10];
 };
 
 struct printjob printjobs[MAXPRINTJOBS];
@@ -644,7 +649,7 @@ void econet_readconfig(void)
 	
 	FILE *configfile;
 	char linebuf[256], basenet[20];
-	regex_t r_comment, r_entry_distant, r_entry_local, r_entry_server, r_entry_wire, r_entry_trunk, r_entry_xlate, r_entry_fw, r_entry_learn, r_entry_namedpipe, r_entry_filter, r_entry_basenet;
+	regex_t r_comment, r_entry_distant, r_entry_local, r_entry_server, r_entry_wire, r_entry_trunk, r_entry_xlate, r_entry_fw, r_entry_learn, r_entry_namedpipe, r_entry_filter, r_entry_basenet, r_entry_printhandler;
 	regmatch_t matches[9];
 	int count;
 	short j, k;
@@ -698,6 +703,12 @@ void econet_readconfig(void)
 	}
 
 	/* This needs a better regex */
+	if (regcomp(&r_entry_printhandler, "^\\s*PRINTHANDLER\\s+(.+)\\s*$", REG_EXTENDED) != 0)
+	{
+		fprintf(stderr, "Unable to compile print handler regex.\n");		
+		exit(EXIT_FAILURE);
+	}
+
 	if (regcomp(&r_entry_distant, "^\\s*([Aa]|IP)\\s+([[:digit:]]{1,3})\\s+([[:digit:]]{1,3})\\s+([^[:space:]]+)\\s+([[:digit:]]{4,5})\\s*$", REG_EXTENDED) != 0)
 	{
 		fprintf(stderr, "Unable to compile full distant station regex.\n");
@@ -795,6 +806,16 @@ void econet_readconfig(void)
 
 		if (regexec(&r_comment, linebuf, 0, NULL, 0) == 0)
 		{ }
+		else if (regexec(&r_entry_printhandler, linebuf, 2, matches, 0) == 0)
+		{
+			printhandler = malloc(sizeof(linebuf));
+			if (!printhandler)
+			{
+				fprintf (stderr, "Error on malloc() for print handler string.\n");
+				exit(EXIT_FAILURE);
+			}
+			strcpy(printhandler, &(linebuf[matches[1].rm_so]));
+		}
 		else if (regexec(&r_entry_distant, linebuf, 6, matches, 0) == 0)
 		{
 			char 	tmp[300];
@@ -1620,6 +1641,7 @@ void econet_readconfig(void)
 	regfree(&r_entry_trunk);
 	regfree(&r_entry_xlate);
 	regfree(&r_entry_fw);
+	regfree(&r_entry_printhandler);
 	
 	fclose(configfile);
 
@@ -2418,7 +2440,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 					sprintf(filename, SPOOLFILESPEC, found);
 	
 					printjobs[found].spoolfile = fopen(filename, "w");
-	
+					
 					if (!printjobs[found].spoolfile)
 					{
 						printjobs[count].net = printjobs[count].stn = 0;  // Free this up - couldn't open file	
@@ -2428,6 +2450,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 					{
 
 						unsigned char printer_index = 0xff;
+						int fserver, active_id; // active_id is an internal FS index to the logged in user table
 
 						// Which printer?
 
@@ -2439,12 +2462,27 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 
 						fprintf (stderr, "PRINT: Starting spooler job for %d.%d - %s (%s)\n", a->p.srcnet, a->p.srcstn, network[d_ptr].printers[printer_index].name, network[d_ptr].printers[printer_index].unixname);
 
-						if (strstr(network[d_ptr].printers[printer_index].unixname, "@")) // Email print job, not send to printer
+						// If we are using the new external print handler, we don't do the headers internally any more. They are configured.
+
+						strcpy(printjobs[found].name, network[d_ptr].printers[printer_index].name);
+
+						// Are we a fileserver as well as a print server? If so, is this station logged into it?
+						if (((fserver = fs_get_server_id(a->p.dstnet, a->p.dststn)) != -1) && ((active_id = fs_stn_logged_in(fserver, a->p.srcnet, a->p.srcstn)) != -1))
+						{
+							fs_get_username(fserver, active_id, printjobs[found].username);
+							if (pkt_debug) fprintf(stderr, "PRINT: Printjob on fileserver %d, active_id %d, username %s", fserver, active_id, printjobs[found].username);
+							if (printjobs[found].username == 0) strcpy(printjobs[found].username, "ANONYMOUS");
+							
+						}
+						else	strcpy(printjobs[found].username, "ANONYMOUS");
+
+						if (!printhandler && strstr(network[d_ptr].printers[printer_index].unixname, "@")) // Email print job, not send to printer
 						{
 							fprintf(printjobs[count].spoolfile, "To: %s\n", network[d_ptr].printers[printer_index].unixname);
 							fprintf(printjobs[count].spoolfile, "Subject: Econet print job from station %d.%d\n\n", a->p.srcnet, a->p.srcstn);
 						}
-						fprintf (printjobs[count].spoolfile, PRINTHEADER, a->p.srcnet, a->p.srcstn);
+						if (!printhandler) fprintf (printjobs[count].spoolfile, PRINTHEADER, a->p.srcnet, a->p.srcstn);
+
 						strcpy (printjobs[count].unixname, network[d_ptr].printers[printer_index].unixname);
 					}
 
@@ -2490,21 +2528,43 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 	
 							// There is a rogue byte on the end of the last printjob packet it would seem
 							fwrite(&(a->p.data), packlen-12-1, 1, printjobs[count].spoolfile);
-							fprintf(printjobs[count].spoolfile, PRINTFOOTER);
+
+							if (!printhandler)	
+								fprintf(printjobs[count].spoolfile, PRINTFOOTER);
+
 							reply.p.data[0] = a->p.data[0];	
 	
 							fclose(printjobs[count].spoolfile);
 							sprintf(filename_string, SPOOLFILESPEC, found);
 							
-							if (strstr(printjobs[count].unixname, "@")) // Email address not printername
-								sprintf(command_string, MAILCMDSPEC, printjobs[count].unixname, filename_string);
-							else
-								sprintf(command_string, PRINTCMDSPEC, printjobs[count].unixname, filename_string);
-	
-							fprintf (stderr, "PRINT: Sending print job with %s\n", command_string);
+							if (!printhandler)
+							{
+								if (strstr(printjobs[count].unixname, "@")) // Email address not printername
+									sprintf(command_string, MAILCMDSPEC, printjobs[count].unixname, filename_string);
+								else
+									sprintf(command_string, PRINTCMDSPEC, printjobs[count].unixname, filename_string);
+		
+								fprintf (stderr, "PRINT: Sending print job with %s\n", command_string);
 							
-							if (!fork())
-								execl("/bin/sh", "sh", "-c", command_string, (char *)0);
+								if (!fork())
+									execl("/bin/sh", "sh", "-c", command_string, (char *)0);
+							}
+							else
+							{
+								sprintf(command_string, "%s %d %d %d %d %s %s %s %s",
+									printhandler,
+									a->p.dstnet, a->p.dststn,
+									a->p.srcnet, a->p.srcstn,
+									printjobs[count].username,
+									printjobs[count].unixname,
+									printjobs[count].name,
+									filename_string);
+				
+								if (pkt_debug) fprintf(stderr, "PRINT: Command string: %s\n", command_string);
+
+								if (!fork())	execl("/bin/bash", "bash", "-c", command_string, (char *) 0);
+	
+							}
 	
 							printjobs[count].stn = printjobs[count].net = 0; // Free the resource	
 

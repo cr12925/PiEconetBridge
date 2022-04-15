@@ -868,6 +868,95 @@ is the default - you can turn it off with the -j switch), the *PRINTER
 command will let you select which printer your station prints to when
 it sends a print job.
 
+*** Note: In a recent version upgrade, this functionality changed.
+
+The above will work fine, but you can now optinally define a print
+handler script with the configuration line
+
+PRINTHANDLER <scriptname>
+
+If you define a printhandler, the bridge will not insert its usual
+header or footer data onto print jobs, nor will it internally call
+lp or sendmail any more.
+
+A print handler script (which handles jobs to locally defined printers
+and detects email address destinations) is provided in the repo as
+pserv.sh . NOTE THAT THIS WILL DELETE THE SOURCE FILE CREATED BY
+THE BRIDGE. So if you test it on the command line, DON'T test it
+with a source file (i.e. print data) which you need to keep!
+
+To use this:
+
+A. Copy pserv.sh to /etc/econet-gpio/pserv.sh (you may need to be root)
+B. As root if need be, change the ownership & permissions on the script:
+	chown pi:pi /etc/econet-gpio/pserv.sh
+	chmod ug=rx,o= /etc/econet-gpio/pserv.sh
+C. Create a directory /etc/econet-gpio/printers
+D. Copy the examples from the printers directory in the repo into
+   /etc/econet-gpio/printers
+
+The content of the printers directory provides default & specific ways
+of introducing header files and command line switches to the lp or
+sendmail commands which are finally used to deliver print jobs to their
+ultimate destinations.
+
+The files are called header.XXX and conf.XXX where the 'header' file
+is prepended to the print job when it is sent, and 'conf' contains
+bash variable definitions to enable command line switches to be
+pre-pended to the sendmail or lp command line (i.e. after 'lp' but
+before any other parameters) in case you want to tweak how your
+system prints things.
+
+Suppose a user ("CHRIS") prints a job to a printer ("LASER"), the
+system will search for header and conf files in priority as follows
+(all within /etc/econet-gpio/printers):
+
+LASER.CHRIS.header
+LASER.header
+default.header
+
+Thus the particular user can have a specific header file, but if not
+then the printer itself can have a specific header, and otherwise
+the default header will be picked up.
+
+The header files can have variables substituted into them before
+the job is sent. They are fairly self-explanatory in most cases:
+
+_USERNAME_ : Logged in username, or 'ANONYMOUS' if not logged in
+_SERVERNETWORK_ : Network number of print server
+_SERVERSTATION_ : Station number of print server
+_NETWORK_ : Network number of client station
+_STATION_ : Station number of client station
+_DESTINATION_ : Unix destination of print job (e.g. 'printer1'
+   or 'example@examle.com'
+_DATE_ : Date in dd/mm/YYYY format
+_TIME_ : Time in hh:mm format
+
+The same priority system happens for the conf files.
+
+If the printing user is not logged into a PiFS fileserver, their
+username will show as 'ANONYMOUS'. Thus, a particular header for
+not logged in users can be created with, e.g., a massive banner
+saying that someone is trying to print without logging in(!).
+
+If you are sending by email, you should really have a bespoke
+header file because it can put the minimal email headers (To:
+and Subject:) into the output. An example for a printer called
+'EMAIL' is provided.
+
+The conf files simply have two lines (both optional):
+
+cmdopts="..."
+cmdexec="..."
+
+The first is the command options to put after the name of the
+deliverying binary (lp or sendmail depending on whether there is
+an '@' in the unix destination for the job).
+
+The second (cmdexec) allows you to specify a particular binary
+to do final delivery if you don't want lp or sendmail for this
+printer. E.g. if you wanted to send the print job by some 
+sort of messaging service you can access over the Internet.
 
 THE FILESERVER
 --------------

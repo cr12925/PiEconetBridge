@@ -286,6 +286,29 @@ short fs_get_uid(int server, char *username)
 
 }
 
+// Fill character array with username for a given active_id on this server. Put NULL in
+// first byte if active id is invalid
+void fs_get_username (int server, int active_id, char *username)
+{
+
+	if (active[server][active_id].stn == 0 && active[server][active_id].net == 0)
+		*username = 0;
+	else
+	{
+		short ptr = 0;
+
+		while (ptr < 10)
+		{
+			*(username+ptr) = users[server][active[server][active_id].userid].username[ptr];
+			ptr++;
+		}
+
+		*(username+ptr) = 0; // Null terminate
+
+	}
+
+}
+
 // Find the tail end entry on path2 and store in path1. If path2 empty, store "$".
 void fs_store_tail_path(char *path1, char *path2)
 {
