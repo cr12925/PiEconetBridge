@@ -6376,10 +6376,12 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 		fs_error(server, reply_port, net, stn, 0xbd, "Insufficient access");
 	//else if (existingfile && p.ftype != FS_FTYPE_FILE) // Cope with weird FS3 behaviour where you can open a directory but not actually read or write from/to it
 		//fs_error(server, reply_port, net, stn, 0xBE, "Is not a file");
+/* This is wrong. Locked just stops you deleting a file.
 	else if (!readonly && (p.perm & FS_PERM_L)) // File locked
 	{
 		fs_error(server, reply_port, net, stn, 0xC3, "Locked");
 	}
+*/
 	else if (!readonly && (p.ftype == FS_FTYPE_NOTFOUND) && 
 		(	(p.parent_owner != active[server][active_id].userid && ((p.parent_perm & FS_PERM_OTH_W) == 0)) ||
 			(p.parent_owner == active[server][active_id].userid && ((p.perm & FS_PERM_OWN_W) == 0))
