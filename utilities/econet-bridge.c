@@ -91,7 +91,7 @@ int seq;
 int pkt_debug = 0;
 int dumpmode_brief = 0;
 int wire_enabled = 1;
-int spoof_immediate = 1;
+int spoof_immediate = 0; // Changed from 1
 int wired_eject = 1; // When set, and a dynamic address is allocated to an unknown AUN station, this will cause the bridge to spoof a '*bye' equivalent to fileservers it has learned about on the wired network
 short learned_net = -1;
 int wire_tx_errors = 0; // Count of successive errors on tx to the wire - if it gets too high, we'll do a chip reset
@@ -2975,7 +2975,7 @@ int main(int argc, char **argv)
 				pkt_debug = 1;
 				break;
 			case 'f': fs_quiet = 1; fs_noisy = 0; break;
-			case 'i': spoof_immediate = 0; break;
+			case 'i': spoof_immediate = 1; break;
 			case 'j': fs_sjfunc = 0; break; // Turn off MDFS / SJ functionality in FS
 			case 'l': wire_enabled = 0; break;
 			case 'n': fs_noisy = 1; fs_quiet = 0; break;

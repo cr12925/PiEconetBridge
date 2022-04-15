@@ -982,8 +982,17 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 		p->perm = oa.perm;
 		p->length = statbuf.st_size;
 
+		// If we own the object and it's a directory, and it has permissions 0, then spoof RW/
+		if ((p->owner == userid) && S_ISDIR(statbuf.st_mode) && (p->perm == 0))
+			p->perm = FS_PERM_OWN_R | FS_PERM_OWN_W;	
+
 		p->parent_owner = oa_parent.owner;
 		p->parent_perm = oa_parent.perm;
+
+		// Parent must be a directory, so we frig the permissions to be WR/ if we own the parent and permissions are &00 (which L3FS would let us read/write to because we own it)
+		
+		if ((p->parent_owner == userid) && (p->parent_perm == 0))
+			p->parent_perm = FS_PERM_OWN_R | FS_PERM_OWN_W;
 
 		if (p->owner == userid)
 			p->my_perm = (p->perm & ~(FS_PERM_OTH_W | FS_PERM_OTH_R));
@@ -1512,6 +1521,10 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		owner = attr.owner;
 		perm = attr.perm;
 
+		// Fudge parent perm if we own the object and permissions = &00
+		if ((active[server][user].userid == attr.owner) && (attr.perm == 0))
+			perm = attr.perm = FS_PERM_OWN_W | FS_PERM_OWN_R;
+		
 		if (count == result->npath - 1) // Last segment
 			result->parent_perm = perm;
 
@@ -1571,18 +1584,21 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			//int owner;
 			char dirname[1024];
 
+			if (normalize_debug) fprintf (stderr, "stat(%s) succeeded\n", result->unixpath);
 			if (!S_ISDIR(s.st_mode) && (count < (result->npath - 1))) // stat() follows symlinks so the first bit works across links; the second condition is because we only insist on directories for that part of the path except the last element, which might legitimately be FILE or DIR
 			{
 				result->ftype = FS_FTYPE_NOTFOUND; // Because something we encountered before end of path could not be a directory
 				return 1;
 			}
 
+			if (normalize_debug) fprintf (stderr, "Non-leaf node %s confirmed to be a directory\n", result->unixpath);
 			if ((S_ISDIR(s.st_mode) == 0) && (S_ISREG(s.st_mode) == 0)) // Soemthing is wrong
 			{
 				result->error = FS_PATH_ERR_TYPE;
 				return 0; // Should either be file or directory - not block device etc.
 			}
 
+			if (normalize_debug) fprintf (stderr, "Proceeding to look at attributes on %s\n", result->unixpath);
 			// Next, set internal name from inode number
 
 			result->internal = s.st_ino; // Internal name = Inode number
@@ -1594,6 +1610,16 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			if (S_ISDIR(s.st_mode))	strcat(dirname, "/");
 
 			fs_read_xattr(dirname, &attr);
+
+			// If it's a directory with 0 permissions and we own it, set permissions to RW/
+
+			if (normalize_debug) fprintf (stderr, "Looking to see if this user (id %04X) is the owner (%04X), if this is a dir and if perms (%02X) are &00\n", active[server][user].userid, attr.owner, attr.perm);
+			if ((active[server][user].userid == attr.owner) && S_ISDIR(s.st_mode) && (attr.perm == 0))
+			{
+				if (normalize_debug) fprintf (stderr, "Is a directory owned by the user with perm = 0 - setting permissions to WR/\n");
+				attr.perm = FS_PERM_OWN_W | FS_PERM_OWN_R;
+			}
+		
 			result->owner = attr.owner;
 			result->load = attr.load;
 			result->exec = attr.exec;
