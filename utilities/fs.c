@@ -6612,16 +6612,19 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 				r.p.data[2] = fs_perm_to_acorn(FS_PERM_OWN_R | FS_PERM_OWN_W, FS_FTYPE_FILE);
 				r.p.data[3] = day;
 				r.p.data[4] = monthyear;
+
+				/* Per @arg's remark from the EcoIPFS - whilst the specs say pad the filename to 12 characters and terminate with &0d,
+				   in fact existing servers pad to 12 characters with spaces and terminate it with a negative byte "(plus 3 bytes of
+				   junk!)". So we'll try that. */
+
 				memset(&(r.p.data[5]), 0, 15);
 				snprintf(&(r.p.data[5]), 13, "%-12s", fs_bulk_ports[server][port].acornname);
-				if (strlen(fs_bulk_ports[server][port].acornname) < 12)
-				{
-					// Put &0d on the end of it
-					r.p.data[5+strlen(fs_bulk_ports[server][port].acornname)] = 0x0d;
-				}
+				r.p.data[17] = 0x80;
+				// And the 'junk'
+				r.p.data[18] = 0x20; r.p.data[19] = 0xA9; r.p.data[20] = 0x24;
 
-				//fs_aun_send (&r, server, 5, net, stn);
-				fs_aun_send (&r, server, 20, net, stn);
+				fs_aun_send (&r, server, 21, net, stn);
+				// OLD fs_aun_send (&r, server, 5, net, stn);
 			}
 
 			fs_bulk_ports[server][port].handle = -1; // Make the bulk port available again
