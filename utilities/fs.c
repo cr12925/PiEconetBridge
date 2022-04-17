@@ -169,6 +169,7 @@ struct {
 	unsigned short active_id; // 0 = no user handle because we are doing a fs_save
 	unsigned short user_handle; // index into active[server][active_id].fhandles[] so that cursor can be updated
 	unsigned long long last_receive; // Time of last receipt so that we can garbage collect	
+	unsigned char acornname[12]; // Tail path segment - enables *SAVE to return it on final close
 } fs_bulk_ports[ECONET_MAX_FS_SERVERS][256];
 
 struct objattr {
@@ -214,7 +215,7 @@ struct path {
 	unsigned char discname[30]; // Actually max 10 chars. This is just safety.
 	short disc; // Disc number
 	unsigned char path[30][11]; // Path elements in order, relative to root
-	unsigned char acornname[11]; // Acorn format filename - tail end
+	unsigned char acornname[11]; // Acorn format filename - tail end - gets populated on not found for non-wildcard searches to enable *SAVE to return it
 	short npath; // Number of entries in path[]. 1 means last entry is [0]
 	unsigned char path_from_root[256]; // Path from root directory in Econet format
 	int owner; // Owner user ID
@@ -1424,6 +1425,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			if (found == 0) // Didn't find anything
 			{
 				result->ftype = FS_FTYPE_NOTFOUND;
+
 				// If we are on the last segment and the filename does not contain wildcards, we return 1 to indicate that what was 
 				// searched for wasn't there so that it can be written to. Obviously if it did contain wildcards then it can't be so we
 				// return 0
@@ -1581,7 +1583,10 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 				unix_segment[r_counter] = '\0';
 				strcat(result->unixpath, "/");
 				strcat(result->unixpath, unix_segment); // Add these on a last leg not found so that the calling routine can open the file to write if it wants
+				// Populate the acorn name we were looking for so that things like fs_save() can easily return it
+				strcpy(result->acornname, path_segment);
 				result->parent_owner = parent_owner; // Otherwise this doesn't get properly updated
+				if (normalize_debug) fprintf (stderr, "Non-Wildcard file (%s, unix %s) not found in dir %s - returning unixpath %s, acornname %s, parent_owner %04X\n", path_segment, unix_segment, result->unixpath, result->unixpath, result->acornname, result->parent_owner);
 				return 1;
 			}
 			else	
@@ -3537,6 +3542,7 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 							fs_bulk_ports[server][incoming_port].rx_ctrl = rx_ctrl;
 							fs_bulk_ports[server][incoming_port].mode = 3;
 							fs_bulk_ports[server][incoming_port].user_handle = 0; // Rogue for no user handle, because never hand out user handle 0. This stops the bulk transfer routine trying to increment a cursor on a user handle which doesn't exist.
+							strncpy(fs_bulk_ports[server][incoming_port].acornname, p.acornname, 12);
 							fs_bulk_ports[server][incoming_port].last_receive = (unsigned long long) time(NULL);
 						}
 					}
@@ -6606,8 +6612,16 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 				r.p.data[2] = fs_perm_to_acorn(FS_PERM_OWN_R | FS_PERM_OWN_W, FS_FTYPE_FILE);
 				r.p.data[3] = day;
 				r.p.data[4] = monthyear;
+				memset(&(r.p.data[5]), 0, 15);
+				snprintf(&(r.p.data[5]), 13, "%-12s", fs_bulk_ports[server][port].acornname);
+				if (strlen(fs_bulk_ports[server][port].acornname) < 12)
+				{
+					// Put &0d on the end of it
+					r.p.data[5+strlen(fs_bulk_ports[server][port].acornname)] = 0x0d;
+				}
 
-				fs_aun_send (&r, server, 5, net, stn);
+				//fs_aun_send (&r, server, 5, net, stn);
+				fs_aun_send (&r, server, 20, net, stn);
 			}
 
 			fs_bulk_ports[server][port].handle = -1; // Make the bulk port available again
@@ -6618,8 +6632,8 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 			r.p.port = fs_bulk_ports[server][port].ack_port;
 			r.p.ctrl = ctrl;
 			r.p.ptype = ECONET_AUN_DATA;
-			r.p.data[0] = 0; // was FS_PERM_OWN_R | FS_PERM_OWN_W;
-			fs_aun_send (&r, server, 1, net, stn);
+			r.p.data[0] = r.p.data[1] = 0; // was FS_PERM_OWN_R | FS_PERM_OWN_W;
+			fs_aun_send (&r, server, 2, net, stn);
 		}
 
 		
