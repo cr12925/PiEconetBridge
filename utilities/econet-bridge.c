@@ -3622,7 +3622,12 @@ Options:\n\
 						
 						if (p.p.aun_ttype == ECONET_AUN_ACK || p.p.aun_ttype == ECONET_AUN_IMMREP || p.p.aun_ttype == ECONET_AUN_NAK)
 						{
-							if (p.p.seq == network[from_found].ackimm_seq_awaited) // Found the ACK or IMMREP sequence this host was supposed to produce
+							if (p.p.aun_ttype == ECONET_AUN_NAK)
+							{
+								if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X seq 0x%08X NAK received!\n",
+									p.p.srcnet, p.p.srcstn, p.p.dstnet, p.p.dststn, r+4, p.p.seq);
+							}
+							else if (p.p.seq == network[from_found].ackimm_seq_awaited) // Found the ACK or IMMREP sequence this host was supposed to produce
 							{
 								if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X seq 0x%08X found ack/imm rep which was awaited\n",
 									p.p.srcnet, p.p.srcstn, p.p.dstnet, p.p.dststn, r+4, p.p.seq);
