@@ -108,6 +108,10 @@ struct {
 	char unused[1];
 } users[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_USERS];
 
+struct {
+	unsigned char groupname[10]; // First character null means unused.
+} groups[ECONET_MAX_FS_SERVERS][256];
+
 #define FS_MAX_OPEN_FILES 33 // Really 32 because we don't use entry 0
 
 struct {
@@ -1940,6 +1944,8 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 		memset(fs_discs[fs_count], 0, sizeof(fs_discs)/ECONET_MAX_FS_SERVERS);
 		memset(fs_files[fs_count], 0, sizeof(fs_files)/ECONET_MAX_FS_SERVERS);
 		memset(fs_dirs[fs_count], 0, sizeof(fs_dirs)/ECONET_MAX_FS_SERVERS);
+		memset(users[fs_count], 0, sizeof(users)/ECONET_MAX_FS_SERVERS); // Added 18.04.22 - we didn't seem to be doing this!
+		memset(groups[fs_count], 0, sizeof(groups)/ECONET_MAX_FS_SERVERS); // Added 18.04.22 - beginning of group implementation
 
 		for (length = 0; length < ECONET_MAX_FS_DISCS; length++) // used temporarily as counter
 		{
@@ -2023,7 +2029,49 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 					fs_bulk_ports[fs_count][portcount].handle = -1; 
 		
 				if (discs_found > 0)
-					fs_count++; // Only now do we increment the counter, when everything's worked
+				{
+					// Load / Initialize groups file here - TODO
+					unsigned char groupfile[1024];
+					FILE *group;
+
+					sprintf(groupfile, "%s/Groups", fs_stations[fs_count].directory);
+	
+					group = fopen(groupfile, "r+");
+
+					if (!group) // Doesn't exist - create it
+					{
+
+						if (!fs_quiet) fprintf(stderr, "   FS: No group file at %s - initializing\n", groupfile);
+						if ((group = fopen(groupfile, "w+")))
+							fwrite(&(groups[fs_count]), sizeof(groups)/ECONET_MAX_FS_SERVERS, 1, group);
+						else if (!fs_quiet) fprintf(stderr, "   FS: Unable to write group file at %s - not initializing\n", groupfile);
+					}
+
+					if (group) // Got it somehow - created or it existed
+					{
+
+						int length; 
+
+						fseek (group, 0, SEEK_END);
+						length = ftell(group); // Get file size
+						rewind(group);
+
+						if (length != 2560)
+						{
+							if (!fs_quiet) fprintf (stderr, "   FS: Group file is wrong length / corrupt - not initializing\n");
+						}
+						else
+						{
+							// Load it and complete initialization
+							fread (&(groups[fs_count]), 2560, 1, group);
+
+							fs_count++; // Only now do we increment the counter, when everything's worked
+						}
+					}
+					else if (!fs_quiet) fprintf (stderr, "   FS: Server %d - failed to initialize - cannot initialize or find Groups file!\n", fs_count);
+
+					// (If there was still no group file here, fs_count won't increment and we don't initialize)
+				}
 				else if (!fs_quiet) fprintf (stderr, "   FS: Server %d - failed to find any discs!\n", fs_count);
 			}
 			fclose(passwd);
@@ -6771,17 +6819,25 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			}
 			command[counter-5] = 0;
 
+			/* Note for TODO - parsing *LOAD / *LO. / *SAVE / *SA.:
+				*LOAD <filename> <load4>
+				*SAVE <filename> <start4> <end4 (or +length, can be without space after start)> [<exec4> [<reload4>]]
+
+				*LOAD returns command code 2, return 0, load4, 1 byte 'load_addr_found' in aund - but what is it?, pathname (query termination)
+				*SAVE returns command code 1, return 0, load4, exec4, length*3*, pathname (query termination)
+			*/
+
 			if (!strncasecmp("I AM ", (const char *) command, 5)) fs_login(server, reply_port, net, stn, command + 5);
 			else if ((!strncasecmp("LOGIN ", (const char *) command, 6)) || (!strncasecmp("LOGON ", (const char *) command, 6))) fs_login(server, reply_port, net, stn, command + 6);
 			else if (!strncasecmp("IAM ", (const char *) command, 4)) fs_login(server, reply_port, net, stn, command + 4);
 			else if (!strncasecmp("I .", (const char *) command, 3)) fs_login(server, reply_port, net, stn, command + 3);
 			else if (fs_stn_logged_in(server, net, stn) < 0)
 				fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
-			else if ((!strncasecmp("CAT ", (const char *) command, 4)) || (!strncmp(".", (const char *) command, 1)))
+			else if ((!strncasecmp("CAT", (const char *) command, 3)) || (!strncmp(".", (const char *) command, 1)))
 			{
 
 				struct __econet_packet_udp r;
-				unsigned short len;
+				unsigned short len; // Length of path we are trying to CAT
 
 				r.p.port = reply_port;
 				r.p.ctrl = 0x80;
@@ -6790,16 +6846,21 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				r.p.data[0] = 3; // CAT
 				r.p.data[1] = 0; // Successful return
 				
-				len = datalen-1;
+				len = strlen(command)-1;
 				if (*command == '.')
 				{
 					if (*(command+1) == ' ')
 						len--; // Take one off for the space
 				}
 				else
-					datalen -= 3; // Adjust because this had the letters 'CAT' in it.
+				{
+					len -= 3; // Adjust because this had the letters 'CAT' in it and we've already deducted one above, but there will may be be a space.
+					if (*(command+3) == 0x00) // No parameters on *CAT - so nothing to copy
+						len = 0;
+				}
 	
-				strncpy(&(r.p.data[0]), (command + (datalen - len)), len);
+				if (len)
+					strncpy(&(r.p.data[0]), (command + (strlen(command) - len)), len);
 
 				r.p.data[len] = 0x0d;
 
