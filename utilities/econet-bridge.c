@@ -2814,6 +2814,8 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 		if (!is_on_wirebridge && p->p.aun_ttype == ECONET_AUN_IMM)
 			network[d].last_imm_seq_sent = p->p.seq;
 
+		// RISCOS FIX?
+		usleep(ECONET_AUN_INTERPACKET_GAP * 1000);
 		econet_enqueue(p, len, QUEUE_AUTO);
 		result = len;
 
@@ -2840,6 +2842,8 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 
 		if (p->p.aun_ttype != ECONET_AUN_BCAST) // Ignore broadcasts to AUN for now
 		{
+			// RISCOS FIX?
+			usleep(ECONET_AUN_INTERPACKET_GAP * 1000);
 			if (econet_general_enqueue(&(network[d].aun_head), &(network[d].aun_tail), p, len))
 			{
 				result = len;

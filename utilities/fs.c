@@ -6772,11 +6772,40 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			command[counter-5] = 0;
 
 			if (!strncasecmp("I AM ", (const char *) command, 5)) fs_login(server, reply_port, net, stn, command + 5);
-			else if (!strncasecmp("LOGIN ", (const char *) command, 6)) fs_login(server, reply_port, net, stn, command + 6);
+			else if ((!strncasecmp("LOGIN ", (const char *) command, 6)) || (!strncasecmp("LOGON ", (const char *) command, 6))) fs_login(server, reply_port, net, stn, command + 6);
 			else if (!strncasecmp("IAM ", (const char *) command, 4)) fs_login(server, reply_port, net, stn, command + 4);
 			else if (!strncasecmp("I .", (const char *) command, 3)) fs_login(server, reply_port, net, stn, command + 3);
 			else if (fs_stn_logged_in(server, net, stn) < 0)
 				fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+			else if ((!strncasecmp("CAT ", (const char *) command, 4)) || (!strncmp(".", (const char *) command, 1)))
+			{
+
+				struct __econet_packet_udp r;
+				unsigned short len;
+
+				r.p.port = reply_port;
+				r.p.ctrl = 0x80;
+				r.p.ptype = ECONET_AUN_DATA;
+	
+				r.p.data[0] = 3; // CAT
+				r.p.data[1] = 0; // Successful return
+				
+				len = datalen-1;
+				if (*command == '.')
+				{
+					if (*(command+1) == ' ')
+						len--; // Take one off for the space
+				}
+				else
+					datalen -= 3; // Adjust because this had the letters 'CAT' in it.
+	
+				strncpy(&(r.p.data[0]), (command + (datalen - len)), len);
+
+				r.p.data[len] = 0x0d;
+
+				fs_aun_send (&r, server, len, net, stn);
+
+			}
 			else if (!strncasecmp("BYE", (const char *) command, 3)) fs_bye(server, reply_port, net, stn, 1);
 			else if (!strncasecmp("SETLIB ", (const char *) command, 7))
 			{ // Permanently set library directory
@@ -7086,6 +7115,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 					}
 			
+					// TODO - Implement this!!
+
 					fs_reply_ok(server, reply_port, net, stn);
 				}
 				else if (!strncasecmp("NEWUSER ", (const char *) command, 8)) // Create new user
