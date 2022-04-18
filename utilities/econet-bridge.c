@@ -117,7 +117,7 @@ unsigned char econet_stations[8192];
 // AUN Ack wait time in ms
 #define ECONET_AUN_ACK_WAIT_TIME 200
 // Mandatory gap between last tx to or rx from an AUN host so that it doesn't get confused (ms)
-#define ECONET_AUN_INTERPACKET_GAP (50 + packet_gap)
+#define ECONET_AUN_INTERPACKET_GAP 50
 
 struct __econet_packet_aun_cache {
 	struct __econet_packet_aun *p;
