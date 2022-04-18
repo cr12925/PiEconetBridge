@@ -3024,7 +3024,7 @@ int main(int argc, char **argv)
 
 	fs_sevenbitbodge = fs_sjfunc = 1; // On by default 
 
-	while ((opt = getopt(argc, argv, "bc:dfgijlnmqrsxzh7")) != -1)
+	while ((opt = getopt(argc, argv, "bc:dfg:ijlnmqrsxzh7")) != -1)
 	{
 		switch (opt) {
 			case 'b': dumpmode_brief = 1; break;
