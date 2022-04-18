@@ -117,7 +117,7 @@ unsigned char econet_stations[8192];
 // AUN Ack wait time in ms
 #define ECONET_AUN_ACK_WAIT_TIME 200
 // Mandatory gap between last tx to or rx from an AUN host so that it doesn't get confused (ms)
-#define ECONET_AUN_INTERPACKET_GAP 50
+#define ECONET_AUN_INTERPACKET_GAP (50 + packet_gap)
 
 struct __econet_packet_aun_cache {
 	struct __econet_packet_aun *p;
@@ -256,7 +256,6 @@ unsigned char queue_debug = 0; // Whether we produce verbose queueing diagnostic
 
 struct timeval last_bridge_reset;
 
-
 // Bridge control arrays
 unsigned char wire_advertizable[256]; /* AUN/IP and local networks - for replying to wire bridge queries */
 unsigned char trunk_advertizable[256]; /* Networks we know about which have wire or local stations on them, since we do not advertise AUN/IP stations on trunks */
@@ -331,6 +330,8 @@ struct last_printer last_printers[256][256];
 
 // Local bridge query status
 int bridge_query = 1;
+
+unsigned short packet_gap = 0; // Some RiscOS or AUN systems don't seem to like a data packet too quickly after their previous ACK. There's a hard-coded 50ms gap. This is added to it.
 
 unsigned long timediffmsec(struct timeval *s, struct timeval *d)
 {
@@ -2814,8 +2815,6 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 		if (!is_on_wirebridge && p->p.aun_ttype == ECONET_AUN_IMM)
 			network[d].last_imm_seq_sent = p->p.seq;
 
-		// RISCOS FIX?
-		usleep(ECONET_AUN_INTERPACKET_GAP * 1000);
 		econet_enqueue(p, len, QUEUE_AUTO);
 		result = len;
 
@@ -2842,8 +2841,6 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 
 		if (p->p.aun_ttype != ECONET_AUN_BCAST) // Ignore broadcasts to AUN for now
 		{
-			// RISCOS FIX?
-			usleep(ECONET_AUN_INTERPACKET_GAP * 1000);
 			if (econet_general_enqueue(&(network[d].aun_head), &(network[d].aun_tail), p, len))
 			{
 				result = len;
@@ -3027,7 +3024,7 @@ int main(int argc, char **argv)
 
 	fs_sevenbitbodge = fs_sjfunc = 1; // On by default 
 
-	while ((opt = getopt(argc, argv, "bc:dfijlnmqrsxzh7")) != -1)
+	while ((opt = getopt(argc, argv, "bc:dfgijlnmqrsxzh7")) != -1)
 	{
 		switch (opt) {
 			case 'b': dumpmode_brief = 1; break;
@@ -3038,6 +3035,7 @@ int main(int argc, char **argv)
 				pkt_debug = 1;
 				break;
 			case 'f': fs_quiet = 1; fs_noisy = 0; break;
+			case 'g': packet_gap = atoi(optarg); break;
 			case 'i': spoof_immediate = 1; break;
 			case 'j': fs_sjfunc = 0; break; // Turn off MDFS / SJ functionality in FS
 			case 'l': wire_enabled = 0; break;
@@ -3064,6 +3062,7 @@ Options:\n\
 \t-c\t<config path>\n\
 \t-d\tTurn on packet debug (you won't see much without!)\n\
 \t-f\tSilence fileserver log output\n\
+\t-g\tAdditional AUN inter-packet gap - may to help with RiscOS\n\
 \t-i\tSpoof immediate responses in-kernel (will break *REMOTE, *VIEW etc.)\n\
 \t-j\tTurn off SJ Research MDFS functionality in file server\n\
 \t-l\tLocal only - do not connect to kernel module (uses /dev/null instead)\n\
