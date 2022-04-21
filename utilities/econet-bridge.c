@@ -3779,8 +3779,6 @@ Options:\n\
 
 					if (err == ECONET_TX_NECOUTEZPAS)
 					{
-						wire_head->tx_count++;
-						if (queue_debug) fprintf(stderr, " Not listening - back on the queue ");
 /* DISUSED
 						wire_head->next_tx_interval *= ECONET_RETX_BACKOFF_MULTIPLE; // Exponential backoff
 */
@@ -3804,6 +3802,7 @@ Options:\n\
 
 				econet_general_dumphead(&wire_head, &wire_tail);
 				
+				/* NOTA BENE - TODO - DUMP OTHER TRAFFIC FOR SAME DESTINATION HERE */
 			}
 	
 
