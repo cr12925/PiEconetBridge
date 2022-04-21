@@ -6854,7 +6854,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				r.p.data[0] = 3; // CAT
 				r.p.data[1] = 0; // Successful return
 				
-				len = strlen(command)-1;
+				len = strlen(command)-1; // Drop first character (there will at least be a '.'!)
 				if (*command == '.')
 				{
 					if (*(command+1) == ' ')
@@ -6868,9 +6868,9 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				}
 	
 				if (len)
-					strncpy(&(r.p.data[0]), (command + (strlen(command) - len)), len);
+					strncpy(&(r.p.data[2]), &(command[(strlen(command) - len)]), len);
 
-				r.p.data[len] = 0x0d;
+				r.p.data[len+2] = 0x0d; //Terminate string
 
 				fs_aun_send (&r, server, len+3, net, stn);
 
