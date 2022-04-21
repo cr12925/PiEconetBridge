@@ -6619,7 +6619,7 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 		if (fs_bulk_ports[server][port].user_handle != 0) // This is a putbytes transfer not a fs_save; in the latter there is no user handle
 			active[server][fs_bulk_ports[server][port].active_id].fhandles[fs_bulk_ports[server][port].user_handle].cursor += writeable;
 	
-		if (!fs_quiet) fprintf (stderr, "   FS:%12sfrom %3d.%3d Bulk transfer in on port %02X data length &%04X, expected total length &%04lX, writeable &%04X\n", "", net, stn, port, datalen, fs_bulk_ports[server][port].length, writeable
+		if (fs_noisy) fprintf (stderr, "   FS:%12sfrom %3d.%3d Bulk transfer in on port %02X data length &%04X, expected total length &%04lX, writeable &%04X\n", "", net, stn, port, datalen, fs_bulk_ports[server][port].length, writeable
 				);
 
 		fs_bulk_ports[server][port].last_receive = (unsigned long long) time(NULL);
