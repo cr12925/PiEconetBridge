@@ -112,12 +112,12 @@ unsigned char econet_stations[8192];
 
 #define ECONET_AUN_MAX_TX 10
 #define ECONET_WIRE_MAX_TX 20  // Attempt to improve reliability on a busy network
-// Time before we send another packet on the Econet - Query whether we should be doing this at all (looks like we don't actually use it anywhere)
-#define ECONET_RETX_INTERVAL_MSEC 75
 // AUN Ack wait time in ms
 #define ECONET_AUN_ACK_WAIT_TIME 200
 // Mandatory gap between last tx to or rx from an AUN host so that it doesn't get confused (ms)
-#define ECONET_AUN_INTERPACKET_GAP 50
+#define ECONET_AUN_INTERPACKET_GAP (50000) // 50ms - Don't think this is used any more
+// Multiplier applied to the packet_gap parameter on a failed transmission
+#define ECONET_RETX_BACKOFF_MULTIPLE (1.25)
 
 struct __econet_packet_aun_cache {
 	struct __econet_packet_aun *p;
@@ -125,7 +125,9 @@ struct __econet_packet_aun_cache {
 	unsigned int size; // Size of p, less its 4 byte header.
 	struct timeval tstamp; // When it went in the cache - used to expire stale packets
 	unsigned short tx_count; // Initially set to 0. Increases each time there is a TX attempt. After ECONET_AUN_MAX_TX is reached, the packet gets ditched (along with everything to this host from the same source, so that we ditch any bulk transfer queues that might be lurking in the queue). ONLY RELEVANT TO WIRE STATIONS, AND NON-TRUNK AUN STATIONS. For local, we are guaranteed to transmit successfully. For AUN, the packet will get taken off the queue when an ACK or NAK arrives. For Wire, it gets taken off the queue when there is a successful transmit. For trunks, endpoint retransmission is the job of the last bridge in the chain
-	// tx_count is also used to work out, based on tstamp, whether it's time for another retransmission (e.g. tx_count = 2, next transmission needs to be at tstamp+(2 x ECONET_RETX_INTERVAL_MSEC) msecs
+	struct timeval last_tx_attempt; // Timestamp of last time we tried a transmit (or 0,0 if we haven't)
+	long next_tx_interval; // msecs since last_tx_attempt before we can try again. Used in order to re-transmit (e.g. to RiscOS stations which don't quite open their RxCB in time)
+	
 };
 
 // Printer status
@@ -211,7 +213,7 @@ struct econet_hosts {							// what we we need to find a beeb?
 	uint32_t seq, last_imm_seq_sent; // Our local sequence number, and the last immediate sequence number sent to this host (for wire hosts) so that we acknowledge with the same immediate sequence number
 	uint32_t last_seq_ack; // The last sequence number which was acknowledged to this host if it is AUN. If we have already acknoweldged a given sequence number, we *don't* attempt to re-transmit the data onto the Econet Wire, but we do acknowledge the packet again
 	unsigned char last_imm_ctrl, last_imm_net, last_imm_stn; // Designed to try and avoid adding high bit back on where it's an immediate transmitting a characer for *NOTIFY - net & stn are source net & stn of the last immediate going to this host
-	struct timespec last_wire_tx;
+	//struct timespec last_wire_tx; // Disused. aun_last_tx/rx used for wire too
 	struct timeval aun_last_tx; // Last AUN tx to an AUN machine. Used to time out the ACK/IMM wait below. (The 'awaited' value.)
 	struct timeval aun_last_rx; // When we received a packet from the AUN machine so we can time out the ACK / IMMREP timer on our own transmits to it
 	uint32_t ackimm_seq_awaited; // Sequence number we are waiting for an ACK for (or could be Immediate reply) FROM the AUN machine
@@ -404,6 +406,9 @@ void econet_enqueue (struct __econet_packet_aun *p, int len, unsigned char heado
 	q_entry->size = len;
 	q_entry->next = NULL;
 	q_entry->tx_count = 0;
+	if (queue_debug) fprintf (stderr, "- last tx attempt set to 0, interval to %d\n", packet_gap);
+	q_entry->last_tx_attempt.tv_sec = q_entry->last_tx_attempt.tv_usec = 0; // Set up re-transmission timer for immediate dispatch
+	q_entry->next_tx_interval = packet_gap;
 	memcpy(&(q_entry->tstamp), &now, sizeof(struct timeval));
 
 	// Is the queue empty so it doesn't matter where we put this?
@@ -459,6 +464,9 @@ int econet_general_enqueue(struct __econet_packet_aun_cache **head, struct __eco
 	q_entry->size = len;
 	q_entry->next = NULL;
 	q_entry->tx_count = 0;
+	if (queue_debug) fprintf (stderr, "- last tx attempt set to 0, interval to %d\n", packet_gap);
+	q_entry->last_tx_attempt.tv_sec = q_entry->last_tx_attempt.tv_usec = 0; // Set up re-transmission timer for immediate dispatch
+	q_entry->next_tx_interval = packet_gap;
 	memcpy(&(q_entry->tstamp), &now, sizeof(struct timeval));
 
 	// Is the queue empty so it doesn't matter where we put this?
@@ -1389,8 +1397,11 @@ void econet_readconfig(void)
 				network[networkp].pind = pmax;
 				network[networkp].seq = 0x00004000;
 
+				network[networkp].aun_last_tx.tv_sec = network[networkp].aun_last_tx.tv_usec = 0;
+				network[networkp].aun_last_rx.tv_sec = network[networkp].aun_last_rx.tv_usec = 0;
+
 				gettimeofday(&(network[networkp].last_bridge_reply),0);
-				clock_gettime (CLOCK_MONOTONIC, &(network[networkp].last_wire_tx));
+				//clock_gettime (CLOCK_MONOTONIC, &(network[networkp].last_wire_tx));
 				fd_ptr[network[networkp].listensocket] = networkp; // Create the index to find a station from its FD
 
 				if (network[networkp].network != 0)
@@ -1833,6 +1844,7 @@ char * econet_strtxerr(int e)
 		case ECONET_TX_BUSY: return (char *)"Module busy";
 		case ECONET_TX_JAMMED: return (char *)"Line jammed";
 		case ECONET_TX_HANDSHAKEFAIL: return (char *)"Handshake failure";
+		case ECONET_TX_NECOUTEZPAS: return (char *)"Not listening";
 		case ECONET_TX_NOCLOCK: return (char *)"No clock";
 		case ECONET_TX_UNDERRUN: return (char *)"Transmit underrun";
 		case ECONET_TX_TDRAFULL: return (char *)"Data register full on tx";
@@ -3035,7 +3047,7 @@ int main(int argc, char **argv)
 				pkt_debug = 1;
 				break;
 			case 'f': fs_quiet = 1; fs_noisy = 0; break;
-			case 'g': packet_gap = atoi(optarg); break;
+//			case 'g': packet_gap = atoi(optarg); break;
 			case 'i': spoof_immediate = 1; break;
 			case 'j': fs_sjfunc = 0; break; // Turn off MDFS / SJ functionality in FS
 			case 'l': wire_enabled = 0; break;
@@ -3062,7 +3074,6 @@ Options:\n\
 \t-c\t<config path>\n\
 \t-d\tTurn on packet debug (you won't see much without!)\n\
 \t-f\tSilence fileserver log output\n\
-\t-g\tAdditional AUN inter-packet gap - may to help with RiscOS\n\
 \t-i\tSpoof immediate responses in-kernel (will break *REMOTE, *VIEW etc.)\n\
 \t-j\tTurn off SJ Research MDFS functionality in file server\n\
 \t-l\tLocal only - do not connect to kernel module (uses /dev/null instead)\n\
@@ -3292,12 +3303,17 @@ Options:\n\
 
 				if (!wire_adv_in[rx.p.srcnet]) // This was not a network advertised inbound on the wire - i.e. we should have a network[] entry for it
 				{
+					short station;
+
+					station = econet_ptr[rx.p.srcnet][rx.p.srcstn];
+
 					rx.p.seq = get_local_seq(rx.p.srcnet, rx.p.srcstn);
 
 					if (rx.p.aun_ttype == ECONET_AUN_IMMREP) // Fudge - assume the immediate we have received is a reply to the last one we sent. Maybe make this more intelligent.
 						rx.p.seq = network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_imm_seq_sent;
 
-					network[econet_ptr[rx.p.srcnet][rx.p.srcstn]].last_transaction = time(NULL);
+					network[station].last_transaction = time(NULL);
+					gettimeofday(&(network[station].aun_last_rx), 0); // Mark last reception
 
 				}
 				else
@@ -3504,6 +3520,8 @@ Options:\n\
 
 					network[fd_ptr[realfd]].last_transaction = time(NULL);
 					
+					gettimeofday (&(network[fd_ptr[realfd]].aun_last_rx), 0); // Mark last RX
+
 					// If the pipewritesocket is not open, open it because we've received traffic
 
 					if (network[fd_ptr[pset[realfd].fd]].pipewritesocket == -1)
@@ -3629,6 +3647,10 @@ Options:\n\
 							{
 								if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X seq 0x%08X NAK received!\n",
 									p.p.srcnet, p.p.srcstn, p.p.dstnet, p.p.dststn, r+4, p.p.seq);
+
+								/* If the NAK seq is the one on the right queue head, then increment its tx_count (artificially), multiply its interpacket gap by 1.25, and let nature take its course on the retransmit */
+								if (p.p.seq == network[from_found].aun_head->p->p.seq) // Increment the backoff timer
+									network[from_found].aun_head->next_tx_interval *= ECONET_RETX_BACKOFF_MULTIPLE;
 							}
 							else if (p.p.seq == network[from_found].ackimm_seq_awaited) // Found the ACK or IMMREP sequence this host was supposed to produce
 							{
@@ -3679,6 +3701,9 @@ Options:\n\
 		if (wire_head) // On successful TX, we'll send an ACK if the source was AUN or trunk & dump the packet off the queue. Unsuccessful tx, we'll increment the tx counter. We dump packets that are more than 2s old or have had 10 tx attempts
 		{
 			struct timeval now;
+			//long tx_diff = 0, rx_diff = 0, time_since_last_tx;
+			long time_since_last_tx;
+			short station;
 
 			gettimeofday(&now, 0);
 
@@ -3690,13 +3715,48 @@ Options:\n\
 				wire_head->size,
 				wire_head->tx_count);
 
-			if (wire_head->tx_count++ < ECONET_WIRE_MAX_TX) // we'll have a go at transmitting
+			station = econet_ptr[wire_head->p->p.dstnet][wire_head->p->p.dststn];
+			
+// Presently unused
+			if (station != -1)
+			{
+/* Disused in this location
+				tx_diff = timediffmsec(&(network[station].aun_last_tx), &now); // Used so we don't send things too quickly to RiscOS in case it NAKs them erroneously
+				rx_diff = timediffmsec(&(network[station].aun_last_rx), &now); // Used so that when we want to transmit, it is not too close to the last received packet from this host, because it seems to cause problems
+*/
+			}
+/* Disused
+			else	tx_diff = rx_diff = 1000000; // Rogue high value
+*/
+
+
+			time_since_last_tx = timediffmsec(&(wire_head->last_tx_attempt), &now);
+
+			//if (queue_debug) fprintf (stderr, "time_since_last_tx = %ld ms, interval %ld ms - %s ", time_since_last_tx, wire_head->next_tx_interval, (time_since_last_tx >= wire_head->next_tx_interval ? "Ok to transmit..." : "Deferred..."));
+			if (queue_debug) fprintf (stderr, "time_since_last_tx = %ld ms, ", time_since_last_tx);
+			if (	/* DISUSED (time_since_last_tx >= wire_head->next_tx_interval) */ // Implement exponential backoff if station doesn't listen
+				/*  && (tx_diff > ECONET_AUN_INTERPACKET_GAP) && (rx_diff > ECONET_AUN_INTERPACKET_GAP) */ 
+				/* && */ (wire_head->tx_count)++ < ECONET_WIRE_MAX_TX
+			) // we'll have a go at transmitting - assuming we have the right gap
 			{
 				int err;
+
+				// Update last TX attempt time
+				gettimeofday (&(wire_head->last_tx_attempt), 0);
 
 				if (econet_write_wire(wire_head->p, wire_head->size, 0) == wire_head->size || (ioctl(econet_fd, ECONETGPIO_IOC_TXERR) == 0)) // successful tx
 				{
 					if (queue_debug) fprintf (stderr, "Sent ");
+
+					// Update last tx if we have an entry - Presently unused
+
+/* Disused
+					if ((station != -1) && (wire_head->p->p.aun_ttype == ECONET_AUN_DATA))
+						gettimeofday(&(network[station].aun_last_tx), 0);
+					else // Just zero out last tx - we can send what we like
+						network[station].aun_last_tx.tv_sec = network[station].aun_last_tx.tv_usec = 0;
+*/
+
 					if (is_aun(wire_head->p->p.srcnet, wire_head->p->p.srcstn) && wire_head->p->p.aun_ttype == ECONET_AUN_DATA) // Send ACK if we've just successfully sent a DATA packet and the sender is AUN
 					{
 /* Disabled because we ack an AUN on receipt now to avoid rapid retransmits from BeebEm
@@ -3711,10 +3771,20 @@ Options:\n\
 				else 
 				{
 					err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
+
 					if (err == ECONET_TX_HANDSHAKEFAIL) // Receiver not present
 						econet_general_dumphead(&wire_head, &wire_tail);
 
 					/* Inserted because on *REMOTE traffic where the remoted station is talking to the server, we tend to get lots of module busy for some reason, so we'll pretend they didn't happen. */
+
+					if (err == ECONET_TX_NECOUTEZPAS)
+					{
+						wire_head->tx_count++;
+						if (queue_debug) fprintf(stderr, " Not listening - back on the queue ");
+/* DISUSED
+						wire_head->next_tx_interval *= ECONET_RETX_BACKOFF_MULTIPLE; // Exponential backoff
+*/
+					}
 
 					if (err == ECONET_TX_BUSY) wire_head->tx_count--;
 
@@ -3752,18 +3822,20 @@ Options:\n\
 				if ((network[count].type & ECONET_HOSTTYPE_TDIS) && (network[count].aun_head)) // This is an AUN host and it has queued packets
 				{
 					struct timeval now;
-					long tdiff; // , rx_tdiff;
+					//long tx_diff, rx_diff, time_since_last_tx;
+					long tx_diff, rx_diff;
 
 					gettimeofday(&now, 0);
 
-					tdiff = timediffmsec(&(network[count].aun_last_tx), &now);
-					//rx_tdiff = timediffmsec(&(network[count].aun_last_rx), &now); // Used so that when we want to transmit, it is not too close to the last received packet from this host, because it seems to cause problems
+					tx_diff = timediffmsec(&(network[count].aun_last_tx), &now); // Used so we don't send things too quickly to RiscOS in case it NAKs them erroneously
+					rx_diff = timediffmsec(&(network[count].aun_last_rx), &now); // Used so that when we want to transmit, it is not too close to the last received packet from this host, because it seems to cause problems
+
 
 					//if (queue_debug) fprintf (stderr, "QUEUE: Examining queue on AUN host at network[%d]\n", count);
 
 					// First, if there is a sequence number this host is waiting for an ACK on and this packet is not an IMMREP with that sequence number, don't send anything - just move on, unless it's timed out.
 
-					if ((network[count].ackimm_seq_tosend) && (timediffmsec(&(network[count].aun_last_rx), &now) > 2000)) // Ditch the last RX / Seq tracker
+					if ((network[count].ackimm_seq_tosend) && rx_diff > 2000) // Ditch the last RX / Seq tracker
 					{
 						if (queue_debug) fprintf (stderr, "QUEUE: Last receipt from station > 2s ago - dumping ACK tracker (seq %08X) for packets to network[%d]\n", network[count].ackimm_seq_tosend, count);
 						network[count].aun_last_rx.tv_sec = network[count].aun_last_rx.tv_usec = 0;
@@ -3780,7 +3852,7 @@ Options:\n\
 		
 					if (network[count].ackimm_seq_awaited) // If we are waiting for an ACK or IMMREP *from* this host, don't send it anything unless we need to re-tx a data packet
 					{
-						if (tdiff > 0 && tdiff < ECONET_AUN_ACK_WAIT_TIME)
+						if (tx_diff > 0 && tx_diff < ECONET_AUN_ACK_WAIT_TIME)
 						{
 							if (queue_debug) fprintf (stderr, "QUEUE: network[%d] hasn't yet acked sequence 0x%08X - skipping\n", count, network[count].ackimm_seq_awaited);
 							continue;
@@ -3793,7 +3865,8 @@ Options:\n\
 
 					if (network[count].aun_head) // This might have broken things && (network[count].ackimm_seq_awaited == 0 || network[count].ackimm_seq_awaited == network[count].aun_head->p->p.seq)) // If we have a queue for this host and either we aren't waiting for a particular ACK to come back OR the one we ARE waiting for matches the packet on the queue head so that we might need to retransmit it...
 					{
-						if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X type 0x%02X seq 0x%08X retrieved from network[%d] queue (tx count %02X) (tdiff = %ld)", 
+						// DISUSED time_since_last_tx = timediffmsec(&(network[count].aun_head->last_tx_attempt), &(now));
+						if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X type 0x%02X seq 0x%08X retrieved from network[%d] queue (tx count %02X)", // DISUSED time since last tx %ld", //, next tx interval %ld: %s ",  
 							network[count].aun_head->p->p.dstnet,
 							network[count].aun_head->p->p.dststn,
 							network[count].aun_head->p->p.srcnet,
@@ -3801,7 +3874,12 @@ Options:\n\
 							network[count].aun_head->size,
 							network[count].aun_head->p->p.aun_ttype,
 							network[count].aun_head->p->p.seq,
-							count, network[count].aun_head->tx_count, tdiff);
+							count, network[count].aun_head->tx_count);
+							//time_since_last_tx);
+							//, network[count].aun_head->next_tx_interval,
+							//(time_since_last_tx >= network[count].aun_head->next_tx_interval ? "In principle ok to transmit..." : "Not time to send yet...")
+							//);
+
 
 						if (network[count].aun_head->tx_count++ > ECONET_AUN_MAX_TX) // Dump
 						{
@@ -3831,17 +3909,19 @@ Options:\n\
 							}
 
 						}
-						else if (network[count].ackimm_seq_awaited && (network[count].ackimm_seq_awaited != network[count].aun_head->p->p.seq) && tdiff > 0 && tdiff < ECONET_AUN_ACK_WAIT_TIME) // Waiting for an ACK from this host and this wasn't it and we haven't waited long enough yet and the packet on the head of the queue is not the same one, so not to be retransmitted (the timeout check is done above!)
+						else if (network[count].ackimm_seq_awaited && (network[count].ackimm_seq_awaited != network[count].aun_head->p->p.seq) && tx_diff > 0 && tx_diff < ECONET_AUN_ACK_WAIT_TIME) // Waiting for an ACK from this host and this wasn't it and we haven't waited long enough yet and the packet on the head of the queue is not the same one, so not to be retransmitted (the timeout check is done above!)
 						{
-							if (queue_debug) fprintf (stderr, "\n");
+							if (queue_debug) fprintf (stderr, " - ACK wait time not expired\n");
 							continue;
 						}
 						else if ( 	
-/*
+/* disabled
 								(
-								((tdiff > ECONET_AUN_INTERPACKET_GAP) && (rx_tdiff > ECONET_AUN_INTERPACKET_GAP)) || (usleep(ECONET_AUN_INTERPACKET_GAP * 1000))
+								((tx_diff > ECONET_AUN_INTERPACKET_GAP) && (rx_diff > ECONET_AUN_INTERPACKET_GAP)) || (usleep(ECONET_AUN_INTERPACKET_GAP * 1000))
 								) && 
 */
+							(timediffmsec(&(network[count].aun_head->last_tx_attempt), &now) > network[count].aun_head->next_tx_interval)  && // Read to transmit yet?
+							!gettimeofday(&(network[count].aun_head->last_tx_attempt), 0) && // 0 return on success - Reset last_tx_attempt to now
 							econet_write_general(network[count].aun_head->p, network[count].aun_head->size) == network[count].aun_head->size
 						)
 						{
@@ -3855,6 +3935,8 @@ Options:\n\
 								if (network[count].aun_head->p->p.aun_ttype == ECONET_AUN_IMM) // If we just sent an immediate to an AUN host, set the poll_timeout
 									poll_timeout = 500;
 							}
+							else // Wasn't data or immediate - just zero out the last_tx field
+								network[count].aun_last_tx.tv_sec = network[count].aun_last_tx.tv_usec = 0;
 
 							// If this was the priority packet, clear ackimm_seq_tosend
 							if (network[count].aun_head->p->p.seq == network[count].ackimm_seq_tosend)
@@ -3872,7 +3954,7 @@ Options:\n\
 							}
 
 							// If we are more than the ACK time since transmitting a packet we were waiting on an ACK for, and that packet isn't on the queue head, then ditch the 'awaited' tracker because it's not going to come
-							if (tdiff > ECONET_AUN_ACK_WAIT_TIME && ((!network[count].aun_head) || (network[count].ackimm_seq_awaited != network[count].aun_head->p->p.seq)))
+							if (tx_diff > ECONET_AUN_ACK_WAIT_TIME && ((!network[count].aun_head) || (network[count].ackimm_seq_awaited != network[count].aun_head->p->p.seq)))
 							{
 								network[count].aun_last_tx.tv_sec = network[count].aun_last_tx.tv_usec = 0;
 								network[count].ackimm_seq_awaited = 0;
@@ -3880,7 +3962,7 @@ Options:\n\
 
 							if (queue_debug) fprintf (stderr, "\n");
 						}
-						else if (queue_debug) fprintf (stderr, "FAILED\n");
+						else if (queue_debug) fprintf (stderr, "FAILED / Deferred for timeout\n");
 
 					}
 

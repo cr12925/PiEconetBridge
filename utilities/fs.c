@@ -6872,7 +6872,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 				r.p.data[len] = 0x0d;
 
-				fs_aun_send (&r, server, len, net, stn);
+				fs_aun_send (&r, server, len+3, net, stn);
 
 			}
 			else if (!strncasecmp("BYE", (const char *) command, 3)) fs_bye(server, reply_port, net, stn, 1);

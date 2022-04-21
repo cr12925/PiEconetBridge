@@ -87,8 +87,12 @@ The system will require:
           rx/tx problems
 	- No other GPIO usage on the system
 	- Do NOT install the Pi desktop - or if you do, don't run it.
+	- Use of Wifi for AUN traffic causes latency / loss issues. Wired
+	  Ethernet is by far the preferred transport.
 	- The hardware (see Hardware.pdf), which in turn requires a Master 128
-          Econet board
+          Econet board. If you buy a version 2 ready made board from 
+	  @KenLowe, this *includes* the necessary econet board and a separate
+	  Master 128 expansion board (i.e. an ADF10) is NOT required.
 	- Your installation of PiOS having the kernel headers installed (see
           below)
 	- A pre-existing functioning Econet (with clock) with a spare station
@@ -220,24 +224,10 @@ provides a means of doing network monitoring. Thus the 'econet-monitor'
 utilities does not upload a station map, so that the module remains in 'raw'
 mode.
 
-The other thing to appreciate is that because a reply to an immediate query on
-the hardware econet has to be provided faster than it possibly could be if the
-query were sent out over AUN/UDP, a reply collected, and then delivered to the
-wire, the kernel module does the immediate replies for 'distant' and 'local'
-stations (as to which see below: they're the ones which are not physically
-attached to the Econet wire itself). It responds only to a selection. In fact,
-in AUN only 'Machine Peek' is implemented in the real world. However, the
-kernel module will respond to a MachinePeek with machine type &EEEE (unusued
-in the current list) and version 0.1. It will 'sink' continues and halts by
-acknowledging them on the wire, but will ignore all other types of immediate
-(e.g. memory peek, memory poke, JSR, User subroutine call etc.).
-
-Thus if, on a real BBC on the Econet, you run a BASIC programme which does a
-Machine Peek to an AUN station elsewhere, you will (falsely) be told is it
-machine type &EEEE running version 0.1 of the network software. In the future,
-it may be possible to make the bridge code in userspace collect all the Machine
-Peek responses from stations it knows about, and feed them to the kernel module 
-to respond by proxy. It is probably unnecessary, and I haven't done it yet.
+Immediate queries are now handled properly (and forwarded on to AUN etc. if
+appropriate). If you want the kernel module to spoof Immediate replies like
+it used to, you must now turn on the -i command line switch to the Econet
+bridge. There should be no need to do so and use is discouraged.
 
 TESTING - HARDWARE
 ------------------
@@ -614,6 +604,7 @@ The -h command line switch will give you help as to other things you can do.
 -f	  : Stop the fileserver from producing log output to stderr.
 	    (Incompatible with -n and if specified after -n will take
 	    precedence.)
+-i	  : Turns on old immediate mode spoofing. Should not be required.
 -l	  : Stops the bridge code talking to the Econet hardware. Useful
 	    for testing, or if you just want to run a fileserver without any
 	    connection to a wired Econet.
@@ -621,6 +612,8 @@ The -h command line switch will give you help as to other things you can do.
 	    about what it is doing, notably on file reads/writes/bulk
 	    transfer. (Incompatible with -f and if specified after -f will
 	    override it.)
+-r	  : Turns on traffic queue debugging. Should not normally be
+	    needed. Avoid.
 -s        : Dump a summary of the config file before bridging - useful for
 	    checking the config has been read.
 -q        : Don't do bridge query responses (but the present version doesn't
