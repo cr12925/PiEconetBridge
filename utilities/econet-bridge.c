@@ -110,14 +110,14 @@ char *beebmem;
 
 unsigned char econet_stations[8192];
 
-#define ECONET_AUN_MAX_TX 10
-#define ECONET_WIRE_MAX_TX 20  // Attempt to improve reliability on a busy network
+#define ECONET_AUN_MAX_TX 10 // Times out after this period * interpacket gap - presently 5s then.
+#define ECONET_WIRE_MAX_TX 50  // Attempt to improve reliability on a busy network (20220422 was 20)
 // AUN Ack wait time in ms
 #define ECONET_AUN_ACK_WAIT_TIME 200
 // Mandatory gap between last tx to or rx from an AUN host so that it doesn't get confused (ms)
-#define ECONET_AUN_INTERPACKET_GAP (50000) // 50ms - Don't think this is used any more
-// Multiplier applied to the packet_gap parameter on a failed transmission
-#define ECONET_RETX_BACKOFF_MULTIPLE (1.25)
+#define ECONET_AUN_INTERPACKET_GAP (500) // 500ms
+// Multiplier applied to the packet_gap parameter on a failed transmission - Disused
+//#define ECONET_RETX_BACKOFF_MULTIPLE (1.25)
 
 struct __econet_packet_aun_cache {
 	struct __econet_packet_aun *p;
@@ -333,7 +333,7 @@ struct last_printer last_printers[256][256];
 // Local bridge query status
 int bridge_query = 1;
 
-unsigned short packet_gap = 0; // Some RiscOS or AUN systems don't seem to like a data packet too quickly after their previous ACK. There's a hard-coded 50ms gap. This is added to it.
+//unsigned short packet_gap = 0; // Some RiscOS or AUN systems don't seem to like a data packet too quickly after their previous ACK. There's a hard-coded 50ms gap. This is added to it.
 
 unsigned long timediffmsec(struct timeval *s, struct timeval *d)
 {
@@ -406,9 +406,9 @@ void econet_enqueue (struct __econet_packet_aun *p, int len, unsigned char heado
 	q_entry->size = len;
 	q_entry->next = NULL;
 	q_entry->tx_count = 0;
-	if (queue_debug) fprintf (stderr, "- last tx attempt set to 0, interval to %d\n", packet_gap);
+	//if (queue_debug) fprintf (stderr, "- last tx attempt set to 0, interval to %d\n", packet_gap);
 	q_entry->last_tx_attempt.tv_sec = q_entry->last_tx_attempt.tv_usec = 0; // Set up re-transmission timer for immediate dispatch
-	q_entry->next_tx_interval = packet_gap;
+	//q_entry->next_tx_interval = packet_gap;
 	memcpy(&(q_entry->tstamp), &now, sizeof(struct timeval));
 
 	// Is the queue empty so it doesn't matter where we put this?
@@ -464,9 +464,9 @@ int econet_general_enqueue(struct __econet_packet_aun_cache **head, struct __eco
 	q_entry->size = len;
 	q_entry->next = NULL;
 	q_entry->tx_count = 0;
-	if (queue_debug) fprintf (stderr, "- last tx attempt set to 0, interval to %d\n", packet_gap);
+	//if (queue_debug) fprintf (stderr, "- last tx attempt set to 0, interval to %d\n", packet_gap);
 	q_entry->last_tx_attempt.tv_sec = q_entry->last_tx_attempt.tv_usec = 0; // Set up re-transmission timer for immediate dispatch
-	q_entry->next_tx_interval = packet_gap;
+	//q_entry->next_tx_interval = packet_gap;
 	memcpy(&(q_entry->tstamp), &now, sizeof(struct timeval));
 
 	// Is the queue empty so it doesn't matter where we put this?
@@ -3649,8 +3649,10 @@ Options:\n\
 									p.p.srcnet, p.p.srcstn, p.p.dstnet, p.p.dststn, r+4, p.p.seq);
 
 								/* If the NAK seq is the one on the right queue head, then increment its tx_count (artificially), multiply its interpacket gap by 1.25, and let nature take its course on the retransmit */
+/* DISUSED
 								if (p.p.seq == network[from_found].aun_head->p->p.seq) // Increment the backoff timer
 									network[from_found].aun_head->next_tx_interval *= ECONET_RETX_BACKOFF_MULTIPLE;
+*/
 							}
 							else if (p.p.seq == network[from_found].ackimm_seq_awaited) // Found the ACK or IMMREP sequence this host was supposed to produce
 							{
@@ -3707,12 +3709,14 @@ Options:\n\
 
 			gettimeofday(&now, 0);
 
-			if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X retrieved from wire queue (tx count %02d) ", 
+			if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X seq 0x%08X retrieved from wire queue at %p (tx count %02d) ", 
 				wire_head->p->p.dstnet,
 				wire_head->p->p.dststn,
 				wire_head->p->p.srcnet,
 				wire_head->p->p.srcstn,
 				wire_head->size,
+				wire_head->p->p.seq,
+				wire_head,
 				wire_head->tx_count);
 
 			station = econet_ptr[wire_head->p->p.dstnet][wire_head->p->p.dststn];
@@ -3865,7 +3869,7 @@ Options:\n\
 					if (network[count].aun_head) // This might have broken things && (network[count].ackimm_seq_awaited == 0 || network[count].ackimm_seq_awaited == network[count].aun_head->p->p.seq)) // If we have a queue for this host and either we aren't waiting for a particular ACK to come back OR the one we ARE waiting for matches the packet on the queue head so that we might need to retransmit it...
 					{
 						// DISUSED time_since_last_tx = timediffmsec(&(network[count].aun_head->last_tx_attempt), &(now));
-						if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X type 0x%02X seq 0x%08X retrieved from network[%d] queue (tx count %02X)", // DISUSED time since last tx %ld", //, next tx interval %ld: %s ",  
+						if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X type 0x%02X seq 0x%08X retrieved from network[%d] queue at %p (tx count %02X)", // DISUSED time since last tx %ld", //, next tx interval %ld: %s ",  
 							network[count].aun_head->p->p.dstnet,
 							network[count].aun_head->p->p.dststn,
 							network[count].aun_head->p->p.srcnet,
@@ -3873,14 +3877,14 @@ Options:\n\
 							network[count].aun_head->size,
 							network[count].aun_head->p->p.aun_ttype,
 							network[count].aun_head->p->p.seq,
-							count, network[count].aun_head->tx_count);
+							count, network[count].aun_head, network[count].aun_head->tx_count);
 							//time_since_last_tx);
 							//, network[count].aun_head->next_tx_interval,
 							//(time_since_last_tx >= network[count].aun_head->next_tx_interval ? "In principle ok to transmit..." : "Not time to send yet...")
 							//);
 
 
-						if (network[count].aun_head->tx_count++ > ECONET_AUN_MAX_TX) // Dump
+						if (network[count].aun_head->tx_count > ECONET_AUN_MAX_TX) // Dump
 						{
 
 							if (queue_debug) fprintf (stderr, " - dumped (too many retries)\n");
@@ -3918,12 +3922,16 @@ Options:\n\
 								(
 								((tx_diff > ECONET_AUN_INTERPACKET_GAP) && (rx_diff > ECONET_AUN_INTERPACKET_GAP)) || (usleep(ECONET_AUN_INTERPACKET_GAP * 1000))
 								) && 
-*/
 							(timediffmsec(&(network[count].aun_head->last_tx_attempt), &now) > network[count].aun_head->next_tx_interval)  && // Read to transmit yet?
+*/
+							(tx_diff > ECONET_AUN_INTERPACKET_GAP) && // Impose only a transmission interpacket gap (presently 0.5s) NB tx_diff is calculated by reference to last tx attempt, which will be the epoch for untransmitted packets
 							!gettimeofday(&(network[count].aun_head->last_tx_attempt), 0) && // 0 return on success - Reset last_tx_attempt to now
 							econet_write_general(network[count].aun_head->p, network[count].aun_head->size) == network[count].aun_head->size
 						)
 						{
+							// Increment tx count here - because this is where there has actually been a tx!
+							network[count].aun_head->tx_count++;
+
 							if (queue_debug) fprintf (stderr, " - sent ");
 							if (network[count].aun_head->p->p.aun_ttype == ECONET_AUN_DATA || network[count].aun_head->p->p.aun_ttype == ECONET_AUN_IMM)
 							{
@@ -3961,7 +3969,7 @@ Options:\n\
 
 							if (queue_debug) fprintf (stderr, "\n");
 						}
-						else if (queue_debug) fprintf (stderr, "FAILED / Deferred for timeout\n");
+						else if (queue_debug) fprintf (stderr, " FAILED / Deferred for timeout (tx_diff = %ld)\n", tx_diff);
 
 					}
 

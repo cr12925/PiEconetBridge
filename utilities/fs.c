@@ -63,7 +63,7 @@ extern uint8_t get_printer_info (unsigned char, unsigned char, uint8_t, char *, 
 extern uint8_t set_printer_info (unsigned char, unsigned char, uint8_t, char *, char *, uint8_t, short);
 extern uint8_t get_printer_total (unsigned char, unsigned char);
 
-extern short packet_gap; // Gap in MS (if set) between receiving data burst & sending ACK - Appears to be needed by RiscOS
+// DISUSED extern short packet_gap; // Gap in MS (if set) between receiving data burst & sending ACK - Appears to be needed by RiscOS
 
 short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for extra year information
 short fs_sjfunc; // Whether SJ MDFS functionality is turned on (global - not per fileserver)
@@ -6645,8 +6645,8 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 			r.p.ptype = ECONET_AUN_DATA;
 			r.p.data[0] = r.p.data[1] = 0;
 
-			// RiscOS help?
-			if (packet_gap) usleep (packet_gap * 1000); // Try and avoid RiscOS NAK'ing a perfectly good data acknowledgment from us
+			// RiscOS help? DISUSED
+			// if (packet_gap) usleep (packet_gap * 1000); // Try and avoid RiscOS NAK'ing a perfectly good data acknowledgment from us
 
 			if (fs_bulk_ports[server][port].user_handle) // This was PutBytes, not save
 			{
@@ -6685,8 +6685,8 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 		}
 		else
 		{	
-			// RiscOS help?
-			if (packet_gap) usleep (packet_gap * 1000); // Try and avoid RiscOS NAK'ing a perfectly good data acknowledgment from us
+			// RiscOS help? DISUSED
+			//if (packet_gap) usleep (packet_gap * 1000); // Try and avoid RiscOS NAK'ing a perfectly good data acknowledgment from us
 
 			r.p.port = fs_bulk_ports[server][port].ack_port;
 			r.p.ctrl = ctrl;
