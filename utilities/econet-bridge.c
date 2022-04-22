@@ -111,11 +111,13 @@ char *beebmem;
 unsigned char econet_stations[8192];
 
 #define ECONET_AUN_MAX_TX 10 // Times out after this period * interpacket gap - presently 5s then.
-#define ECONET_WIRE_MAX_TX 50  // Attempt to improve reliability on a busy network (20220422 was 20)
+#define ECONET_WIRE_MAX_TX 30  // Attempt to improve reliability on a busy network (20220422 was 20)
 // AUN Ack wait time in ms
 #define ECONET_AUN_ACK_WAIT_TIME 200
 // Mandatory gap between last tx to or rx from an AUN host so that it doesn't get confused (ms)
-#define ECONET_AUN_INTERPACKET_GAP (500) // 500ms
+#define ECONET_AUN_INTERPACKET_GAP (50) 
+// Gap between re-tx on the wire if it's failed
+#define ECONET_WIRE_INTERPACKET_GAP (25)
 // Multiplier applied to the packet_gap parameter on a failed transmission - Disused
 //#define ECONET_RETX_BACKOFF_MULTIPLE (1.25)
 
@@ -3738,18 +3740,26 @@ Options:\n\
 
 			//if (queue_debug) fprintf (stderr, "time_since_last_tx = %ld ms, interval %ld ms - %s ", time_since_last_tx, wire_head->next_tx_interval, (time_since_last_tx >= wire_head->next_tx_interval ? "Ok to transmit..." : "Deferred..."));
 			if (queue_debug) fprintf (stderr, "time_since_last_tx = %ld ms, ", time_since_last_tx);
-			if (	/* DISUSED (time_since_last_tx >= wire_head->next_tx_interval) */ // Implement exponential backoff if station doesn't listen
+			if (	/* Moved inside the IF ((wire_head->tx_count == 0) || (time_since_last_tx >= ECONET_WIRE_INTERPACKET_GAP)) && */ // No delay if first transmission, otherwise needs to be after the gap period
 				/*  && (tx_diff > ECONET_AUN_INTERPACKET_GAP) && (rx_diff > ECONET_AUN_INTERPACKET_GAP) */ 
-				/* && */ (wire_head->tx_count)++ < ECONET_WIRE_MAX_TX
+				/* && */ (wire_head->tx_count++) < ECONET_WIRE_MAX_TX
 			) // we'll have a go at transmitting - assuming we have the right gap
 			{
 				int err;
 
-				// Update last TX attempt time
-				gettimeofday (&(wire_head->last_tx_attempt), 0);
 
-				if (econet_write_wire(wire_head->p, wire_head->size, 0) == wire_head->size || (ioctl(econet_fd, ECONETGPIO_IOC_TXERR) == 0)) // successful tx
+				if ((wire_head->tx_count > 0) && (time_since_last_tx < ECONET_WIRE_INTERPACKET_GAP)) // Leave it on the queue
+				{ 
+					// Don't count this as a tx
+					wire_head->tx_count--;
+					if (queue_debug) fprintf (stderr, " - deferred\n");	
+				}
+				else if (econet_write_wire(wire_head->p, wire_head->size, 0) == wire_head->size || (ioctl(econet_fd, ECONETGPIO_IOC_TXERR) == 0)) // successful tx
 				{
+					
+					// Update last TX attempt time
+					gettimeofday (&(wire_head->last_tx_attempt), 0);
+
 					if (queue_debug) fprintf (stderr, "Sent ");
 
 					// Update last tx if we have an entry - Presently unused
@@ -3774,6 +3784,9 @@ Options:\n\
 				}
 				else 
 				{
+					// Update last TX attempt time
+					gettimeofday (&(wire_head->last_tx_attempt), 0);
+
 					err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
 
 					if (err == ECONET_TX_HANDSHAKEFAIL) // Receiver not present
