@@ -3745,8 +3745,11 @@ Options:\n\
 								/* If the NAK seq is the one on the right queue head, then increment its tx_count (artificially), multiply its interpacket gap by 1.25, and let nature take its course on the retransmit */
 								if ((p.p.seq == network[from_found].ackimm_seq_awaited) && (network[from_found].aun_head->p->p.seq == p.p.seq)) // It was the one on the queue head
 								{
-									if (queue_debug) fprintf (stderr, " - is packet on output queue head. Setting last tx timer backwards to cause retransmit");
-									network[from_found].aun_head->last_tx_attempt.tv_sec -= (network[from_found].aun_head->last_tx_attempt.tv_sec >= (2 * ECONET_AUN_ACK_WAIT_TIME)) ? (2 * ECONET_AUN_ACK_WAIT_TIME) : network[from_found].aun_head->last_tx_attempt.tv_sec;
+									if (queue_debug) fprintf (stderr, " - is packet on output queue head. Force immediate retransmit");
+									// Do it both in the packet in the queue, and for the station itself
+									network[from_found].aun_head->last_tx_attempt.tv_sec = network[from_found].aun_head->last_tx_attempt.tv_usec = 0;
+									network[from_found].aun_last_tx.tv_sec = network[from_found].aun_last_tx.tv_usec = 0;
+								
 								}
 
 								if (queue_debug) fprintf (stderr, "\n");
@@ -3759,7 +3762,7 @@ Options:\n\
 									r+4, p.p.seq);
 
 								network[from_found].ackimm_seq_awaited = 0;
-								network[from_found].aun_last_tx.tv_sec = network[from_found].aun_last_rx.tv_usec = 0;
+								network[from_found].aun_last_tx.tv_sec = network[from_found].aun_last_tx.tv_usec = 0;
 			
 								poll_timeout = -1;  // Go back to normal timeout if we find the packet we want
 
