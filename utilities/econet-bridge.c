@@ -546,7 +546,10 @@ unsigned int econet_write_wire(struct __econet_packet_aun *p, int len, int cache
 
 			// Wait for TX to complete
 			err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
-			while ((err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS) && (timediffmsec(&start, &now) < ((2 + ((len+1024) / 1024) * 41)) )) // 1Kb on the wire is < 50ms. So 30Kb is < 150ms.
+			//while ((err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS) && (timediffmsec(&start, &now) < ((2 + ((len+1024) / 1024) * 41)) )) // 1Kb on the wire is < 50ms. So 30Kb is < 150ms.
+			while (	(err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS) 
+				&& (timediffmsec(&start, &now) < (((len + 25) / 25) + 100) ) // at 200kHz, 25,000 bytes per second (ignoring the bit stuffing), so 25 bytes per ms. So we add a bit, and work out the number of ms, then add 100 for the 4-way.
+			) 
 			{
 				gettimeofday(&now, 0);
 				err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
