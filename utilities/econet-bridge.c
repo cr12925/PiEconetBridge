@@ -3381,6 +3381,42 @@ Options:\n\
 				if (rx.p.dstnet == 0xff && rx.p.dststn == 0xff)
 					rx.p.aun_ttype = ECONET_AUN_BCAST;
 
+				// Sequencing Fix: If there is anything in the wire output queue destined for this station from a station to which this packet was addressed, get rid of it - we have probably managed to transmit a packet which we thought had failed to transmit
+				if (1)
+				{
+					struct __econet_packet_aun_cache *p, *parent;
+
+					parent = NULL;
+					p = wire_head;
+
+					while (p)
+					{
+						if (	(p->p->p.dstnet == rx.p.srcnet) 
+						&&	(p->p->p.dststn == rx.p.srcstn)
+						&&	(p->p->p.srcnet == rx.p.dstnet)
+						&&	(p->p->p.srcstn == rx.p.dststn)
+						) // Found one - get rid of it
+						{
+							if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: to %3d.%3d from %3d.%3d Dumping queued wire packet at %p because - traffic received off wire from %3d.%3d when we still had traffic to send. Probable successful earlier TX which we thought had filed.\n", timediffstart(), p->p->p.dstnet, p->p->p.dststn, p->p->p.srcnet, p->p->p.srcstn, p, rx.p.srcnet, rx.p.srcstn);
+							if (!parent)
+								wire_head = p->next;
+							else // Not at head of queue
+								parent->next = p->next;
+							
+							p = p->next;
+
+							free(p);
+
+						}	
+						else	
+						{
+							parent = p;
+							p = p->next; // Move to next one
+						}
+					}
+
+				}
+
 				aun_send_internal (&rx, r, 0);
 
 			}
