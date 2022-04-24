@@ -1103,6 +1103,12 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 	strcpy(path, received_path);
 	
+	// If the handle we have for 'relative to' is invalid, then return directory error
+	if ((relative_to > FS_MAX_OPEN_FILES) || (active[server][user].fhandles[relative_to].handle == -1))
+	{
+		result->error = FS_PATH_ERR_NODIR; return 0;
+	}
+
 	// Cope with null path relative to dir on another disc
 	if (strlen(path) == 0 && relative_to != -1)
 		strcpy(path, active[server][user].fhandles[relative_to].acornfullpath);
@@ -3330,7 +3336,6 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 	path[replylen] = '\0'; // Null terminate instead of 0x0d in the packet
 
 	if (fs_noisy) fprintf (stderr, "[+%15.6f]    FS:%12sfrom %3d.%3d Get Object Info %s relative to %02X, command %d\n", timediffstart(), "", net, stn, path, relative_to, command);
-	
 
 	norm_return = fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1);
 
@@ -3352,10 +3357,6 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		reply.p.data[0] = reply.p.data[1] = 0; // This is apparently how you flag not found on an examine...
 		if (command == 6) // Longer error block
 		{
-			//memset(&(reply.p.data[2]), 0x20, 10);
-			//reply.p.data[12] = 0xFF;
-			//reply.p.data[13] = 0;
-			//fs_aun_send(&reply, server, 14, net, stn);
 			fs_error(server, reply_port, net, stn, 0xd6, "Not found");
 		}
 		else
@@ -6368,7 +6369,7 @@ void fs_close(int server, unsigned char reply_port, unsigned char net, unsigned 
 
 	if (handle != 0)
 	{
-		if (!fs_quiet) fprintf(stderr, "(%s)", active[server][active_id].fhandles[handle].acornfullpath);
+		if (!fs_quiet) fprintf(stderr, "(%s)\n", active[server][active_id].fhandles[handle].acornfullpath);
 		fs_close_handle(server, reply_port, net, stn, active_id, handle);
 	}
 	else // User wants to close everything
@@ -6383,9 +6384,9 @@ void fs_close(int server, unsigned char reply_port, unsigned char net, unsigned 
 			}
 			count++;
 		}
-	}
 
-	if (!fs_quiet) fprintf (stderr, "\n");
+		if (!fs_quiet) fprintf (stderr, "\n");
+	}
 
 	fs_reply_success(server, reply_port, net, stn, 0, 0);
 
@@ -7756,7 +7757,10 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							}
 					
 							reply.p.data[2] = numret;
-							if (numret == 0) reply_length--; // Don't send the count. See if that sorts it out?
+							if (numret == 0) 
+							{
+								reply_length--; // Don't send the count. See if that sorts it out?
+							}
 
 						} break;
 						default:
