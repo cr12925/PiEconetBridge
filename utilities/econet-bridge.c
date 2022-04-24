@@ -117,7 +117,7 @@ unsigned char econet_stations[8192];
 #define ECONET_AUN_MAX_TX 10 // Times out after this period * interpacket gap - presently 5s then.
 #define ECONET_WIRE_MAX_TX 30  // Attempt to improve reliability on a busy network (20220422 was 20)
 // AUN Ack wait time in ms
-#define ECONET_AUN_ACK_WAIT_TIME 200
+#define ECONET_AUN_ACK_WAIT_TIME 400
 // Mandatory gap between last tx to or rx from an AUN host so that it doesn't get confused (ms)
 #define ECONET_AUN_INTERPACKET_GAP (50) 
 // Gap between re-tx on the wire if it's failed
@@ -3737,16 +3737,19 @@ Options:\n\
 							if (p.p.aun_ttype == ECONET_AUN_NAK)
 							{
 	
-								if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: to %3d.%3d from %3d.%3d len 0x%04X seq 0x%08X NAK received!\n",
+								if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: to %3d.%3d from %3d.%3d len 0x%04X seq 0x%08X NAK received!",
 									timediffstart(),
 									p.p.srcnet, p.p.srcstn, p.p.dstnet, p.p.dststn, 
 									r+4, p.p.seq);
 
 								/* If the NAK seq is the one on the right queue head, then increment its tx_count (artificially), multiply its interpacket gap by 1.25, and let nature take its course on the retransmit */
-/* DISUSED
-								if (p.p.seq == network[from_found].aun_head->p->p.seq) // Increment the backoff timer
-									network[from_found].aun_head->next_tx_interval *= ECONET_RETX_BACKOFF_MULTIPLE;
-*/
+								if ((p.p.seq == network[from_found].ackimm_seq_awaited) && (network[from_found].aun_head->p->p.seq == p.p.seq)) // It was the one on the queue head
+								{
+									if (queue_debug) fprintf (stderr, " - is packet on output queue head. Setting last tx timer backwards to cause retransmit");
+									network[from_found].aun_head->last_tx_attempt.tv_sec -= (network[from_found].aun_head->last_tx_attempt.tv_sec >= (2 * ECONET_AUN_ACK_WAIT_TIME)) ? (2 * ECONET_AUN_ACK_WAIT_TIME) : network[from_found].aun_head->last_tx_attempt.tv_sec;
+								}
+
+								if (queue_debug) fprintf (stderr, "\n");
 							}
 							else if (p.p.seq == network[from_found].ackimm_seq_awaited) // Found the ACK or IMMREP sequence this host was supposed to produce
 							{
