@@ -1561,7 +1561,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 	{
 		printk (KERN_INFO "ECONET-GPIO: IRQ in Test mode - how did that happen?");
 	}
-	else if ((sr2 & ECONET_GPIO_S2_RX_IDLE) && (econet_data->initialized))
+	else if ((sr2 & ECONET_GPIO_S2_RX_IDLE) && (econet_data->initialized) && !(econet_data->aun_mode && (econet_get_aunstate() == EA_W_READFINALACK) && econet_pkt_rx.ptr == 3)) // But don't go in here if we are in AUN mode, reading a final ACK and we've got 4 bytes in the buffer (i.e. a final ack!)
 	{
 
 		unsigned short aun_state, chip_state, tx_status;
@@ -1575,7 +1575,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 #ifdef ECONET_GPIO_DEBUG_LINEIDLE
 		if (econet_data->aun_mode && aun_state != EA_IDLE)	
-			printk (KERN_INFO "ECONET-GPIO: econet_irq(): Line idle IRQ - aun state = %d, chip state = %d, tx_status = 0x%02x\n", aun_state, chip_state, tx_status);	
+			printk (KERN_INFO "ECONET-GPIO: econet_irq(): Line idle IRQ - aun state = %d, chip state = %d, tx_status = 0x%02x, rx ptr=%02X\n", aun_state, chip_state, tx_status, econet_pkt_rx.ptr);	
 		else if ((!econet_data->aun_mode) && (chip_state != EM_TEST && chip_state != EM_IDLE && chip_state != EM_IDLEINIT))
 			printk (KERN_INFO "ECONET-GPIO: econet_irq(): Line idle IRQ - chip state = %d\n",  chip_state);
 #endif
@@ -1750,7 +1750,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 	// Are we either mid-read, or idle (in which case, this will be a receiver IRQ)
 	else if (econet_get_chipstate() == EM_READ || (sr2 & (ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_AP)) || (sr1 & ECONET_GPIO_S1_RDA)) // In case we get address present or data or are already in read mode
 		econet_irq_read();
-/*
 	else if (sr2 & ECONET_GPIO_S2_RX_IDLE) // We seem to occasionally get RX IDLE interrupts when preparing to transmit. We'll ignore them.
 	{
 		int tmp_status;
@@ -1765,7 +1764,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 			econet_rx_cleardown();
 		}
 	}
-*/
 	else if (econet_get_chipstate() == EM_IDLE || econet_get_chipstate() == EM_IDLEINIT) // We seem to get these when the chip gets its pants tangled. (With sr1=0 - but we've handled reading and writing above, so just clear status)
 	{
 		if (econet_get_chipstate() == EM_IDLEINIT)
