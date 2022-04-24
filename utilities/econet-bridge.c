@@ -3397,15 +3397,18 @@ Options:\n\
 						&&	(p->p->p.srcstn == rx.p.dststn)
 						) // Found one - get rid of it
 						{
-							if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: to %3d.%3d from %3d.%3d Dumping queued wire packet at %p because - traffic received off wire from %3d.%3d when we still had traffic to send. Probable successful earlier TX which we thought had filed.\n", timediffstart(), p->p->p.dstnet, p->p->p.dststn, p->p->p.srcnet, p->p->p.srcstn, p, rx.p.srcnet, rx.p.srcstn);
+							struct __econet_packet_aun_cache *old;
+
+							if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: to %3d.%3d from %3d.%3d Dumping queued wire packet at %p because - traffic received off wire from %3d.%3d when we still had traffic to send. Probable successful earlier TX which we thought had failed.\n", timediffstart(), p->p->p.dstnet, p->p->p.dststn, p->p->p.srcnet, p->p->p.srcstn, p, rx.p.srcnet, rx.p.srcstn);
 							if (!parent)
 								wire_head = p->next;
 							else // Not at head of queue
 								parent->next = p->next;
 							
+							old = p;
 							p = p->next;
 
-							free(p);
+							free(old);
 
 						}	
 						else	
@@ -3880,6 +3883,8 @@ Options:\n\
 
 					err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
 
+					if (queue_debug) fprintf (stderr, "TX FAIL - %s (0x%02X)\n", econet_strtxerr(-1 * err), err);
+
 					if (err == ECONET_TX_HANDSHAKEFAIL) // Receiver not present
 						econet_general_dumphead(&wire_head, &wire_tail);
 
@@ -3897,7 +3902,6 @@ Options:\n\
 					if (wire_tx_errors++ > 300)
 						ioctl(econet_fd, ECONETGPIO_IOC_READMODE);
 
-					if (queue_debug) fprintf (stderr, "TX FAIL - %s (0x%02X)\n", econet_strtxerr(-1 * err), err);
 				}
 			}
 			else	

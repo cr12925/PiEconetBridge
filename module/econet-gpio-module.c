@@ -1561,7 +1561,22 @@ irqreturn_t econet_irq(int irq, void *ident)
 	{
 		printk (KERN_INFO "ECONET-GPIO: IRQ in Test mode - how did that happen?");
 	}
-	else if ((sr2 & ECONET_GPIO_S2_RX_IDLE) && (econet_data->initialized) && !(econet_data->aun_mode && (econet_get_aunstate() == EA_W_READFINALACK) && econet_pkt_rx.ptr == 3)) // But don't go in here if we are in AUN mode, reading a final ACK and we've got 4 bytes in the buffer (i.e. a final ack!)
+	else if ((sr2 & ECONET_GPIO_S2_RX_IDLE) && (econet_data->initialized) && (econet_data->aun_mode) && (econet_get_aunstate() == EA_W_READFINALACK)) // Line idle whilst waiting for final ack on a write = handshakefail
+	{
+
+		unsigned short aun_state, chip_state, tx_status;
+
+		chip_state = econet_get_chipstate();
+		aun_state = econet_get_aunstate();
+		tx_status = econet_get_tx_status();
+		printk (KERN_INFO "ECONET-GPIO: econet_irq(): Line idle IRQ waiting for final ACK - Handshake failed. aun state = %d, chip state = %d, tx_status = 0x%02x, rx ptr=%02X - Experimentally not resetting state machine\n", aun_state, chip_state, tx_status, econet_pkt_rx.ptr);	
+/*
+		econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
+		econet_set_aunstate(EA_IDLE);
+*/
+		econet_set_read_mode();
+	}
+	else if ((sr2 & ECONET_GPIO_S2_RX_IDLE) && (econet_data->initialized)) 
 	{
 
 		unsigned short aun_state, chip_state, tx_status;
