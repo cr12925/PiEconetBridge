@@ -101,6 +101,7 @@ int spoof_immediate = 0; // Changed from 1
 int wired_eject = 1; // When set, and a dynamic address is allocated to an unknown AUN station, this will cause the bridge to spoof a '*bye' equivalent to fileservers it has learned about on the wired network
 short learned_net = -1;
 int wire_tx_errors = 0; // Count of successive errors on tx to the wire - if it gets too high, we'll do a chip reset
+int reception_extend = 0; // number of ms extra to wait for an Econet transmission to complete - -e cmd line option sets it - useful for RiscOS machines?
 unsigned char last_net = 0, last_stn = 0;
 char *printhandler = NULL; // Filename of generic print handling routine
 
@@ -548,7 +549,7 @@ unsigned int econet_write_wire(struct __econet_packet_aun *p, int len, int cache
 			err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
 			//while ((err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS) && (timediffmsec(&start, &now) < ((2 + ((len+1024) / 1024) * 41)) )) // 1Kb on the wire is < 50ms. So 30Kb is < 150ms.
 			while (	(err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS) 
-				&& (timediffmsec(&start, &now) < (((len + 25) / 25) + 100) ) // at 200kHz, 25,000 bytes per second (ignoring the bit stuffing), so 25 bytes per ms. So we add a bit, and work out the number of ms, then add 100 for the 4-way.
+				&& (timediffmsec(&start, &now) < (((len + 25) / 25) + 110 + reception_extend) ) // at 200kHz, 25,000 bytes per second (ignoring the bit stuffing), so 25 bytes per ms. So we add a bit, and work out the number of ms, then add 100 for the 4-way.
 			) 
 			{
 				gettimeofday(&now, 0);
@@ -3077,7 +3078,7 @@ int main(int argc, char **argv)
 
 	fs_sevenbitbodge = fs_sjfunc = 1; // On by default 
 
-	while ((opt = getopt(argc, argv, "bc:dfg:ijlnmqrsxzh7")) != -1)
+	while ((opt = getopt(argc, argv, "bc:de:fg:ijlnmqrsxzh7")) != -1)
 	{
 		switch (opt) {
 			case 'b': dumpmode_brief = 1; break;
@@ -3086,6 +3087,9 @@ int main(int argc, char **argv)
 				break;
 			case 'd':
 				pkt_debug = 1;
+				break;
+			case 'e':
+				reception_extend = atoi(optarg);
 				break;
 			case 'f': fs_quiet = 1; fs_noisy = 0; break;
 //			case 'g': packet_gap = atoi(optarg); break;
@@ -3114,6 +3118,7 @@ Options:\n\
 \t-b\tDo brief packet dumps\n\
 \t-c\t<config path>\n\
 \t-d\tTurn on packet debug (you won't see much without!)\n\
+\t-e\tExtend reception timeframe for Econet (wired) clients - parameter is a number of milliseconds\n\
 \t-f\tSilence fileserver log output\n\
 \t-i\tSpoof immediate responses in-kernel (will break *REMOTE, *VIEW etc.)\n\
 \t-j\tTurn off SJ Research MDFS functionality in file server\n\
