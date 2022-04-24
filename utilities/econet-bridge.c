@@ -40,6 +40,8 @@
 #include "../include/econet-gpio-consumer.h"
 #include "../include/econet-pserv.h"
 
+struct timeval start;
+
 extern int fs_initialize(unsigned char, unsigned char, char *);
 extern int sks_initialize(unsigned char, unsigned char, char *);
 extern void handle_fs_traffic(int, unsigned char, unsigned char, unsigned char, unsigned char *, unsigned int);
@@ -74,6 +76,8 @@ extern short normalize_debug;
 #define ECONET_SERVER_SOCKET 0x04
 
 #define DEVICE_PATH "/dev/econet-gpio"
+
+struct timeval start;
 
 int aun_send (struct __econet_packet_aun *, int);
 unsigned short is_aun(unsigned char, unsigned char);
@@ -344,6 +348,14 @@ unsigned long timediffmsec(struct timeval *s, struct timeval *d)
 
 }
 
+float timediffstart()
+{
+	struct timeval now;
+
+	gettimeofday(&now, 0);
+
+	return (float) timediffmsec(&start, &now) / 1000;
+}
 
 #define QUEUE_HEAD 1
 #define QUEUE_TAIL 2
@@ -363,7 +375,8 @@ void econet_enqueue (struct __econet_packet_aun *p, int len, unsigned char heado
 
 	gettimeofday(&now, 0);
 
-	if (queue_debug)	fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X request  wire   enqueue mode %02X ",
+	if (queue_debug)	fprintf (stderr, "[+%15.6f] QUEUE: to %3d.%3d from %3d.%3d len 0x%04X request  wire   enqueue mode %02X ",
+		timediffstart(),
 		p->p.dstnet, p->p.dststn,
 		p->p.srcnet, p->p.srcstn,
 		len,
@@ -440,23 +453,25 @@ int econet_general_enqueue(struct __econet_packet_aun_cache **head, struct __eco
 	struct __econet_packet_aun *p_entry;
 	struct __econet_packet_aun_cache *q_entry;
 
-	if (queue_debug)	fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X request general enqueue\n",
+	gettimeofday(&now, 0);
+
+	if (queue_debug)	fprintf (stderr, "[+%15.6f] QUEUE: to %3d.%3d from %3d.%3d len 0x%04X request general enqueue\n",
+				timediffstart(),
 		p->p.dstnet, p->p.dststn,
 		p->p.srcnet, p->p.srcstn,
 		len);
 
-	gettimeofday(&now, 0);
 	p_entry = malloc(len);
 	if (!p_entry) // Malloc failed
 	{
-		if (queue_debug)	fprintf (stderr, "QUEUE: main malloc failed!\n");
+		if (queue_debug)	fprintf (stderr, "[+%15.6f] QUEUE: main malloc failed!\n", timediffstart());
 		return 0;
 	}
 
 	q_entry = malloc(sizeof(struct __econet_packet_aun_cache));
 	if (!q_entry) // Malloc failed
 	{
-		if (queue_debug)	fprintf (stderr, "QUEUE: packet malloc failed!\n");
+		if (queue_debug)	fprintf (stderr, "[+%15.6f] QUEUE: packet malloc failed!\n", timediffstart());
 		free(p_entry);
 		return 0;
 	}
@@ -488,10 +503,13 @@ void econet_general_dumphead(struct __econet_packet_aun_cache **head, struct __e
 {
 
 	struct __econet_packet_aun_cache *q_entry;
+	struct timeval now;
 
 	q_entry = *head;
 
-	if (queue_debug) fprintf (stderr, "QUEUE: Dumping packet at queue head %p\n", *head);
+	gettimeofday(&now, 0);
+
+	if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: Dumping packet at queue head %p\n", timediffstart(), *head);
 
 	if (q_entry)
 	{
@@ -600,13 +618,13 @@ int econet_write_general(struct __econet_packet_aun *p, int len)
 			}
 			else	
 			{
-				if (pkt_debug) fprintf (stderr, "PIPE : Pipe write socket not open\n");
+				if (pkt_debug) fprintf (stderr, "[+%15.6f] PIPE : Pipe write socket not open\n", timediffstart());
 				return -1; // The other end of the named pipe isn't open
 			}
 		}
 		else
 		{
-			fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d Unknown destination type (0x%02x) - cannot route\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, network[ptr].type);
+			fprintf (stderr, "[+%15.6f] ERROR: to %3d.%3d from %3d.%3d Unknown destination type (0x%02x) - cannot route\n", timediffstart(), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, network[ptr].type);
 			return -1;
 		} // NB, Local transmission handled on arrival
 
@@ -615,7 +633,7 @@ int econet_write_general(struct __econet_packet_aun *p, int len)
 		return aun_trunk_send(p, len);
 	else
 	{
-		fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d Cannot route\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
+		fprintf (stderr, "[+%15.6f] ERROR: to %3d.%3d from %3d.%3d Cannot route\n", timediffstart(), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 		return -1;
 	}
 
@@ -688,7 +706,7 @@ void econet_readconfig(void)
 	configfile = fopen(cfgpath, "r");
 	if (configfile == NULL)
 	{
-		fprintf(stderr, "Unable to open config file %s: %s\n", cfgpath, strerror(errno));
+		fprintf(stderr, "[+%15.6f] Unable to open config file %s: %s\n", timediffstart(), cfgpath, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 
@@ -1735,7 +1753,11 @@ void dump_udp_pkt_aun(struct __econet_packet_aun *a, int s)
 	int src, dst;
 	char src_c, dst_c;
 
+	struct timeval now;
+
 	if (pkt_debug == 0) return;
+
+	gettimeofday(&now, 0);
 
 	src = econet_ptr[a->p.srcnet][a->p.srcstn];
 	dst = econet_ptr[a->p.dstnet][a->p.dststn];
@@ -1767,7 +1789,7 @@ void dump_udp_pkt_aun(struct __econet_packet_aun *a, int s)
 
 	if (dumpmode_brief)
 	{
-		fprintf (stderr, "%c-->%c: to %3d.%3d from %3d.%3d port 0x%02x ctrl 0x%02x seq 0x%08x len 0x%04x ", src_c, dst_c, a->p.dstnet, a->p.dststn, a->p.srcnet, a->p.srcstn, a->p.port, a->p.ctrl, le32toh(a->p.seq), s-12);
+		fprintf (stderr, "[+%15.6f] %c-->%c: to %3d.%3d from %3d.%3d port 0x%02x ctrl 0x%02x seq 0x%08x len 0x%04x ", timediffstart(), src_c, dst_c, a->p.dstnet, a->p.dststn, a->p.srcnet, a->p.srcstn, a->p.port, a->p.ctrl, le32toh(a->p.seq), s-12);
 		for (count = 0; count < ((s-12) < 40 ? (s-12) : 40); count++)
 			fprintf (stderr, "%02x %c ", a->p.data[count], (a->p.data[count] < 32 || a->p.data[count] > 126) ? '.' : a->p.data[count]);
 		fprintf (stderr, "%s\n", (s-12) < 40 ? "" : " ...");
@@ -1810,6 +1832,7 @@ void dump_udp_pkt_aun(struct __econet_packet_aun *a, int s)
 			fprintf (stderr, "         DST Net/Stn 0x%02x/0x%02x\n", a->p.dstnet, a->p.dststn);
 
 		fprintf (stderr, "         SRC Net/Stn 0x%02x/0x%02x\n", a->p.srcnet, a->p.srcstn);
+		fprintf (stderr, "         TIMESTAMP [+%15.6f]\n", timediffstart());
 		fprintf (stderr, "         PORT/CTRL   0x%02x/0x%02x\n", a->p.port, a->p.ctrl);
 	
 		//fprintf (stderr, "         SEQ         0x%08X\n", a->p.seq);
@@ -1882,8 +1905,14 @@ void aun_acknowledge (struct __econet_packet_aun *a, unsigned char ptype)
 		
 	if (ptr != -1 && (network[ptr].type & ECONET_HOSTTYPE_TDIS) && reply.p.seq == network[ptr].ackimm_seq_tosend)
 	{
+		struct timeval now;
+
+		gettimeofday(&now, 0);
+
 		network[ptr].ackimm_seq_tosend = 0; // We have just acknowledged a packet from this machine - clear off the tracker
-		if (queue_debug) fprintf (stderr, "QUEUE: Clearing ACK tracker on network[%d] - seq 0x%08X\n", ptr, network[ptr].ackimm_seq_tosend);
+		if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: Clearing ACK tracker on network[%d] - seq 0x%08X\n", 
+			timediffstart(),
+			ptr, network[ptr].ackimm_seq_tosend);
 	}
 
 }
@@ -1910,7 +1939,7 @@ void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
 
 	if (pkt_debug)
 	{
-		fprintf (stderr, "B-->B: Receive bridge %s from %s ", (is_reset ? "reset " : "update"), (source == -1 ? "internal" : (source == 0 ? "wire" : "trunk")));
+		fprintf (stderr, "[+%15.6f] B-->B: Receive bridge %s from %s ", timediffstart(), (is_reset ? "reset " : "update"), (source == -1 ? "internal" : (source == 0 ? "wire" : "trunk")));
 
 		if (source > 0) fprintf (stderr, "%d ", source);
 
@@ -2089,7 +2118,7 @@ void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
 
 		count = 0;
 
-		if (pkt_debug) fprintf (stderr, "B-->B: Sending bridge %s to   wire    with nets ", (is_reset ? "reset " : "update"));
+		if (pkt_debug) fprintf (stderr, "[+%15.6f] B-->B: Sending bridge %s to   wire    with nets ", timediffstart(), (is_reset ? "reset " : "update"));
 
 		for (net = 1; net < 255; net++)
 			if (wire_adv_out[net] == 0xff)
@@ -2121,7 +2150,7 @@ void econet_bridge_process(struct __econet_packet_aun *p, int len, int source)
 				out.p.aun_ttype = ECONET_AUN_BCAST;
 				out.p.seq = (local_seq += 4);
 
-				if (pkt_debug) fprintf (stderr, "B-->B: Sending bridge %s on   trunk %d with nets ", (out.p.ctrl == 0x80 ? "reset " : "update"), trunk);
+				if (pkt_debug) fprintf (stderr, "[+%15.6f] B-->B: Sending bridge %s on   trunk %d with nets ", timediffstart(), (out.p.ctrl == 0x80 ? "reset " : "update"), trunk);
 
 				count = 0;
 
@@ -2216,7 +2245,8 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 		
 			pname[6] = 0; // NULL terminate
 
-			if (pkt_debug) fprintf (stderr, "PRINT: to %3d.%3d from %3d.%3d Printer Status Query (%s) for printer %s ",
+			if (pkt_debug) fprintf (stderr, "[+%15.6f] PRINT: to %3d.%3d from %3d.%3d Printer Status Query (%s) for printer %s ",
+				timediffstart(),
 				a->p.dstnet, a->p.dststn,
 				a->p.srcnet, a->p.srcstn,
 				(querytype == PRN_QUERY_STATUS) ? "status" : "name",
@@ -2300,7 +2330,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 			gettimeofday(&now, 0);
 
 			if (pkt_debug && !dumpmode_brief)
-				fprintf (stderr, "LOC  : BRIDGE     from %3d.%3d, query 0x%02x, reply port 0x%02x, query net %d\n", a->p.srcnet, a->p.srcstn, a->p.ctrl, reply_port, query_net);
+				fprintf (stderr, "[+%15.6f] LOC  : BRIDGE     from %3d.%3d, query 0x%02x, reply port 0x%02x, query net %d\n", timediffstart(), a->p.srcnet, a->p.srcstn, a->p.ctrl, reply_port, query_net);
 
 			if (nativebridgenet && 
 				(
@@ -2329,7 +2359,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 				reply.p.data[1] = query_net; 
 				aun_send (&reply, 14);
 			}
-			else if (pkt_debug) fprintf (stderr, "LOC  : BRIDGE     from %3d.%3d - didn't bother replying.\n", a->p.srcnet, a->p.srcstn);
+			else if (pkt_debug) fprintf (stderr, "[+%15.6f] LOC  : BRIDGE     from %3d.%3d - didn't bother replying.\n", timediffstart(), a->p.srcnet, a->p.srcstn);
 	
 		}
 		else if (a->p.port == 0x99) // Handle broadcasts to fileservers
@@ -2360,7 +2390,8 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 
 			strncpy(printer_selected, (const char *) a->p.data, 6);
 
-			fprintf (stderr, "PRINT: to %3d.%3d from %3d.%3d Printer status enquiry %s\n", 
+			fprintf (stderr, "[+%15.6f] PRINT: to %3d.%3d from %3d.%3d Printer status enquiry %s\n", 
+				timediffstart(),
 				a->p.dstnet, a->p.dststn, a->p.srcnet, a->p.srcstn, printer_selected);
 
 			reply.p.srcnet = a->p.dstnet;
@@ -2459,7 +2490,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 					if (!printjobs[found].spoolfile)
 					{
 						printjobs[count].net = printjobs[count].stn = 0;  // Free this up - couldn't open file	
-						fprintf (stderr, "Unable to open spool file for print job from station %d.%d\n", a->p.srcnet, a->p.srcstn);
+						fprintf (stderr, "[+%15.6f] PRINT: Unable to open spool file for print job from station %d.%d\n", timediffstart(), a->p.srcnet, a->p.srcstn);
 					}
 					else
 					{
@@ -2475,7 +2506,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 						if (printer_index == 0xff)
 							printer_index = network[d_ptr].printer_priorities[0];
 
-						fprintf (stderr, "PRINT: Starting spooler job for %d.%d - %s (%s)\n", a->p.srcnet, a->p.srcstn, network[d_ptr].printers[printer_index].name, network[d_ptr].printers[printer_index].unixname);
+						fprintf (stderr, "[+%15.6f] PRINT: Starting spooler job for %d.%d - %s (%s)\n", timediffstart(), a->p.srcnet, a->p.srcstn, network[d_ptr].printers[printer_index].name, network[d_ptr].printers[printer_index].unixname);
 
 						// If we are using the new external print handler, we don't do the headers internally any more. They are configured.
 
@@ -2558,7 +2589,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 								else
 									sprintf(command_string, PRINTCMDSPEC, printjobs[count].unixname, filename_string);
 		
-								fprintf (stderr, "PRINT: Sending print job with %s\n", command_string);
+								fprintf (stderr, "[+%15.6f] PRINT: Sending print job with %s\n", timediffstart(), command_string);
 							
 								if (!fork())
 									execl("/bin/sh", "sh", "-c", command_string, (char *)0);
@@ -2574,7 +2605,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 									printjobs[count].name,
 									filename_string);
 				
-								if (pkt_debug) fprintf(stderr, "PRINT: Command string: %s\n", command_string);
+								if (pkt_debug) fprintf(stderr, "[+%15.6f] PRINT: Command string: %s\n", timediffstart(), command_string);
 
 								if (!fork())	execl("/bin/bash", "bash", "-c", command_string, (char *) 0);
 	
@@ -2591,7 +2622,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 				aun_send (&reply, 13);
 			}
 			else
-				fprintf (stderr, "PRINT: Spooler not found for print request from %d.%d\n", network[s_ptr].network, network[s_ptr].station);
+				fprintf (stderr, "[+%15.6f] PRINT: Spooler not found for print request from %d.%d\n", timediffstart(), network[s_ptr].network, network[s_ptr].station);
 			
 		}
 		else if ((a->p.port == 0xdf) && (network[d_ptr].servertype & ECONET_SERVER_SOCKET) && (network[d_ptr].sks_index >= 0))
@@ -2599,14 +2630,19 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 		else if ((network[d_ptr].servertype & ECONET_SERVER_FILE) && (network[d_ptr].fileserver_index >= 0)) // Could be fileserver bulk transfer traffic
 			handle_fs_bulk_traffic(network[d_ptr].fileserver_index, a->p.srcnet, a->p.srcstn, a->p.port, a->p.ctrl, a->p.data, packlen-12);
 		else
-			fprintf(stderr, "LOCAL: Unhandled traffic.\n");
+			fprintf(stderr, "[+%15.6f] LOCAL: Unhandled traffic.\n", timediffstart());
 	}
 	else if (a->p.aun_ttype == ECONET_AUN_ACK)
 	{
+		if (queue_debug) fprintf (stderr, "[+%15.6f] LOCAL: to %3d.%3d from %3d.%3d ACK received for seq 0x%08X len 0x%08X\n",
+			timediffstart(),
+			a->p.dstnet, a->p.dststn,
+			a->p.srcnet, a->p.srcstn,
+			a->p.seq, packlen-12);
 	}
 	else
 	{
-		fprintf (stderr, "Ignoring AUN type %d to local station %d.%d\n", a->p.aun_ttype, network[d_ptr].network, network[d_ptr].station);
+		fprintf (stderr, "[+%15.6f] LOCAL: Ignoring AUN type %d to local station %d.%d\n", timediffstart(), a->p.aun_ttype, network[d_ptr].network, network[d_ptr].station);
 	}
 
 }
@@ -2620,7 +2656,7 @@ int aun_trunk_send_internal (struct __econet_packet_aun *p, int len, int t)
 	if (trunk_xlate_fw(p, t, 1) == FW_ACCEPT) // returns 0 for drop traffic (param 3 = 1 means outbound)
 		result = sendto(trunks[t].listensocket, p, len, MSG_DONTWAIT, trunks[t].addr->ai_addr, trunks[t].addr->ai_addrlen); 
 	else
-		fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d Unknown destination\n", 
+		fprintf (stderr, "[+%15.6f] ERROR: to %3d.%3d from %3d.%3d Unknown destination\n", timediffstart(),
 			p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 
 	return result;
@@ -2641,7 +2677,7 @@ int aun_trunk_send(struct __econet_packet_aun *p, int len)
 
 	if (trunk >= 0)
 		result = aun_trunk_send_internal(p, len, trunk);
-	else	if (pkt_debug) fprintf (stderr, "TRUNK: to %3d.%3d from %3d.%3d Trunk destination not found\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
+	else	if (pkt_debug) fprintf (stderr, "[+%15.6f] TRUNK: to %3d.%3d from %3d.%3d Trunk destination not found\n", timediffstart(), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 
 	return result;
 
@@ -2673,11 +2709,9 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 	
 	p->p.padding = 0x00;
 
-	//fprintf (stderr, "Got here 1\n");
-	if (p->p.aun_ttype != ECONET_AUN_ACK && p->p.aun_ttype != ECONET_AUN_NAK) // Don't dump acks...
+	if ((p->p.aun_ttype != ECONET_AUN_ACK && p->p.aun_ttype != ECONET_AUN_NAK) || queue_debug) // Don't dump acks... unless we're in queue_debug
 		dump_udp_pkt_aun(p, len);
 
-	//fprintf (stderr, "Got here 2\n");
 	result = -1;
 
 	// Perform interlock - do not send between same type of endpoints, or between trunk<->AUN/IP, and drop any RAW traffic in bridge mode
@@ -2686,17 +2720,17 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 	{
 		if ((network[d].type & ECONET_HOSTTYPE_TAUN) == 0) // Raw destination - dump it
 		{
-			if (pkt_debug) fprintf (stderr, "ILOCK: to %3d.%3d from %3d.%3d I refuse to forward traffic to a raw destination.\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
+			if (pkt_debug) fprintf (stderr, "[+%15.6f] ILOCK: to %3d.%3d from %3d.%3d I refuse to forward traffic to a raw destination.\n", timediffstart(), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 			return result;
 		}
 		if ((network[s].type & ECONET_HOSTTYPE_TAUN) == 0) // Raw source - dump it
 		{
-			if (pkt_debug) fprintf (stderr, "ILOCK: to %3d.%3d from %3d.%3d I refuse to forward traffic from a raw source.\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
+			if (pkt_debug) fprintf (stderr, "[+%15.6f] ILOCK: to %3d.%3d from %3d.%3d I refuse to forward traffic from a raw source.\n", timediffstart(), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 			return result;
 		}
 		if ((network[d].type & ~ECONET_HOSTTYPE_TAUN) == (network[s].type & ~ECONET_HOSTTYPE_TAUN)) // Same type - dump it
 		{
-			if (pkt_debug) fprintf (stderr, "ILOCK: to %3d.%3d from %3d.%3d I refuse to forward betwen stations of the same type.\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
+			if (pkt_debug) fprintf (stderr, "[+%15.6f] ILOCK: to %3d.%3d from %3d.%3d I refuse to forward betwen stations of the same type.\n", timediffstart(), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 			return result;
 		}
 	}
@@ -2704,17 +2738,17 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 	{
 		if (is_on_wirebridge && source == 0) // Wire to wire
 		{
-			if (pkt_debug) fprintf (stderr, "ILOCK: to %3d.%3d from %3d.%3d I refuse to forward wire traffic via a wire bridge\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
+			if (pkt_debug) fprintf (stderr, "[+%15.6f] ILOCK: to %3d.%3d from %3d.%3d I refuse to forward wire traffic via a wire bridge\n", timediffstart(), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 			return result;
 		}
 		if (d == -1 && (s != -1) && (network[s].type & ECONET_HOSTTYPE_TDIS)) // AUN/IP source to Trunk - dump it
 		{
-			if (pkt_debug) fprintf (stderr, "ILOCK: to %3d.%3d from %3d.%3d I refuse to forward AUN traffic to trunk\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
+			if (pkt_debug) fprintf (stderr, "[+%15.6f] ILOCK: to %3d.%3d from %3d.%3d I refuse to forward AUN traffic to trunk\n", timediffstart(), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 			return result;
 		}
 		if (s == -1 && (d != -1) && (network[d].type & ECONET_HOSTTYPE_TDIS)) // Trunk to AUN/IP - dump it
 		{
-			if (pkt_debug) fprintf (stderr, "ILOCK: to %3d.%3d from %3d.%3d I refuse to forward trunk traffic to AUN.\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
+			if (pkt_debug) fprintf (stderr, "[+%15.6f] ILOCK: to %3d.%3d from %3d.%3d I refuse to forward trunk traffic to AUN.\n", timediffstart(), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 			return result;
 		}
 	}
@@ -2822,7 +2856,7 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 		if (!is_on_wirebridge && (network[d].type & ECONET_HOSTTYPE_TWIRE) && (p->p.port == 0x99) && (!(network[d].is_wired_fs))) // Fileserver traffic on a wire station
 		{
 			network[d].is_wired_fs = 1;
-			fprintf (stderr, "  DYN:%12s             Station %d.%d identified as wired fileserver\n", "", p->p.dstnet, p->p.dststn);
+			fprintf (stderr, "[+%15.6f]   DYN:%12s             Station %d.%d identified as wired fileserver\n", timediffstart(), "", p->p.dstnet, p->p.dststn);
 		}
 
 		// Update this even if we don't get to transmit - what's the harm?
@@ -2845,7 +2879,7 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 			result = write(network[d].pipewritesocket, &delivery, len+2);
 			if (result == len+2) result -= 2;
 		}
-		else	if (pkt_debug) fprintf (stderr, "PIPE : Pipe write socket not open\n");
+		else	if (pkt_debug) fprintf (stderr, "[+%15.6f] PIPE : Pipe write socket not open\n", timediffstart());
 	}
 	else if (network[d].type & ECONET_HOSTTYPE_TDIS)
 	{
@@ -2866,7 +2900,7 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 	}
 	else // Unknown destination type
 	{
-		fprintf (stderr, "ERROR: to %3d.%3d from %3d.%3d Unknown destination\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
+		fprintf (stderr, "[+%15.6f] ERROR: to %3d.%3d from %3d.%3d Unknown destination\n", timediffstart(), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 	}
 
 	return result;
@@ -2976,7 +3010,7 @@ int trunk_xlate_fw(struct __econet_packet_aun *p, int trunk, unsigned char dir)
 	}
 
 	if (pkt_debug && (ret == FW_DROP)) // log it
-		fprintf (stderr, "FWALL: to %3d.%3d from %3d.%3d FORBIDDEN\n", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
+		fprintf (stderr, "[+%15.6f] FWALL: to %3d.%3d from %3d.%3d FORBIDDEN\n", timediffstart(), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 	
 	return ret;
 
@@ -3023,6 +3057,8 @@ int main(int argc, char **argv)
 	unsigned short from_found, to_found; // Used to see if we know a station or not
 
 	struct __econet_packet_aun rx;
+
+	gettimeofday(&start, 0); // Initialize value for start time
 
 	memset(&network, 0, sizeof(network));
 	memset(&econet_ptr, 0xff, sizeof(econet_ptr));
@@ -3264,7 +3300,13 @@ Options:\n\
 	}
 	
 	if (pkt_debug)
-		fprintf(stderr, "Awaiting traffic.\n\n");
+	{
+		struct timeval now;
+
+		gettimeofday(&now, 0);
+
+		fprintf(stderr, "[+%15.6f] *****: Awaiting traffic.\n\n", timediffstart());
+	}
 
 	/* Wait for traffic */
 
@@ -3285,7 +3327,7 @@ Options:\n\
 	while (wire_head || aun_queued || trunk_head || poll((struct pollfd *)&pset, pmax+(wire_enabled ? 1 : 0), poll_timeout)) // AUN queued packets, wire queued packets, or something arriving. The 1 is because we now have a timeout on poll() in case we need to reset the module to make sure that immediates to AUN stations which are not present doesn't cause a hang!
 	{
 	
-		//fprintf (stderr, "DEBUG: wire_haed = %p, aun_queued = %ld, trunk_head = %p\n", wire_head, aun_queued, trunk_head);
+		//fprintf (stderr, "[+%15.6f] DEBUG: wire_haed = %p, aun_queued = %ld, trunk_head = %p\n", timediffstart(), wire_head, aun_queued, trunk_head);
 
 		if (wire_head || aun_queued || trunk_head) // Do a poll just in case something turns up, but do it quickly
 			poll((struct pollfd *) &pset, pmax+(wire_enabled ? 1 : 0), 10);
@@ -3301,7 +3343,11 @@ Options:\n\
 			if (r > 0) // Ding dong, traffic arriving off the wire  (and if it's -1, the module was busy on read - try next time)
 			{
 				if (r < 12)
-					fprintf(stderr, "Runt packet length %d received off Econet wire\n", r);
+				{
+					struct timeval now;
+					gettimeofday(&now, 0);
+					fprintf(stderr, "[+%15.6f] *****: Runt packet length %d received off Econet wire\n", timediffstart(), r);
+				}
 
 				if (!wire_adv_in[rx.p.srcnet]) // This was not a network advertised inbound on the wire - i.e. we should have a network[] entry for it
 				{
@@ -3362,7 +3408,7 @@ Options:\n\
 				// Client went away - close the writer pipe
 				close(network[np].pipewritesocket);
 				network[np].pipewritesocket = -1;
-				if (pkt_debug) fprintf (stderr, "*PIPE:                 %3d.%3d client pipe went away.\n", 
+				if (pkt_debug) fprintf (stderr, "[+%15.6f] *PIPE:                 %3d.%3d client pipe went away.\n", timediffstart(),
 					network[np].network, network[np].station);
 				// Close the reader & re-open it
 				fd_ptr[network[np].listensocket] = -1;
@@ -3372,7 +3418,7 @@ Options:\n\
 					fd_ptr[pset[realfd].fd] = np;
 				else 	// Barf!
 				{
-					fprintf (stderr, "*PIPE: Reader socket for %3d.%3d went away. Quitting.\n", network[np].network, network[np].station);
+					fprintf (stderr, "[+%15.6f] *PIPE: Reader socket for %3d.%3d went away. Quitting.\n", timediffstart(), network[np].network, network[np].station);
 					exit(EXIT_FAILURE);
 				}
 
@@ -3401,7 +3447,7 @@ Options:\n\
 				while ((from_found == 0xffff) && (count < 256))
 				{
 
-//					fprintf (stderr, "Checking trunk %d\n", count);
+//					fprintf (stderr, "[+%15.6f] TRUNK: Checking trunk %d\n", timediffstart(), count);
 
 					if (
 // May need some ntohs or ntohl here somewhere..?? TODO
@@ -3417,12 +3463,12 @@ Options:\n\
 				if (from_found == 0xffff) // Traffic arrived on a trunk but either not from someone friendly, or it was but not on a network we think should be arriving on that trunk
 				{
 					// Dump it.
-					fprintf (stderr, "TRUNK: to %3d.%3d from %3d.%3d received on trunk %04X unrecognized\n", p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn, (from_found == 0xffff ? 0xffff : count));
+					fprintf (stderr, "[+%15.6f] TRUNK: to %3d.%3d from %3d.%3d received on trunk %04X unrecognized\n", timediffstart(), p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn, (from_found == 0xffff ? 0xffff : count));
 					continue;
 				}
 				else if (trunks[from_found].adv_in[p.p.srcnet] != 0xff && (p.p.port != 0x9c)) // Check if this was a network we were expecting from that source, and it wasn't bridge traffic
 				{
-					fprintf (stderr, "FWALL: to %3d.%3d from %3d.%3d received on trunk %04X from unadvertized source network %d\n", p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn, from_found, p.p.srcnet);
+					fprintf (stderr, "[+%15.6f] FWALL: to %3d.%3d from %3d.%3d received on trunk %04X from unadvertized source network %d\n", timediffstart(), p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn, from_found, p.p.srcnet);
 					continue;
 				}
 			
@@ -3466,7 +3512,7 @@ Options:\n\
 				p.p.dststn = network[netptr].station;
 
 				if (from_found == 0xffff)
-					fprintf (stderr, "*PIPE: to %3d.%3d              traffic from unknown AUN source.\n", p.p.dstnet, p.p.dststn);
+					fprintf (stderr, "[+%15.6f] *PIPE: to %3d.%3d              traffic from unknown AUN source.\n", timediffstart(), p.p.dstnet, p.p.dststn);
 				else
 				{
 					p.p.srcnet = network[from_found].network;
@@ -3486,7 +3532,7 @@ Options:\n\
 						write (network[netptr].pipewritesocket, &delivery, r+4+2);
 					}
 					else
-						fprintf (stderr, "*PIPE: to %3d.%3d from %3d.%3d traffic received on UDP for named pipe but pipe not connected\n", p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn );
+						fprintf (stderr, "[+%15.6f] *PIPE: to %3d.%3d from %3d.%3d traffic received on UDP for named pipe but pipe not connected\n", timediffstart(), p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn );
 				}
 
 			}
@@ -3533,7 +3579,7 @@ Options:\n\
 						snprintf(writerfilename, 249, "%s.frombridge", network[fd_ptr[pset[realfd].fd]].named_pipe_filename);
 
 						network[fd_ptr[pset[realfd].fd]].pipewritesocket = open(writerfilename, O_WRONLY | O_NONBLOCK | O_SYNC);
-						if (pkt_debug) fprintf (stderr, "*PIPE: to %3d.%3d from %3d.%3d traffic caused write pipe to open (normal) - fd %d\n", p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn, network[fd_ptr[pset[realfd].fd]].pipewritesocket);
+						if (pkt_debug) fprintf (stderr, "[+%15.6f] *PIPE: to %3d.%3d from %3d.%3d traffic caused write pipe to open (normal) - fd %d\n", timediffstart(), p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn, network[fd_ptr[pset[realfd].fd]].pipewritesocket);
 					}
 
 					/* This sends ACK & NAK that might arise from the named pipe - they can ignore it if they want */
@@ -3580,7 +3626,7 @@ Options:\n\
 	
 								network[stn_count].port = ntohs(src_address.sin_port);
 								from_found = stn_count;
-								if (pkt_debug) fprintf (stderr, "  DYN: Allocated station number %3d.%3d to incoming traffic from %d.%d.%d.%d:%d\n", network[stn_count].network, network[stn_count].station, 
+								if (pkt_debug) fprintf (stderr, "[+%15.6f]   DYN: Allocated station number %3d.%3d to incoming traffic from %d.%d.%d.%d:%d\n", timediffstart(), network[stn_count].network, network[stn_count].station, 
 									(ntohl(network[stn_count].s_addr.s_addr) & 0xff000000) >> 24,
 									(ntohl(network[stn_count].s_addr.s_addr) & 0xff0000) >> 16,
 									(ntohl(network[stn_count].s_addr.s_addr) & 0xff00) >> 8,
@@ -3604,7 +3650,7 @@ Options:\n\
 								
 								if (wired_eject)
 								{
-									if (pkt_debug) fprintf (stderr, "  DYN:%12s             Spoofing *bye to known wired fileservers...", "");
+									if (pkt_debug) fprintf (stderr, "[+%15.6f]   DYN:%12s             Spoofing *bye to known wired fileservers...", timediffstart(), "");
 	
 									for (netcount = 0; netcount < stations; netcount++)
 									{
@@ -3645,10 +3691,17 @@ Options:\n\
 						
 						if (p.p.aun_ttype == ECONET_AUN_ACK || p.p.aun_ttype == ECONET_AUN_IMMREP || p.p.aun_ttype == ECONET_AUN_NAK)
 						{
+							struct timeval now;
+
+							gettimeofday(&now, 0);
+
 							if (p.p.aun_ttype == ECONET_AUN_NAK)
 							{
-								if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X seq 0x%08X NAK received!\n",
-									p.p.srcnet, p.p.srcstn, p.p.dstnet, p.p.dststn, r+4, p.p.seq);
+	
+								if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: to %3d.%3d from %3d.%3d len 0x%04X seq 0x%08X NAK received!\n",
+									timediffstart(),
+									p.p.srcnet, p.p.srcstn, p.p.dstnet, p.p.dststn, 
+									r+4, p.p.seq);
 
 								/* If the NAK seq is the one on the right queue head, then increment its tx_count (artificially), multiply its interpacket gap by 1.25, and let nature take its course on the retransmit */
 /* DISUSED
@@ -3658,8 +3711,10 @@ Options:\n\
 							}
 							else if (p.p.seq == network[from_found].ackimm_seq_awaited) // Found the ACK or IMMREP sequence this host was supposed to produce
 							{
-								if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X seq 0x%08X found ack/imm rep which was awaited\n",
-									p.p.srcnet, p.p.srcstn, p.p.dstnet, p.p.dststn, r+4, p.p.seq);
+								if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: to %3d.%3d from %3d.%3d len 0x%04X seq 0x%08X found ack/imm rep which was awaited\n",
+									timediffstart(),
+									p.p.srcnet, p.p.srcstn, p.p.dstnet, p.p.dststn, 
+									r+4, p.p.seq);
 
 								network[from_found].ackimm_seq_awaited = 0;
 								network[from_found].aun_last_tx.tv_sec = network[from_found].aun_last_rx.tv_usec = 0;
@@ -3685,7 +3740,7 @@ Options:\n\
 	
 					}
 					else	
-						if (pkt_debug) fprintf (stderr, "ERROR: UDP packet received on FD %d; From%s found, To%s found (pointer %d)!\n", pset[realfd].fd, ((from_found != 0xffff) ? "" : " not"), ((to_found != 0xffff) ? "" : " not"), to_found);
+						if (pkt_debug) fprintf (stderr, "[+%15.6f] ERROR: UDP packet received on FD %d; From%s found, To%s found (pointer %d)!\n", timediffstart(), pset[realfd].fd, ((from_found != 0xffff) ? "" : " not"), ((to_found != 0xffff) ? "" : " not"), to_found);
 				}
 			}
 		
@@ -3711,7 +3766,7 @@ Options:\n\
 
 			gettimeofday(&now, 0);
 
-			if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X seq 0x%08X retrieved from wire queue at %p (tx count %02d) ", 
+			if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: to %3d.%3d from %3d.%3d len 0x%04X seq 0x%08X retrieved from wire queue at %p (tx count %02d) ", timediffstart(),
 				wire_head->p->p.dstnet,
 				wire_head->p->p.dststn,
 				wire_head->p->p.srcnet,
@@ -3831,13 +3886,14 @@ Options:\n\
 		{
 			int count;
 
-			//if (queue_debug) fprintf (stderr, "QUEUE: Attempting to find AUN output entries\n");
+			struct timeval now;
+
+			//if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: Attempting to find AUN output entries\n", timediffstart());
 
 			for (count = 0; count < stations; count++)
 			{
 				if ((network[count].type & ECONET_HOSTTYPE_TDIS) && (network[count].aun_head)) // This is an AUN host and it has queued packets
 				{
-					struct timeval now;
 					//long tx_diff, rx_diff, time_since_last_tx;
 					long tx_diff, rx_diff;
 
@@ -3847,20 +3903,20 @@ Options:\n\
 					rx_diff = timediffmsec(&(network[count].aun_last_rx), &now); // Used so that when we want to transmit, it is not too close to the last received packet from this host, because it seems to cause problems
 
 
-					//if (queue_debug) fprintf (stderr, "QUEUE: Examining queue on AUN host at network[%d]\n", count);
+					//if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: Examining queue on AUN host at network[%d]\n", timediffstart(), count);
 
 					// First, if there is a sequence number this host is waiting for an ACK on and this packet is not an IMMREP with that sequence number, don't send anything - just move on, unless it's timed out.
 
 					if ((network[count].ackimm_seq_tosend) && rx_diff > 2000) // Ditch the last RX / Seq tracker
 					{
-						if (queue_debug) fprintf (stderr, "QUEUE: Last receipt from station > 2s ago - dumping ACK tracker (seq %08X) for packets to network[%d]\n", network[count].ackimm_seq_tosend, count);
+						if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: Last receipt from station > 2s ago - dumping ACK tracker (seq %08X) for packets to network[%d]\n", timediffstart(), network[count].ackimm_seq_tosend, count);
 						network[count].aun_last_rx.tv_sec = network[count].aun_last_rx.tv_usec = 0;
 						network[count].ackimm_seq_tosend = 0;
 					}
 
 					if (network[count].ackimm_seq_tosend && (network[count].aun_head->p->p.aun_ttype != ECONET_AUN_IMMREP || network[count].aun_head->p->p.seq != network[count].ackimm_seq_tosend)) // If this host is waiting for an IMM REP, and this one either isn't one of those, or isn't the right sequence number, then ignore it.
 					{
-						//if (queue_debug) fprintf (stderr, "QUEUE: network[%d] expecting sequence 0x%08X but this wasn't it\n", count, network[count].ackimm_seq_tosend);
+						//if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: network[%d] expecting sequence 0x%08X but this wasn't it\n", timediffstart(), count, network[count].ackimm_seq_tosend);
 						continue; // Next host please!
 					}
 
@@ -3870,7 +3926,7 @@ Options:\n\
 					{
 						if (tx_diff > 0 && tx_diff < ECONET_AUN_ACK_WAIT_TIME)
 						{
-							if (queue_debug) fprintf (stderr, "QUEUE: network[%d] hasn't yet acked sequence 0x%08X - skipping\n", count, network[count].ackimm_seq_awaited);
+							if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: network[%d] hasn't yet acked sequence 0x%08X - skipping\n", timediffstart(), count, network[count].ackimm_seq_awaited);
 							continue;
 						}
 
@@ -3882,7 +3938,8 @@ Options:\n\
 					if (network[count].aun_head) // This might have broken things && (network[count].ackimm_seq_awaited == 0 || network[count].ackimm_seq_awaited == network[count].aun_head->p->p.seq)) // If we have a queue for this host and either we aren't waiting for a particular ACK to come back OR the one we ARE waiting for matches the packet on the queue head so that we might need to retransmit it...
 					{
 						// DISUSED time_since_last_tx = timediffmsec(&(network[count].aun_head->last_tx_attempt), &(now));
-						if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d len 0x%04X type 0x%02X seq 0x%08X retrieved from network[%d] queue at %p (tx count %02X)", // DISUSED time since last tx %ld", //, next tx interval %ld: %s ",  
+						if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: to %3d.%3d from %3d.%3d len 0x%04X type 0x%02X seq 0x%08X retrieved from network[%d] queue at %p (tx count %02X)", // DISUSED time since last tx %ld", //, next tx interval %ld: %s ",  
+							timediffstart(),
 							network[count].aun_head->p->p.dstnet,
 							network[count].aun_head->p->p.dststn,
 							network[count].aun_head->p->p.srcnet,
@@ -3998,14 +4055,14 @@ Options:\n\
 		{
 			struct timeval now;
 
-			if (queue_debug) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d length 0x%04X retrieved from trunk queue\n", 
+			gettimeofday(&now, 0);
+
+			if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: to %3d.%3d from %3d.%3d length 0x%04X retrieved from trunk queue\n", timediffstart(),
 				trunk_head->p->p.dstnet,
 				trunk_head->p->p.dststn,
 				trunk_head->p->p.srcnet,
 				trunk_head->p->p.srcstn,
 				trunk_head->size);
-
-			gettimeofday(&now, 0);
 
 			if (timediffmsec(&(trunk_head->tstamp), &now) < 2000) // Dump traffic older than 2s
 				aun_trunk_send(trunk_head->p, trunk_head->size);
@@ -4021,7 +4078,7 @@ Options:\n\
 		{
 			if (network[s].servertype & ECONET_SERVER_FILE) 
 			{
-				//if (fs_noisy) fprintf(stderr, "   FS: Garbage collect on server %d\n", network[s].fileserver_index);
+				//if (fs_noisy) fprintf(stderr, "[+%15.6f]    FS: Garbage collect on server %d\n", timediffstart(), network[s].fileserver_index);
 				fs_garbage_collect(network[s].fileserver_index);
 			}
 		
