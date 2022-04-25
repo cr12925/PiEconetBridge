@@ -1388,7 +1388,6 @@ unexpected_scout:
 								printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): AUN: Read final ACK from %d.%d, after scout with port %02x, ctrl %02x. Flag transmit success.\n", 
 									econet_pkt_rx.d.p.srcnet, econet_pkt_rx.d.p.srcstn, aun_tx.d.p.port, aun_tx.d.p.ctrl);
 #endif
-							//econet_data->tx_status = ECONET_TX_SUCCESS;	
 							econet_set_tx_status(ECONET_TX_SUCCESS);
 						}
 
@@ -1561,7 +1560,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 	{
 		printk (KERN_INFO "ECONET-GPIO: IRQ in Test mode - how did that happen?");
 	}
-	else if ((sr2 & ECONET_GPIO_S2_RX_IDLE) && (econet_data->initialized) && (econet_data->aun_mode) && (econet_get_aunstate() == EA_W_READFINALACK)) // Line idle whilst waiting for final ack on a write = handshakefail
+	else if ((sr2 & ECONET_GPIO_S2_RX_IDLE) && !(sr2 & ECONET_GPIO_S2_VALID) && (econet_data->initialized) && (econet_data->aun_mode) && (econet_get_aunstate() == EA_W_READFINALACK)) // Line idle whilst waiting for final ack on a write = handshakefail. Don't match on frame valid in case we're getting FV & LINE IDLE in same IRQ, because we'll miss a valid frame then
 	{
 
 		unsigned short aun_state, chip_state, tx_status;
@@ -1569,14 +1568,16 @@ irqreturn_t econet_irq(int irq, void *ident)
 		chip_state = econet_get_chipstate();
 		aun_state = econet_get_aunstate();
 		tx_status = econet_get_tx_status();
-		printk (KERN_INFO "ECONET-GPIO: econet_irq(): Line idle IRQ waiting for final ACK - Handshake failed. aun state = %d, chip state = %d, tx_status = 0x%02x, rx ptr=%02X - Experimentally not resetting state machine\n", aun_state, chip_state, tx_status, econet_pkt_rx.ptr);	
-/*
+#ifdef ECONET_GPIO_DEBUG_LINEIDLE
+		printk (KERN_INFO "ECONET-GPIO: econet_irq(): Line idle IRQ waiting for final ACK - Handshake failed. aun state = %d, chip state = %d, tx_status = 0x%02x, rx ptr=%02X, sr1=0x%02X, sr2=%02X\n", aun_state, chip_state, tx_status, econet_pkt_rx.ptr, sr1, sr2);	
+#endif
+/* Experimentally, let's not do this. The ACK receiver should detect a scout.  See if this fixes the problems with RiscOS. We do seem to get a lot of RX_IDLE IRQs when waiting for final ACK - often followed shortly thereafter by the ACK! (Actually what it will do is either (i) if the scout is > 0.8s after we sent the data portion, it'll go back to IDLE and assume it's waiting for a Scout; otherwise (ii) if what it gets is not the ACK it is expecting it will ignore it, and the sending station will have to have another go - either way, if an ACK turns up in any kind of timely fashion we'll pick it up.
 		econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
 		econet_set_aunstate(EA_IDLE);
 */
 		econet_set_read_mode();
 	}
-	else if ((sr2 & ECONET_GPIO_S2_RX_IDLE) && (econet_data->initialized)) 
+	else if ((sr2 & ECONET_GPIO_S2_RX_IDLE) && !(sr2 & ECONET_GPIO_S2_VALID) && (econet_data->initialized)) 
 	{
 
 		unsigned short aun_state, chip_state, tx_status;
@@ -1590,7 +1591,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 #ifdef ECONET_GPIO_DEBUG_LINEIDLE
 		if (econet_data->aun_mode && aun_state != EA_IDLE)	
-			printk (KERN_INFO "ECONET-GPIO: econet_irq(): Line idle IRQ - aun state = %d, chip state = %d, tx_status = 0x%02x, rx ptr=%02X\n", aun_state, chip_state, tx_status, econet_pkt_rx.ptr);	
+			printk (KERN_INFO "ECONET-GPIO: econet_irq(): Line idle IRQ waiting for final ACK - Handshake failed. aun state = %d, chip state = %d, tx_status = 0x%02x, rx ptr=%02X, sr1=0x%02X, sr2=%02X\n", aun_state, chip_state, tx_status, econet_pkt_rx.ptr, sr1, sr2);	
 		else if ((!econet_data->aun_mode) && (chip_state != EM_TEST && chip_state != EM_IDLE && chip_state != EM_IDLEINIT))
 			printk (KERN_INFO "ECONET-GPIO: econet_irq(): Line idle IRQ - chip state = %d\n",  chip_state);
 #endif
@@ -1612,13 +1613,13 @@ irqreturn_t econet_irq(int irq, void *ident)
 						econet_set_tx_status(ECONET_TX_NOTSTART);
 						break;
 					case EA_W_READFIRSTACK:
-					case EA_W_READFINALACK:
 					case EA_I_READREPLY:
 						econet_set_tx_status(ECONET_TX_NECOUTEZPAS);
 						break;
 					case EA_R_READDATA:
 					case EA_R_WRITEFIRSTACK:
 					case EA_R_WRITEFINALACK:
+					case EA_W_READFINALACK:
 						econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
 						break;
 
@@ -1643,13 +1644,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 			unsigned short aun_state;
 
-/*
-			// See what the TX status is
-
-			if (econet_get_tx_status() != ECONET_TX_SUCCESS) // Go back to idle if TX failed
-				econet_set_aunstate(EA_IDLE);
-	
-*/
 			// Commented 25.07.21
 			econet_data->aun_last_tx = ktime_get_ns(); // Used to check if we have fallen out of bed on receiving a packet
 
@@ -1697,11 +1691,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 				case EA_R_WRITEFINALACK: // Just written final ACK after a data packet - go back to IDLE & dump received packet to userspace
 				{
 					
-					//if (kfifo_is_empty(&econet_rx_queue))
-					{
-						kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
-						wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
-					}
+					kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
+					wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
 					econet_set_aunstate(EA_IDLE);
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "ECONET-GPIO: econet_irq(): AUN: Final ACK to %d.%d, packet delivered to userspace\n", aun_rx.d.p.srcnet, aun_rx.d.p.srcstn);
@@ -1752,19 +1743,15 @@ irqreturn_t econet_irq(int irq, void *ident)
 			kfifo_reset(&econet_rx_queue);
 		}
 
-		// Straight back to IDLEINIT
-		// Checking for TDRA (i.e. frame complete) here seemed to do nothing of any use - just go back to IDLEINIT)
-		//if (sr1 & ECONET_GPIO_S1_TDRA) // In this mode, this means 'Frame Complete'
-		//{
-			econet_set_chipstate(EM_IDLEINIT);
-			econet_write_cr(ECONET_GPIO_CR2, C2_READ);
-			econet_write_cr(ECONET_GPIO_CR1, C1_READ);
-		//}
+		econet_set_chipstate(EM_IDLEINIT);
+		econet_write_cr(ECONET_GPIO_CR2, C2_READ);
+		econet_write_cr(ECONET_GPIO_CR1, C1_READ);
 		
 	}
 	// Are we either mid-read, or idle (in which case, this will be a receiver IRQ)
 	else if (econet_get_chipstate() == EM_READ || (sr2 & (ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_AP)) || (sr1 & ECONET_GPIO_S1_RDA)) // In case we get address present or data or are already in read mode
 		econet_irq_read();
+/*
 	else if (sr2 & ECONET_GPIO_S2_RX_IDLE) // We seem to occasionally get RX IDLE interrupts when preparing to transmit. We'll ignore them.
 	{
 		int tmp_status;
@@ -1779,6 +1766,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 			econet_rx_cleardown();
 		}
 	}
+*/
 	else if (econet_get_chipstate() == EM_IDLE || econet_get_chipstate() == EM_IDLEINIT) // We seem to get these when the chip gets its pants tangled. (With sr1=0 - but we've handled reading and writing above, so just clear status)
 	{
 		if (econet_get_chipstate() == EM_IDLEINIT)
@@ -1791,18 +1779,9 @@ irqreturn_t econet_irq(int irq, void *ident)
 		else
 			econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Just clear status
 	}
-	else if (econet_get_chipstate() == EM_IDLEINIT) // Not clear we ever get here given the statement above!
-	{
-		econet_set_chipstate(EM_IDLE); 
-		if (sr2 & ~(ECONET_GPIO_S2_AP | ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_RDA)) // Errors
-		{
-			econet_rx_cleardown();
-		}
-		else	econet_write_cr(ECONET_GPIO_CR2, C2_READ);
-	}
 	// Otherwise we are in test mode (which might not exist any more) and we shouldn't be getting IRQs at all!
 	else
-		printk (KERN_INFO "ECONET-GPIO: IRQ received in Test Mode\n");
+		printk (KERN_INFO "ECONET-GPIO: IRQ received in unknown state - sr1=0x%02X, sr2=0x%02X\n", sr1, sr2);
 
 	/* And if the mode is anything else, just abandon */
 

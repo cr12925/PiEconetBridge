@@ -3389,6 +3389,8 @@ Options:\n\
 				if (rx.p.dstnet == 0xff && rx.p.dststn == 0xff)
 					rx.p.aun_ttype = ECONET_AUN_BCAST;
 
+/* Disabled - see if this is causing our double-linked list problem!
+
 				// Sequencing Fix: If there is anything in the wire output queue destined for this station from a station to which this packet was addressed, get rid of it - we have probably managed to transmit a packet which we thought had failed to transmit
 				if (1)
 				{
@@ -3428,6 +3430,7 @@ Options:\n\
 
 				}
 
+*/
 				aun_send_internal (&rx, r, 0);
 
 			}
