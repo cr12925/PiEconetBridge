@@ -2311,6 +2311,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 							snprintf((char * restrict) reply.p.data, 7, "%6s", network[count].printers[printer].name);
 							aun_send (&reply, 18);
 							if (printer == 0 && pkt_debug) fprintf (stderr, " - responded with printer list\n");
+							printer++;
 						}
 
 					}
@@ -2323,7 +2324,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 		if (bridge_query && (a->p.port == 0x9C) && (a->p.ctrl == 0x80 || a->p.ctrl == 0x81) && (source >= 0)) // bridge reset/update broadcast
 			econet_bridge_process (a, packlen, source);
 
-		else if (bridge_query && (a->p.port == 0x9c) && (!strncmp("BRIDGE", (const char *) a->p.data, 6)) && localnet && (network[econet_ptr[a->p.srcnet][a->p.srcstn]].type & (ECONET_HOSTTYPE_TWIRE | ECONET_HOSTTYPE_TNAMEDPIPE)))
+		else if (bridge_query && (a->p.port == 0x9c) && (!strncasecmp("BRIDGE", (const char *) a->p.data, 6)) && localnet && (network[econet_ptr[a->p.srcnet][a->p.srcstn]].type & (ECONET_HOSTTYPE_TWIRE | ECONET_HOSTTYPE_TNAMEDPIPE)))
 		{
 			short query_net, reply_port;
 			struct timeval now;
@@ -3056,7 +3057,7 @@ int main(int argc, char **argv)
 	int dump_station_table = 0;
 	short fs_bulk_traffic = 0;
 	int last_active_fd = 0;
-	int poll_timeout; // Used in order to reset the chip if we send an immediate to an AUN station and it doesn't reply
+	int poll_timeout; // Used in order to reset the chip if we send an immediate to an AUN or NAMED PIPE station and it doesn't reply
 
 	unsigned short from_found, to_found; // Used to see if we know a station or not
 
@@ -3335,14 +3336,14 @@ Options:\n\
 	while (wire_head || aun_queued || trunk_head || poll((struct pollfd *)&pset, pmax+(wire_enabled ? 1 : 0), poll_timeout)) // AUN queued packets, wire queued packets, or something arriving. The 1 is because we now have a timeout on poll() in case we need to reset the module to make sure that immediates to AUN stations which are not present doesn't cause a hang!
 	{
 	
-		//fprintf (stderr, "[+%15.6f] DEBUG: wire_haed = %p, aun_queued = %ld, trunk_head = %p\n", timediffstart(), wire_head, aun_queued, trunk_head);
+		if (queue_debug) fprintf (stderr, "[+%15.6f] DEBUG: Start loop: wire_haed = %p, aun_queued = %ld, trunk_head = %p, poll_timeout = %d\n", timediffstart(), wire_head, aun_queued, trunk_head, poll_timeout);
 
 		if (wire_head || aun_queued || trunk_head) // Do a poll just in case something turns up, but do it quickly
 			poll((struct pollfd *) &pset, pmax+(wire_enabled ? 1 : 0), 10);
 
 		if (wire_enabled && (pset[pmax].revents & POLLIN)) // Let the wire take a back seat sometimes
 		{
-			int r;
+			int r, lensent;
 
 
 			// Collect the packet
@@ -3431,7 +3432,15 @@ Options:\n\
 				}
 
 */
-				aun_send_internal (&rx, r, 0);
+				lensent = aun_send_internal (&rx, r, 0);
+
+				if ((rx.p.aun_ttype == ECONET_AUN_IMM)) // Failed immediate - reset the module (otherwise it'll be stuck waiting for a reply)
+				{
+					if (lensent != r) // Failed Imm transmit (e.g. to pipe)
+						ioctl(econet_fd, ECONETGPIO_IOC_READMODE);
+					else // Set poll timeout to 500 in case we hear nothing
+						poll_timeout = 500;
+				}
 
 			}
 		}
@@ -3525,12 +3534,6 @@ Options:\n\
 
 				policy = trunk_xlate_fw(&p, count, 0); // 0 = inbound translation && firewalling
 
-// Disabled - use aun_send_internal
-/*
-				if ((p.p.aun_ttype == ECONET_AUN_BCAST) && from_found != 0xffff) // Dump to local in case it's bridge stuff - but only if we knew where it came from
-					econet_handle_local_aun(&p, r, from_found);
-*/
-		
 				if (p.p.aun_ttype == ECONET_AUN_BCAST && from_found != 0xffff)
 					aun_send_internal (&p, r, from_found);
 
@@ -3540,6 +3543,13 @@ Options:\n\
 				{
 					if (p.p.aun_ttype == ECONET_AUN_DATA && (econet_ptr[p.p.dstnet][p.p.dststn] != -1)) // DATA, and it's going to a known host (can't be AUN because AUN hosts don't talk to trunks) - Proxy acknowledge, even for Named Pipes
 						aun_acknowledge(&p, ECONET_AUN_ACK);
+
+					if ((econet_ptr[p.p.dstnet][p.p.dststn] != -1) && (network[econet_ptr[p.p.dstnet][p.p.dststn]].type & ECONET_HOSTTYPE_TNAMEDPIPE) && (p.p.aun_ttype == ECONET_AUN_IMM)) // Immediate request going to a named pipe
+					{
+						if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: Setting poll timeout to 500ms - Immediate sent to named pipe\n", timediffstart());
+						poll_timeout = 500; // Shorten the poll timeout so we reset the module if no reply emerges to send.
+					}
+
 					aun_send(&p, r);
 				}
 			}
@@ -3580,6 +3590,12 @@ Options:\n\
 						delivery.length_high = ((r+4) >> 8) & 0xff;
 						
 						write (network[netptr].pipewritesocket, &delivery, r+4+2);
+
+						if (p.p.aun_ttype == ECONET_AUN_IMM) // Immediate request going to a named pipe
+						{
+							if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: Setting poll timeout to 500ms - Immediate sent to named pipe\n", timediffstart());
+							poll_timeout = 500; // Shorten the poll timeout so we reset the module if no reply emerges to send.
+						}
 					}
 					else
 						fprintf (stderr, "[+%15.6f] *PIPE: to %3d.%3d from %3d.%3d traffic received on UDP for named pipe but pipe not connected\n", timediffstart(), p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn );
@@ -3630,6 +3646,12 @@ Options:\n\
 
 						network[fd_ptr[pset[realfd].fd]].pipewritesocket = open(writerfilename, O_WRONLY | O_NONBLOCK | O_SYNC);
 						if (pkt_debug) fprintf (stderr, "[+%15.6f] *PIPE: to %3d.%3d from %3d.%3d traffic caused write pipe to open (normal) - fd %d\n", timediffstart(), p.p.dstnet, p.p.dststn, p.p.srcnet, p.p.srcstn, network[fd_ptr[pset[realfd].fd]].pipewritesocket);
+					}
+
+					if (p.p.aun_ttype == ECONET_AUN_IMM) // Immediate request going to a named pipe
+					{
+						if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: Setting poll timeout to 500ms - Immediate sent to named pipe\n", timediffstart());
+						poll_timeout = 500; // Shorten the poll timeout so we reset the module if no reply emerges to send.
 					}
 
 					/* This sends ACK & NAK that might arise from the named pipe - they can ignore it if they want */
@@ -3791,6 +3813,12 @@ Options:\n\
 /* DISABLED. We now acknowledge all incoming AUN data because otherwise we get too rapid retransmits on a busy Econet wire 
 						if (p.p.aun_ttype == ECONET_AUN_DATA && (network[to_found].type & ECONET_HOSTTYPE_TNAMEDPIPE || network[to_found].type & ECONET_HOSTTYPE_TLOCAL)) // If AUN was sending to local or named pipe, we'll do the ACK (wire and trunk do their own)
 */
+						if ((network[to_found].type & ECONET_HOSTTYPE_TNAMEDPIPE) && (p.p.aun_ttype == ECONET_AUN_IMM)) // Immediate request going to a named pipe
+						{
+							if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: Setting poll timeout to 500ms - Immediate sent to named pipe\n", timediffstart());
+							poll_timeout = 500; // Shorten the poll timeout so we reset the module if no reply emerges to send.
+						}
+
 						if (p.p.aun_ttype == ECONET_AUN_DATA)
 							aun_acknowledge(&p, ECONET_AUN_ACK);
 	
@@ -3818,7 +3846,7 @@ Options:\n\
 			struct timeval now;
 			//long tx_diff = 0, rx_diff = 0, time_since_last_tx;
 			long time_since_last_tx;
-			short station;
+			//short station;
 
 			gettimeofday(&now, 0);
 
@@ -3832,21 +3860,8 @@ Options:\n\
 				wire_head,
 				wire_head->tx_count);
 
-			station = econet_ptr[wire_head->p->p.dstnet][wire_head->p->p.dststn];
+			//station = econet_ptr[wire_head->p->p.dstnet][wire_head->p->p.dststn];
 			
-// Presently unused
-			if (station != -1)
-			{
-/* Disused in this location
-				tx_diff = timediffmsec(&(network[station].aun_last_tx), &now); // Used so we don't send things too quickly to RiscOS in case it NAKs them erroneously
-				rx_diff = timediffmsec(&(network[station].aun_last_rx), &now); // Used so that when we want to transmit, it is not too close to the last received packet from this host, because it seems to cause problems
-*/
-			}
-/* Disused
-			else	tx_diff = rx_diff = 1000000; // Rogue high value
-*/
-
-
 			time_since_last_tx = timediffmsec(&(wire_head->last_tx_attempt), &now);
 
 			//if (queue_debug) fprintf (stderr, "time_since_last_tx = %ld ms, interval %ld ms - %s ", time_since_last_tx, wire_head->next_tx_interval, (time_since_last_tx >= wire_head->next_tx_interval ? "Ok to transmit..." : "Deferred..."));
@@ -3871,25 +3886,8 @@ Options:\n\
 					// Update last TX attempt time
 					gettimeofday (&(wire_head->last_tx_attempt), 0);
 
-					if (queue_debug) fprintf (stderr, "Sent ");
+					if (queue_debug) fprintf (stderr, "Sent\n");
 
-					// Update last tx if we have an entry - Presently unused
-
-/* Disused
-					if ((station != -1) && (wire_head->p->p.aun_ttype == ECONET_AUN_DATA))
-						gettimeofday(&(network[station].aun_last_tx), 0);
-					else // Just zero out last tx - we can send what we like
-						network[station].aun_last_tx.tv_sec = network[station].aun_last_tx.tv_usec = 0;
-*/
-
-					if (is_aun(wire_head->p->p.srcnet, wire_head->p->p.srcstn) && wire_head->p->p.aun_ttype == ECONET_AUN_DATA) // Send ACK if we've just successfully sent a DATA packet and the sender is AUN
-					{
-/* Disabled because we ack an AUN on receipt now to avoid rapid retransmits from BeebEm
-						if (queue_debug) fprintf (stderr, " AUN ack sent ");
-						aun_acknowledge(wire_head->p, ECONET_AUN_ACK);	
-*/
-					}
-					if (queue_debug) fprintf (stderr, "\n");
 					econet_general_dumphead(&wire_head, &wire_tail);
 					wire_tx_errors = 0;
 				}
@@ -3924,10 +3922,6 @@ Options:\n\
 			else	
 			{
 				if (queue_debug) fprintf (stderr, "DUMPED - old or tx count exceeded\n");
-/*
-				if (wire_head->tx_count >= ECONET_WIRE_MAX_TX) // Reset the chip just in case
-					ioctl(econet_fd, ECONETGPIO_IOC_READMODE);
-*/
 
 				econet_general_dumphead(&wire_head, &wire_tail);
 				
@@ -4045,12 +4039,6 @@ Options:\n\
 							continue;
 						}
 						else if ( 	
-/* disabled
-								(
-								((tx_diff > ECONET_AUN_INTERPACKET_GAP) && (rx_diff > ECONET_AUN_INTERPACKET_GAP)) || (usleep(ECONET_AUN_INTERPACKET_GAP * 1000))
-								) && 
-							(timediffmsec(&(network[count].aun_head->last_tx_attempt), &now) > network[count].aun_head->next_tx_interval)  && // Read to transmit yet?
-*/
 							(tx_diff > ECONET_AUN_INTERPACKET_GAP) && // Impose only a transmission interpacket gap (presently 0.5s) NB tx_diff is calculated by reference to last tx attempt, which will be the epoch for untransmitted packets
 							!gettimeofday(&(network[count].aun_head->last_tx_attempt), 0) && // 0 return on success - Reset last_tx_attempt to now
 							econet_write_general(network[count].aun_head->p, network[count].aun_head->size) == network[count].aun_head->size
@@ -4067,7 +4055,10 @@ Options:\n\
 								gettimeofday(&(network[count].aun_last_tx), 0);
 					
 								if (network[count].aun_head->p->p.aun_ttype == ECONET_AUN_IMM) // If we just sent an immediate to an AUN host, set the poll_timeout
+								{
+									if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: Setting poll timeout to 500ms - Immediate sent to named pipe\n", timediffstart());
 									poll_timeout = 500;
+								}
 							}
 							else // Wasn't data or immediate - just zero out the last_tx field
 								network[count].aun_last_tx.tv_sec = network[count].aun_last_tx.tv_usec = 0;
@@ -4149,13 +4140,25 @@ Options:\n\
 			pset[s].events = POLLIN;
 			pset[s].revents = 0; // Need to re-set because we might go round the loop because of the cache not poll()
 		}
-		
+
 		start_fd = last_active_fd;
+
+		if (queue_debug) fprintf (stderr, "[+%15.6f] DEBUG: End loop: wire_haed = %p, aun_queued = %ld, trunk_head = %p, poll_timeout = %d\n", timediffstart(), wire_head, aun_queued, trunk_head, poll_timeout);
 	}
 
+	
+	if (queue_debug) fprintf (stderr, "[+%15.6f] DEBUG: poll() timer expired. Resetting module & starting again.\n", timediffstart());
 
 	ioctl(econet_fd, ECONETGPIO_IOC_READMODE); // Reset the module - we have got here because an Immediate to AUN went unresponded to, so the chip will not be in read mode any more.
 
+	// Reset our poll structure
+	for (s = 0; s <= pmax; s++)
+	{
+		pset[s].events = POLLIN;
+		pset[s].revents = 0; // Need to re-set because we might go round the loop because of the cache not poll()
+	}
+	
+	start_fd = last_active_fd;
    }
 }
 

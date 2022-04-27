@@ -5489,7 +5489,7 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn)
 
 	if (fs_noisy) fprintf (stderr, "[+%15.6f] CACHE: to %3d.%3d from %3d.%3d Sending packet from __pq %p, length %04X\n", timediffstart(), net, stn, fs_stations[server].net, fs_stations[server].stn, l->pq_head, l->pq_head->len);
 
-	if (fs_aun_send(l->pq_head->packet, server, l->pq_head->len, l->net, l->stn) <= 0) // If this fails, dump the rest of the enqueued traffic
+	if ((fs_aun_send(l->pq_head->packet, server, l->pq_head->len, l->net, l->stn) <= 0)) // If this fails, dump the rest of the enqueued traffic
 	{
 		if (fs_noisy) fprintf (stderr, "[+%15.6f] CACHE: fs_aun_send() failed in fs_load_sequeue() - dumping rest of queue\n", timediffstart());
 		fs_enqueue_dump(l); // Also closes file

@@ -155,6 +155,7 @@ void econet_set_dir(short d)
 }
 
 #define econet_write_fifo(x) econet_write_cr(3, (x))
+#define econet_write_last(x) econet_write_cr(4, (x))
 
 /* econet_write_cr - write value to ADLC control register
  */
@@ -791,9 +792,10 @@ void econet_finish_tx(void)
 #endif
 	/* Tell the 68B54 we've finished so it can end the frame */
 	econet_set_chipstate(EM_WRITE_WAIT);
-	econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_EOF);
-	econet_get_sr();
+	//econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_EOF);
+	econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_TXLAST | ECONET_GPIO_C2_FC | ECONET_GPIO_C2_FLAGIDLE | ECONET_GPIO_C2_PSE); // No RX status reset
 #ifdef ECONET_GPIO_DEBUG_TX
+	econet_get_sr();
 	printk (KERN_INFO "ECONET-GPIO: econet_finish_tx(): SR after C2_WRITE_EOF: SR1 = 0x%02x, SR2 = 0x%02x\n", sr1, sr2);
 #endif
 
@@ -939,13 +941,17 @@ void econet_irq_write(void)
 				econet_pkt_tx.length = 0;
 				return;
 			}
+			else
+			{
 
+				/* Query whether this is necessary - possible TDRA is self-resetting */
+				//econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_CLR_TX_STATUS |
+					//ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE);
+				econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_CLR_TX_STATUS |
+					ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE);
+			}
 
 			byte_counter++;
-
-			/* Query whether this is necessary - possible TDRA is self-resetting */
-			econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_CLR_TX_STATUS |
-				ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE);
 
 		}
 
@@ -2217,6 +2223,8 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 #endif
 			econet_adlc_cleardown(0); // 0 = not in IRQ
 			econet_set_read_mode(); // Required in addition to the cleadown, because this sets the ADLC up to read, where as cleardown doesn't.
+			if (econet_data->aun_mode)
+				econet_set_aunstate(EA_IDLE);
 
 			break;
 		case ECONETGPIO_IOC_SET_STATIONS:
