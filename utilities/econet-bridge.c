@@ -3868,23 +3868,18 @@ Options:\n\
 				wire_head,
 				wire_head->tx_count);
 
-			//station = econet_ptr[wire_head->p->p.dstnet][wire_head->p->p.dststn];
-			
 			time_since_last_tx = timediffmsec(&(wire_head->last_tx_attempt), &now);
 
-			//if (queue_debug) fprintf (stderr, "time_since_last_tx = %ld ms, interval %ld ms - %s ", time_since_last_tx, wire_head->next_tx_interval, (time_since_last_tx >= wire_head->next_tx_interval ? "Ok to transmit..." : "Deferred..."));
 			if (queue_debug) fprintf (stderr, "time_since_last_tx = %ld ms, ", time_since_last_tx);
-			if (	/* Moved inside the IF ((wire_head->tx_count == 0) || (time_since_last_tx >= ECONET_WIRE_INTERPACKET_GAP)) && */ // No delay if first transmission, otherwise needs to be after the gap period
-				/*  && (tx_diff > ECONET_AUN_INTERPACKET_GAP) && (rx_diff > ECONET_AUN_INTERPACKET_GAP) */ 
-				/* && */ wire_head->tx_count < ECONET_WIRE_MAX_TX
-			) // we'll have a go at transmitting - assuming we have the right gap
+
+			if (wire_head->tx_count < ECONET_WIRE_MAX_TX) // we'll have a go at transmitting - assuming we have the right gap
 			{
 				int err;
 
 
 				if ((wire_head->tx_count > 0) && (time_since_last_tx < ECONET_WIRE_INTERPACKET_GAP)) // Leave it on the queue
 				{ 
-					if (queue_debug) fprintf (stderr, " - deferred (interpacket gap not expire)\n");	
+					if (queue_debug) fprintf (stderr, "- deferred (interpacket gap not expired)\n");	
 				}
 				else if (((wire_head->tx_count++ >= 0) && econet_write_wire(wire_head->p, wire_head->size, 0) == wire_head->size) || (ioctl(econet_fd, ECONETGPIO_IOC_TXERR) == 0)) // successful tx
 				{
@@ -3892,9 +3887,10 @@ Options:\n\
 					// Update last TX attempt time
 					gettimeofday (&(wire_head->last_tx_attempt), 0);
 
-					if (queue_debug) fprintf (stderr, "Sent\n");
+					if (queue_debug) fprintf (stderr, "- Sent\n");
 
-					if (pkt_debug && (wire_head->tx_count > 1)) fprintf (stderr, "QUEUE: to %3d.%3d from %3d.%3d seq 0x%08X econet wire took %d attempts\n",
+					if (pkt_debug && (wire_head->tx_count > 1)) fprintf (stderr, "[+%15.6f] QUEUE: to %3d.%3d from %3d.%3d seq 0x%08X econet wire took %d attempts\n",
+						timediffstart(),
 						wire_head->p->p.dstnet, wire_head->p->p.dststn,
 						wire_head->p->p.srcnet, wire_head->p->p.srcstn,
 						wire_head->p->p.seq,
@@ -3910,12 +3906,7 @@ Options:\n\
 
 					err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
 
-					if (pkt_debug) fprintf (stderr, "[%15.6f] QUEUE: to %3d.%3d from %3d.%3d seq 0x%08X econet wire abandoned - too many tries - ",
-						timediffstart(),
-						wire_head->p->p.dstnet, wire_head->p->p.dststn,
-						wire_head->p->p.srcnet, wire_head->p->p.srcstn,
-						wire_head->p->p.seq);
-					if (queue_debug || pkt_debug) fprintf (stderr, "TX FAIL - %s (0x%02X)\n", econet_strtxerr(-1 * err), err);
+					if (queue_debug) fprintf (stderr, "TX FAIL - %s (0x%02X)\n", econet_strtxerr(-1 * err), err);
 
 					if (err == ECONET_TX_HANDSHAKEFAIL) // Receiver not present
 						econet_general_dumphead(&wire_head, &wire_tail);
@@ -3938,7 +3929,13 @@ Options:\n\
 			}
 			else	
 			{
-				if (queue_debug) fprintf (stderr, "DUMPED - old or tx count exceeded\n");
+				if (pkt_debug) fprintf (stderr, "[+%15.6f] QUEUE: to %3d.%3d from %3d.%3d seq 0x%08X econet wire abandoned - too many tries - ",
+					timediffstart(),
+					wire_head->p->p.dstnet, wire_head->p->p.dststn,
+					wire_head->p->p.srcnet, wire_head->p->p.srcstn,
+					wire_head->p->p.seq);
+
+				if (pkt_debug || queue_debug) fprintf (stderr, "DUMPED - old or tx count exceeded\n");
 
 				econet_general_dumphead(&wire_head, &wire_tail);
 				
