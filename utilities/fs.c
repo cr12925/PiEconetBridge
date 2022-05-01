@@ -50,6 +50,11 @@
 // the ] as second character is a special location for that character - it loses its
 // special meaning as 'end of character class' so you can match on it.
 #define FSREGEX "[]\\*\\#A-Za-z0-9\\+_;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
+#define FS_LOAD_REGEX "/LOAD\\s+(\\S+)\\s+([0-9A-F]{1,8})?\\s*$/i"
+#define FS_SAVE_REGEX "/SAVE\\s+(\\S+)\\s+([0-9A-F]{1,8})\\s+(\\+?[0-9A-F]{1,8})\\s*([0-9A-F]{1,8}(\\s+[0-9A-F]{1,8})?)?\\s*$/i"
+
+regex_t fs_load_regex, fs_save_regex;
+short fs_loadsave_regex_initialized = 0;
 
 extern int aun_send (struct __econet_packet_aun *, int);
 
@@ -1842,6 +1847,17 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 	int portcount;
 	char regex[256];
 
+	if (!fs_loadsave_regex_initialized) // Listen very carefully, I shall say zis ernly wearnce...
+	{
+
+		if ((regcomp(&fs_load_regex, FS_LOAD_REGEX, REG_EXTENDED | REG_ICASE | REG_NEWLINE) != 0) || (regcomp(&fs_save_regex, FS_SAVE_REGEX, REG_EXTENDED | REG_ICASE | REG_NEWLINE) != 0))
+		{
+			fprintf (stderr, "ERROR: Unable to compile regular expression for *LOAD and *SAVE OSCLI (FSOp 0) commands - cannot initialize fileserver\n");
+			return 0;
+		}
+		else	fs_loadsave_regex_initialized = 1;
+
+	}
 
 // Seven bit bodge test harness
 
@@ -5594,22 +5610,30 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 	if (!fs_quiet) fprintf (stderr, "[+%15.6f]    FS:%12sfrom %3d.%3d %s %s\n", timediffstart(), "", net, stn, (loadas ? "RUN" : "LOAD"), command);
 
 	//if (!fs_normalize_path(server, active_id, command, active[server][active_id].current, &p) &&
-	if (!(result = fs_normalize_path(server, active_id, command, relative_to, &p)))
+	if (!(result = fs_normalize_path(server, active_id, command, relative_to, &p)) && !loadas) // Try and find the file first, but don't barf here if we are trying to *RUN it.
 	{
 
+/* This stops it searching the library!
 		if (loadas)
 			fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
 		else
-			fs_error(server, reply_port, net, stn, 0xD6, "Not found");
+*/
+		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
 		return;
 	}
 
 	if ((!result || (p.ftype == FS_FTYPE_NOTFOUND)) && loadas && !fs_normalize_path(server, active_id, command, active[server][active_id].lib, &p))   // Either in current, or lib if loadas set
 	{
+/* OLD code - doesn't need to differentiate between loaas and !loadas - see the if() statement above
 		if (loadas)
 			fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
 		else
 			fs_error(server, reply_port, net, stn, 0xD6, "Not found");
+		return;
+*/
+
+		// Just barf
+		fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
 		return;
 	}
 
@@ -6851,6 +6875,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			else if (!strncasecmp("I .", (const char *) command, 3)) fs_login(server, reply_port, net, stn, command + 3);
 			else if (fs_stn_logged_in(server, net, stn) < 0)
 				fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+/* insert here regex matches for LOAD, SAVE, parse them and return the right results */
 			else if ((!strncasecmp("CAT", (const char *) command, 3)) || (!strncmp(".", (const char *) command, 1)))
 			{
 
