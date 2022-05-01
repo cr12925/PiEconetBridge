@@ -5748,7 +5748,7 @@ void fs_getbyte(int server, unsigned char reply_port, unsigned char net, unsigne
 
 		h = fs_files[server][active[server][active_id].fhandles[handle].handle].handle;
 
-		if (!fs_quiet) fprintf (stderr, "[+%15.6f]    FS:%12sfrom %3d.%3d Get byte on channel %02x, cursor %04lX, ctrl seq is %s (stored: %02X, received: %02X)\n", timediffstart(), "", net, stn, handle, active[server][active_id].fhandles[handle].cursor,
+		if (fs_noisy) fprintf (stderr, "[+%15.6f]    FS:%12sfrom %3d.%3d Get byte on channel %02x, cursor %04lX, ctrl seq is %s (stored: %02X, received: %02X)\n", timediffstart(), "", net, stn, handle, active[server][active_id].fhandles[handle].cursor,
 			fs_check_seq(ctrl, active[server][active_id].fhandles[handle].sequence) ? "OK" : "WRONG", active[server][active_id].fhandles[handle].sequence, ctrl);
 
 		if (active[server][active_id].fhandles[handle].is_dir) // Directory handle
