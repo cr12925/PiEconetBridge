@@ -98,6 +98,17 @@ The system will require:
 	- A pre-existing functioning Econet (with clock) with a spare station
           port to connect to the hardware
 
+
+You will need to fix the clock on your Pi - i.e. it MUST NOT switch in and
+out of turbo mode. If you don't, then expect unreliability.
+
+In your /boot/config.txt file, set
+arm_freq=900
+force_turbo=1
+
+... and reboot. 900MHz is conservative. It'll probably work at a faster
+speed quite happily.
+
 WARNING - NO, REALLY, YOU SHOULD READ THIS!
 -------------------------------------------
 
@@ -124,20 +135,16 @@ matter of regret that I have not managed to do so. In particular:
 
 	- It probably does not handle AUN ACK and NAK quite the way it should.
 
-	- It does not use ..._probe to load the module when it probably ought
-	  to.
-
-	- It does not use the Device Tree when it really should. I can only say
-	  that I tried for a very long time to work out how to do that from a
-	  standing start, and I got a little way but became lost. I would be
-	  very pleased if anyone can explain.
-
 It is some time since I saw a kernel crash with this module, but you should be
 alive to the prospect that it might happen. If you use this on a production
 system that's doing something else, you have been warned!
 
 INSTALLATION
 ------------
+
+NB: Unless you have a v2 board AND you are one of the v2 board testers,
+please DO NOT attempt to use the material in the v2eeprom or dts directories,
+nor should you do anything that is in the 'EEPROM' file.
 
 1. Install your kernel headers. On PiOS that requires the following (prepended
    by 'sudo ' if you are not root):
