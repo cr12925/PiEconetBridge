@@ -126,23 +126,6 @@ enum econet_modes {
 			// until it gave up waiting for EM_IDLE. So EM_INIT
 			// just catches the first interrupt and puts us into EM_IDLE
 
-enum econet_aunstate {
-	EA_IDLE = 1, // Waiting for something to happen
-	EA_W_WRITESCOUT, // Given a data packet by userspace. Writing the Scout
-	EA_W_READFIRSTACK, // We've been given an AUN packet by userspace, and written the scout, now waiting for first ack from wire
-	EA_W_WRITEDATA, // Given a data packet by userspace, done the scout, picked up the first ack, now writing the data packet
-	EA_W_READFINALACK, // We've written the data packet to the wire, now waiting for final ack
-	// Any read of a Data scout will happen in EA_IDLE, so first state is WRITEFIRSTACK
-	EA_R_WRITEFIRSTACK, // We've read a scout from the wire, now transmitting first ack
-	EA_R_READDATA, // We've read a scout from the wire, written the ack, now waiting for the data packet
-	EA_R_WRITEFINALACK, // We've read a scout from the wire, written the first ack, read the data packet, now tx final ack
-	EA_I_WRITEREPLY, // We've read an immediate from the wire; we are now writing out the response to the wire
-	EA_I_WRITEIMM, // We got an immediate from userspace and are putting it on the wire
-	EA_I_READREPLY, // We've written an immediate to the wire, we are now waiting for the response from the wire
-	EA_I_IMMSENTTOAUN, // We've received an immediate off the wire and sent it to userspace. We are waiting for a reply to come back and will then transmit it
-	EA_W_WRITEBCAST // Writing a broadcast. Don't hang about for a reply
-};
-
 struct __econet_data {
 
 	int irq;

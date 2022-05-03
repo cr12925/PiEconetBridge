@@ -101,7 +101,7 @@ int spoof_immediate = 0; // Changed from 1
 int wired_eject = 1; // When set, and a dynamic address is allocated to an unknown AUN station, this will cause the bridge to spoof a '*bye' equivalent to fileservers it has learned about on the wired network
 short learned_net = -1;
 int wire_tx_errors = 0; // Count of successive errors on tx to the wire - if it gets too high, we'll do a chip reset
-int reception_extend = 0; // number of ms extra to wait for an Econet transmission to complete - -e cmd line option sets it - useful for RiscOS machines?
+int reception_extend = 1750; // long stop wait time for an econet packet of length > 4k to be transmitted
 unsigned char last_net = 0, last_stn = 0;
 char *printhandler = NULL; // Filename of generic print handling routine
 short econet_imm_wait_time = 500;
@@ -125,7 +125,7 @@ unsigned char econet_stations[8192];
 // Mandatory gap between last tx to or rx from an AUN host so that it doesn't get confused (ms)
 #define ECONET_AUN_INTERPACKET_GAP (50) 
 // Gap between re-tx on the wire if it's failed
-#define ECONET_WIRE_INTERPACKET_GAP (25)
+#define ECONET_WIRE_INTERPACKET_GAP (10)
 // Multiplier applied to the packet_gap parameter on a failed transmission - Disused
 //#define ECONET_RETX_BACKOFF_MULTIPLE (1.25)
 
@@ -246,6 +246,8 @@ struct econet_hosts {							// what we we need to find a beeb?
 	int pipeudpsocket; /* Socket descriptor for inbound UDP AUN traffic to this host */
 
 };
+
+char * econet_strstate(int); // AUN state to string
 
 // Wire packet queue & priority system
 
@@ -545,15 +547,18 @@ unsigned int econet_write_wire(struct __econet_packet_aun *p, int len, int cache
 		{
 			struct timeval start, now;
 
+			int aunstate, txptr;
+
 			gettimeofday(&start, 0);
 			gettimeofday(&now, 0);
 
 			// Wait for TX to complete
 			err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
-			//while ((err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS) && (timediffmsec(&start, &now) < ((2 + ((len+1024) / 1024) * 41)) )) // 1Kb on the wire is < 50ms. So 30Kb is < 150ms.
-			while (	(err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS) 
-				&& (timediffmsec(&start, &now) < (((len + 25) / 25) + 110 + reception_extend) ) // at 200kHz, 25,000 bytes per second (ignoring the bit stuffing), so 25 bytes per ms. So we add a bit, and work out the number of ms, then add 100 for the 4-way.
-			) 
+
+			while (
+				(err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS) 
+				&& (timediffmsec(&start, &now) < ((len > 4096) ? reception_extend : 1000) ) // at 200kHz, 4096 bytes plus some overhead, say 4200 = 4200 x 8 bits x 5us = 165000 us . Waiting 1s should easily see it complete - and if it doesn't, something's wrong
+			)
 			{
 				gettimeofday(&now, 0);
 				err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
@@ -563,6 +568,14 @@ unsigned int econet_write_wire(struct __econet_packet_aun *p, int len, int cache
 			{
 				return len;
 			}
+
+			// Precautionarily reset the module, collecting its AUN state for reporting first
+
+			aunstate = ioctl(econet_fd, ECONETGPIO_IOC_GETAUNSTATE);
+			txptr = aunstate >> 16;
+			aunstate &= 0xFF;
+
+			if (queue_debug) fprintf (stderr, " wire transmission started but did not complete - AUN state %02d (%s), kernel tx ptr = %02X ", aunstate, econet_strstate(aunstate), txptr);
 
 		}
 
@@ -1868,6 +1881,28 @@ int udp_receive(int fd, void *a, int maxlen, struct sockaddr * restrict addr)
 
 }
 
+char * econet_strstate(int s) // Convert AUN state to string
+{
+	switch (s)
+	{
+		case EA_IDLE: return (char *)"Idle";
+		case EA_W_WRITESCOUT: return (char *)"Writing - sending scout";
+		case EA_W_READFIRSTACK: return (char *)"Writing - reading first ack";
+		case EA_W_WRITEDATA: return (char *)"Writing - sending data";
+		case EA_W_READFINALACK: return (char *)"Writing - reading final ack";
+		case EA_R_WRITEFIRSTACK: return (char *)"Reading - sending first ack";
+		case EA_R_READDATA: return (char *)"Reading - reading data";
+		case EA_R_WRITEFINALACK: return (char *)"Reading - sending final ack";
+		case EA_I_WRITEREPLY: return (char *)"Immediate - writing reply";
+		case EA_I_WRITEIMM: return (char *)"Immediate - sending query";
+		case EA_I_READREPLY: return (char *)"Immediate - reading reply";
+		case EA_I_IMMSENTTOAUN: return (char *)"Immediate - wire query sent to AUN and reply awaited";
+		case EA_W_WRITEBCAST: return (char *)"Broadcast - writing packet";
+		default: return (char *)"Unknown state";
+	}
+
+}
+
 char * econet_strtxerr(int e)
 {
 	switch (-1 * e)
@@ -3123,7 +3158,7 @@ Options:\n\
 \t-b\tDo brief packet dumps\n\
 \t-c\t<config path>\n\
 \t-d\tTurn on packet debug (you won't see much without!)\n\
-\t-e\tExtend reception timeframe for Econet (wired) clients - parameter is a number of milliseconds\n\
+\t-e\tAlter long stop wait for wire packet transmission (ms)\n\
 \t-f\tSilence fileserver log output\n\
 \t-i\tSpoof immediate responses in-kernel (will break *REMOTE, *VIEW etc.)\n\
 \t-j\tTurn off SJ Research MDFS functionality in file server\n\
@@ -3870,7 +3905,7 @@ Options:\n\
 
 			time_since_last_tx = timediffmsec(&(wire_head->last_tx_attempt), &now);
 
-			if (queue_debug) fprintf (stderr, "time_since_last_tx = %ld ms, ", time_since_last_tx);
+			if (queue_debug) fprintf (stderr, "time_since_last_tx = %lu ms, ", time_since_last_tx);
 
 			if (wire_head->tx_count < ECONET_WIRE_MAX_TX) // we'll have a go at transmitting - assuming we have the right gap
 			{
@@ -4008,7 +4043,7 @@ Options:\n\
 						if (network[count].aun_head->tx_count == 0)
 							network[count].aun_head->last_tx_attempt.tv_sec = network[count].aun_head->last_tx_attempt.tv_usec = 0;
 
-						if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: to %3d.%3d from %3d.%3d len 0x%04X type 0x%02X seq 0x%08X retrieved from network[%d] queue at %p (tx count %02X), last tx attempt = %ld.%ld, now = %ld.%ld, time since last tx %ld ", 
+						if (queue_debug) fprintf (stderr, "[+%15.6f] QUEUE: to %3d.%3d from %3d.%3d len 0x%04X type 0x%02X seq 0x%08X retrieved from network[%d] queue at %p (tx count %02X), last tx attempt = %ld.%ld, now = %ld.%ld, time since last tx %lu ", 
 							timediffstart(),
 							network[count].aun_head->p->p.dstnet,
 							network[count].aun_head->p->p.dststn,
@@ -4070,7 +4105,7 @@ Options:\n\
 							if (econet_write_general(network[count].aun_head->p, network[count].aun_head->size) != network[count].aun_head->size)
 							{
 
-								if (queue_debug) fprintf (stderr, " FAILED / Deferred for timeout (tx_diff = %ld)\n", tx_diff);
+								if (queue_debug) fprintf (stderr, " FAILED / Deferred for timeout (tx_diff = %lu)\n", tx_diff);
 							}
 							else
 							{

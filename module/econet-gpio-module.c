@@ -2295,6 +2295,9 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 #endif
 			return (econet_get_tx_status());
 			break;
+		case ECONETGPIO_IOC_GETAUNSTATE:
+			return ((econet_pkt_tx.ptr << 16) | econet_get_aunstate());
+			break;
 		case ECONETGPIO_IOC_FLAGFILL: /* Go into flag fill */
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "ECONET-GPIO: ioctl(set flag fill) called\n");
