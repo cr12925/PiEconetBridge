@@ -6,6 +6,7 @@ econet-gpio-y := econet-gpio-module.o
 else
 
 KDIR ?= /lib/modules/`uname -r`/build
+#BUILDDIR = /home/pi/econet-gpio-module/module
 
 all:
 	$(MAKE) -I../include -C $(KDIR) M=$(PWD) modules
@@ -13,9 +14,12 @@ all:
 clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
 
-reload:
+install:
+	sudo cp econet-gpio.ko /lib/modules/`uname -r`/kernel/drivers/net
+	sudo depmod
+
+reload: 
 	-sudo rmmod econet-gpio
 	sudo insmod ./econet-gpio.ko
-	sudo chmod a+rw /dev/econet-gpio
 
 endif

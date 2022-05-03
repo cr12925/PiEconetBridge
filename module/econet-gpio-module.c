@@ -689,7 +689,6 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 				while (count++ < 25 && (!(sr2 & ECONET_GPIO_S2_RX_IDLE)))
 				{
 					econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT1);
-					// udelay(10);
 					udelay(count << 2);
 					sr2 = econet_read_sr(2);
 				}
@@ -1749,9 +1748,12 @@ irqreturn_t econet_irq(int irq, void *ident)
 			kfifo_reset(&econet_rx_queue);
 		}
 
+		econet_set_read_mode();
+/* 20220503
 		econet_set_chipstate(EM_IDLEINIT);
 		econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 		econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+*/
 		
 	}
 	// Are we either mid-read, or idle (in which case, this will be a receiver IRQ)
@@ -1809,27 +1811,27 @@ irqreturn_t econet_irq(int irq, void *ident)
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Chris Royle");
 MODULE_DESCRIPTION("Acorn Econet(R) to IP bridge");
-MODULE_VERSION("0.01");
+MODULE_VERSION("2.01");
 
 /* Packet buffers */
 struct __econet_pkt_buffer econet_pkt; /* Temporary buffer for incoming / outgoing packets */
 
 
 const struct of_device_id econet_of_match[] = {
-	{ .compatible = DEVICE_NAME },
+	{ .compatible = "econet-gpio" },
 	{ }
 };
 
-/*
-struct platform_driver econet_driver = {
+MODULE_DEVICE_TABLE(of, econet_of_match);
+
+static struct platform_driver econet_driver = {
 	.driver = {
-			.name = DEVICE_NAME,
-			.of_match_table = of_match_ptr(econet_of_match)
+			.name = "econet-gpio",
+			.of_match_table = of_match_ptr(econet_of_match),
 		},
 	.probe = econet_probe,
-	.remove = econet_remove
+	.remove = econet_remove,
 };
-*/
 
 /* When a process reads from our device, this gets called. */
 ssize_t econet_readfd(struct file *flip, char *buffer, size_t len, loff_t *offset) {
@@ -2484,7 +2486,7 @@ static int __init econet_init(void)
 
 /* This is known to be nasty. It should really pick all the GPIOs up from the DT - but that's the next stage... */
 
-static int econet_probe (struct platform_device *pdev)
+static int __init econet_probe (struct platform_device *pdev)
 {
 
 	return econet_init();
@@ -2493,7 +2495,6 @@ static int econet_probe (struct platform_device *pdev)
 
 /* Exit routine */
 
-//int econet_remove (struct platform_device *pdev)
 static void econet_exit(void)
 {
 	econet_gpio_release();

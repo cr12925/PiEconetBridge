@@ -1,0 +1,44 @@
+Blowing the relevant data into a v2 board's EEPROM
+--------------------------------------------------
+
+1. First clone the hat utilities repo
+
+   git clone https://github.com/raspberrypi/hats.git
+
+2. Make the utilities (you'll need your C compiler)
+
+   cd hats/eepromutils
+   make
+
+3. Enable i2c_arm & i2c_vc in your config.txt 
+
+   Edit /boot/config.txt with your favourite editor
+
+   Enable i2c_arm:
+	dtparam=i2c_arm=on
+
+   Enable i2c_vc:
+        dtparam=i2c_vc=on
+
+4. Reboot.
+
+5. Then blank off the EEPROM:
+
+   dd if=/dev/zero ibs=1k count=8 of=blank.eep
+
+   sudo {path to eepromutils}/eepflash.sh -w -f=blank.eep -t=24c64
+
+6. Next, compile up our own .eep file to blow into it:
+
+   A. First, compile the DTB for the HAT
+   
+      sudo dtc -@ -I dts -O dtb -o v2eeprom/econet-gpio.dtb dts/econet-gpio.dts
+
+   B. Then make the EEPROM .eep file
+ 
+      sudo {path to eepromutils}/eepmake v2eeprom/econet_eeprom.txt v2eeprom/econet-gpio-v2.eep v2eeprom/econet-gpio.dtb
+
+7. Then blow the resulting file into the EEPROM
+
+   sudo {path to eepromutils}/eepflash.sh -w -f=econet-gpio-v2.eep -t=24c64
+ 
