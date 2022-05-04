@@ -50,10 +50,11 @@
 // the ] as second character is a special location for that character - it loses its
 // special meaning as 'end of character class' so you can match on it.
 #define FSREGEX "[]\\*\\#A-Za-z0-9\\+_;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
-#define FS_LOAD_REGEX "/LOAD\\s+(\\S+)\\s+([0-9A-F]{1,8})?\\s*$/i"
-#define FS_SAVE_REGEX "/SAVE\\s+(\\S+)\\s+([0-9A-F]{1,8})\\s+(\\+?[0-9A-F]{1,8})\\s*([0-9A-F]{1,8}(\\s+[0-9A-F]{1,8})?)?\\s*$/i"
+#define FS_LOAD_REGEX "^LOAD\\s+(\\S+)\\s+([0-9A-F]{1,8})?\\s*$"
+#define FS_SAVE_REGEX "^SAVE\\s+(\\S+)\\s+([0-9A-F]{1,8})\\s+(\\+?[0-9A-F]{1,8})\\s*([0-9A-F]{1,8}(\\s+[0-9A-F]{1,8})?)?\\s*$"
+#define FS_NETCONF_REGEX_ONE "^NETCONF\\s+([\\+\\-][A-Z]+)\\s*"
 
-regex_t fs_load_regex, fs_save_regex;
+regex_t fs_load_regex, fs_save_regex, fs_netconf_regex_one;
 short fs_loadsave_regex_initialized = 0;
 
 extern int aun_send (struct __econet_packet_aun *, int);
@@ -71,10 +72,8 @@ extern uint8_t get_printer_total (unsigned char, unsigned char);
 // Server timing
 extern float timediffstart(void);
 
-// DISUSED extern short packet_gap; // Gap in MS (if set) between receiving data burst & sending ACK - Appears to be needed by RiscOS
-
 short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for extra year information
-short fs_sjfunc; // Whether SJ MDFS functionality is turned on (global - not per fileserver)
+//short fs_sjfunc; // Whether SJ MDFS functionality is turned on (global - not per fileserver)
 short use_xattr=1 ; // When set use filesystem extended attributes, otherwise use a dotfile
 short normalize_debug = 0; // Whether we spew out loads of debug about filename normalization
 
@@ -103,6 +102,14 @@ void fs_close_interlock(int, unsigned short, unsigned short);
 #define FS_BOOTOPT_LOAD 0x01
 #define FS_BOOTOPT_RUN 0x02
 #define FS_BOOTOPT_EXEC 0x03
+
+#define FS_MAX_BULK_SIZE 0x1000 // 4k - see RiscOS PRM
+
+struct {
+	uint8_t	fs_acorn_home; // != 0 means implement acorn home directory ownership semantics
+	uint8_t fs_sjfunc; // != 0 means turn on SJ MDFS functionality
+	uint8_t pad[254]; // Spare spare in the config
+} fs_config[ECONET_MAX_FS_SERVERS];
 
 struct {
 	unsigned char username[10];
@@ -191,6 +198,7 @@ struct objattr {
 	unsigned short perm;
 	unsigned short owner;
 	unsigned long load, exec;
+	unsigned short homeof;
 };
 
 #define FS_FTYPE_NOTFOUND 0
@@ -210,6 +218,7 @@ struct path_entry {
 	int owner, parent_owner;
 	unsigned char ownername[11];
 	unsigned short perm, parent_perm, my_perm;
+	unsigned short homeof;
 	unsigned long load, exec, length, internal;
 	unsigned char unixpath[1024], unixfname[15], acornname[15];
 	unsigned char day, monthyear, hour, min, sec; // Modified date / time
@@ -235,6 +244,7 @@ struct path {
 	unsigned char path_from_root[256]; // Path from root directory in Econet format
 	int owner; // Owner user ID
 	int parent_owner;
+	unsigned short homeof;
 	unsigned char ownername[11]; // Readable name of owner
 	unsigned short perm; // Permissions for owner & other - ECONET_PERM_... etc.
 	unsigned short parent_perm; // If object is not found or is a file, this contains permission on parent dir
@@ -338,7 +348,7 @@ void fs_store_tail_path(char *path1, char *path2)
 
 
 // Convert our perm storage to Acorn / MDFS format
-unsigned char fs_perm_to_acorn(unsigned char fs_perm, unsigned char ftype)
+unsigned char fs_perm_to_acorn(int server, unsigned char fs_perm, unsigned char ftype)
 {
 	unsigned char r;
 
@@ -350,7 +360,7 @@ unsigned char fs_perm_to_acorn(unsigned char fs_perm, unsigned char ftype)
 	if (fs_perm & FS_PERM_L)
 		r |= 0x10;
 
-	if (fs_sjfunc & FS_PERM_H) // SJ research Privacy bit
+	if (fs_config[server].fs_sjfunc & FS_PERM_H) // SJ research Privacy bit
 		r |= ((fs_perm & (FS_PERM_H)) ? 0x40 : 0);
 
 	r |= ((fs_perm & (FS_PERM_OWN_R | FS_PERM_OWN_W)) << 2);
@@ -363,13 +373,13 @@ unsigned char fs_perm_to_acorn(unsigned char fs_perm, unsigned char ftype)
 }
 
 // Convert acorn / MDFS perm to our format
-unsigned char fs_perm_from_acorn(unsigned char acorn_perm)
+unsigned char fs_perm_from_acorn(int server, unsigned char acorn_perm)
 {
 	unsigned char r;
 
 	r = 0;
 
-	if (fs_sjfunc) r |= (acorn_perm & 0x40) ? FS_PERM_H : 0; // Hidden / Private. This is MDFS only really
+	if (fs_config[server].fs_sjfunc) r |= (acorn_perm & 0x40) ? FS_PERM_H : 0; // Hidden / Private. This is MDFS only really
 	r |= (acorn_perm & 0x10) ? FS_PERM_L : 0; // Locked
 	r |= (acorn_perm & 0x08) ? FS_PERM_OWN_W : 0; // Owner write
 	r |= (acorn_perm & 0x04) ? FS_PERM_OWN_R : 0; // Owner read
@@ -704,28 +714,35 @@ void fs_read_attr_from_file(unsigned char *path, struct objattr *r)
 	FILE *f=fopen(dotfile,"r");
 	if (f != NULL)
 	{
-		unsigned short owner, perm;
+		unsigned short owner, perm, homeof;
 		unsigned long load, exec;
-		fscanf(f, "%hx %lx %lx %hx", &owner, &load, &exec, &perm);
-		// printf("GOT %hx %lx %lx %hx\n", owner, load, exec, perm);
+
+		homeof = 0;
+
+		if (fscanf(f, "%hx %lx %lx %hx %hx", &owner, &load, &exec, &perm, &homeof) != 5)
+			fscanf(f, "%hx %lx %lx %hx", &owner, &load, &exec, &perm);
+
 		r->owner = owner;
 		r->load = load;
 		r->exec = exec;
 		r->perm = perm;
+		r->homeof = homeof;
+
 		fclose(f);
+
 	}
 
 	free(dotfile);
 	return;
 }
 
-void fs_write_attr_to_file(unsigned char *path, int owner, short perm, unsigned long load, unsigned long exec)
+void fs_write_attr_to_file(unsigned char *path, int owner, short perm, unsigned long load, unsigned long exec, int homeof)
 {
 	char *dotfile=pathname_to_dotfile(path);
 	FILE *f=fopen(dotfile,"w");
 	if (f != NULL)
 	{
-		fprintf(f, "%hx %lx %lx %hx", owner, load, exec, perm);
+		fprintf(f, "%hx %lx %lx %hx %hx", owner, load, exec, perm, homeof);
 		fclose(f);
 	}
 	else
@@ -742,6 +759,7 @@ void fs_read_xattr(unsigned char *path, struct objattr *r)
 	r->load=0;
 	r->exec=0;
 	r->perm=FS_PERM_OWN_R | FS_PERM_OWN_W | FS_PERM_OTH_R;
+	r->homeof=0;
 
 	char *dotfile=pathname_to_dotfile(path);
 	int dotexists=access(dotfile, F_OK);
@@ -778,12 +796,17 @@ void fs_read_xattr(unsigned char *path, struct objattr *r)
 		attrbuf[2] = '\0';
 		r->perm = strtoul((const char * ) attrbuf, NULL, 16);
 	}
+	if (getxattr((const char *) path, "user.econet_homeof", attrbuf, 4) >= 0) // Attribute found
+	{
+		attrbuf[4] = '\0';
+		r->homeof = strtoul((const char * ) attrbuf, NULL, 16);
+	}
 
 	return;
 
 }
 
-void fs_write_xattr(unsigned char *path, int owner, short perm, unsigned long load, unsigned long exec)
+void fs_write_xattr(unsigned char *path, int owner, short perm, unsigned long load, unsigned long exec, int homeof)
 {
 	char *dotfile=pathname_to_dotfile(path);
 	int dotexists=access(dotfile, F_OK);
@@ -791,7 +814,7 @@ void fs_write_xattr(unsigned char *path, int owner, short perm, unsigned long lo
 
 	if (!use_xattr || dotexists==0)
 	{
-		fs_write_attr_to_file(path, owner, perm, load, exec);
+		fs_write_attr_to_file(path, owner, perm, load, exec, homeof);
 		return;
 	}
 
@@ -813,6 +836,9 @@ void fs_write_xattr(unsigned char *path, int owner, short perm, unsigned long lo
 	if (setxattr((const char *) path, "user.econet_exec", (const void *) attrbuf, 8, 0))
 		fprintf (stderr, "[+%15.6f]    FS: Failed to set exec address on %s: %s\n", timediffstart(), path, strerror(errno));
 
+	sprintf((char *) attrbuf, "%04x", homeof);
+	if (setxattr((const char *) path, "user.econet_homeof", (const void *) attrbuf, 4, 0))
+		fprintf (stderr, "[+%15.6f]    FS: Failed to set home directory flag on %s: %s\n", timediffstart(), path, strerror(errno));
 }
 
 // Convert filename from acorn to unix (replace / with :)
@@ -1020,6 +1046,7 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 		p->exec = oa.exec;
 		p->owner = oa.owner;
 		p->perm = oa.perm;
+		p->homeof = oa.homeof;
 		p->length = statbuf.st_size;
 
 		// If we own the object and it's a directory, and it has permissions 0, then spoof RW/
@@ -1034,7 +1061,9 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 		if ((p->parent_owner == userid) && (p->parent_perm == 0))
 			p->parent_perm = FS_PERM_OWN_R | FS_PERM_OWN_W;
 
-		if (p->owner == userid)
+		if (users[server][userid].priv & FS_PRIV_SYSTEM)
+			p->my_perm = (p->perm & (FS_PERM_L | FS_PERM_OWN_W | FS_PERM_OWN_R));
+		else if (p->owner == userid)
 			p->my_perm = (p->perm & ~(FS_PERM_OTH_W | FS_PERM_OTH_R));
 		else
 			p->my_perm = (p->perm & (FS_PERM_L | FS_PERM_H)) | ((p->perm & (FS_PERM_OTH_W | FS_PERM_OTH_R)) >> 4);
@@ -1096,6 +1125,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	int parent_owner = 0;
 	short found;
 	unsigned char path[1030];
+
+	unsigned short homeof_found = 0; // Non-zero if we traverse a known home directory
 
 	DIR *dir;
 	//struct dirent *d;
@@ -1368,8 +1399,9 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		result->load = attr.load;
 		result->exec = attr.exec;
 		result->perm = attr.perm;
+		result->homeof = attr.homeof;
 
-		fs_write_xattr(result->unixpath, result->owner, result->perm, result->load, result->exec);
+		fs_write_xattr(result->unixpath, result->owner, result->perm, result->load, result->exec, result->homeof);
 
 		stat(result->unixpath, &s);
 		localtime_r(&(s.st_mtime), &t);
@@ -1419,10 +1451,10 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 				p = result->paths;
 				while (p != NULL)
 				{
-					fprintf(stderr, "Type %02x Owner %04x Parent owner %04x Owner %10s Perm %02x Parent Perm %02x My Perm %02x Load %08lX Exec %08lX Length %08lX Int name %06lX Unixpath %s Unix fname %s Acorn Name %s Date %02d/%02d/%02d\n",
+					fprintf(stderr, "Type %02x Owner %04x Parent owner %04x Owner %10s Perm %02x Parent Perm %02x My Perm %02x Load %08lX Exec %08lX Homeof %04x Length %08lX Int name %06lX Unixpath %s Unix fname %s Acorn Name %s Date %02d/%02d/%02d\n",
 						p->ftype, p->owner, p->parent_owner, p->ownername,
 						p->perm, p->parent_perm, p->my_perm,
-						p->load, p->exec, p->length, p->internal,
+						p->load, p->exec, p->homeof, p->length, p->internal,
 						p->unixpath, p->unixfname, p->acornname,
 						fs_day_from_two_bytes(p->day, p->monthyear),
 						fs_month_from_two_bytes(p->day, p->monthyear),
@@ -1472,9 +1504,6 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			//
 			//
 
-			strncpy(result->ownername, result->paths->ownername, 10);
-			result->ownername[10] = '\0';
-
 			result->ftype = result->paths->ftype;
 			result->parent_owner = result->paths->parent_owner;
 			result->owner = result->paths->owner;
@@ -1483,10 +1512,43 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			result->my_perm = result->paths->my_perm;
 			result->load = result->paths->load;
 			result->exec = result->paths->exec;
+			result->homeof = result->paths->homeof;
 			result->length = result->paths->length;
 			result->internal = result->paths->internal;
 			strncpy (result->acornname, result->paths->acornname, 10);
 			result->acornname[10] = '\0';
+
+			// If we are in Acorn Home Semantics mode, and we've found a home directory then update the info accordingly
+			// I.e. once we are below a home directory, set owner for everything in there to the ID whose home directory we traversed
+
+			if (homeof_found == 0 && result->homeof != 0)
+				homeof_found = result->homeof;
+
+			if (fs_config[server].fs_acorn_home && homeof_found)
+			{
+				struct path_entry *h;
+
+				result->owner = homeof_found;
+				result->my_perm = result->perm;
+				h = result->paths;
+
+				while (h)
+				{
+					h->owner = homeof_found;
+					h->my_perm = h->perm;
+					strncpy(h->ownername, users[server][h->owner].username, 10);
+					h->ownername[10] = '\0';
+
+					h = h->next;
+				}
+
+			}
+			
+
+			// Populate ownername. Done here in case it changed because of Acorn home semantics
+
+			strncpy(result->ownername, result->paths->ownername, 10);
+			result->ownername[10] = '\0';
 
 			if (count < result->npath-1) // Add path to acornfullpath. When in wildcard mode, the caller is expected to add whichever element of paths[] they want to the acornpath to get the full path.
 			{
@@ -1568,6 +1630,12 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		owner = attr.owner;
 		perm = attr.perm;
 
+		if (homeof_found == 0 && fs_config[server].fs_acorn_home && attr.homeof != 0)
+			homeof_found = attr.homeof;
+
+		if (homeof_found)
+			owner = homeof_found;
+		
 		// Fudge parent perm if we own the object and permissions = &00
 		if ((active[server][user].userid == attr.owner) && ((attr.perm & ~FS_PERM_L) == 0))
 			perm = attr.perm |= FS_PERM_OWN_W | FS_PERM_OWN_R;
@@ -1661,6 +1729,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 			fs_read_xattr(dirname, &attr);
 
+			if (normalize_debug) fprintf (stderr, "fs_read_xattr yielded: Owner %04X, Load %08lX, Exec %08lX, Home Of %04X, Perm %02X\n", attr.owner, attr.load, attr.exec, attr.homeof, attr.perm);
+
 			// If it's a directory with 0 permissions and we own it, set permissions to RW/
 
 			if (normalize_debug) fprintf (stderr, "Looking to see if this user (id %04X) is the owner (%04X), if this is a dir and if perms (%02X) are &00\n", active[server][user].userid, attr.owner, attr.perm);
@@ -1674,14 +1744,21 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			result->load = attr.load;
 			result->exec = attr.exec;
 			result->perm = attr.perm;
+			result->homeof = attr.homeof;
 			
 			result->attr.owner = attr.owner;
 			result->attr.load = attr.load;
 			result->attr.exec = attr.exec;
 			result->attr.perm = attr.perm;
+			result->attr.homeof = attr.homeof;
 
-			//fs_write_xattr(dirname, result->owner, result->perm, result->load, result->exec); // Not required.
 
+			if (homeof_found == 0 && fs_config[server].fs_acorn_home && attr.homeof != 0)
+				homeof_found = attr.homeof;
+
+			if (homeof_found)
+				result->owner = result->attr.owner = homeof_found;
+		
 			result->parent_owner = parent_owner;
 
 			parent_owner = result->owner; // Ready for next loop
@@ -1850,7 +1927,7 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 	if (!fs_loadsave_regex_initialized) // Listen very carefully, I shall say zis ernly wearnce...
 	{
 
-		if ((regcomp(&fs_load_regex, FS_LOAD_REGEX, REG_EXTENDED | REG_ICASE | REG_NEWLINE) != 0) || (regcomp(&fs_save_regex, FS_SAVE_REGEX, REG_EXTENDED | REG_ICASE | REG_NEWLINE) != 0))
+		if ((regcomp(&fs_load_regex, FS_LOAD_REGEX, REG_EXTENDED | REG_ICASE | REG_NEWLINE) != 0) || (regcomp(&fs_save_regex, FS_SAVE_REGEX, REG_EXTENDED | REG_ICASE | REG_NEWLINE) != 0) || (regcomp(&fs_netconf_regex_one, FS_NETCONF_REGEX_ONE, REG_EXTENDED | REG_ICASE | REG_NEWLINE) != 0))
 		{
 			fprintf (stderr, "ERROR: Unable to compile regular expression for *LOAD and *SAVE OSCLI (FSOp 0) commands - cannot initialize fileserver\n");
 			return 0;
@@ -1975,6 +2052,7 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 		memset(fs_dirs[fs_count], 0, sizeof(fs_dirs)/ECONET_MAX_FS_SERVERS);
 		memset(users[fs_count], 0, sizeof(users)/ECONET_MAX_FS_SERVERS); // Added 18.04.22 - we didn't seem to be doing this!
 		memset(groups[fs_count], 0, sizeof(groups)/ECONET_MAX_FS_SERVERS); // Added 18.04.22 - beginning of group implementation
+		memset(&(fs_config[fs_count]), 0, sizeof(fs_config)/ECONET_MAX_FS_SERVERS); // Added 03.05.22 - Per server configuration
 
 		for (length = 0; length < ECONET_MAX_FS_DISCS; length++) // used temporarily as counter
 		{
@@ -1982,6 +2060,44 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 			fs_discs[fs_count][length].name[0] = '\0';
 		}
 	
+		// Temporary use of the passwordfile variable
+
+		// Set up some defaults in case we are writing a new file
+		fs_config[fs_count].fs_acorn_home = 0;
+		fs_config[fs_count].fs_sjfunc = 1;
+
+		sprintf(passwordfile, "%s/Configuration", fs_stations[fs_count].directory);
+		passwd = fopen(passwordfile, "r+");
+
+		if (!passwd) // Config file not present
+		{
+			if ((passwd = fopen(passwordfile, "w+")))
+				fwrite(&(fs_config[fs_count]), 256, 1, passwd);
+			else if (!fs_quiet) fprintf (stderr, "[+%15.6f]    FS: Unable to write configuration file at %s - not initializing\n", timediffstart(), passwordfile);
+		}
+
+		if (passwd)
+		{
+			int configlen;
+
+			fseek(passwd, 0, SEEK_END);
+			configlen = ftell(passwd);
+			rewind(passwd);
+
+			if (configlen != 256)
+			{
+				if (!fs_quiet) fprintf(stderr, "[+%15.6f]    FS: Configuration file is incorrect length!\n", timediffstart());
+			}
+			else
+			{
+				fread (&(fs_config[fs_count]), 256, 1, passwd);
+				fclose(passwd);
+				if (fs_noisy) fprintf(stderr, "[+%15.6f]    FS: Configuration file loaded\n", timediffstart());
+			}
+		}
+
+
+		// Load / Create password file
 
 		sprintf(passwordfile, "%s/Passwords", fs_stations[fs_count].directory);
 	
@@ -2823,6 +2939,8 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
 		return;
 
+/*
+
 		struct __econet_packet_udp reply;
 	
 		reply.p.ptype = ECONET_AUN_DATA;
@@ -2831,6 +2949,13 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 		reply.p.data[0] = reply.p.data[1] = reply.p.data[2] = 0; // This is apparently how you flag not found on an examine...
 	
 		fs_aun_send(&reply, server, 2, net, stn);
+		return;
+*/
+	}
+
+	if (!(active[server][active_id].priv & FS_PRIV_SYSTEM) && (!(p.my_perm & FS_PERM_OWN_R))) // Can't read it
+	{
+		fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 		return;
 	}
 
@@ -2909,11 +3034,11 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 
 					replylen += 8; // Skip past the load / exec that we just filled in
 
-					r.p.data[replylen++] = fs_perm_to_acorn(e->perm, e->ftype);
+					r.p.data[replylen++] = fs_perm_to_acorn(server, e->perm, e->ftype);
 					r.p.data[replylen++] = e->day;
 					r.p.data[replylen++] = e->monthyear;
 
-					if (fs_sjfunc) // Next three bytes are ownership information - main & aux. We always set aux to 0 for now.
+					if (fs_config[server].fs_sjfunc) // Next three bytes are ownership information - main & aux. We always set aux to 0 for now.
 					{
 						r.p.data[replylen++] = (e->owner & 0xff);
 						r.p.data[replylen++] = ((e->owner & 0x700) >> 3);
@@ -3179,7 +3304,7 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 	command = *(data+5);
 	relative_to = *(data+3);
 
-	if (command == 0x40 && !fs_sjfunc)
+	if (command == 0x40 && !(fs_config[server].fs_sjfunc))
 	{
 		fs_error(server, reply_port, net, stn, 0xff, "MDFS Unsupported");
 		return;
@@ -3232,7 +3357,7 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 				attr.load = (*(data+6)) + (*(data+7) << 8) + (*(data+8) << 16) + (*(data+9) << 24);
 				attr.exec = (*(data+10)) + (*(data+11) << 8) + (*(data+12) << 16) + (*(data+13) << 24);
 				// We need to make sure our bitwise stuff corresponds with Acorns before we do this...
-				attr.perm = fs_perm_from_acorn(*(data+14));
+				attr.perm = fs_perm_from_acorn(server, *(data+14));
 				break;
 			
 			case 2: // Set load address
@@ -3245,7 +3370,7 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 	
 			case 4: // Set attributes only
 				// Need to convert acorn to PiFS
-				attr.perm = fs_perm_from_acorn(*(data+6));
+				attr.perm = fs_perm_from_acorn(server, *(data+6));
 				break;
 
 			case 5: // Set file date
@@ -3263,7 +3388,7 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 			// No default needed - we caught it above
 		}
 
-		fs_write_xattr(p.unixpath, attr.owner, attr.perm, attr.load, attr.exec);
+		fs_write_xattr(p.unixpath, attr.owner, attr.perm, attr.load, attr.exec, attr.homeof);
 
 		// If we get here, we need to send the reply
 
@@ -3410,7 +3535,7 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 	}
 
 	if (command == 4 || command == 5)
-		r.p.data[replylen++] = fs_perm_to_acorn(p.perm, p.ftype);
+		r.p.data[replylen++] = fs_perm_to_acorn(server, p.perm, p.ftype);
 
 	if (command == 1 || command == 5)
 	{
@@ -3449,7 +3574,7 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 	if (command == 64) // SJ Research function
 	{
 
-		if (!fs_sjfunc)
+		if (!(fs_config[server].fs_sjfunc))
 		{
 			fs_error(server, reply_port, net, stn, 0xff, "SJR Not enabled");
 			return;
@@ -3547,7 +3672,7 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 						fs_error(server, reply_port, net, stn, 0xFF, "FS Error"); // File didn't open when it should
 					else
 					{
-						fs_write_xattr(p.unixpath, active[server][active_id].userid, FS_PERM_OWN_R | FS_PERM_OWN_W, load, exec); 
+						fs_write_xattr(p.unixpath, active[server][active_id].userid, FS_PERM_OWN_R | FS_PERM_OWN_W, load, exec, 0);  // homeof = 0 because it's a file
 
 						r.p.port = reply_port;
 						r.p.ctrl = rx_ctrl; // Copy from request
@@ -3856,7 +3981,7 @@ void fs_chown(int server, unsigned short reply_port, int active_id, unsigned cha
 		// normalize_path will have put the attributes in its attr struct - change & write to disc
 		p.attr.owner = newid;
 
-		fs_write_xattr(p.unixpath, p.attr.owner, p.attr.perm, p.attr.load, p.attr.exec);
+		fs_write_xattr(p.unixpath, p.attr.owner, p.attr.perm, p.attr.load, p.attr.exec, p.attr.homeof);
 
 		fs_reply_success(server, reply_port, net, stn, 0, 0);
 		
@@ -3915,7 +4040,7 @@ short fs_open_interlock(int server, unsigned char *path, unsigned short mode, un
 			else		fs_files[server][count].writers = 1;
 
 			if (mode == 3) // Take ownereship on OPENOUT
-				fs_write_xattr(path, userid, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0);
+				fs_write_xattr(path, userid, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0, 0);
 	
 			if (fs_noisy) fprintf (stderr, "[+%15.6f]    FS:%12sInterlock opened internal handle %d, mode %d. Readers = %d, Writers = %d, path %s\n", timediffstart(), "", count, mode, fs_files[server][count].readers, fs_files[server][count].writers, fs_files[server][count].name);
 			return count;
@@ -4115,7 +4240,7 @@ void fs_copy(int server, unsigned short reply_port, int active_id, unsigned char
 			readpos += sf_return;
 		}
 
-		fs_write_xattr(destfile, active[server][active_id].userid, a.perm, a.load, a.exec);
+		fs_write_xattr(destfile, active[server][active_id].userid, a.perm, a.load, a.exec, a.homeof);
 		fs_close_interlock(server, handle, 1);
 		fs_close_interlock(server, out_handle, 3);
 
@@ -4166,7 +4291,7 @@ void fs_link(int server, unsigned short reply_port, int active_id, unsigned char
 		return;
 	}
 	
-	fs_write_xattr(p_src.unixpath, p_src.owner, p_src.perm | FS_PERM_L, p_src.load, p_src.exec); // Lock the file. If you remove the file to which there are symlinks, stat goes bonkers and the FS crashes. So lock the source file so the user has to think about it!! (Obviously this will show as a locked linked file too, but hey ho)
+	fs_write_xattr(p_src.unixpath, p_src.owner, p_src.perm | FS_PERM_L, p_src.load, p_src.exec, p_src.homeof); // Lock the file. If you remove the file to which there are symlinks, stat goes bonkers and the FS crashes. So lock the source file so the user has to think about it!! (Obviously this will show as a locked linked file too, but hey ho)
 
 	fs_free_wildcard_list(&p_src);
 	fs_free_wildcard_list(&p_dst);
@@ -4720,7 +4845,7 @@ void fs_cdir(int server, unsigned short reply_port, int active_id, unsigned char
 		{
 			if (!mkdir((const char *) p.unixpath, 0770))
 			{
-				fs_write_xattr(p.unixpath, active[server][active_id].userid, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0);
+				fs_write_xattr(p.unixpath, active[server][active_id].userid, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0, 0);
 				fs_reply_success(server, reply_port, net, stn, 0, 0);
 			}
 			else	fs_error(server, reply_port, net, stn, 0xFF, "Unable to make directory");
@@ -4985,7 +5110,7 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 
 	while (e != NULL)
 	{
-		fs_write_xattr(e->unixpath, e->owner, perm, e->load, e->exec); // 'perm' because that's the *new* permission
+		fs_write_xattr(e->unixpath, e->owner, perm, e->load, e->exec, e->homeof); // 'perm' because that's the *new* permission
 		e = e->next;
 	
 	}
@@ -5231,7 +5356,7 @@ void fs_cat_header(int server, unsigned short reply_port, int active_id, unsigne
 	{
 		if (p.ftype != FS_FTYPE_DIR)
 			fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
-		else
+		else if (p.my_perm & FS_PERM_OWN_R)
 		{
 			r.p.ptype = ECONET_AUN_DATA;
 			r.p.port = reply_port;
@@ -5246,6 +5371,7 @@ void fs_cat_header(int server, unsigned short reply_port, int active_id, unsigne
 	
 			fs_aun_send(&r, server, 35, net, stn);	 // would be length 33 if Acorn server was within spec...
 		}
+		else	fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 
 	}
 	
@@ -6085,7 +6211,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	unsigned short eofreached, fserroronread;
 	int received, total_received;
 
-	unsigned char readbuffer[0x500];
+	unsigned char readbuffer[FS_MAX_BULK_SIZE];
 
 	struct __econet_packet_udp r;
 
@@ -6306,8 +6432,8 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 		r.p.ctrl = ctrl;
 		r.p.data[0] = r.p.data[1] = 0;
 		r.p.data[2] = incoming_port;
-		r.p.data[3] = (0x500) & 0xff; // Max trf size
-		r.p.data[4] = ((0x500) & 0xff00) >> 8; // High byte of max trf
+		r.p.data[3] = (FS_MAX_BULK_SIZE) & 0xff; // Max trf size
+		r.p.data[4] = (FS_MAX_BULK_SIZE & 0xff00) >> 8; // High byte of max trf
 	
 		fs_aun_send(&r, server, 5, net, stn);
 	}
@@ -6646,7 +6772,6 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 		if (fs_bulk_ports[server][port].user_handle != 0) // This is a putbytes transfer not a fs_save; in the latter there is no user handle. Seek to correct point in file
 			fseek(fs_files[server][fs_bulk_ports[server][port].handle].handle, SEEK_SET, active[server][fs_bulk_ports[server][port].active_id].fhandles[fs_bulk_ports[server][port].user_handle].cursor);
 
-		//fwrite(data, 1, writeable, fs_files[server][fs_bulk_ports[server][port].handle].handle);
 		fwrite(data, writeable, 1, fs_files[server][fs_bulk_ports[server][port].handle].handle);
 
 		fflush(fs_files[server][fs_bulk_ports[server][port].handle].handle);
@@ -6674,8 +6799,6 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 			t = *localtime(&now);
 
 			fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &monthyear, &day);
-			//day = t.tm_mday;
-			//monthyear = (((t.tm_year - 81 - 40) & 0x0f) << 4) | ((t.tm_mon+1) & 0x0f);	
 								
 			r.p.port = fs_bulk_ports[server][port].reply_port;
 			r.p.ctrl = fs_bulk_ports[server][port].rx_ctrl;
@@ -6696,7 +6819,7 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 				fs_close_interlock(server, fs_bulk_ports[server][port].handle, 3); // We don't close on a putbytes - file stays open!
 
 				r.p.data[0] = 3; // This appears to be what FS3 does!
-				r.p.data[2] = fs_perm_to_acorn(FS_PERM_OWN_R | FS_PERM_OWN_W, FS_FTYPE_FILE);
+				r.p.data[2] = fs_perm_to_acorn(server, FS_PERM_OWN_R | FS_PERM_OWN_W, FS_FTYPE_FILE);
 				r.p.data[3] = day;
 				r.p.data[4] = monthyear;
 
@@ -6719,9 +6842,6 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 		}
 		else
 		{	
-			// RiscOS help? DISUSED
-			//if (packet_gap) usleep (packet_gap * 1000); // Try and avoid RiscOS NAK'ing a perfectly good data acknowledgment from us
-
 			r.p.port = fs_bulk_ports[server][port].ack_port;
 			r.p.ctrl = ctrl;
 			r.p.ptype = ECONET_AUN_DATA;
@@ -6812,7 +6932,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 	reply_port = *data;
 	fsop = *(data+1);
 
-	if (fsop >= 64 && !fs_sjfunc) // SJ Functions turned off
+	if (fsop >= 64 && !(fs_config[server].fs_sjfunc)) // SJ Functions turned off
 	{
 		fs_error(server, reply_port, net, stn, 0xFF, "Unsupported");
 		return;
@@ -7015,7 +7135,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					if (p.disc != active[server][active_id].current_disc)
 						fs_error(server, reply_port, net, stn, 0xFF, "Not on current disc");
 					*/
-					else
+					else if (p.my_perm & FS_PERM_OWN_R)
 					{	
 						/* l = fs_get_dir_handle(server, active_id, p.unixpath); */
 						l = fs_open_interlock(server, p.unixpath, 1, active[server][active_id].userid);
@@ -7057,6 +7177,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						}
 						else	fs_error(server, reply_port, net, stn, 0xD6, "Dir unreadable");
 					}
+					else	fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 				}
 				else	fs_error(server, reply_port, net, stn, 0xFE, "Not found");
 			}
@@ -7085,7 +7206,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				{
 					if (p.ftype != FS_FTYPE_DIR)
 						fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
-					else
+					else if (p.my_perm & FS_PERM_OWN_R)
 					{	
 						l = fs_open_interlock(server, p.unixpath, 1, active[server][active_id].userid);
 						if (l != -1) // Found
@@ -7129,6 +7250,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						}
 						else	fs_error(server, reply_port, net, stn, 0xC7, "Dir unreadable");
 					}
+					else fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 				}
 				else	fs_error(server, reply_port, net, stn, 0xFE, "Not found");
 			}
@@ -7136,15 +7258,68 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			else if (active[server][active_id].priv & FS_PRIV_SYSTEM)
 			{
 
+				regmatch_t matches[10];
+
 				// System commands here
 
-				if (!strncasecmp("SETHOME ", (const char *) command, 8))
+				if (regexec(&fs_netconf_regex_one, command, 2, matches, 0) == 0) // Found a NETCONF
+				{
+					char configitem[100];
+					int length;
+					unsigned char operator; // The + or - on the command line
+					FILE *config;
+					char configfile[300];
+
+					// temp use of length - will point to the operator character
+
+					operator = command[matches[1].rm_so];
+
+					length = matches[1].rm_eo - matches[1].rm_so - 1;
+					configitem[length] = 0;
+
+					while (length > 0)
+					{
+						configitem[length-1] = command[matches[1].rm_so + length];
+						length--;
+					}
+
+					if (!fs_quiet) fprintf (stderr, "[+%15.6f]    FS:%12sfrom %3d.%3d NET CONFIG: %s -> %s\n", timediffstart(), "", net, stn, configitem, (operator == '+' ? "ON" : "OFF"));
+
+					if (!strcasecmp("ACORNHOME", configitem))
+						fs_config[server].fs_acorn_home = (operator == '+' ? 1 : 0);
+					else if (!strcasecmp("MDFS", configitem))
+						fs_config[server].fs_sjfunc = (operator == '+' ? 1 : 0);
+					else
+					{
+						fs_error(server, reply_port, net, stn, 0xFF, "Bad configuration entry name"); return;
+					}
+					
+					sprintf(configfile, "%s/Configuration", fs_stations[server].directory);
+	
+					config = fopen(configfile, "w+");
+
+					if (!config)
+					{
+						if (!fs_quiet) fprintf (stderr, "[+%15.6f]    FS: Unable to write config file!\n", timediffstart());
+					}
+					else
+					{
+						fwrite(&(fs_config[server]), 256, 1, config);
+						fclose(config);
+					}
+					
+					fs_reply_ok(server, reply_port, net, stn);
+
+				}
+				else if (!strncasecmp("SETHOME ", (const char *) command, 8))
 				{ // Permanently set home directory
 					unsigned char params[256], dir[96], username[11];
 					short uid;
 	
 					{
 						struct path p;
+						char homepath[300];
+						struct objattr oa;
 
 						fs_copy_to_cr(params, command+8, 255);
 
@@ -7166,6 +7341,18 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						}
 						else	uid = userid;
 
+						// Remove homeof flag from existing home directory
+
+						if (users[server][uid].home[0]) // If there IS a home path
+						{
+							sprintf(homepath, ":%s.%s", fs_discs[server][users[server][uid].home_disc].name, users[server][uid].home);
+							if (fs_normalize_path(server, active_id, homepath, *(data+3), &p) && (p.ftype == FS_FTYPE_DIR))
+							{
+								fs_read_xattr(p.unixpath, &oa);
+								fs_write_xattr(p.unixpath, oa.owner, oa.perm, oa.load, oa.exec, 0); // Set homeof = 0
+							}
+						}
+			
 						if (!strcmp("%", dir)) // Blank it off
 						{
 							users[server][uid].home[0] = '\0';
@@ -7185,6 +7372,14 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							strncat((char * ) users[server][uid].home, (const char * ) p.path_from_root, 94);
 							users[server][uid].home_disc = p.disc;
 							fs_write_user(server, uid, (unsigned char *) &(users[server][uid]));
+
+							// Set homeof attribute
+							if (strlen(p.path_from_root)) // Don't set it on root!
+							{
+								fs_read_xattr(p.unixpath, &oa);
+								fs_write_xattr(p.unixpath, oa.owner, oa.perm, oa.load, oa.exec, uid);
+							}
+
 							fs_reply_ok(server, reply_port, net, stn);
 						}
 						else	fs_error(server, reply_port, net, stn, 0xA8, "Bad directory");
@@ -7258,31 +7453,32 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							fs_error(server, reply_port, net, stn, 0xFF, "No available users");
 						else
 						{
+							char homepath[300];
+
 							snprintf((char * ) users[server][id].username, 11, "%-10s", username);
 							snprintf((char * ) users[server][id].password, 7, "%-6s", "");
 							snprintf((char * ) users[server][id].fullname, 31, "%-30s", &(username[ptr]));
-							users[server][id].home[0] = '\0';
-							users[server][id].lib[0] = '\0';
-							//snprintf((char * ) users[server][id].home, 97, "$.%s", username);
-							//snprintf((char * ) users[server][id].lib, 97, "$.%s", "Library");
+							//users[server][id].home[0] = '\0';
+							//users[server][id].lib[0] = '\0';
+							snprintf((char * ) users[server][id].home, 97, "$.%s", username);
+							snprintf((char * ) users[server][id].lib, 97, "$.%s", "Library");
 							users[server][id].home_disc = 0;
 							users[server][id].priv = FS_PRIV_USER;
-							/*
-							sprintf((char * ) homepath, "%s/%1x%s/%s", fs_stations[server].directory, 0, fs_discs[server][0].name, username);
+							
+							sprintf(homepath, "%s/%1x%s/%s", fs_stations[server].directory, 0, fs_discs[server][0].name, username);
 							if (mkdir((const char *) homepath, 0770) != 0)
 								fs_error(server, reply_port, net, stn, 0xff, "Unable to create home directory");
 							else
 							{
-								snprintf((char * ) idtext, 5, "%04x", (unsigned short) id);
-								fs_write_xattr(homepath, id, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0);
-							*/
+								fs_write_xattr(homepath, id, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0, id); // Set home ownership. Is there a mortgage?
+							
 								fs_write_user(server, id, (unsigned char *) &(users[server][id]));
 								if (id >= fs_stations[server].total_users) fs_stations[server].total_users = id+1;
 								fs_reply_ok(server, reply_port, net, stn);
 								if (!fs_quiet) fprintf (stderr, "[+%15.6f]    FS:%12sfrom %3d.%3d New User %s, id = %d, total users = %d\n", timediffstart(), "", net, stn, username, id, fs_stations[server].total_users);
-							/*
+							
 							}
-							*/
+							
 							
 						}
 					}
@@ -7509,7 +7705,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				fs_aun_send (&reply, server, 2, net, stn);
 			}
 			else
-				fs_error(server, reply_port, net, stn, 0xff, "Insufficient access");
+				fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 			break;
 		case 0x1d: // Create file
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_save(server, reply_port, net, stn, active_id, data, datalen, ctrl); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?"); // fs_save works out whether it is handling a real save, or a 0x1d create
@@ -7586,7 +7782,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 				}
 				else
-					fs_error(server, reply_port, net, stn, 0xff, "Insufficient access");
+					fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 			}
 			break;
 		case 0x41: // Read/write system information (SJ Only)
@@ -7800,7 +7996,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					fs_aun_send (&reply, server, reply_length, net, stn);
 				}
 				else
-					fs_error(server, reply_port, net, stn, 0xff, "Insufficient access");
+					fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 			}
 			break;
 		default: // Send error

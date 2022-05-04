@@ -58,7 +58,7 @@ extern int8_t fs_get_user_printer(int, unsigned char, unsigned char);
 
 short aun_wait (unsigned char, unsigned char, unsigned char, unsigned char, unsigned char, uint32_t, short, struct __econet_packet_aun **);
 extern unsigned short fs_quiet, fs_noisy;
-extern short fs_sevenbitbodge, fs_sjfunc; // 7-bit acorn date bodge, fs_sjfunc turns on MDFS-only functionality in the fileserver(s)
+extern short fs_sevenbitbodge /*, fs_sjfunc*/ ; // 7-bit acorn date bodge, fs_sjfunc turns on MDFS-only functionality in the fileserver(s)
 extern short use_xattr; // When set use filesystem extended attributes, otherwise use a dotfile
 extern short normalize_debug;
 
@@ -557,7 +557,7 @@ unsigned int econet_write_wire(struct __econet_packet_aun *p, int len, int cache
 
 			while (
 				(err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS) 
-				&& (timediffmsec(&start, &now) < ((len > 4096) ? reception_extend : 1000) ) // at 200kHz, 4096 bytes plus some overhead, say 4200 = 4200 x 8 bits x 5us = 165000 us . Waiting 1s should easily see it complete - and if it doesn't, something's wrong
+				&& (timediffmsec(&start, &now) < ((len > 4096) ? reception_extend : 1500) ) // at 200kHz, 4096 bytes plus some overhead, say 4200 = 4200 x 8 bits x 5us = 165000 us . Waiting 1s should easily see it complete - and if it doesn't, something's wrong
 			)
 			{
 				gettimeofday(&now, 0);
@@ -3115,9 +3115,11 @@ int main(int argc, char **argv)
 
 	seq = 0x46; /* Random number */
 
-	fs_sevenbitbodge = fs_sjfunc = 1; // On by default 
 
-	while ((opt = getopt(argc, argv, "bc:de:f:ijlnmqrsw:xzh7")) != -1)
+	//fs_sevenbitbodge = fs_sjfunc = 1; // On by default 
+	fs_sevenbitbodge = 1; // On by default 
+
+	while ((opt = getopt(argc, argv, "bc:de:filnmqrsw:xzh7")) != -1)
 	{
 		switch (opt) {
 			case 'b': dumpmode_brief = 1; break;
@@ -3133,7 +3135,7 @@ int main(int argc, char **argv)
 			case 'f': fs_quiet = 1; fs_noisy = 0; break;
 //			case 'g': packet_gap = atoi(optarg); break;
 			case 'i': spoof_immediate = 1; break;
-			case 'j': fs_sjfunc = 0; break; // Turn off MDFS / SJ functionality in FS
+//			case 'j': fs_sjfunc = 0; break; // Turn off MDFS / SJ functionality in FS
 			case 'l': wire_enabled = 0; break;
 			case 'n': fs_noisy = 1; fs_quiet = 0; break;
 			case 'm': normalize_debug = 1; fs_noisy = 1; fs_quiet = 0; break;
@@ -3161,7 +3163,6 @@ Options:\n\
 \t-e\tAlter long stop wait for wire packet transmission (ms)\n\
 \t-f\tSilence fileserver log output\n\
 \t-i\tSpoof immediate responses in-kernel (will break *REMOTE, *VIEW etc.)\n\
-\t-j\tTurn off SJ Research MDFS functionality in file server\n\
 \t-l\tLocal only - do not connect to kernel module (uses /dev/null instead)\n\
 \t-n\tTurn on noisy fileserver debugging (also turns on ordinary logging)\n\
 \t-m\tTurn on FS 'normalize' debug (filename translation from Acorn to Unix) - super noisy\n\

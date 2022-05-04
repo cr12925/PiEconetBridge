@@ -1188,13 +1188,35 @@ Privileged commands:
 	  one user opening the original file for writing and another opening
 	  a link for writing.
 
+*NETCONF <+/-OPTION>
+	- Turns FS options on/off. These persist across restarts.
+	- There are two at present:
+	
+		*NETCONF +ACORNHOME / *NETCONF -ACORNHOME
+			Turns Acorn home directory semantics on/off
+			When on, a user will be treated as owning everything
+			in and below their home directory regardless of how
+			ownership is actually set in the permissions.
+
+		*NETCONF +MDFS / *NETCONF -MDFS
+			Turns SJ MDFS functionality on off. 
+			(Previously this was global across all fileservers
+			 running on a particular bridge.)
+	
 *NEWUSER <username>
 	- Create new user.
-	- At the moment, this does not create a home directory.
-	- You will need to manually create one, set its ownership with *CHOWN
-	- ... and then use *SETHOME to assign that directory to a user.
-	- Note that a user *can* have a home directory which he/she does
-	- ... not own!
+	- This now DOES create a home directory $.Username on the first disc
+	- And will set its ownership up correctly
+	- Note that you can change a user's home directory with *SETHOME
+	- but that will NOT change ownership - a user can thereby have 
+	- a home directory they do not own.
+
+	- NOTE: If you turn on the ACORNHOME option (*NETCONF +ACORNHOME)
+	- then Acorn Home directory ownership semantics will apply, and
+	- the user will be treated as owning everything below their
+	- home directory, whether the FS thinks they really own it or 
+	- not.
+
 	- To delete a user, see *PRIV
 
 *PRIV <user> <priv>
