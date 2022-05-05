@@ -2973,12 +2973,6 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 */
 	}
 
-	if (!(active[server][active_id].priv & FS_PRIV_SYSTEM) && (!(p.my_perm & FS_PERM_OWN_R))) // Can't read it
-	{
-		fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
-		return;
-	}
-
 	// Add final entry onto path_from_root (because normalize doesn't do it on a wildcard call)
 
 	if (strlen(p.path_from_root) != 0)
@@ -7155,7 +7149,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					if (p.disc != active[server][active_id].current_disc)
 						fs_error(server, reply_port, net, stn, 0xFF, "Not on current disc");
 					*/
-					else if (p.my_perm & FS_PERM_OWN_R)
+					else // BROKEN if (p.my_perm & FS_PERM_OWN_R)
 					{	
 						/* l = fs_get_dir_handle(server, active_id, p.unixpath); */
 						l = fs_open_interlock(server, p.unixpath, 1, active[server][active_id].userid);
@@ -7197,7 +7191,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						}
 						else	fs_error(server, reply_port, net, stn, 0xD6, "Dir unreadable");
 					}
-					else	fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
+					// BROKEN else	fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 				}
 				else	fs_error(server, reply_port, net, stn, 0xFE, "Not found");
 			}
@@ -7226,7 +7220,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				{
 					if (p.ftype != FS_FTYPE_DIR)
 						fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
-					else if (p.my_perm & FS_PERM_OWN_R)
+					else // BROKEN if (p.my_perm & FS_PERM_OWN_R)
 					{	
 						l = fs_open_interlock(server, p.unixpath, 1, active[server][active_id].userid);
 						if (l != -1) // Found
@@ -7270,7 +7264,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						}
 						else	fs_error(server, reply_port, net, stn, 0xC7, "Dir unreadable");
 					}
-					else fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
+					// BROKEN else fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 				}
 				else	fs_error(server, reply_port, net, stn, 0xFE, "Not found");
 			}
