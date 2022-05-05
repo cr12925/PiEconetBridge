@@ -1396,10 +1396,14 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 		fs_read_xattr(result->unixpath,&attr);
 		result->owner = 0; // Always SYST if root directory not owned
-		result->load = attr.load;
-		result->exec = attr.exec;
-		result->perm = attr.perm;
-		result->homeof = attr.homeof;
+		result->load = 0;
+		result->exec = 0;
+		result->perm = FS_PERM_OWN_R | FS_PERM_OWN_W | FS_PERM_OTH_R;
+		result->my_perm = FS_PERM_OWN_R | FS_PERM_OWN_W | FS_PERM_OTH_R;
+		if (!(active[server][user].priv & FS_PRIV_SYSTEM))
+			result->my_perm = FS_PERM_OWN_R; // Read only my_perm for non-System users on a root directory
+ 
+		result->homeof = 0;
 
 		fs_write_xattr(result->unixpath, result->owner, result->perm, result->load, result->exec, result->homeof);
 
@@ -1570,14 +1574,20 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			count++;
 		}
 
-		if (normalize_debug) fprintf (stderr, "Returning full acorn path (wildcard - last path element to be added by caller) %s\n", result->acornfullpath);
+		if (normalize_debug) fprintf (stderr, "Returning full acorn path (wildcard - last path element to be added by caller) %s with my_perm = %02X\n", result->acornfullpath, result->my_perm);
 
 		return 1;
 	}
 
 	// This is the non-wildcard code
 
+/* OLD - CAUSED NON-SYST USERS NOT TO BE ABLE TO READ $
 	result->my_perm = result->perm = result->parent_perm = 0; // Clear down
+*/
+	result->my_perm = result->perm;
+	result->parent_perm = result->perm;
+	if (!( (active[server][user].priv & FS_PRIV_SYSTEM) || (active[server][user].userid == result->owner) ))
+		result->my_perm = (result->my_perm & ~(FS_PERM_OWN_R | FS_PERM_OWN_W)) | ((result->my_perm & (FS_PERM_OTH_R | FS_PERM_OTH_W)) >> 4);
 
 	while ((result->npath > 0) && count < result->npath)
 	{
@@ -1821,7 +1831,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 	}
 	
-	if (normalize_debug) fprintf (stderr, "Returning full acorn path (non-wildcard) %s\n", result->acornfullpath);
+	if (normalize_debug) fprintf (stderr, "Returning full acorn path (non-wildcard) %s with permissions %02X\n", result->acornfullpath, result->my_perm);
 
 	strncpy((char * ) result->ownername, (const char * ) users[server][result->owner].username, 10); // Populate readable owner name
 	result->ownername[10] = '\0';
@@ -2714,6 +2724,16 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 				}
 					
 				active[server][usercount].current_disc = p.disc; // Updated here once we know where the URD is for definite.
+
+				if (fs_config[server].fs_acorn_home)
+				{
+					struct objattr oa;
+
+					fs_read_xattr(p.unixpath, &oa);
+
+					if (oa.homeof == 0)
+						fs_write_xattr(p.unixpath, oa.owner, oa.perm, oa.load, oa.exec, active[server][usercount].userid);
+				}
 
 				internal_handle = fs_open_interlock(server, p.unixpath, 1, active[server][usercount].userid);
 
