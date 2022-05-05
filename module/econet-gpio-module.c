@@ -202,6 +202,8 @@ void econet_write_cr(unsigned short r, unsigned char d)
 	if (econet_data->hwver < 2)
 	{
 		econet_wait_pin_low(ECONET_GPIO_PIN_CSRETURN, (ECONET_GPIO_CLOCK_DUTY_CYCLE));
+		// 20220505 And wait a cycle before turning it off again
+		barrier();
 	}
 	else
 		barrier();
