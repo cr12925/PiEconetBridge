@@ -8,7 +8,7 @@ Type=simple
 User=pi
 Group=pi
 Restart=on-failure
-ExecStart=/home/pi/PiEconetBridge/utilities/econet-bridge -f
+ExecStart=/usr/local/sbin/econet-bridge -f
 
 [Install]
 WantedBy=multi-user.target
