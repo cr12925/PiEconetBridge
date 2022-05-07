@@ -7766,6 +7766,15 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				
 				fs_aun_send (&reply, server, counter+1, net, stn);
 			}
+/* NOT YET IMPLEMENTED
+		case 0x21: if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_user_info_extended_multi(server, reply_port, net, stn, *(data+5), *(data+6)); break;
+		case 0x22: if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_user_info_extended_single(server, reply_port, net, stn, data+5); break;
+		case 0x24: if ((fs_stn_logged_in(server, net, stn) >= 0) && active[server][active_id].priv & FS_PRIV_SYSTEM)
+			{
+				fs_manager_interface(server, reply_port, net, stn, *(data+5), data+6);
+			}
+			break;
+*/
 		case 0x40: // Read account information (SJ Only) - i.e. free space on a particular disc
 			{
 				if (fs_stn_logged_in(server, net, stn) >= 0)

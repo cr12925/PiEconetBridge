@@ -40,6 +40,8 @@
 #include "../include/econet-gpio-consumer.h"
 #include "../include/econet-pserv.h"
 
+#define ECONET_MAX_STATIONS 2048 // This can go up to 65536 - but the more you put, the more memory it uses and the longer it takes to load. Only needs to be enough for your defined stations in the config, +256 if you use 'L' or 'DYNAMIC' or 'LEARN', +256 if you use 'WIRE 0 * AUTO'
+
 struct timeval start;
 
 extern int fs_initialize(unsigned char, unsigned char, char *);
@@ -257,7 +259,7 @@ struct timeval wire_prio_expiry; // Time at which the priority values in the lin
 
 // Econet hosts lists & FD pointers back into the various arrays
 
-struct econet_hosts network[65536]; // Hosts we know about / listen for / bridge for
+struct econet_hosts network[ECONET_MAX_STATIONS]; // Hosts we know about / listen for / bridge for
 short econet_ptr[256][256]; /* [net][stn] pointer into network[] array. */
 uint16_t last_ps[256][256]; // Last print (emulated) print server used by each station. Used to re-set default printer if the station uses a new print server
 uint8_t last_prn[256][256]; // Last printer index used by a station on the current print server. Gets re-set to 0 on change of PS (i.e. when a job gets sent to an emulated PS which is not the current one in last_ps).
@@ -825,7 +827,7 @@ void econet_readconfig(void)
 		exit(EXIT_FAILURE);
 	}
 
-	while (!feof(configfile))
+	while ((!feof(configfile)) && (networkp < ECONET_MAX_STATIONS))
 	{
 		if (fgets(linebuf, 255, configfile) == NULL) break;
 		linebuf[strlen(linebuf)-1] = 0x00; // Drop the linefeed
@@ -1684,6 +1686,12 @@ void econet_readconfig(void)
 			fprintf(stderr,    "Bad configuration line: %s\n", linebuf);
 			exit(EXIT_FAILURE);
 		}
+	}
+
+	if (!feof(configfile))
+	{
+		fprintf (stderr, "ERROR: Too many stations defined. Try increasing value of ECONET_MAX_STATIONS in econet-bridge.c and recompiling.\n");
+		exit (EXIT_FAILURE);
 	}
 
 	regfree(&r_entry_wire);
@@ -2825,7 +2833,7 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 
 		result = len;
 
-		//fprintf (stderr, "Broadcast retransmission - len = %d, s = %d\n", len, s);
+		//fprintf (stderr, "Broadcast retransmission - len = %d, s = %d, source = %d\n", len, s, source);
 
 		// Dump it locally if it wasn't local
 		if ((s != -1 && (!(network[s].type & ECONET_HOSTTYPE_TLOCAL))) || (s == -1)) // Known source and it wasn't a local emulator,  or unknown source
@@ -2838,7 +2846,7 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 
 		for (count = 0; count < stations;  count++)
 		{
-			if ((network[count].type & ECONET_HOSTTYPE_TNAMEDPIPE) && (s != -1 && s != count) && (network[count].pipewritesocket != -1)) // Is a named pipe, and not the one the packe came from
+			if ((network[count].type & ECONET_HOSTTYPE_TNAMEDPIPE) && (s == -1 || s != count) && (network[count].pipewritesocket != -1)) // Is a named pipe, and not the one the packe came from
 			{
 				struct __econet_packet_pipe delivery;
 
