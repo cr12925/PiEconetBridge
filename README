@@ -81,6 +81,11 @@ appear to stop stations communicating with distant network numbers.
 Prerequisites
 -------------
 
+** Do NOT attempt to run this on PiOS 64 bit yet. There is an incompatibility
+   with the kernel module which will crash your system. I suspect it is the
+   direct writes to the GPIO hardware. This is on the list to fix.
+**
+
 The system will require:
 	- Raspberry Pi 4B (anything less and timing issues mean it won't work
           at the moment, but I am working on it!) With a version 2 board
@@ -775,9 +780,7 @@ TO DO
 KNOWN BUGS
 ----------
 
-- Kernel module occasionally needs reloading because the AUN state machine
-  gets stuck. Seems to be rare thesedays though. Recent (Apr22) fixes
-  may well have solved this. YMMV.
+- Incompatible with PiOS 64 bit
 
 PRINT & FILE SERVERS
 --------------------
