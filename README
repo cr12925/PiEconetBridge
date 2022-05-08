@@ -25,7 +25,10 @@ THANKS
 Two individuals, KL and IW (you know who you are) did extensive testing
 of both the hardware and software involved in this project (aka trying
 quite hard to break it!) in July and August 2021. I am very grateful to
-them for their efforts.
+them for their efforts. I should also like to express my thanks to
+the following on the stardot.org.uk forums for their help, ideas, and
+patience: @arg, @sweh, @IanJeffray, @Simon - and there are probably 
+others whom I have inexcusably failed to remember - thank you all.
 
 The fileserver code in this repository would not have been possible to
 develop without sight of the code at github.com/stardot/ArduinoFilestore.
@@ -86,9 +89,10 @@ The system will require:
           has quite a current draw and an underpowered PSU can lead to
           rx/tx problems
 	- No other GPIO usage on the system
-	- Do NOT install the Pi desktop - or if you do, don't run it.
-	- Use of Wifi for AUN traffic causes latency / loss issues. Wired
-	  Ethernet is by far the preferred transport.
+	- With v1 hardware (as described in here), do NOT install the Pi
+	  desktop - or if you do, don't run it. 
+	- Disable Wifi sleep on your Pi, especially if that is your network
+	  connectivity of choice.
 	- The hardware (see Hardware.pdf), which in turn requires a Master 128
           Econet board. If you buy a version 2 ready made board from 
 	  @KenLowe, this *includes* the necessary econet board and a separate
@@ -97,7 +101,6 @@ The system will require:
           below)
 	- A pre-existing functioning Econet (with clock) with a spare station
           port to connect to the hardware
-
 
 You will need to fix the clock on your Pi - i.e. it MUST NOT switch in and
 out of turbo mode. If you don't, then expect unreliability.
@@ -238,6 +241,10 @@ bridge. There should be no need to do so and use is discouraged.
 
 TESTING - HARDWARE
 ------------------
+
+By all means build the hardware described here. However, better performing
+hardware is available pre-built in the form of a 'version 2' board from
+@KenLowe on the stardot.org.uk fora.
 
 If, like me, you've built the hardware on a breadbaord, you should probably
 test it before trying to use it. 
