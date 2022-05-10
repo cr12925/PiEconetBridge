@@ -171,6 +171,7 @@ struct __econet_packet_pipe {
 #define ECONETGPIO_IOC_SETBUS		_IOW(ECONETGPIO_MAGIC, 103, char)
 #define ECONETGPIO_IOC_TEST		_IO(ECONETGPIO_MAGIC, 104) /* Put into test mode - interrupts off, ignore all user-space read/write ops. Use RESET to come back to normal ops */
 #define ECONETGPIO_IOC_TESTPACKET	_IO(ECONETGPIO_MAGIC, 105)
+#define ECONETGPIO_IOC_EXTRALOGS	_IOW(ECONETGPIO_MAGIC, 106, char) /* TUrn on additional logging */
 
 
 #define ECONET_GPIO_WRITE 0

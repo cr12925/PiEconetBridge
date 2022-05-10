@@ -657,7 +657,7 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 
 	if (econet_pkt_tx.length != 0) // Already in progress
 	{
-		printk (KERN_INFO "ECONET-GPIO: Flag busy because length != 0\n");
+		if (econet_data->extralogs) printk (KERN_INFO "ECONET-GPIO: Flag busy because length != 0\n");
 		econet_set_tx_status(ECONET_TX_BUSY);
 		return;
 	}
@@ -905,12 +905,12 @@ void econet_irq_write(void)
 
 				if (sr1 & ECONET_GPIO_S1_CTS) // Collision?
 				{
-					printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): /CTS - Collision? TDRA unavailable on IRQ - SR1 - 0x%02X, SR2 = 0x%02X, ptr = %d, loopcount = %d - abort tx\n", sr1, sr2, econet_pkt_tx.ptr, loopcount);
+					if (econet_data->extralogs) printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): /CTS - Collision? TDRA unavailable on IRQ - SR1 - 0x%02X, SR2 = 0x%02X, ptr = %d, loopcount = %d - abort tx\n", sr1, sr2, econet_pkt_tx.ptr, loopcount);
 					econet_set_tx_status(ECONET_TX_COLLISION);
 				}
 				else	
 				{
-					printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): TDRA not available on IRQ - SR1 = 0x%02x, SR2 = 0x%02x, ptr = %d, loopcount = %d - abort transmission\n", sr1, sr2, econet_pkt_tx.ptr, loopcount);
+					if (econet_data->extralogs) printk (KERN_INFO "ECONET-GPIO: econet_irq_write(): TDRA not available on IRQ - SR1 = 0x%02x, SR2 = 0x%02x, ptr = %d, loopcount = %d - abort transmission\n", sr1, sr2, econet_pkt_tx.ptr, loopcount);
 					econet_set_tx_status(ECONET_TX_TDRAFULL);
 				}
 
@@ -2072,7 +2072,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	if (econet_data->aun_mode && aunstate != EA_IDLE) // Not idle
 	{
-		printk (KERN_INFO "ECONET-GPIO: Flag busy because AUN state machine busy (state = 0x%02x)\n", aunstate);
+		if (econet_data->extralogs) printk (KERN_INFO "ECONET-GPIO: Flag busy because AUN state machine busy (state = 0x%02x)\n", aunstate);
 		econet_set_tx_status(ECONET_TX_BUSY);
 		spin_unlock(&econet_irqstate_spin);
 		mutex_unlock(&econet_writefd_mutex);
@@ -2084,7 +2084,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	if (chipmode != EM_IDLE && chipmode != EM_IDLEINIT && chipmode != EM_FLAGFILL)
 	{
-		printk (KERN_INFO "ECONET-GPIO: Flag busy because chip state not idle / flagfill\n");
+		if (econet_data->extralogs) printk (KERN_INFO "ECONET-GPIO: Flag busy because chip state not idle / flagfill\n");
 		econet_set_tx_status(ECONET_TX_BUSY);
 		spin_unlock(&econet_irqstate_spin);
 		mutex_unlock(&econet_writefd_mutex);
@@ -2328,8 +2328,12 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 			break;
 
 		case ECONETGPIO_IOC_IMMSPOOF:
-			printk (KERN_INFO "ECONET-GPIO: Changing immediate spoof mode to %s\n", arg ? "ON" : "OFF");
+			if (econet_data->extralogs) printk (KERN_INFO "ECONET-GPIO: Changing immediate spoof mode to %s\n", arg ? "ON" : "OFF");
 			econet_data->spoof_immediate = arg ? 1 : 0;
+			break;
+		case ECONETGPIO_IOC_EXTRALOGS:
+			econet_data->extralogs = (arg == 0) ? 0 : 1;
+			printk (KERN_INFO "ECONET-GPIO: Extra logging turned %s\n", (arg == 0) ? "OFF" : "ON");
 			break;
 		case ECONETGPIO_IOC_TESTPACKET: /* Send test packet */
 #ifdef ECONET_GPIO_DEBUG_IOCTL
@@ -2419,6 +2423,7 @@ static int __init econet_init(void)
 	econet_data->initialized = 0; // Module not yet initialized.
 	econet_set_aunstate(EA_IDLE);
 	econet_data->spoof_immediate = 0;
+	econet_data->extralogs = 0;
 	
 	// Assume hardware version 1 unless told otherwise
 	econet_data->hwver = 1;

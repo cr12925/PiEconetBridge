@@ -100,6 +100,7 @@ int pkt_debug = 0;
 int dumpmode_brief = 0;
 int wire_enabled = 1;
 int spoof_immediate = 0; // Changed from 1
+int extralogs = 0;
 int wired_eject = 1; // When set, and a dynamic address is allocated to an unknown AUN station, this will cause the bridge to spoof a '*bye' equivalent to fileservers it has learned about on the wired network
 short learned_net = -1;
 int wire_tx_errors = 0; // Count of successive errors on tx to the wire - if it gets too high, we'll do a chip reset
@@ -3127,7 +3128,7 @@ int main(int argc, char **argv)
 	//fs_sevenbitbodge = fs_sjfunc = 1; // On by default 
 	fs_sevenbitbodge = 1; // On by default 
 
-	while ((opt = getopt(argc, argv, "bc:de:filnmqrsw:xzh7")) != -1)
+	while ((opt = getopt(argc, argv, "bc:de:fiklnmqrsw:xzh7")) != -1)
 	{
 		switch (opt) {
 			case 'b': dumpmode_brief = 1; break;
@@ -3144,6 +3145,7 @@ int main(int argc, char **argv)
 //			case 'g': packet_gap = atoi(optarg); break;
 			case 'i': spoof_immediate = 1; break;
 //			case 'j': fs_sjfunc = 0; break; // Turn off MDFS / SJ functionality in FS
+			case 'k': extralogs = 1; break; // Turn on extra kernel logging when initialized
 			case 'l': wire_enabled = 0; break;
 			case 'n': fs_noisy = 1; fs_quiet = 0; break;
 			case 'm': normalize_debug = 1; fs_noisy = 1; fs_quiet = 0; break;
@@ -3171,6 +3173,7 @@ Options:\n\
 \t-e\tAlter long stop wait for wire packet transmission (ms)\n\
 \t-f\tSilence fileserver log output\n\
 \t-i\tSpoof immediate responses in-kernel (will break *REMOTE, *VIEW etc.)\n\
+\t-k\tTurn on slightly more kernel logging (collisions, etc.)\n\
 \t-l\tLocal only - do not connect to kernel module (uses /dev/null instead)\n\
 \t-n\tTurn on noisy fileserver debugging (also turns on ordinary logging)\n\
 \t-m\tTurn on FS 'normalize' debug (filename translation from Acorn to Unix) - super noisy\n\
@@ -3310,6 +3313,9 @@ Options:\n\
 		printf("Unable to open econet device. You may need to be root?\n");
 		exit (EXIT_FAILURE);
 	}
+
+	if (extralogs)
+		ioctl(econet_fd, ECONETGPIO_IOC_EXTRALOGS, extralogs);
 
 	ioctl(econet_fd, ECONETGPIO_IOC_SET_STATIONS, &econet_stations);
 	if (spoof_immediate)
