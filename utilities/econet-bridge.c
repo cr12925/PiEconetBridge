@@ -1387,6 +1387,14 @@ void econet_readconfig(void)
 			// cases and just set the range accordingly.
 			unsigned char stn_low=this_stn?this_stn:1, stn_high=this_stn?this_stn:254;
 
+			// Protect against overfilling the network[] array
+
+			if ((stn_high - stn_low + 1) > (ECONET_MAX_STATIONS - networkp))
+			{
+				fprintf (stderr, "Insufficient network[] entries for configuration file. Try increasing ECONET_MAX_STATIONS.\n");
+				exit (EXIT_FAILURE);
+			}
+
 			for (this_stn=stn_low;this_stn<=stn_high;this_stn++)
 			{
 				if (inuse[this_stn])
@@ -1476,6 +1484,12 @@ void econet_readconfig(void)
 			{
 				fprintf (stderr, "Cannot set dynamic network number to 0 because it is used on the Econet wire.\n");
 				exit(EXIT_FAILURE);
+			}
+
+			if ((ECONET_MAX_STATIONS - networkp) < 255)
+			{
+				fprintf (stderr, "Insufficient network[] entries to configure dynamic network. Try increasing ECONET_MAX_STATIONS.\n");
+				exit (EXIT_FAILURE);
 			}
 
 			for (count = 1; count < 255; count++) // Put the entire network's worth of hosts into network[] and flag as dynamic	
@@ -3862,7 +3876,10 @@ Options:\n\
 								// And dump the packet off the head if it's the same sequence
 	
 								if (network[from_found].aun_head && p.p.seq == network[from_found].aun_head->p->p.seq)
+								{
 									econet_general_dumphead (&(network[from_found].aun_head), &(network[from_found].aun_tail));
+									aun_queued--;
+								}
 
 							}
 						}

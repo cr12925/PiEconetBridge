@@ -4794,7 +4794,7 @@ void fs_delete(int server, unsigned short reply_port, int active_id, unsigned ch
 				return;
 			}
 			else if (
-					!(	(e->owner == active[server][active_id].userid) || ((e->parent_owner == active[server][active_id].userid) && (e->parent_perm & FS_PERM_OWN_W))
+					!(	(users[server][active[server][active_id].userid].priv & FS_PRIV_SYSTEM) || (e->owner == active[server][active_id].userid) || ((e->parent_owner == active[server][active_id].userid) && (e->parent_perm & FS_PERM_OWN_W))
 				)
 			)
 			{
