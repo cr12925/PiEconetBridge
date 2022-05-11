@@ -40,6 +40,7 @@ confpath=/etc/econet-gpio/printers
 # _USERNAME_
 # _SERVERNETWORK_
 # _SERVERSTATION_
+# _DESTINATION_
 # _NETWORK_
 # _STATION_
 # _DATE_
@@ -65,28 +66,41 @@ tmp=$(mktemp /tmp/econet-print.XXXXXXXXXX)
 sedtmp=$(mktemp /tmp/econet-print.XXXXXXXXX)
 
 header=""
+footer=""
 cmdopts="" # Prepended command line options
+cmdexec="" # Replacement command line binary to deliver
 
-if [ -f "${confpath}/${dest}.${username}.header" ]
+if [ -f "${confpath}/${acorndest}.${username}.header" ]
 then
-	header="${confpath}/${dest}.${username}.header"
-elif [ -f "${confpath}/${dest}.header" ]
+	header="${confpath}/${acorndest}.${username}.header"
+elif [ -f "${confpath}/${acorndest}.header" ]
 then
-	header="${conf}/${dest}.header"
+	header="${confpath}/${acorndest}.header"
 elif [ -f "${confpath}/default.header" ]
 then
 	header="${confpath}/default.header"
 fi
 
-if [ -f ${confpath}/${dest}.${username}.conf ]
+if [ -f ${confpath}/${acorndest}.${username}.conf ]
 then
-	. ${confpath}/${dest}.${username}.conf
-elif [ -f ${confpath}/${dest}.conf ]
+	. ${confpath}/${acorndest}.${username}.conf
+elif [ -f ${confpath}/${acorndest}.conf ]
 then
-	. ${confpath}/${dest}.conf
+	. ${confpath}/${acorndest}.conf
 elif [ -f ${confpath}/default.conf ]
 then
 	. ${confpath}/default.conf
+fi
+
+if [ -f "${confpath}/${acorndest}.${username}.footer" ]
+then
+	footer="${confpath}/${acorndest}.${username}.footer"
+elif [ -f "${confpath}/${acorndest}.footer" ]
+then
+	footer="${confpath}/${acorndest}.footer"
+elif [ -f "${confpath}/default.footer" ]
+then
+	footer="${confpath}/default.footer"
 fi
 
 # Build the sed script
@@ -95,6 +109,7 @@ echo s/_SERVERSTATION_/${2}/ >> $sedtmp
 echo s/_NETWORK_/${3}/ >> $sedtmp
 echo s/_STATION_/${4}/ >> $sedtmp
 echo s/_USERNAME_/${5}/ >> $sedtmp
+echo s/_DESTINATION_/${6}/ >> $sedtmp
 echo s/_DATE_/`date +'%d.%m.%Y'`/ >> $sedtmp
 echo s/_TIME_/`date +'%H:%M'`/ >> $sedtmp
 
@@ -107,16 +122,32 @@ fi
 
 cat ${file} >> ${tmp}
 
+if [ "${footer}" != "" ]
+then
+	/usr/bin/sed -f ${sedtmp} ${footer} >> ${tmp}
+fi
+
 if [[ "${dest}" =~ "@" ]]
 then
+	if [ "${cmdexec}" == "" ]
+	then
 		/usr/sbin/sendmail ${cmdopts} ${dest} < ${tmp} 2>&1 >/dev/null
+	else
+		${cmdexec} ${cmdopts} ${dest} < ${tmp} 2>&1 >/dev/null
+	fi
 else
+	if [ "${cmdexec}" == "" ]
+	then
 		/usr/bin/lp ${cmdopts} -d ${dest} < ${tmp} 2>&1 >/dev/null
+	else
+                ${cmdexec} ${cmdopts} ${dest} < ${tmp} 2>&1 >/dev/null
+        fi
 fi
 
 # Clean up
 
 rm ${sedtmp}
 rm ${tmp}
+rm ${file} # Removes source file!
 
 exit 0
