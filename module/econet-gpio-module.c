@@ -2378,6 +2378,9 @@ static int __init econet_init(void)
 	/* Initialize some debug instrumentation */
 	tx_packets = 0; 
 
+	/* See what sort of system we have */
+
+
 	/* See if our ancient econet_ndelay code is disabled */
 #ifdef ECONET_NO_NDELAY
 	printk (KERN_INFO "ECONET-GPIO: Old econet_ndelay() code disabled. This is Good.\n");
@@ -2413,6 +2416,36 @@ static int __init econet_init(void)
 		printk ("ECONET-GPIO: Failed to allocate internal data storage.\n");
 		return -ENOMEM;
 	}
+
+	econet_data->peribase = 0xFE000000; // Assume Pi4-class unless we find otherwise
+
+	if (of_machine_is_compatible("raspberrypi,4-model-b"))
+		printk (KERN_INFO "ECONET-GPIO: This appears to be a Pi4B\n");
+	else if (of_machine_is_compatible("raspberrypi,400"))
+		printk (KERN_INFO "ECONET-GPIO: This appears to be a Pi400\n");
+	else if (of_machine_is_compatible("raspberrypi,3-model-b"))
+	{
+		econet_data->peribase = 0x3F000000;
+		printk (KERN_INFO "ECONET-GPIO: This appears to be a Pi3B\n");
+	}
+	else if (of_machine_is_compatible("raspberrypi,3-model-b-plus"))
+	{
+		econet_data->peribase = 0x3F000000;
+		printk (KERN_INFO "ECONET-GPIO: This appears to be a Pi3B+\n");
+	}
+	else if (of_machine_is_compatible("raspberrypi,model-zero-w") || of_machine_is_compatible("raspberrypi,model-zero"))
+	{
+		econet_data->peribase = 0x20000000;
+		printk (KERN_INFO "ECONET-GPIO: This appears to be a PiZero (reliability uncertain)\n");
+	}
+	else if (of_machine_is_compatible("raspberrypi,model-zero-2-w") || of_machine_is_compatible("raspberrypi,model-zero-2"))
+	{
+		econet_data->peribase = 0x3F000000;
+		printk (KERN_INFO "ECONET-GPIO: This appears to be a PiZero2\n");
+	}
+	else printk (KERN_INFO "ECONET-GPIO: Machine compatibility uncertain - assuming Peripheral base at 0xFE000000");
+
+	printk (KERN_INFO "ECONET-GPIO: Peripheral base address set to 0x%08lX\n", econet_data->peribase);
 
 	econet_set_chipstate(EM_TEST);
 	econet_set_irq_state(-1);

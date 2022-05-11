@@ -152,6 +152,8 @@ struct __econet_data {
 	unsigned char hwver;
 	unsigned char current_dir; // Current databus direction
 	unsigned char initialized; // Whether module is actually initialized
+	unsigned char extralogs; // If 1, extra dmesg logging happens (e.g. collisions, rx aborts, etc.)
+	unsigned long peribase; // Peripheral base address
 };
 
 struct __econet_pkt_buffer {
