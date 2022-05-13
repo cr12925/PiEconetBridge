@@ -162,6 +162,13 @@ nor should you do anything that is in the 'EEPROM' file.
 2. Get the distribution of the bridge code. It comes in three main sections:
    kernel module, utilities, configuration
 
+NB: All of the following steps can be automated on a new install by doing
+'make install' in the top level directory of the distribution. If you are using
+v2 hardware (see below), then the install routine will make the Pi autosense
+the v2 HAT, load the kernel module, and start the bridge at boot. You may wish
+nonetheless to edit the config file (especially if you have a wired station
+at 254!).
+
 3. Build the kernel module
 
 	cd module
@@ -615,15 +622,27 @@ It will produce little output in this mode, save for errors.
 
 The -h command line switch will give you help as to other things you can do. 
 
+-a <ms>   : Change the AUN interpacket gap - milliseconds. This is the period
+	    the bridge will wait before retransmitting a packet to an
+	    AUN station.
+-b        : When specified with -d, produces abbreviated (~ 1 line per packet)
+	    output.
 -c <path> : Use alternative config.
 -d        : Produce packets on stderr as they come and go. These will be
 	    AUN-type (i.e. not raw off the wire), post 4-way h/shake.
--b        : When specified with -d, produces abbreviated (~ 1 line per packet)
-	    output.
+-e <ms>	  : Alter the long stop wait time for an econet packet to transmit
+	    on the wire. Longer will slow down the bridge, potentially,
+	    but may increase reliability.
 -f	  : Stop the fileserver from producing log output to stderr.
 	    (Incompatible with -n and if specified after -n will take
 	    precedence.)
+-g <ms>	  : Change the Econet wire interpacket gap - milliseonds. This is
+	    the period the bridge will wait before trying to send an
+	    econet packet (to any station on the wire) where previous
+	    transmission(s) have failed. Default is 10ms. Faster means
+	    potentially better performance.
 -i	  : Turns on old immediate mode spoofing. Should not be required.
+-k	  : Turns on slightly more kernel logging (e.g. about collisions)
 -l	  : Stops the bridge code talking to the Econet hardware. Useful
 	    for testing, or if you just want to run a fileserver without any
 	    connection to a wired Econet.
@@ -631,12 +650,27 @@ The -h command line switch will give you help as to other things you can do.
 	    about what it is doing, notably on file reads/writes/bulk
 	    transfer. (Incompatible with -f and if specified after -f will
 	    override it.)
+-m	  : Turns on FS 'normalize' debugging (e.g. translation of Acorn
+	    to Unix filesystem naming). Produces a lot of output. Not
+	    normally needed.
+-q        : Don't do bridge query responses
 -r	  : Turns on traffic queue debugging. Should not normally be
 	    needed. Avoid.
 -s        : Dump a summary of the config file before bridging - useful for
 	    checking the config has been read.
--q        : Don't do bridge query responses (but the present version doesn't
-	    anyway, so this achieves nothing).
+-x	  : Force use of .inf files instead of xattr in Fileserver.
+	    Affects all locally emulated fileservers.
+-w <ms>	  : Change the wait time for immediate relies (milliseconds).
+	    Shorter = more responsive; Longer = more reliable. Default is
+	    500ms. After this timeout, the bridge will likely re-set the
+	    kernel module back to read mode where it is waiting for an
+	    immediate reply from AUN.
+-z	  : Stop the bridge from sending an automatic *BYE to known
+	    fileservers where a dynamically allocated AUN station joins
+	    the network. This should normally not be used, because it is
+	    important that a new dynamic station does not inherit the login
+	    to fileservers which any previous holder of the same net/stn
+	    combination had.
 -7	  : By default, the FS will use the '7 bit bodge' for dates to
  	    provide some Y2K compliance. This turns the option off and
   	    reverts to 'original' Acorn year numbering which tops out at 
@@ -680,6 +714,17 @@ You should find your real BBC can log into the BeebEm Fileserver.
 
 The reverse also works - logging into a real BBC fileserver (or potentially SJ
 Research, but I don't have one) from BeebEm.
+
+
+DEFAULT CONFIGURATION
+---------------------
+
+The system ships with a default configuration file (installed for you with
+the top level 'make install' if there isn't a config file present already) which
+will recognize all wired stations, will number the local network as 1, and
+implement a local fileserver at station number 254 (with files stored in 
+/home/pi/econetfs). The fileserver is accessible over AUN at port 32768 on the
+Pi's local IP address.
 
 TRUNKING, FIREWALLING AND NETWORK ADDRESS TRANSLATION
 -----------------------------------------------------

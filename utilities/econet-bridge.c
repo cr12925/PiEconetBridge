@@ -126,9 +126,11 @@ unsigned char econet_stations[8192];
 // Wait time for immediate reply before resetting module
 #define ECONET_IMM_WAIT_TIME (econet_imm_wait_time)
 // Mandatory gap between last tx to or rx from an AUN host so that it doesn't get confused (ms)
-#define ECONET_AUN_INTERPACKET_GAP (50) 
+unsigned short econet_aun_interpacket_gap = 25;
+#define ECONET_AUN_INTERPACKET_GAP (econet_aun_interpacket_gap) 
 // Gap between re-tx on the wire if it's failed
-#define ECONET_WIRE_INTERPACKET_GAP (10)
+unsigned short econet_wire_interpacket_gap = 10;
+#define ECONET_WIRE_INTERPACKET_GAP (econet_wire_interpacket_gap)
 // Multiplier applied to the packet_gap parameter on a failed transmission - Disused
 //#define ECONET_RETX_BACKOFF_MULTIPLE (1.25)
 
@@ -3142,9 +3144,10 @@ int main(int argc, char **argv)
 	//fs_sevenbitbodge = fs_sjfunc = 1; // On by default 
 	fs_sevenbitbodge = 1; // On by default 
 
-	while ((opt = getopt(argc, argv, "bc:de:fiklnmqrsw:xzh7")) != -1)
+	while ((opt = getopt(argc, argv, "a:bc:de:fg:hiklnmqrsw:xzh7")) != -1)
 	{
 		switch (opt) {
+			case 'a': econet_aun_interpacket_gap = atoi(optarg); break;
 			case 'b': dumpmode_brief = 1; break;
 			case 'c':
 				strcpy (cfgpath, optarg);
@@ -3156,9 +3159,8 @@ int main(int argc, char **argv)
 				reception_extend = atoi(optarg);
 				break;
 			case 'f': fs_quiet = 1; fs_noisy = 0; break;
-//			case 'g': packet_gap = atoi(optarg); break;
+			case 'g': econet_wire_interpacket_gap = atoi(optarg); break;
 			case 'i': spoof_immediate = 1; break;
-//			case 'j': fs_sjfunc = 0; break; // Turn off MDFS / SJ functionality in FS
 			case 'k': extralogs = 1; break; // Turn on extra kernel logging when initialized
 			case 'l': wire_enabled = 0; break;
 			case 'n': fs_noisy = 1; fs_quiet = 0; break;
@@ -3174,18 +3176,20 @@ int main(int argc, char **argv)
 			case '7': fs_sevenbitbodge = 0; break;
 			case 'h':	
 				fprintf(stderr, " \n\
-Copyright (c) 2021 Chris Royle\n\
+Copyright (c) 2022 Chris Royle\n\
 This program comes with ABSOLUTELY NO WARRANTY; for details see\n\
 the GPL v3.0 licence at https://www.gnu.org/licences/ \n\
 \n\
 Usage: %s [options] \n\
 Options:\n\
 \n\
+\t-a\tSet AUN interpacket retransmission gap per station (ms) (default %d)\n\
 \t-b\tDo brief packet dumps\n\
 \t-c\t<config path>\n\
 \t-d\tTurn on packet debug (you won't see much without!)\n\
 \t-e\tAlter long stop wait for wire packet transmission (ms)\n\
 \t-f\tSilence fileserver log output\n\
+\t-g\tSet econet interpacket retransmission gap (ms) (default %d)\n\
 \t-i\tSpoof immediate responses in-kernel (will break *REMOTE, *VIEW etc.)\n\
 \t-k\tTurn on slightly more kernel logging (collisions, etc.)\n\
 \t-l\tLocal only - do not connect to kernel module (uses /dev/null instead)\n\
@@ -3200,7 +3204,7 @@ Options:\n\
 \t-7\tDisable fileserver 7 bit bodge\n\
 \n\
 \
-", argv[0]);
+", argv[0], econet_aun_interpacket_gap, econet_wire_interpacket_gap);
 				exit(EXIT_FAILURE);
 		}
 	}

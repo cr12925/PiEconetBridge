@@ -1913,10 +1913,11 @@ void fs_write_user(int server, int user, unsigned char *d) // Writes the 256 byt
 			if (!fs_quiet) fprintf (stderr, "[+%15.6f]    FS: Attempt to write beyond end of user file\n", timediffstart());
 		}
 		else
-			fwrite(d, 256, 1, h);
+			if ((fwrite(d, 256, 1, h) != 1) && (!fs_quiet)) fprintf (stderr, "[+%15.6f]    FS: Error writing to password file\n", timediffstart());
 
 		fclose(h);
 	}
+	else fprintf (stderr, "[+%15.6f]    FS: Error opening password file - %s\n", timediffstart(), strerror(errno));
 
 }
 
@@ -2601,7 +2602,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 
 	while (counter < fs_stations[server].total_users && !found)
 	{
-		if (!strncmp(users[server][counter].username, username, 10) && (users[server][counter].priv != 0))
+		if (!strncasecmp(users[server][counter].username, username, 10) && (users[server][counter].priv != 0))
 			found = 1;
 		else
 			counter++;
@@ -3807,13 +3808,13 @@ void fs_free(int server, unsigned short reply_port, unsigned char net, unsigned 
 
 				// This is well dodgy and probably no use unless you put the filestore on a smaller filing system
 
-				if (f > 0xffffff) f = 0xffffff;
+				if (f > 0xffffff) f = 0x7fffff;
 
 				r.p.data[2] = (f % 256) & 0xff;
 				r.p.data[3] = ((f >> 8) % 256) & 0xff;
 				r.p.data[4] = ((f >> 16) % 256) & 0xff;
 
-				if (e > 0xffffff) e = 0xffffff;
+				if (e > 0xffffff) e = 0x7fffff;
 
 				r.p.data[5] = (e % 256) & 0xff;
 				r.p.data[6] = ((e >> 8) % 256) & 0xff;
