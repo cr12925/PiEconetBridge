@@ -73,12 +73,15 @@ extern uint8_t get_printer_total (unsigned char, unsigned char);
 extern float timediffstart(void);
 
 short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for extra year information
-//short fs_sjfunc; // Whether SJ MDFS functionality is turned on (global - not per fileserver)
 short use_xattr=1 ; // When set use filesystem extended attributes, otherwise use a dotfile
 short normalize_debug = 0; // Whether we spew out loads of debug about filename normalization
 
 short fs_open_interlock(int, unsigned char *, unsigned short, unsigned short);
 void fs_close_interlock(int, unsigned short, unsigned short);
+
+// Parser
+//#define FS_PARSE_DEBUG 1
+uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 
 #define FS_VERSION_STRING "PiEconetBridge FS 1.0"
 
@@ -91,6 +94,11 @@ void fs_close_interlock(int, unsigned short, unsigned short);
 #define ECONET_MAX_FS_DISCS 10 // Don't change this. It won't end well.
 #define ECONET_MAX_FS_DIRS 256 // maximum number of active directory handles
 #define ECONET_MAX_FS_FILES 512 // Maximum number of active file handles
+
+// Don't get excited - these are provision for long filenames if they ever come, but for now changing them will achieve not a lot
+#define ECONET_MAX_FILENAME_LENGTH 10
+#define ECONET_MAX_PATH_ENTRIES 30
+#define ECONET_MAX_PATH_LENGTH ((ECONET_MAX_PATH_ENTRIES * (ECONET_MAX_FILENAME_LENGTH + 1)) + 1)
 
 #define FS_PRIV_SYSTEM 0x80
 #define FS_PRIV_LOCKED 0x40
@@ -465,7 +473,7 @@ void fs_copy_to_cr(unsigned char *dest, unsigned char *src, unsigned short len)
 	// Skip leading whitspace
 	while (*(src+srccount) == ' ') srccount++;
 
-	while (count < len && *(src+count) != 0x0d)
+	while (count < len && *(src+count) != 0x0d && *(src+count) != 0x00) // Catch null termination as well now
 	{
 		//if (*(src+srccount) != ' ') // Skip space - Done above. This version removed spaces within the command line, d'uh!
 			*(dest+count++) = *(src+srccount);
@@ -1935,6 +1943,10 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 	int portcount;
 	char regex[256];
 
+#ifdef FS_PARSE_DEBUG
+	char *param;
+#endif
+
 	if (!fs_loadsave_regex_initialized) // Listen very carefully, I shall say zis ernly wearnce...
 	{
 
@@ -1946,6 +1958,16 @@ int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 		else	fs_loadsave_regex_initialized = 1;
 
 	}
+
+#ifdef FS_PARSE_DEBUG
+	fs_parse_cmd ("i am chris wobble\r", "I AM", 4, &param);
+	fs_parse_cmd ("acc. stromboli wr/r\r", "ACCESS", 3, &param);
+	fs_parse_cmd ("lo.file 6000    \r", "LOAD", 3, &param);
+	fs_parse_cmd ("lo.file 6000\r", "LOAD", 2, &param);
+	fs_parse_cmd ("lo.         file 6000\r", "LOAD", 2, &param);
+	fs_parse_cmd ("del.       file      \r", "DELETE", 3, &param);
+	fs_parse_cmd ("DELETE        MYFILE   \r", "DELETE", 3, &param);
+#endif
 
 // Seven bit bodge test harness
 
@@ -3892,13 +3914,15 @@ void fs_chown(int server, unsigned short reply_port, int active_id, unsigned cha
 	unsigned short ptr_file, ptr_owner, ptr;
 	int userid;
 
-	fs_copy_to_cr(path, command, 1023);
+	fs_copy_to_cr(path, command, 255); // Command no longer 0x0d terminated
 
 	if (!fs_quiet) fprintf (stderr, "[+%15.6f]    FS:%12sfrom %3d.%3d *CHOWN %s\n", timediffstart(), "", net, stn, path);
 
 	userid = active[server][active_id].userid;
 
 	ptr = 0;
+
+	// Skip whitespace (not necessary with new command parse, but does no harm)
 
 	while (*(command + ptr) == ' ' && ptr < strlen((const char *) command))
 		ptr++;
@@ -3908,6 +3932,7 @@ void fs_chown(int server, unsigned short reply_port, int active_id, unsigned cha
 
 	ptr_file = ptr;
 
+	// Skip the filename
 	while (*(command + ptr) != ' ' && ptr < strlen((const char *) command))
 		ptr++;
 
@@ -3915,19 +3940,26 @@ void fs_chown(int server, unsigned short reply_port, int active_id, unsigned cha
 		ptr_owner = 0;
 	else
 	{
+		int orig_length;
+
+		orig_length = strlen(command);
+
+		// Null terminate the filename
 		*(command + ptr) = '\0';
 
 		ptr++;
-		while (*(command + ptr) == ' ' && ptr < strlen((const char *) command))
+
+		// Skip more whitespace
+		while (*(command + ptr) == ' ' && ptr < orig_length)
 			ptr++;
 		if (ptr == strlen((const char *) command)) // No user specified
 			ptr_owner = 0;
 		else	ptr_owner = ptr;
 
-		while (*(command + ptr) != ' ' && ptr < strlen((const char *) command))
+		while (*(command + ptr) != ' ' && ptr < orig_length)
 			ptr++; // Skip past owner name
 
-		if (ptr < strlen((const char *) command))
+		if (ptr < orig_length)
 			command[ptr] = '\0'; // Null terminate the username
 	}
 
@@ -4968,10 +5000,10 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 		{
 			switch (perm_str[ptr])
 			{
-				case 'W': perm |= FS_PERM_OWN_W; break;
-				case 'R': perm |= FS_PERM_OWN_R; break;
-				case 'H': perm |= FS_PERM_H; break; // Hidden from directory listings
-				case 'L': perm |= FS_PERM_L; break; // Locked
+				case 'w': case 'W': perm |= FS_PERM_OWN_W; break;
+				case 'r': case 'R': perm |= FS_PERM_OWN_R; break;
+				case 'h': case 'H': perm |= FS_PERM_H; break; // Hidden from directory listings
+				case 'l': case 'L': perm |= FS_PERM_L; break; // Locked
 				default:
 				{
 					fs_error(server, reply_port, net, stn, 0xCF, "Bad attribute");
@@ -4989,8 +5021,8 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 			{
 				switch (perm_str[ptr])
 				{
-					case 'W': perm |= FS_PERM_OTH_W; break;
-					case 'R': perm |= FS_PERM_OTH_R; break;
+					case 'w': case 'W': perm |= FS_PERM_OTH_W; break;
+					case 'r': case 'R': perm |= FS_PERM_OTH_R; break;
 					default: 
 					{
 						fs_error(server, reply_port, net, stn, 0xCF, "Bad attribute");
@@ -6930,6 +6962,94 @@ void fs_eject_station(unsigned char net, unsigned char stn)
 
 }
 
+/* Parse command line with abbreviation. 
+   Command must have a minimum of 'min' characters followed either by the full command word,
+   or at some stage a '.'.
+   If there is a '.' then parameters can begin immediately
+   If the command word is a full word, there must be at least one space after it before
+   the parameters.
+   
+   parse - the string to be parsed
+   cmd - the command word to search for
+   min - minimum number of characters to match
+   param_idx - returns ptr to parameters within parse for the start of parameters
+
+   Returns 1 for match, 0 for no match
+*/
+
+uint8_t fs_parse_cmd (char *parse, char *cmd, unsigned short min, char **param_idx)
+{
+
+
+	uint8_t found = 0;
+	char *ptr, *tmp;
+	char workstr[256];
+
+	/* Find a dot, space */
+
+#ifdef FS_PARSE_DEBUG
+	fprintf (stderr, "Parse debug: Looking for '%s' in '%s\n   minimum length %d: ", cmd, parse, min);
+#endif
+
+	if (strlen(parse) < min) // Command cannot meet requirements
+	{
+#ifdef FS_PARSE_DEBUG
+	fprintf (stderr, "Command too short to meet requirements\n");
+#endif
+		return 0;
+	}
+
+	ptr = parse+strlen(parse); // By the time this routine is called, the command is NULL terminated
+	if ((tmp = strchr(parse+min, ' ')) && (ptr > tmp)) ptr = tmp;
+	if ((tmp = strchr(parse+min, '.')) && (ptr > tmp)) ptr = tmp;
+
+#ifdef FS_PARSE_DEBUG
+	if (ptr) fprintf (stderr, "Found '%c' at position %d: ", *ptr, (unsigned int) (ptr-parse));
+	else fprintf (stderr, "Found neither ' ', nor '.' nor end of command ");
+#endif
+
+	if (ptr) // Should always be!
+	{
+		strncpy(workstr, parse, 255);
+		workstr[(unsigned short) (ptr-parse)] = '\0'; // Null terminate at the boundary we found
+
+		tmp = ptr;
+
+		if (*tmp == 0x00) *param_idx = tmp;
+		else
+		{
+			tmp++;
+			while ((*tmp != 0x0d) && (*tmp == ' '))
+				tmp++;
+			*param_idx = tmp;
+		}
+
+		// Now see if we have a matching string
+
+		if (!strncasecmp(workstr, cmd, strlen(workstr))) // Found, potentially
+		{
+			if (strlen(workstr) == strlen(cmd)) // Full match - found
+				found = 1;
+			else if ((*ptr == '.') // Abbreviation
+			&&	 (strlen(workstr) >= min) // Meets minimum length requirement
+			)
+				found = 1;
+
+		}
+
+#ifdef FS_PARSE_DEBUG
+		if (found) fprintf (stderr, "Parameters at %d \n   Parameters: %s\n  Matched length %d: ", (int) (*param_idx - parse), *param_idx, strlen(workstr));
+#endif
+	}
+
+#ifdef FS_PARSE_DEBUG
+	fprintf (stderr, "Returning %d\n", found);
+#endif
+
+	return found;
+
+}
+
 /* Handle locally arriving fileserver traffic to server #server, from net.stn, ctrl, data, etc. - port will be &99 for FS Op */
 void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsigned char ctrl, unsigned char *data, unsigned int datalen)
 {
@@ -6987,6 +7107,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		{
 			unsigned char command[256];
 			int counter;
+			char *param;
 
 			counter = 5;
 			while ((*(data+counter) != 0x0d) && (counter < datalen))
@@ -7004,14 +7125,18 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				*SAVE returns command code 1, return 0, load4, exec4, length*3*, pathname (query termination)
 			*/
 
-			if (!strncasecmp("I AM ", (const char *) command, 5)) fs_login(server, reply_port, net, stn, command + 5);
-			else if ((!strncasecmp("LOGIN ", (const char *) command, 6)) || (!strncasecmp("LOGON ", (const char *) command, 6))) fs_login(server, reply_port, net, stn, command + 6);
-			else if (!strncasecmp("IAM ", (const char *) command, 4)) fs_login(server, reply_port, net, stn, command + 4);
-			else if (!strncasecmp("I .", (const char *) command, 3)) fs_login(server, reply_port, net, stn, command + 3);
+			//if (!strncasecmp("I AM ", (const char *) command, 5)) fs_login(server, reply_port, net, stn, command + 5);
+			if (fs_parse_cmd(command, "I AM", 2, &param)) fs_login(server, reply_port, net, stn, param);
+			else if (fs_parse_cmd(command, "IAM", 3, &param)) fs_login(server, reply_port, net, stn, param);
+			else if (fs_parse_cmd(command, "LOGIN", 4, &param)) fs_login(server, reply_port, net, stn, param);
+			else if (fs_parse_cmd(command, "LOGON", 5, &param)) fs_login(server, reply_port, net, stn, param);
+			//else if ((!strncasecmp("LOGIN ", (const char *) command, 6)) || (!strncasecmp("LOGON ", (const char *) command, 6))) fs_login(server, reply_port, net, stn, command + 6);
+			//else if (!strncasecmp("IAM ", (const char *) command, 4)) fs_login(server, reply_port, net, stn, command + 4);
+			//else if (!strncasecmp("I .", (const char *) command, 3)) fs_login(server, reply_port, net, stn, command + 3);
 			else if (fs_stn_logged_in(server, net, stn) < 0)
 				fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
-/* insert here regex matches for LOAD, SAVE, parse them and return the right results */
-			else if ((!strncasecmp("CAT", (const char *) command, 3)) || (!strncmp(".", (const char *) command, 1)))
+			//else if ((!strncasecmp("CAT", (const char *) command, 3)) || (!strncmp(".", (const char *) command, 1)))
+			else if (fs_parse_cmd(command, "CAT", 2, &param) || fs_parse_cmd(command, ".", 1, &param))
 			{
 
 				struct __econet_packet_udp r;
@@ -7024,6 +7149,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				r.p.data[0] = 3; // CAT
 				r.p.data[1] = 0; // Successful return
 				
+/*
 				len = strlen(command)-1; // Drop first character (there will at least be a '.'!)
 				if (*command == '.')
 				{
@@ -7037,16 +7163,121 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						len = 0;
 				}
 	
+
 				if (len)
 					strncpy(&(r.p.data[2]), &(command[(strlen(command) - len)]), len);
 
 				r.p.data[len+2] = 0x0d; //Terminate string
 
+*/
+				len = strlen(param);
+
+				strcpy(&(r.p.data[2]), param);
+				r.p.data[len+2] = 0x0d; // Terminate string
+
 				fs_aun_send (&r, server, len+3, net, stn);
 
 			}
-			else if (!strncasecmp("BYE", (const char *) command, 3)) fs_bye(server, reply_port, net, stn, 1);
-			else if (!strncasecmp("SETLIB ", (const char *) command, 7))
+			else if (fs_parse_cmd(command, "LOAD", 2, &param))
+			{
+				uint32_t load_addr;
+				char filename[ECONET_MAX_PATH_LENGTH+1];
+				struct __econet_packet_udp r;
+
+				r.p.port = reply_port;
+				r.p.ctrl = 0x80;
+				r.p.ptype = ECONET_AUN_DATA;
+	
+				r.p.data[0] = 2; // Load
+				r.p.data[1] = 0; // Successful return
+
+				load_addr = 0; // 
+
+				r.p.data[6] = 0x00; // Load address not found - set if we do find one
+
+				// Now check the various things which might be there
+				if (sscanf(param, "%s %08x", filename, &load_addr) == 2)
+					r.p.data[6] = 0xff;
+				else if (sscanf(param, "%s", filename) == 1)
+				{ }
+				else
+				{
+					fs_error(server, reply_port, net, stn, 0xFF, "Bad parameters");
+					return;
+				}			
+
+				r.p.data[2] = (load_addr) & 0xff;
+				r.p.data[3] = (load_addr >> 8) & 0xff;
+				r.p.data[4] = (load_addr >> 16) & 0xff;
+				r.p.data[5] = (load_addr >> 24) & 0xff;
+
+				strcpy (&(r.p.data[7]), filename);
+				r.p.data[7+strlen(filename)] = 0x0d;
+
+				fs_aun_send (&r, server, 7 + 1 + strlen(filename), net, stn);
+		
+			}
+			else if (fs_parse_cmd(command, "SAVE", 2, &param))
+			{
+
+				uint32_t save_addr, load_addr, exec_addr, length;
+				unsigned short parsed;
+				char filename[ECONET_MAX_PATH_LENGTH+1];
+				struct __econet_packet_udp r;
+
+				r.p.port = reply_port;
+				r.p.ctrl = 0x80;
+				r.p.ptype = ECONET_AUN_DATA;
+	
+				r.p.data[0] = 1; // Save
+				r.p.data[1] = 0; // Successful return
+
+				save_addr = load_addr = exec_addr = length = 0;
+
+				if ((parsed = sscanf(param, "%s %08x +%08x %08x %08x", filename, &save_addr, &length, &load_addr, &exec_addr)) >= 3)
+				{ 
+					if (parsed < 4)
+						load_addr = save_addr;
+					if (parsed < 5)
+						exec_addr = load_addr;
+				}
+				else if ((parsed = sscanf(param, "%s %08x %08x %08x %08x", filename, &save_addr, &length, &load_addr, &exec_addr)) >= 3) // NB not really length
+				{
+					length = (length - save_addr + 1);
+
+					if (parsed < 4)
+						load_addr = save_addr;
+					if (parsed < 5)
+						exec_addr = load_addr;
+				}
+				else
+				{
+					fs_error(server, reply_port, net, stn, 0xff, "Bad parameters");
+					return;
+				}
+
+				r.p.data[2] = (load_addr) & 0xff;
+				r.p.data[3] = (load_addr >> 8) & 0xff;
+				r.p.data[4] = (load_addr >> 16) & 0xff;
+				r.p.data[5] = (load_addr >> 24) & 0xff;
+				r.p.data[6] = (exec_addr) & 0xff;
+				r.p.data[7] = (exec_addr >> 8) & 0xff;
+				r.p.data[8] = (exec_addr >> 16) & 0xff;
+				r.p.data[9] = (exec_addr >> 24) & 0xff;
+				r.p.data[10] = (length) & 0xff;
+				r.p.data[11] = (length >> 8) & 0xff;
+				r.p.data[12] = (length >> 16) & 0xff;
+
+				strcpy(&(r.p.data[13]), filename);
+				r.p.data[13 + strlen(filename)] = 0x0d;
+
+				fs_aun_send (&r, server, 13 + 1 + strlen(filename), net, stn);
+
+			}
+			//else if (!strncasecmp("BYE", (const char *) command, 3)) fs_bye(server, reply_port, net, stn, 1);
+			else if (fs_parse_cmd(command, "BYE", 3, &param)) fs_bye(server, reply_port, net, stn, 1);
+			//else if (!strncasecmp("SETLIB ", (const char *) command, 7))
+			else if (fs_parse_cmd(command, "SETLIB", 4, &param))
 			{ // Permanently set library directory
 				unsigned char libdir[97], username[11], params[256];
 				short uid;
@@ -7056,7 +7287,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				else
 				{
 					struct path p;
-					fs_copy_to_cr(params, command+7, 255);
+					//fs_copy_to_cr(params, param, 255); // There's no CR at the end of param...
+					strncpy(params, param, 255);
 
 					if ((active[server][active_id].priv & FS_PRIV_SYSTEM) && (sscanf(params, "%10s %96s", username, libdir) == 2)) // System user with optional username
 					{
@@ -7109,40 +7341,52 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					else	fs_error(server, reply_port, net, stn, 0xA8, "Bad library");
 				}
 			}
-			else if (!strncasecmp("PRINTER ", (const char *) command, 8))
-				fs_select_printer(server, reply_port, active_id, net, stn, command+8);
-			else if (!strncasecmp("PASS ", (const char *) command, 5))
-				fs_change_pw(server, reply_port, userid, net, stn, command+5);
-			else if (!strncasecmp("CHOWN ", (const char *) command, 6))
-				fs_chown(server, reply_port, active_id, net, stn, command+6);
-			else if (!strncasecmp("OWNER ", (const char *) command, 6))
-				fs_owner(server, reply_port, active_id, net, stn, command+6);
-			else if (!strncasecmp("ACCESS ", (const char *) command, 7))
-				fs_access(server, reply_port, active_id, net, stn, command+7);
-			else if (!strncasecmp("INFO ", (const char *) command, 5))
-				fs_info(server, reply_port, active_id, net, stn, command+5);
-			else if (!strncasecmp("I.", (const char *) command, 2))
-				fs_info(server, reply_port, active_id, net, stn, command+2);
-			else if (!strncasecmp("CDIR ", (const char *) command, 5))
-				fs_cdir(server, reply_port, active_id, net, stn, active[server][active_id].current, command+5);
-			else if (!strncasecmp("DELETE ", (const char *) command, 7))
-				fs_delete(server, reply_port, active_id, net, stn, active[server][active_id].current, command+7);
-			else if (!strncasecmp("RENAME ", (const char *) command, 7))
-				fs_rename(server, reply_port, active_id, net, stn, active[server][active_id].current, command+7);
-			else if (!strncasecmp("REN. ", (const char *) command, 5))
-				fs_rename(server, reply_port, active_id, net, stn, active[server][active_id].current, command+5);
-			else if (!strncasecmp("SDISC ", (const char *) command, 6))
-				fs_sdisc(server, reply_port, active_id, net, stn, command + 6);
-			else if (!strncasecmp("COPY ", (const char *) command, 5))
-				fs_copy(server, reply_port, active_id, net, stn, command+5);
-			else if (!strncasecmp("LIB ", (const char *) command, 4)) // Change library directory
+			//else if (!strncasecmp("PRINTER ", (const char *) command, 8))
+			else if (fs_parse_cmd(command, "PRINTER", 6, &param))
+				fs_select_printer(server, reply_port, active_id, net, stn, param);
+			//else if (!strncasecmp("PASS ", (const char *) command, 5))
+			else if (fs_parse_cmd(command, "PASS", 4, &param))
+				fs_change_pw(server, reply_port, userid, net, stn, param);
+			//else if (!strncasecmp("CHOWN ", (const char *) command, 6))
+			else if (fs_parse_cmd(command, "CHOWN", 3, &param))
+				fs_chown(server, reply_port, active_id, net, stn, param);
+			//else if (!strncasecmp("OWNER ", (const char *) command, 6))
+			else if (fs_parse_cmd(command, "OWNER", 3, &param))
+				fs_owner(server, reply_port, active_id, net, stn, param);
+			//else if (!strncasecmp("ACCESS ", (const char *) command, 7))
+			else if (fs_parse_cmd(command, "ACCESS", 3, &param))
+				fs_access(server, reply_port, active_id, net, stn, param);
+			//else if (!strncasecmp("INFO ", (const char *) command, 5))
+			else if (fs_parse_cmd(command, "INFO", 1, &param)) // For some reason *I. is an abbreviation for *INFO...
+				fs_info(server, reply_port, active_id, net, stn, param);
+			//else if (!strncasecmp("I.", (const char *) command, 2))
+				//fs_info(server, reply_port, active_id, net, stn, command+2);
+			//else if (!strncasecmp("CDIR ", (const char *) command, 5))
+			else if (fs_parse_cmd(command, "CDIR", 2, &param))
+				fs_cdir(server, reply_port, active_id, net, stn, active[server][active_id].current, param);
+			//else if (!strncasecmp("DELETE ", (const char *) command, 7))
+			else if (fs_parse_cmd(command, "DELETE", 3, &param))
+				fs_delete(server, reply_port, active_id, net, stn, active[server][active_id].current, param);
+			//else if (!strncasecmp("RENAME ", (const char *) command, 7))
+			else if (fs_parse_cmd(command, "RENAME", 3, &param))
+				fs_rename(server, reply_port, active_id, net, stn, active[server][active_id].current, param);
+			//else if (!strncasecmp("REN. ", (const char *) command, 5))
+				//fs_rename(server, reply_port, active_id, net, stn, active[server][active_id].current, command+5);
+			//else if (!strncasecmp("SDISC ", (const char *) command, 6))
+			else if (fs_parse_cmd(command, "SDISC", 2, &param))
+				fs_sdisc(server, reply_port, active_id, net, stn, param);
+			//else if (!strncasecmp("COPY ", (const char *) command, 5))
+			else if (fs_parse_cmd(command, "COPY", 2, &param))
+				fs_copy(server, reply_port, active_id, net, stn, param);
+			//else if (!strncasecmp("LIB ", (const char *) command, 4)) // Change library directory
+			else if (fs_parse_cmd(command, "LIB", 3, &param))
 			{
 				int found;
 				struct path p;
 				unsigned short l, n_handle;
 
-				if (!fs_quiet) fprintf (stderr, "[+%15.6f]    FS:%12sfrom %3d.%3d LIB %s\n", timediffstart(), "", net, stn, command+4);
-				if ((found = fs_normalize_path(server, active_id, command+4, *(data+3), &p)) && (p.ftype != FS_FTYPE_NOTFOUND)) // Successful path traverse
+				if (!fs_quiet) fprintf (stderr, "[+%15.6f]    FS:%12sfrom %3d.%3d LIB %s\n", timediffstart(), "", net, stn, param);
+				if ((found = fs_normalize_path(server, active_id, param, *(data+3), &p)) && (p.ftype != FS_FTYPE_NOTFOUND)) // Successful path traverse
 				{
 					if (p.ftype != FS_FTYPE_DIR)
 						fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
@@ -7197,15 +7441,16 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				else	fs_error(server, reply_port, net, stn, 0xFE, "Not found");
 			}
 			//else if (!strncasecmp("DIR ", (const char *) command, 4) || (!strncasecmp("DIR", (const char *) command, 3) && (*(command + 3) == 0x0d))) // Change working directory
-			else if (!strncasecmp("DIR", (const char *) command, 3) && (*(command + 3) == '\0' || *(command + 3) == ' ')) // The code above has already null terminated the command
+			//else if (!strncasecmp("DIR", (const char *) command, 3) && (*(command + 3) == '\0' || *(command + 3) == ' ')) // The code above has already null terminated the command
+			else if (fs_parse_cmd(command, "DIR", 3, &param))
 			{
 				int found;
 				struct path p;
 				unsigned short l, n_handle;
 				unsigned char dirname[1024];
 
-				if (*(command + 3) == '\0')	strcpy(dirname, "");
-				else	strcpy (dirname, command+4);
+				if (*param == '\0')	strcpy(dirname, "");
+				else	strcpy (dirname, param);
 
 				if (!fs_quiet) fprintf (stderr, "[+%15.6f]    FS:%12sfrom %3d.%3d DIR %s\n", timediffstart(), "", net, stn, dirname);
 			
@@ -7326,7 +7571,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					fs_reply_ok(server, reply_port, net, stn);
 
 				}
-				else if (!strncasecmp("SETHOME ", (const char *) command, 8))
+				//else if (!strncasecmp("SETHOME ", (const char *) command, 8))
+				else if (fs_parse_cmd(command, "SETHOME", 4, &param))
 				{ // Permanently set home directory
 					unsigned char params[256], dir[96], username[11];
 					short uid;
@@ -7336,7 +7582,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						char homepath[300];
 						struct objattr oa;
 
-						fs_copy_to_cr(params, command+8, 255);
+						fs_copy_to_cr(params, param, 255);
 
 						if (sscanf(params, "%10s %96s", username, dir) == 2)
 						{
@@ -7400,16 +7646,19 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						else	fs_error(server, reply_port, net, stn, 0xA8, "Bad directory");
 					}
 				}
-				else if (!strncasecmp("LINK ", (const char *) command, 5))
-					fs_link(server, reply_port, active_id, net, stn, command+5);
-				else if (!strncasecmp("UNLINK ", (const char *) command, 7))
-					fs_unlink(server, reply_port, active_id, net, stn, command+7);
-				else if (!strncasecmp("FLOG ", (const char *) command, 5)) // Force log user off
+				//else if (!strncasecmp("LINK ", (const char *) command, 5))
+				else if (fs_parse_cmd(command, "LINK", 4, &param))
+					fs_link(server, reply_port, active_id, net, stn, param);
+				//else if (!strncasecmp("UNLINK ", (const char *) command, 7))
+				else if (fs_parse_cmd(command, "UNLINK", 3, &param))
+					fs_unlink(server, reply_port, active_id, net, stn, param);
+				//else if (!strncasecmp("FLOG ", (const char *) command, 5)) // Force log user off
+				else if (fs_parse_cmd(command, "FLOG", 2, &param))
 				{
 					char parameter[20];
 					unsigned short l_net, l_stn;
 
-					fs_copy_to_cr(parameter, command+5, 19);
+					fs_copy_to_cr(parameter, param, 19);
 
 					if (isdigit(parameter[0])) // Assume station number, possible net number too
 					{
@@ -7433,12 +7682,13 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 					fs_reply_ok(server, reply_port, net, stn);
 				}
-				else if (!strncasecmp("NEWUSER ", (const char *) command, 8)) // Create new user
+				//else if (!strncasecmp("NEWUSER ", (const char *) command, 8)) // Create new user
+				else if (fs_parse_cmd(command, "NEWUSER", 4, &param))
 				{
 					unsigned char username[11];
 					int ptr;
 	
-					fs_copy_to_cr(username, command+8, 10);
+					fs_copy_to_cr(username, param, 10);
 					
 					if (!fs_quiet) fprintf (stderr, "[+%15.6f]    FS:%12sfrom %3d.%3d Create new user %s\n", timediffstart(), "", net, stn, username);
 	
@@ -7499,7 +7749,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					}
 
 				}
-				else if (!strncasecmp("PRIV ", (const char *) command, 5)) // Set user privilege
+				//else if (!strncasecmp("PRIV ", (const char *) command, 5)) // Set user privilege
+				else if (fs_parse_cmd(command, "PRIV", 4, &param))
 				{
 					char username[11], priv, priv_byte;
 
@@ -7507,37 +7758,37 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		
 					count = 0;
 				
-					while ((count +5) < strlen((const char *) command) && (count < 10) && command[count+5] != ' ')
+					while (count < strlen((const char *) param) && (count < 10) && param[count] != ' ')
 					{
-						username[count] = command[count+5];
+						username[count] = param[count];
 						count++;
 					}
 
-					if ((count + 5) == strlen((const char *) command)) // THere was no space after the username
+					if (count == strlen((const char *) param)) // THere was no space after the username
 						fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
 					else
 					{
 						username[count] = '\0';
 						count++;
-						if ((count + 5) == strlen((const char *) command)) // There was no priv character!
+						if (count == strlen((const char *) param)) // There was no priv character!
 							fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
 						else
 						{
-							priv = command[count+5];	
+							priv = param[count];	
 							switch (priv) {
-								case 'S': // System user
+								case 's': case 'S': // System user
 									priv_byte = FS_PRIV_SYSTEM;			
 									break;
-								case 'U': // Unlocked normal user
+								case 'u': case 'U': // Unlocked normal user
 									priv_byte = FS_PRIV_USER;
 									break;
-								case 'L': // Locked normal user
+								case 'l': case 'L': // Locked normal user
 									priv_byte = FS_PRIV_LOCKED;
 									break;
-								case 'N': // Unlocked user who cannot change password
+								case 'n': case 'N': // Unlocked user who cannot change password
 									priv_byte = FS_PRIV_NOPASSWORDCHANGE;
 									break;
-								case 'D': // Invalidate privilege - delete the user
+								case 'd': case 'D': // Invalidate privilege - delete the user
 									priv_byte = 0;
 									break;
 								default:
@@ -7556,21 +7807,26 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		
 								snprintf(username_padded, 11, "%-10s", username);
 								
+								if (!fs_quiet) fprintf (stderr, "[+%15.6f]    FS:%12sfrom %3d.%3d Attempt to change privilege for %s to %02x ", timediffstart(), "", net, stn, username, priv_byte);
+
 								while ((count < ECONET_MAX_FS_USERS) && !found)
 								{
 									if (!strncasecmp((const char *) users[server][count].username, username_padded, 10) && users[server][count].priv != FS_PRIV_INVALID)
 									{
-										if (!fs_quiet) fprintf (stderr, "[+%15.6f]    FS:%12sfrom %3d.%3d Change privilege for %s to %02x\n", timediffstart(), "", net, stn, username, priv_byte);
-
 										users[server][count].priv = priv_byte;
 										fs_write_user(server, count, (unsigned char *) &(users[server][count]));
+										if (!fs_quiet) fprintf (stderr, "- success\n");
 										fs_reply_ok(server, reply_port, net, stn);
 										found = 1;
 									}
 									count++;
 								}
 								
-								if (count == ECONET_MAX_FS_USERS) fs_error(server, reply_port, net, stn, 0xbc, "User not found");
+								if (count == ECONET_MAX_FS_USERS) 
+								{
+									if (!fs_quiet) fprintf (stderr, " - unknown user\n");
+									fs_error(server, reply_port, net, stn, 0xbc, "User not found");
+								}
 
 							}
 						}
