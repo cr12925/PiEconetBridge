@@ -116,7 +116,8 @@ uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 struct {
 	uint8_t	fs_acorn_home; // != 0 means implement acorn home directory ownership semantics
 	uint8_t fs_sjfunc; // != 0 means turn on SJ MDFS functionality
-	uint8_t pad[254]; // Spare spare in the config
+	uint8_t fs_bigchunks; // Whether we use 4k chunks on data bursts, or 1.25k (BeebEm compatibility - it appears to have a buffer overrun!)
+	uint8_t pad[253]; // Spare spare in the config
 } fs_config[ECONET_MAX_FS_SERVERS];
 
 struct {
@@ -6479,8 +6480,8 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 		r.p.ctrl = ctrl;
 		r.p.data[0] = r.p.data[1] = 0;
 		r.p.data[2] = incoming_port;
-		r.p.data[3] = (FS_MAX_BULK_SIZE) & 0xff; // Max trf size
-		r.p.data[4] = (FS_MAX_BULK_SIZE & 0xff00) >> 8; // High byte of max trf
+		r.p.data[3] = (fs_config[server].fs_bigchunks ? FS_MAX_BULK_SIZE : 0x500) & 0xff; // Max trf size
+		r.p.data[4] = ((fs_config[server].fs_bigchunks ? FS_MAX_BULK_SIZE : 0x500) & 0xff00) >> 8; // High byte of max trf
 	
 		fs_aun_send(&r, server, 5, net, stn);
 	}
@@ -7549,6 +7550,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						fs_config[server].fs_acorn_home = (operator == '+' ? 1 : 0);
 					else if (!strcasecmp("MDFS", configitem))
 						fs_config[server].fs_sjfunc = (operator == '+' ? 1 : 0);
+					else if (!strcasecmp("BIGCHUNKS", configitem))
+						fs_config[server].fs_bigchunks = (operator == '+' ? 1 : 0);
 					else
 					{
 						fs_error(server, reply_port, net, stn, 0xFF, "Bad configuration entry name"); return;
