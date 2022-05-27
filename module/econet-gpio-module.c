@@ -475,6 +475,49 @@ short econet_gpio_init(void)
 
 	INP_GPIO(ECONET_GPIO_PIN_BUSY); // v2 hardware busy line
 
+	// Ask for clock function on CLK pin
+
+	t = (readl(GPIO_PORT) & ~(0x07 << (3 * ECONET_GPIO_PIN_CLK))) | (ECONET_GPIO_CLK_ALT_FUNCTION << (3 * ECONET_GPIO_PIN_CLK));
+	writel (t, GPIO_PORT); /* Select alt function for clock output pin */
+
+	// Now set the clock up on it
+
+	request_region(CLOCK_PERI_BASE, GPIO_CLK_RANGE, DEVICE_NAME);
+
+	GPIO_CLK = ioremap(CLOCK_PERI_BASE, GPIO_CLK_RANGE);
+
+	if (GPIO_CLK)
+	{
+#ifdef ECONET_GPIO_DEBUG_SETUP
+		printk (KERN_INFO "ECONET-GPIO: Clock base remapped to %p\n", GPIO_CLK);
+#endif
+	}
+	else
+	{
+		printk (KERN_INFO "ECONET-GPIO: Clock base remap failed.\n");
+		econet_gpio_release_pins();
+		return 0;
+	}
+	
+	writel ((readl(GPIO_CLK + ECONET_GPIO_CMCTL) & ~0xF0) | ECONET_GPIO_CLOCKDISABLE, GPIO_CLK + ECONET_GPIO_CMCTL); // Disable clock
+
+	barrier();
+
+	while (readl(GPIO_CLK + ECONET_GPIO_CMCTL) & 0x80); // Wait for not busy
+
+	// Select speed
+
+	writel(ECONET_GPIO_CLOCKSOURCEPLLD, GPIO_CLK + ECONET_GPIO_CMCTL); // Select PLLD
+
+	barrier();
+
+	
+	writel(econet_data->clockdiv, GPIO_CLK + ECONET_GPIO_CMCTL + 1);
+
+	barrier();
+
+	writel(ECONET_GPIO_CLOCKENABLE, GPIO_CLK + ECONET_GPIO_CMCTL); // Turn the clock back on
+
 	barrier();
 
 	if (!econet_probe_adapter())
@@ -482,6 +525,11 @@ short econet_gpio_init(void)
 		econet_gpio_release_pins();
 		printk (KERN_ERR "ECONET-GPIO: Hardware not found.\n");
 		return -1;
+	}
+
+	if (econet_data->hwver >= 2) // Attempt to set PWM on /CSRETURN (unused on v2 and above)
+	{
+
 	}
 
 	econet_data->irq = gpio_to_irq(econet_gpio_pins[EGP_IRQ]);
@@ -2418,6 +2466,7 @@ static int __init econet_init(void)
 	}
 
 	econet_data->peribase = 0xFE000000; // Assume Pi4-class unless we find otherwise
+	econet_data->clockdiv = ECONET_GPIO_CLOCKDIVFAST; // Larger divider default unless we're sure we don't want it
 
 	if (of_machine_is_compatible("raspberrypi,4-model-b"))
 		printk (KERN_INFO "ECONET-GPIO: This appears to be a Pi4B\n");
@@ -2426,21 +2475,25 @@ static int __init econet_init(void)
 	else if (of_machine_is_compatible("raspberrypi,3-model-b"))
 	{
 		econet_data->peribase = 0x3F000000;
+		econet_data->clockdiv = ECONET_GPIO_CLOCKDIVSET;
 		printk (KERN_INFO "ECONET-GPIO: This appears to be a Pi3B\n");
 	}
 	else if (of_machine_is_compatible("raspberrypi,3-model-b-plus"))
 	{
 		econet_data->peribase = 0x3F000000;
+		econet_data->clockdiv = ECONET_GPIO_CLOCKDIVSET;
 		printk (KERN_INFO "ECONET-GPIO: This appears to be a Pi3B+\n");
 	}
 	else if (of_machine_is_compatible("raspberrypi,model-zero-w") || of_machine_is_compatible("raspberrypi,model-zero"))
 	{
 		econet_data->peribase = 0x20000000;
+		econet_data->clockdiv = ECONET_GPIO_CLOCKDIVSET;
 		printk (KERN_INFO "ECONET-GPIO: This appears to be a PiZero (reliability uncertain)\n");
 	}
 	else if (of_machine_is_compatible("raspberrypi,model-zero-2-w") || of_machine_is_compatible("raspberrypi,model-zero-2"))
 	{
 		econet_data->peribase = 0x3F000000;
+		econet_data->clockdiv = ECONET_GPIO_CLOCKDIVSET;
 		printk (KERN_INFO "ECONET-GPIO: This appears to be a PiZero2\n");
 	}
 	else printk (KERN_INFO "ECONET-GPIO: Machine compatibility uncertain - assuming Peripheral base at 0xFE000000");

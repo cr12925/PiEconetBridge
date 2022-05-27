@@ -54,23 +54,6 @@
 /* Set our device name */
 #define DEVICE_NAME "econet-gpio"
 
-/* The following defines are based on a GPIO BCM 4 clock speed of 550kHz */
-/* There is a special fast bus write routine which has none of the delay of the slow one
- * whose purpose is to write data on the bus when it is going in the TX FIFO. The
- * slower routine is fine for writing to registers, because it doesn't matter if the chip
- * reads those multiple times. However, if it reads the TX FIFO multiple times then
- * unsurprisingly it transmits multiple copies of the same byte onto the wire, which is
- * unhelpful. However, even udelay(1) is too long to hold /CS low, and no udelay at all
- * is too short. On Linux ARM, there appears to be no ndelay(). So there is a loop
- * which uses asm("") to stop the compiler optimizing it out. This is the number of times
- * a for(;;) loop  'calls' asm("") to create the right delay.
- *
- * I am well aware that this is a total fiddle. The value will need to be less on slower
- * machines, probably more on faster machines. I developed on a 3B+.
- *
- * No postcards or other communications about how bad this is, *please*. */
-
-
 
 #define ECONET_CHAR(d)	((d >= 32) && (d < 127)) ? d : '.'
 #define CLASS_NAME "econetgpio"
@@ -154,6 +137,7 @@ struct __econet_data {
 	unsigned char initialized; // Whether module is actually initialized
 	unsigned char extralogs; // If 1, extra dmesg logging happens (e.g. collisions, rx aborts, etc.)
 	unsigned long peribase; // Peripheral base address
+	unsigned long clockdiv; // Clock divider setting
 };
 
 struct __econet_pkt_buffer {
