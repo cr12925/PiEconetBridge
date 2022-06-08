@@ -327,7 +327,7 @@ void fs_debug (uint8_t death, uint8_t level, char *fmt, ...)
 	char		padstr[1044];
 
 #else
-	if (level == 2 && !fs_noisy)	return;
+	if (level >= 2 && !fs_noisy)	return;
 	if (level == 1 && fs_quiet)	return;
 #endif
 
@@ -2472,7 +2472,7 @@ void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned ch
 
 	active_id = fs_stn_logged_in(server, net, stn);
 
-	fs_debug (0, 1, "           from %3d.%3d Bye", net, stn);
+	fs_debug (0, 1, "            from %3d.%3d Bye", net, stn);
 
 	// Close active files / handles
 
@@ -5397,13 +5397,13 @@ void fs_read_user_info(int server, unsigned short reply_port, unsigned char net,
 	while (count < ECONET_MAX_FS_USERS)
 	{
 
-		if ((active[server][count].net != 0) && (active[server][count].stn != 0) && (!strncasecmp((const char *) username_padded, (const char *) users[server][active[server][count].userid].username, 10)))
+		if ((active[server][count].stn != 0) && (!strncasecmp((const char *) username_padded, (const char *) users[server][active[server][count].userid].username, 10)))
 		{
 
 			unsigned short userid = active[server][count].userid;
 			r.p.data[0] = r.p.data[1] = 0;
 			if (users[server][userid].priv & FS_PRIV_SYSTEM)
-				r.p.data[2] = 1;
+				r.p.data[2] = 0x40; // This appears to be what L3 does for a privileged user
 			else	r.p.data[2] = 0;
 
 			r.p.data[3] = active[server][count].stn;
@@ -5496,7 +5496,7 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 	struct __pq *q; // Queue entry within a host
 	struct load_queue *l, *l_parent, *n; // l_ used for searching, n is a new entry if we need one
 
-	fs_debug (0, 2, "to %3d.%3d              Enqueue packet length %04X type %d", net, stn, len, p->p.ptype);
+	fs_debug (0, 4, "to %3d.%3d              Enqueue packet length %04X type %d", net, stn, len, p->p.ptype);
 
 	u = malloc(len + 8);
 	memcpy(u, p, len + 8); // Copy the packet data off
@@ -5546,7 +5546,7 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 
 		// Make a new load queue entry
 
-		fs_debug (0, 2, "Making new packet queue entry for this server/net/src triple ");
+		fs_debug (0, 4, "Making new packet queue entry for this server/net/src triple ");
 
 		n = malloc(sizeof(struct load_queue));
 
@@ -5555,7 +5555,7 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 			free (u); free (q); return -1;
 		}
 
-		fs_debug (0, 2, " - at %p ", n);
+		fs_debug (0, 4, " - at %p ", n);
 
 		n->net = net;
 		n->stn = stn;
@@ -5567,18 +5567,18 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 		n->pq_tail = NULL;
 		n->next = NULL; // Applies whether there was no list at all, or we fell off the end of it. We'll fix it below if we're inserting
 
-		fs_debug (0, 2, " - fs_load_queue = %p, l = %p ", fs_load_queue, l);
+		fs_debug (0, 4, " - fs_load_queue = %p, l = %p ", fs_load_queue, l);
 
 		if (!fs_load_queue) // There was no queue at all
 		{
-			fs_debug (0, 2, " - as a new fs_load_queue");
+			fs_debug (0, 4, " - as a new fs_load_queue");
 			fs_load_queue = n;
 		}
 		else // We are inserting, possibly at the end
 		{
 			if (!l) // We fell off the end
 			{
-				fs_debug (0, 2, " - on the end of the existing queue");
+				fs_debug (0, 4, " - on the end of the existing queue");
 				l_parent->next = n;
 			}
 			else // Inserting in the middle or at queue head
@@ -5586,13 +5586,13 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 				if (!l_parent)
 				{
 					n->next = fs_load_queue;
-					fs_debug (0, 2, " - by inserting at queue head");
+					fs_debug (0, 4, " - by inserting at queue head");
 					fs_load_queue = n;
 					
 				}
 				else
 				{
-					fs_debug (0, 2, " - by splice at %p", l_parent->next);
+					fs_debug (0, 4, " - by splice at %p", l_parent->next);
 					n->next = l_parent->next; // Splice this one in
 					l_parent->next = n;
 				}
@@ -5662,10 +5662,10 @@ void fs_enqueue_dump(struct load_queue *l)
 		p_next = p->next;
 		if (p->packet) 
 		{
-			fs_debug (0, 2, "Freeing bulk transfer packet at %p", p->packet);
+			fs_debug (0, 4, "Freeing bulk transfer packet at %p", p->packet);
 			free (p->packet); // Check it is not null, just in case...
 		}
-		fs_debug (0, 2, "Freeing bulk transfer queue entry at %p", p);
+		fs_debug (0, 4, "Freeing bulk transfer queue entry at %p", p);
 		free(p);
 		p = p_next;
 
@@ -5673,16 +5673,16 @@ void fs_enqueue_dump(struct load_queue *l)
 	
 	if (h_parent) // Mid chain, not at start
 	{
-		fs_debug (0, 2, "Freed structure was not at head of chain. Spliced between %p and %p", h_parent, h->next);
+		fs_debug (0, 4, "Freed structure was not at head of chain. Spliced between %p and %p", h_parent, h->next);
 		h_parent->next = h->next; // Drop this one out of the chain
 	}
 	else
 	{
-		fs_debug (0, 2, "Freed structure was at head of chain. fs_load_queue now %p", h->next);
+		fs_debug (0, 4, "Freed structure was at head of chain. fs_load_queue now %p", h->next);
 		fs_load_queue = h->next; // Drop this one off the beginning of the chain
 	}
 
-	fs_debug (0, 2, "Freeing bulk transfer transaction queue head at %p", h);
+	fs_debug (0, 4, "Freeing bulk transfer transaction queue head at %p", h);
 
 	free(h); // Free up this struct
 
@@ -5774,12 +5774,12 @@ void fs_dequeue(void)
 {
 	struct load_queue *l;
 
-	fs_debug (0, 2, "fs_dequeue() called");
+	fs_debug (0, 4, "fs_dequeue() called");
 	l = fs_load_queue;
 
 	while (l)
 	{
-		fs_debug (0, 2, "Dequeue from %p", l);
+		fs_debug (0, 4, "Dequeue from %p", l);
 
 #ifdef BRIDGE_V2
 		if (l->server == server)
@@ -6114,7 +6114,7 @@ void fs_putbyte(int server, unsigned char reply_port, unsigned char net, unsigne
 			active[server][active_id].fhandles[handle].cursor = ftell(h);
 		
 
-			fs_debug (0, 1, "%12sfrom %3d.%3d Put byte %02X on channel %02x, updated cursor %06lX", "", net, stn, b, handle, active[server][active_id].fhandles[handle].cursor);
+			fs_debug (0, 2, "%12sfrom %3d.%3d Put byte %02X on channel %02x, updated cursor %06lX", "", net, stn, b, handle, active[server][active_id].fhandles[handle].cursor);
 
 		}
 	
@@ -6229,7 +6229,7 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 		case 0: // Set pointer
 		{
 
-			fs_debug (0, 1, "%12sfrom %3d.%3d Set file pointer on channel %02X to %06lX, current extent %06lX%s", "", net, stn, handle, value, extent, (value > extent) ? " which is beyond EOF" : "");
+			fs_debug (0, 2, "%12sfrom %3d.%3d Set file pointer on channel %02X to %06lX, current extent %06lX%s", "", net, stn, handle, value, extent, (value > extent) ? " which is beyond EOF" : "");
 			if (value > extent) // Need to expand file
 			{
 				unsigned char buffer[4096];
@@ -6270,7 +6270,7 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 		break;
 		case 1: // Set file extent
 		{
-			fs_debug (0, 1, "%12sfrom %3d.%3d Set file extent on channel %02X to %06lX, current extent %06lX%s", "", net, stn, handle, value, extent, (value > extent) ? " so adding bytes to end of file" : "");
+			fs_debug (0, 2, "%12sfrom %3d.%3d Set file extent on channel %02X to %06lX, current extent %06lX%s", "", net, stn, handle, value, extent, (value > extent) ? " so adding bytes to end of file" : "");
 /*
 			if (value > extent)
 			{
@@ -6301,7 +6301,7 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 			if (value < extent)
 			{
 */
-				fs_debug (0, 1, "%12sfrom%3d.%3d   - %s file accordingly", "", net, stn, ((value < extent) ? "truncating" : "extending"));
+				fs_debug (0, 3, "%12sfrom%3d.%3d   - %s file accordingly", "", net, stn, ((value < extent) ? "truncating" : "extending"));
 				if (ftruncate(fileno(f), value)) // Error if non-zero
 				{
 					fs_error(server, reply_port, net, stn, 0xFF, "FS Error setting extent");
@@ -6627,11 +6627,11 @@ void fs_close(int server, unsigned char reply_port, unsigned char net, unsigned 
 
 	unsigned short count;
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d Close handle %d", "", net, stn, handle);
+	fs_debug (0, 2, "%12sfrom %3d.%3d Close handle %d", "", net, stn, handle);
 
 	if (handle !=0 && active[server][active_id].fhandles[handle].handle == -1) // Handle not open
 	{
-		fs_debug (0, 1, " - unknown");
+		fs_debug (0, 4, " - unknown");
 		fs_error(server, reply_port, net, stn, 222, "Channel ?");
 		return;
 	}
@@ -6640,12 +6640,12 @@ void fs_close(int server, unsigned char reply_port, unsigned char net, unsigned 
 
 	if (handle != 0)
 	{
-		fs_debug (0, 1, " - (%s)", active[server][active_id].fhandles[handle].acornfullpath);
+		fs_debug (0, 4, " - (%s)", active[server][active_id].fhandles[handle].acornfullpath);
 		fs_close_handle(server, reply_port, net, stn, active_id, handle);
 	}
 	else // User wants to close everything
 	{
-		fs_debug (0, 1, " - closing");
+		fs_debug (0, 4, " - closing");
 		while (count < FS_MAX_OPEN_FILES)
 		{	
 			if (active[server][active_id].fhandles[count].handle != -1 && !(active[server][active_id].fhandles[count].is_dir)) // Close it only if it's open and not a directory handle
@@ -6772,7 +6772,7 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 				reply.p.data[1] = 0;
 				reply.p.data[2] = (unsigned char) (userhandle & 0xff);
 	
-				fs_debug (0, 1, "%12sfrom %3d.%3d Opened handle %d (%s)", "", net, stn, userhandle, p.acornfullpath);
+				fs_debug (0, 2, "%12sfrom %3d.%3d Opened handle %d (%s)", "", net, stn, userhandle, p.acornfullpath);
 				fs_aun_send(&reply, server, 3, net, stn);
 			}
 		}
