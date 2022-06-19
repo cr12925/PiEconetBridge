@@ -736,10 +736,10 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 			{
 				count = 0;
 
-				while (count++ < 25 && (!(sr2 & ECONET_GPIO_S2_RX_IDLE)))
+				while (count++ < 5 && (!(sr2 & ECONET_GPIO_S2_RX_IDLE))) // Was 25!
 				{
 					econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT1);
-					udelay(count << 2);
+					udelay(count << 2); // Possibly alter this to put a minimum 20us delay - less aggressive (i.e. as if count is always at least 5, and then back off. Or possibly just start count at 5 and stop at 30...?)
 					sr2 = econet_read_sr(2);
 				}
 

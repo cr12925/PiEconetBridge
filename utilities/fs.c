@@ -52,7 +52,7 @@
 #ifdef BRIDGE_V2
 	#include <pthread.h>
 	#include <poll.h>
-	#include "../include/econet-bridge.h"
+	#include "../include/econet-hpbridge.h"
 #endif
 
 // the ] as second character is a special location for that character - it loses its
@@ -66,6 +66,7 @@ short fs_netconf_regex_initialized = 0;
 #ifdef BRIDGE_V2
 	extern struct __eb_device * eb_find_station (uint8_t, struct __econet_packet_aun *);
 	extern uint8_t eb_enqueue_output (struct __eb_device *, struct __econet_packet_aun *, uint16_t);
+	extern void eb_add_stats (pthread_mutex_t *, uint64_t *, uint16_t);
 #else
 	extern int aun_send (struct __econet_packet_aun *, int);
 	unsigned short fs_quiet = 0, fs_noisy = 0;
@@ -567,6 +568,7 @@ int fs_aun_send(struct __econet_packet_udp *p, int server, int len, unsigned sho
 	
 	if (a.p.dstnet == 0)	a.p.dstnet = a.p.srcnet;
 	eb_enqueue_output (fs_devices[server], &a, len);
+	eb_add_stats (&(fs_devices[server]->statsmutex), &(fs_devices[server]->b_out), len);
 
 	return len;
 
@@ -3416,7 +3418,10 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 
 	fs_copy_to_cr(path, (data+filenameposition), 1023);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d", "", net, stn, path, relative_to == active[server][active_id].root ? "Root" : relative_to == active[server][active_id].lib ? "Library" : "Current", command);
+	if (command != 4)
+		fs_debug (0, 1, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d", "", net, stn, path, relative_to == active[server][active_id].root ? "Root" : relative_to == active[server][active_id].lib ? "Library" : "Current", command);
+	else
+		fs_debug (0, 1, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d, attribute &%02X", "", net, stn, path, relative_to == active[server][active_id].root ? "Root" : relative_to == active[server][active_id].lib ? "Library" : "Current", command, (*(data + 6)));
 	
 	if (!fs_normalize_path(server, active_id, path, relative_to, &p) || p.ftype == FS_FTYPE_NOTFOUND)
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
@@ -3460,7 +3465,7 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 	
 			case 4: // Set attributes only
 				// Need to convert acorn to PiFS
-				attr.perm = fs_perm_from_acorn(server, *(data+6));
+				attr.perm = (*(data+6)) ? fs_perm_from_acorn(server, *(data+6)) : (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R);
 				break;
 
 			case 5: // Set file date
@@ -5728,6 +5733,8 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn)
 		else	fs_load_queue = l->next;
 
 		free(l);
+
+		return 0;
 	}
 
 	fs_debug (0, 4, "to %3d.%3d from %3d.%3d Sending packet from __pq %p, length %04X", net, stn, fs_stations[server].net, fs_stations[server].stn, l->pq_head, l->pq_head->len);
@@ -5814,7 +5821,7 @@ short fs_dequeuable(void)
 		l = l->next;
 	}
 
-	//fs_debug (0, 2, "There is%s data in the bulk transfer queue (%d entries)", (fs_load_queue ? "" : " no"), count);
+	fs_debug (0, 4, "There is%s data in the bulk transfer queue (%d entries)", (fs_load_queue ? "" : " no"), count);
 
 #ifdef BRIDGE_V2
 	if (count)
@@ -6148,7 +6155,6 @@ void fs_get_random_access_info(int server, unsigned char reply_port, unsigned ch
 	r.p.ptype = ECONET_AUN_DATA;
 	r.p.data[0] = r.p.data[1] = 0;
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d Get random access info on handle %02X, function %02X", "", net, stn, handle, function);
 
 	switch (function) 
 	{
@@ -6156,7 +6162,7 @@ void fs_get_random_access_info(int server, unsigned char reply_port, unsigned ch
 			r.p.data[2] = (active[server][active_id].fhandles[handle].cursor & 0xff);
 			r.p.data[3] = (active[server][active_id].fhandles[handle].cursor & 0xff00) >> 8;
 			r.p.data[4] = (active[server][active_id].fhandles[handle].cursor & 0xff0000) >> 16;
-			fs_debug (0, 2, "%12sfrom %3d.%3d  - cursor %06lX", "", net, stn, active[server][active_id].fhandles[handle].cursor);
+			fs_debug (0, 2, "%12sfrom %3d.%3d Get random access info on handle %02X, function %02X - cursor %06lX", "", net, stn, handle, function, active[server][active_id].fhandles[handle].cursor);
 			break;
 		case 1: // Fall through extent / allocation - going to assume this is file size but might be wrong
 		case 2:
@@ -6169,7 +6175,7 @@ void fs_get_random_access_info(int server, unsigned char reply_port, unsigned ch
 				return;
 			}
 		
-			fs_debug (0, 2, "%12sfrom %3d.%3d  - extent %06lX", "", net, stn, s.st_size);
+			fs_debug (0, 2, "%12sfrom %3d.%3d Get random access info on handle %02X, function %02X - extent %06lX", "", net, stn, handle, function, s.st_size);
 
 			r.p.data[2] = s.st_size & 0xff;
 			r.p.data[3] = (s.st_size & 0xff00) >> 8;
@@ -6808,11 +6814,9 @@ void fs_select_printer(int server, unsigned char reply_port, unsigned int active
 	reply.p.ctrl = 0x80;
 	reply.p.data[0] = reply.p.data[1] = 0;
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d Select printer %s", "", net, stn, pname);
-
 	printerindex = get_printer(fs_stations[server].net, fs_stations[server].stn, pname);
 
-	fs_debug (0, 1, " - %s", (printerindex == -1) ? "UNKNOWN" : "Succeeded");
+	fs_debug (0, 1, "%12sfrom %3d.%3d Select printer %s - %s", "", net, stn, pname, (printerindex == -1) ? "UNKNOWN" : "Succeeded");
 
 	if (printerindex == -1) // Failed
 		fs_error(server, reply_port, net, stn, 0xFF, "Unknown printer");
@@ -8381,13 +8385,10 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 */
 
-void eb_handle_fs_traffic (struct __eb_device *d, struct __econet_packet_aun *p, uint16_t length)
+void eb_handle_fs_traffic (uint8_t server, struct __econet_packet_aun *p, uint16_t length)
 {
 
-	int server;
 	uint8_t port;
-
-	server = d->local.fs.index;
 
 	port = p->p.port;
 
