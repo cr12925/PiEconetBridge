@@ -568,6 +568,7 @@ int fs_aun_send(struct __econet_packet_udp *p, int server, int len, unsigned sho
 	
 	if (a.p.dstnet == 0)	a.p.dstnet = a.p.srcnet;
 	eb_enqueue_output (fs_devices[server], &a, len);
+	pthread_cond_signal(&(fs_devices[server]->qwake));
 	eb_add_stats (&(fs_devices[server]->statsmutex), &(fs_devices[server]->b_out), len);
 
 	return len;
@@ -2367,7 +2368,12 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 		fs_devices[old_fs_count] = device;
 #endif
 
-		fs_debug (0, 1, "Server %d successfully initialized", old_fs_count);
+#ifdef BRIDGE_V2
+		fs_debug (0, 2, "Server %d successfully initialized on station %d.%d", old_fs_count, device->net, stn);
+#else
+		fs_debug (0, 1, "Server %d successfully initialized on station %d.%d", old_fs_count, net, stn);
+#endif
+
 		return old_fs_count; // The index of the newly initialized server
 	}
 }
@@ -2694,7 +2700,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 		if (strncasecmp((const char *) users[server][counter].password, password, 6))
 		{
 			fs_error(server, reply_port, net, stn, 0xBC, "Wrong password");
-			fs_debug(0, 1, "           from %3d.%3d Login attempt - username '%s' - Wrong password", net, stn, username);
+			fs_debug(0, 1, "            from %3d.%3d Login attempt - username '%s' - Wrong password", net, stn, username);
 		}
 		else if (users[server][counter].priv & FS_PRIV_LOCKED)
 		{
@@ -3452,7 +3458,7 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 				attr.load = (*(data+6)) + (*(data+7) << 8) + (*(data+8) << 16) + (*(data+9) << 24);
 				attr.exec = (*(data+10)) + (*(data+11) << 8) + (*(data+12) << 16) + (*(data+13) << 24);
 				// We need to make sure our bitwise stuff corresponds with Acorns before we do this...
-				attr.perm = fs_perm_from_acorn(server, *(data+14));
+				attr.perm = fs_perm_from_acorn(server, *(data+14)) | ((*(data+14) & 0x0c) == 0) ? (FS_PERM_OWN_W | FS_PERM_OWN_R) : 0;
 				break;
 			
 			case 2: // Set load address
@@ -3465,7 +3471,7 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 	
 			case 4: // Set attributes only
 				// Need to convert acorn to PiFS
-				attr.perm = (*(data+6)) ? fs_perm_from_acorn(server, *(data+6)) : (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R);
+				attr.perm = fs_perm_from_acorn(server, *(data+6)) | ((*(data+6) & 0x0c) == 0) ? (FS_PERM_OWN_W | FS_PERM_OWN_R) : 0;
 				break;
 
 			case 5: // Set file date
