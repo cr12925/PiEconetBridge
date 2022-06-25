@@ -57,7 +57,7 @@
 
 // the ] as second character is a special location for that character - it loses its
 // special meaning as 'end of character class' so you can match on it.
-#define FSREGEX "[]\\*\\#A-Za-z0-9\\+_;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
+#define FSREGEX "[]\\*\\#A-Za-z0-9\\+_\xA0;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 #define FS_NETCONF_REGEX_ONE "^NETCONF\\s+([\\+\\-][A-Z]+)\\s*"
 
 regex_t fs_netconf_regex_one;
@@ -939,6 +939,8 @@ void fs_acorn_to_unix(char *string)
 	{
 		if (*(string+counter) == '/')
 			*(string+counter) = ':';
+		else if (*(string+counter) == 0xA0) // Hard space
+			*(string+counter) = '#';
 		counter++;
 	}
 
@@ -954,6 +956,8 @@ void fs_unix_to_acorn(char *string)
 	{
 		if (*(string+counter) == ':')
 			*(string+counter) = '/';
+		else if (*(string+counter) == '#')
+			*(string+counter) = 0xA0; // Hard space
 		counter++;
 	}
 
@@ -1698,6 +1702,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		{
 			if (result->path[count][r_counter] == '/')
 				path_segment[r_counter] = ':';
+			else if (result->path[count][r_counter] == 0xA0)
+				path_segment[r_counter] = '#'; // Hard space equivalent
 			else	path_segment[r_counter] = result->path[count][r_counter];
 			r_counter++;
 		}
@@ -1766,6 +1772,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 				{
 					if (result->path[count][r_counter] == '/')
 						unix_segment[r_counter] = ':';
+					else if (result->path[count][r_counter] == 0xA0) // Hard space
+						unix_segment[r_counter] = '#';
 					else	unix_segment[r_counter] = result->path[count][r_counter];
 					r_counter++;
 				}
