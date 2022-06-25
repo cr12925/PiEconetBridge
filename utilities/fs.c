@@ -3156,7 +3156,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 					if (e->ftype == FS_FTYPE_DIR)	e->length = 0x200; // Dir length in FS3
 					r.p.data[replylen++] = e->length & 0xff;
 					r.p.data[replylen++] = (e->length & 0xff00) >> 8;
-					r.p.data[replylen++] = (e->length & 0xff00) >> 16;
+					r.p.data[replylen++] = (e->length & 0xff0000) >> 16;
 				} break;
 				case 1: // Human readable format
 				{
