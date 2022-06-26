@@ -96,7 +96,11 @@ void fs_close_interlock(int, unsigned short, unsigned short);
 //#define FS_PARSE_DEBUG 1
 uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 
-#define FS_VERSION_STRING "PiEconetBridge FS 1.0"
+#ifndef BRIDGE_V2
+	#define FS_VERSION_STRING "PiEconetBridge FS 1.0"
+#else
+	#define FS_VERSION_STRING "PiEconetHPB FS 1.1"
+#endif
 
 #define FS_DEFAULT_NAMELEN 10
 
@@ -3158,7 +3162,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 					{
 						r.p.data[replylen++] = e->internal & 0xff;
 						r.p.data[replylen++] = (e->internal & 0xff00) >> 8;
-						r.p.data[replylen++] = (e->internal & 0xff00) >> 16;
+						r.p.data[replylen++] = (e->internal & 0xff0000) >> 16;
 					}
 
 					if (e->ftype == FS_FTYPE_DIR)	e->length = 0x200; // Dir length in FS3
@@ -3296,10 +3300,10 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 						r.p.data[replylen++] = file.monthyear;
 						r.p.data[replylen++] = file.internal & 0xff;
 						r.p.data[replylen++] = (file.internal & 0xff00) >> 8;
-						r.p.data[replylen++] = (file.internal & 0xff00) >> 16;
+						r.p.data[replylen++] = (file.internal & 0xff0000) >> 16;
 						r.p.data[replylen++] = file.length & 0xff;
 						r.p.data[replylen++] = (file.length & 0xff00) >> 8;
-						r.p.data[replylen++] = (file.length & 0xff00) >> 16;
+						r.p.data[replylen++] = (file.length & 0xff0000) >> 16;
 					} break;
 					case 1: // Human readable format
 					{
