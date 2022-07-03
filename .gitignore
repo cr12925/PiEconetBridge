@@ -12,3 +12,7 @@ utilities/econet-test
 utilities/econet-ipgw
 utilities/econet-notify
 utilities/pipe-eg
+utilities/econet-clock
+utilities/econet-fslist
+utilities/econet-ledtest
+utilities/econet-remote
