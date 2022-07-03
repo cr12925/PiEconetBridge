@@ -1,0 +1,13 @@
+#
+# Local Econet is net 1
+# Fileserver is emulated at 1.254
+# Whole of network 1 can use AUN - but see NETWORKING doc for info about
+# creating the IP addresses you need.
+#
+# Network 128 is the remote network of Acorn AUN/IP machines. They'll all be
+# communicated with on port 32768
+
+WIRE NET 1 ON DEVICE /dev/econet-gpio
+FILESERVER ON 1.254 PATH /home/pi/econetfs
+EXPOSE NET 1 ON 192.168.1.0 PORT FIXED AUTO
+AUN MAP NET 128 ON 192.168.128.0 PORT FIXED AUTO NONE

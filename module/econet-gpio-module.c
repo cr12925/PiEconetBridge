@@ -49,6 +49,8 @@ unsigned long *GPIO_PORT;
 unsigned GPIO_RANGE = 0x40;
 unsigned long *GPIO_CLK;
 unsigned GPIO_CLK_RANGE = 0xA8;
+unsigned long *GPIO_PWM;
+unsigned GPIO_PWM_RANGE = 0x28;
 
 // This used to do an RX RESET as well, but now it doesn't.
 #define econet_discontinue() \
@@ -78,9 +80,9 @@ unsigned GPIO_CLK_RANGE = 0xA8;
 short sr1, sr2;
 long gpioset_value;
 
-unsigned short econet_gpio_reg_obtained[17];
+unsigned short econet_gpio_reg_obtained[19];
 
-unsigned short econet_gpio_pins[17];
+unsigned short econet_gpio_pins[19];
 	
 struct file_operations econet_fops = {
 	.open = econet_open,
@@ -111,6 +113,7 @@ spinlock_t econet_irqstate_spin;
 
 void econet_set_read_mode(void);
 void econet_set_write_mode(struct __econet_pkt_buffer *, int);
+void econet_set_pwm(uint8_t, uint8_t);
 
 unsigned char econet_stations[8192]; /* Station MAP - which are we proxying for */
 
@@ -305,7 +308,7 @@ void econet_gpio_release_pins(void)
 
 	unsigned short counter;
 
-	for (counter = 0; counter < 17; counter++)
+	for (counter = 0; counter < 19; counter++)
 		if(econet_gpio_reg_obtained[counter])
 			gpio_free(econet_gpio_pins[counter]);
 
@@ -395,10 +398,12 @@ short econet_gpio_init(void)
 	econet_gpio_pins[EGP_DIR] = ECONET_GPIO_PIN_BUSY;
 	econet_gpio_pins[EGP_IRQ] = ECONET_GPIO_PIN_IRQ;
 	econet_gpio_pins[EGP_CSRETURN] = ECONET_GPIO_PIN_CSRETURN;
+	econet_gpio_pins[EGP_READLED] = ECONET_GPIO_PIN_LED_READ;
+	econet_gpio_pins[EGP_WRITELED] = ECONET_GPIO_PIN_LED_WRITE;
 
 	/* Zero out the pin request array */
 
-	for (counter = 0; counter < 17; counter++)
+	for (counter = 0; counter < 19; counter++)
 		econet_gpio_reg_obtained[counter] = 0;
 	
 	/* Request the pins */
@@ -407,7 +412,7 @@ short econet_gpio_init(void)
 	printk (KERN_INFO "ECONET-GPIO: Requesting GPIOs\n");
 #endif
 
-	for (counter = 0; counter < 17; counter++)
+	for (counter = 0; counter < 19; counter++)
 	{
 		if ((err = gpio_request(econet_gpio_pins[counter], THIS_MODULE->name)) != 0)
 		{
@@ -471,9 +476,13 @@ short econet_gpio_init(void)
 	INP_GPIO(ECONET_GPIO_PIN_RW);
 	OUT_GPIO(ECONET_GPIO_PIN_RW);
 
-	INP_GPIO(ECONET_GPIO_PIN_CSRETURN);
+	if (econet_data->hwver < 2) // CS RETURN only used on v1 hardware boards. Used for network clock output on v2r3 onwards.
+		INP_GPIO(ECONET_GPIO_PIN_CSRETURN);
 
 	INP_GPIO(ECONET_GPIO_PIN_BUSY); // v2 hardware busy line
+
+	gpio_direction_output(econet_gpio_pins[EGP_READLED], 1);
+	gpio_direction_output(econet_gpio_pins[EGP_WRITELED], 0);
 
 	// Ask for clock function on CLK pin
 
@@ -510,7 +519,6 @@ short econet_gpio_init(void)
 	writel(ECONET_GPIO_CLOCKSOURCEPLLD, GPIO_CLK + ECONET_GPIO_CMCTL); // Select PLLD
 
 	barrier();
-
 	
 	writel(econet_data->clockdiv, GPIO_CLK + ECONET_GPIO_CMCTL + 1);
 
@@ -520,6 +528,25 @@ short econet_gpio_init(void)
 
 	barrier();
 
+	// Set up access to PWM control so we can put a network clock waveform out on pin 18 if someone wants us to
+
+	request_region(PWM_PERI_BASE, GPIO_PWM_RANGE, DEVICE_NAME);
+
+	GPIO_PWM = ioremap(PWM_PERI_BASE, GPIO_PWM_RANGE);
+
+	if (GPIO_PWM)
+	{
+#ifdef ECONET_GPIO_DEBUG_SETUP
+		printk (KERN_INFO "ECONET-GPIO: PWM base remapped to %p\n", GPIO_PWM);
+#endif
+	}
+	else
+	{
+		printk (KERN_INFO "ECONET-GPIO: PWM base remap failed.\n");
+		econet_gpio_release_pins();
+		return 0;
+	}
+	
 	if (!econet_probe_adapter())
 	{
 		econet_gpio_release_pins();
@@ -527,8 +554,53 @@ short econet_gpio_init(void)
 		return -1;
 	}
 
-	if (econet_data->hwver >= 2) // Attempt to set PWM on /CSRETURN (unused on v2 and above)
+	if (econet_data->hwver >= 2) // Attempt to initialize PWM clock on /CSRETURN (unused on v2 and above)
 	{
+		
+		uint32_t	clockdiv;
+
+		// Ask for ALT5 function (PWM0) on pin 18
+
+		t = (readl(GPIO_PORT + (ECONET_GPIO_PIN_NET_CLOCK / 10)) & ~(0x07 << (3 * (ECONET_GPIO_PIN_NET_CLOCK % 10)))) | (0x02 << (3 * (ECONET_GPIO_PIN_NET_CLOCK % 10))); // 0x02 is the sequence for ALT 5.
+		writel (t, GPIO_PORT + (ECONET_GPIO_PIN_NET_CLOCK / 10)); /* Select alt function for clock output pin */
+
+		// Put a default 5us period with 1us mark out but set it up on a 4MHz clock so that we can do quarter point marks
+
+		while (readl(GPIO_CLK + ECONET_GPIO_PWM_CLKCTL) & 0x80) // Wait for not busy
+		{
+			writel ((readl(GPIO_CLK + ECONET_GPIO_PWM_CLKCTL) & ~0xF0) | ECONET_GPIO_CLOCKDISABLE, GPIO_CLK + ECONET_GPIO_PWM_CLKCTL); // Disable clock
+			barrier();
+		}
+
+		// Select clock - PLLD
+	
+		writel(ECONET_GPIO_CLOCKSOURCEPLLD, GPIO_CLK + ECONET_GPIO_PWM_CLKCTL); // Select PLLD
+	
+		barrier();
+		
+		// Note, we run the PWM clock at 4MHz so that we can get quarter-us divisions for
+		// Period and Mark.
+
+		if ((of_machine_is_compatible("raspberrypi,4-model-b"))|| (of_machine_is_compatible("raspberrypi,400"))) // Bigger divider because PLLD is 750MHz
+			clockdiv = (ECONET_GPIO_CLOCKPASSWD | (187 << 12) | 512); // 750 / 187.5 = 4
+		else
+			clockdiv = (ECONET_GPIO_CLOCKPASSWD | (125 << 12));
+			
+		writel(clockdiv, GPIO_CLK + ECONET_GPIO_PWM_CLKDIV);
+
+		barrier();
+
+		writel(ECONET_GPIO_CLOCKENABLE, GPIO_CLK + ECONET_GPIO_PWM_CLKCTL); // Turn the clock back on
+	
+		barrier();
+	
+#ifdef ECONET_GPIO_DEBUG_SETUP
+		printk (KERN_INFO "ECONET-GPIO: Contents of PWMCTL = %lX, PWMRNG = %lX, PWMDAT = %lX\n", *(GPIO_PWM + PWM_CTL), *(GPIO_PWM + PWM_RNG1), *(GPIO_PWM + PWM_DAT1));
+#endif
+
+		// period 20 = 5us and mark 4 = 1us - Default clock setting. Change via ioctl from userspace
+
+		econet_set_pwm(20, 4); 
 
 	}
 
@@ -2209,6 +2281,61 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	
 }
 
+/* Change state of one or other LED. See #defines in econet-gpio-consumer.h
+ */
+
+void econet_led_state(uint8_t arg)
+{
+	uint8_t pin;
+
+	pin = (arg & ECONETGPIO_READLED) ? EGP_READLED : EGP_WRITELED;
+
+	gpio_set_value(econet_gpio_pins[pin], (arg & ECONETGPIO_LEDON) ? 1 : 0);
+
+}
+
+/* Change the PWM period/mark for the network clock (only initialized on v2 hardware)
+ *
+ * Remember we run the PWM clock at 4MHz to make sure we can do marks which are
+ * fractions of a us - so multiply everything by 4!
+ */
+
+void econet_set_pwm(uint8_t period, uint8_t mark)
+{
+
+	if (econet_data->hwver < 2)	return; // Not on v1 hardware!
+
+	// First, reset the PWM
+
+	writel(0, (GPIO_PWM + PWM_CTL));
+
+	barrier();
+
+	// Clear various error states
+
+	writel(0xffffffff, (GPIO_PWM + PWM_STA));
+	writel(0, (GPIO_PWM + PWM_DMAC));
+
+	barrier();
+
+	// Set range & data - constrain our parameters to 31/4 us period (7.something us), and
+	// 15/4 us mark (3.something us)
+
+	writel(period & 0x1f, (GPIO_PWM + PWM_RNG1));
+	writel(mark & 0x0f, (GPIO_PWM + PWM_DAT1));
+
+	// Enable the PWM
+
+	if ((period & 0x1f) > (mark & 0x0f)) // If resulting mark is < resulting period, don't bother enabling the PWM because it'll be nonsence
+	{
+		writel(	(readl(GPIO_PWM + PWM_CTL) & ~(0xff)) | (PWM_CTL_MSEN1 | PWM_CTL_PWEN1),
+			(GPIO_PWM + PWM_CTL)	);
+#ifdef ECONET_GPIO_DEBUG_SETUP
+		printk (KERN_INFO "ECONET-GPIO: PWM Clock period/mark set to %d, %d\n", (period & 0x1F), (mark & 0x0F));
+#endif
+	}
+
+}
 
 /* Called when a process opens our device */
 int econet_open(struct inode *inode, struct file *file) {
@@ -2406,6 +2533,13 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 			econet_pkt.ptr = 0; /* Start at the beginning */
 			econet_set_write_mode(&econet_pkt, 6);
 			break;
+		case ECONETGPIO_IOC_LED: /* Turn one of the LEDs on or off - only does one at once */
+			econet_led_state(arg);
+			break;
+		case ECONETGPIO_IOC_NETCLOCK: /* Set up the network clock on pin 18 via Hardware PWM */
+			if (econet_data->hwver >= 2)
+				econet_set_pwm (((arg & 0xffff0000) >> 16), (arg & 0xffff)); // Period in top 16 bits; mark in bottom 16.
+			break;
 		default:
 			return -ENOTTY;
 	}
@@ -2590,6 +2724,10 @@ static int __init econet_probe (struct platform_device *pdev)
 
 static void econet_exit(void)
 {
+
+	gpio_direction_output(econet_gpio_pins[EGP_READLED], 0);
+	gpio_direction_output(econet_gpio_pins[EGP_WRITELED], 0);
+
 	econet_gpio_release();
 	
 	device_destroy(econet_class, MKDEV(econet_data->major, 0));

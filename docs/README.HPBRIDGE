@@ -1,0 +1,871 @@
+*** WARNING. THE HIGH PERFORMANCE BRIDGE IS STILL VERY MUCH IN TESTING.
+    YOU MAY EXPERIENCE QUIRKS, CRASHES, BIZARRENESS. IT WOULD HELP IF YOU
+    COULD CAPTURE A TRACE WITH '-ss -zzzz -piIoO --malloc-debug -n 16 ' FLAGS
+    ENABLED AND PM ME ON STARDOT.ORG.UK AND I WILL ATTEMPT TO DISCOVER
+    WHAT IS WRONG. EVEN BETTER, RUN THE BRIDGE UNDER GDB AS FOLLOWS AND
+    SHOW ME THE OUTPUT OF THAT TOO AS IT SHOULD REVEAL PRECISELY WHERE IN
+    THE BRIDGE CODE THE PROBLEM LIES:
+
+    gdb --args econet-hpbridge -ss -zzzz -piIoO --malloc-debug -n 16
+
+THE HIGH PERFORMANCE BRIDGE
+---------------------------
+
+econet-hpbridge is the second generation of the user space bridge code. It is
+backwards compatible in terms of features with econet-bridge, which is the
+first generation. However, it has a number of improvements:
+
+A. It is no longer necessary to expose all of your Econet hosts to AUN. You
+   can do so selectively.
+
+B. Performance is intended to be superior because, among other things, the
+   code is threaded and so writes to the Econet (wire) no longer hold up 
+   other traffic passing through the bridge (e.g. from an AUN or trunk
+   host to a local fileserver).
+
+C. The code has been designed to cope with multiple Econets (wires) in case
+   of future expansion. (The kernel module does not presently support
+   multiple different Econet wires. But it might...)
+
+D. The IP Gateway for Phil Blundell's EcoTCP ROM is now built in.
+
+E. *ALL* configuration requires network numbers other than 0. Even if you
+   have only one network. The system works out when to substitute '0' as
+   the network number in a transmitted packet (and vice versa on receipt),
+   just as real Acorn systems did. This is to simplify configuration.
+
+F. The configuration is designed to be far more human readable and to require
+   fewer configuration lines to achieve a given purpose.
+
+G. The configuration is more flexible in terms of exposing your wired / local
+   hosts to AUN, and in terms of defining where remote AUN/IP hosts are and
+   what port numbers they use. Although at the time of writing it remains
+   necessary to create any IP tunnel or sub-interfaces for use with the bridge,
+   it is hoped that even that can be automated in future. Thus, to define
+   a whole network's worth of AUN/IP machines only a single line is required
+   in the configuration (see below). To expose an entire network of Econet
+   (or even trunked) machines to AUN/IP, again only a single line of
+   configuration is needed, but you will first need to add all the necessary
+   sub-interfaces to your 'lo' or ethernet interface first (see elsewhere).
+
+H. The command line parameters have been considerably simplified.
+
+I. Having at least one Econet board is no longer required. If you do not
+   define an Econet (wire) network, the system won't try to find one and will
+   cheerfully just operate doing trunking and/or AUN/IP.
+
+J. For the large majority of cases, only memory which is actually needed is
+   allocated, thus the large memory allocations which were used (even at 
+   startup) in the old bridge are avoided.
+
+The code supports fileservers and print servers just as its predecessor did.
+In terms of fileservers, it uses precisely the same backend fileserver code,
+with only a few modifications to support the new routines for sending and
+receiving packets. Thus all of the same * commands which worked in the
+fileserver under the older bridge software will work in this one.
+
+For all aspects of how to work the system except for command line parameters
+and configuration, see the older README.
+
+COMMAND LINE PARAMETERS
+-----------------------
+
+These are far simpler than the old version.
+
+-h		Produces help text.
+
+-c <path>	Specify alternate configuration file. Default is
+		/etc/econet-gpio/econet-hpbridge.cfg
+
+		In theory this makes it possible to run two independent
+  		bridges on the same machine. If and when mulitple Econets
+		are supported, they could be run either by two separate
+		userspace bridges, or by one.
+
+-d <path>	Path to write debug output to. It will go to stderr by 
+		default as it previously did, but it can also now be 
+		directed to a file. (You can always 'tail -f' the file
+		to see it in another console window.)
+
+-l		Local mode. Won't attempt to open Econet devices even if they
+		are defined. 
+
+-n <num>	Number of data bytes to display when showing packet data.
+		Default is 0. They are now displayed rather more nicely 
+		than before, in 16-byte lines with characters at the right.
+
+-p [iIoO]	Turn on packet dumps. You must select at least one of the four
+		directions, but you can have any combination thereafter.
+	
+		They mean:
+
+		i:	Packet has arrived off the device in question. This
+			will show its properties before any network number
+			translation. E.g. packets off the Econet may show
+			network 0.
+
+		I:	Packet as received from a device, but after any
+			network number translation. E.g. if your local Econet
+			is network 6, a packet which shows as 0.5 on an 'i'
+			trace will now show as 6.5. Traffic arriving on a 
+			trunk with network address translation turned on
+			will show its translated network number rather than
+			the one it arrived with (which will appear on 'i').
+
+		o:	First output stage in destination device. Shows
+			network numbers before any translation (so this is
+			pretty much like 'I' but in the output phase).
+
+		O:	Final output stage (if the packet has not been 
+			dropped for some reason) - the equivalent of 'i' but
+			for output: it shows the final network numbers as
+			transmitted with the packet.
+
+		Note, even if you turn all these on, you may not see four
+		traces per packet. Example reasons are:
+
+		- Traffic generated by a local emulator. There will be no
+		  i or I phases.
+
+		- Broadcast traffic. You'll see i and I, but probably
+		  multiple o and/or O.
+
+		- Traffic dropped by firewall - you'll probably only see
+		  i and I.
+
+		- Traffic with no known destination - you'll probably only 
+		  see i and I.
+
+-s		Dump configuration at startup. The more '-s's you do, the
+		more it will tell you. E.g. with only one, it won't bother
+		dumping all your remote AUN/IP hosts.
+
+-z		Debug. Specify up to 5 times for increasingly eye-watering
+		output. One is sufficient to tell you what is going on in
+		normal operation. Three starts to get very busy. 5 is only
+		really useful if you're writing to a file and will examine
+		it in detail later.
+
+		Specify none, and without -s you'll get no output except
+		configuration or startup errors to stderr, almost all of which
+		will cause the bridge to exit anyway.
+
+		NOTE: This now controls fileserver debug as well. 
+		No -z is equivalent to the old quiet.
+		One is equivalent to not quiet (ie. produces logs of activity)
+		Two is equivalent to the old 'noisy'.
+
+--malloc-debug	Providing you have at least -zz, this will show you all 
+		malloc() and free() attempts, what they were for and the
+		amount of memory sought/freed.
+
+--disable-7bitbodge	Turns off the Acorn '7 bit bodge' required to 
+		enable Y2K compliant dates in fileserver traffic. This is
+		on by default. This command line switch turns it off for
+		*all* fileservers emulated by this bridge. (In the future,
+		this will be a per-server, persistent, configurable.)
+
+The next few switches ought not to be needed but just in case:
+
+--wire-max-tx <n>	Maximum number of times to try and transmit a
+			packet on the Econet before giving up. If you have
+			RISC OS machines, this should be at least 3. It
+			defaults to 10.
+
+--wire-interval <n>	Milliseconds between retransmit attempts. Default 50.
+
+--wire-imm-wait <n>	Milliseconds to wait before putting the Econet module
+			back into read mode after receiving an Immediate Query
+			from the Econet. If the queried station never responds
+			the Econet will otherwise get stuck waiting to 
+			transmit the reply and will read no more traffic. It 
+			will, for some seconds, also sit in flag fill mode.
+			Default is 1000 (i.e. 1s).
+
+--aun-max-tx <n>	The comparable setting for AUN/IP to --wire-max-tx
+			RISC OS AUN/IP machines occasionally are not listening
+			when they should be. So at least 3 is a good plan.
+
+--aun-interval <b>	Milliseconds between AUN/IP retries for an
+			unacknowledged packet (or a negative acknowledged
+			packet within the NAK tolerance (see below)). Default
+			1000, because BeebEm sometimes takes a while to
+			deal with traffic and anything lower seems to cause
+			problems. If you have no BeebEm, you could probably
+			lower this significantly (e.g. more like 50 ms).
+
+--aun-nak-tolerance <n>	Number of NAKs to tolerate from an AUN/IP host before
+			treating it as really not listening. This is because
+			RISC OS sometimes isn't listening when it ought to be
+			and will NAK a packet it should really have accepted.
+			Beyond this limit, the bridge will treat a NAK as a 
+			real NAK. Prior to the limit, it will just have another
+			go at transmission. Default 2.
+
+--max-sockets <n>	If you expose a lot of stations, you will need to
+			increase the number of file descriptors available to
+			the bridge. A process is often limited to 1024, and
+			if you expose, say, 4 full networks, that would be
+			just over 1,000 and a few more for other functions
+			may exceed the limit. Typically you will see an error
+			on startup to the effect that the bridge could not
+			start a listener for an AUN exposure. If so, use this
+			command line option to increase the limit if your
+			system will allow you to - e.g. to 8192, or even
+			higher.
+
+--flashtime <n>		Number of milliseconds to flash each of the activity
+			LEDs (read, write) *off* to signal activity on the
+			Econet.
+			
+CONFIGURATION
+-------------
+
+This does all the things the old configuration could do, but is easier to
+use and adds more functionality.
+
+IMPORTANT: *ALL* network numbers in the HPB configuration must be non-zero.
+The bridge will work out when to translate a network number to 0 for
+transmission on to a particular medium.
+
+ALSO IMPORTANT: If you want a locally emulated station (e.g. fileserver,
+print server, IP gateway) to be part of a particular network, you must
+define that network in the file before you define the locally emulated
+station / service. Otherwise the system will create the network number
+you specify for the locally emulated station, and you will not be able to
+retrospectively say that that network number is in fact (e.g.) a local
+Econet (wire).
+
+So for example the following will not work:
+
+FILESERVER ON 1.254 PATH /econet
+WIRE NET 1 ON DEVICE /dev/econet-gpio
+
+- It will generate an error complaining that network 1 already exists and 
+  cannot be re-used for the 'WIRE NET' definition.
+
+But if you want your Econet to be network 1 with a locally emulated fileserver
+at 1.254, then the reverse order will do it:
+
+WIRE NET 1 ON DEVICE /dev/econet-gpio
+FILESERVER ON 1.254 PATH /econet
+
+- Because the first line creates network 1 as an Econet, and the second will
+  'splice' in station 254 as a locally emulated fileserver.
+
+FINALLY IMPORTANT: Remember that BBC Bs (and, apparently RISC OS 3?) will not
+do a Bridge query on reset, so they will not be aware of their local network
+number. That means that even with all this non-0 network configuration
+business, you must specify network 0 on such machines in order to access (e.g.)
+a fileserver you have defined as (e.g.) 1.254 on the same Econet. That is 
+how it works on a real Econet too - this is not a bridge deficiency.
+
+Save for pathnames (e.g. for filestores, pipes) the configuration is
+case insensitive, so 'wire net 1 on device /dev/econet-gpio' is just
+as good as the upper-case shouty version.
+
+Defining a local Econet (wire)
+------------------------------
+
+As above, pick a network number and specify
+
+WIRE NET n ON DEVICE /dev/econet-gpio
+
+... where 'n' is a number from 1 to 254 (strictly, probably 127 but let's
+not quibble about that).
+
+If you have a v2 r2a (or later) Econet HAT for your Pi, the kernel
+module will have turned on a 5us period / 1us mark clock output on
+GPIO 18 (Broadcom numbering), which will appear on your Econet if your
+DIP switches are set correctly. You can configure the clock speed of 
+that clock on the HPB with the configuration line below. The config
+line will be accepted on earlier boards, but will have precisely no
+effect at all.
+
+SET NETWORK CLOCK ON NET n PERIOD p MARK m
+
+Where n is the network number of a wire network which is already
+defined, p is the period of the clock in microseconds (valid values are
+3, 4 or 5), and m is the mark time (valid values are 1, 2, or 3).
+
+Note that there will be the possibility of half and quarter microsecond
+settings in future. The regular expression doesn't work at the moment.
+
+Locally emulated stations / connections
+---------------------------------------
+
+You can have any combination of file, print, IP and pipe devices on a single
+station number. You can define more than one print server on the same station
+so long as it has a unique Acorn printer name.
+
+Defining a local fileserver
+---------------------------
+
+For how to operate the fileserver once defined, see the previous
+documentation. But to establish a fileserver the config line is this:
+
+FILESERVER ON net.station PATH <path to filestore>
+
+e.g.
+
+FILESERVER ON 1.254 PATH /econet
+
+Where /econet contains the passwords file, configuration file, an the
+directories which form the 'disks' in your emulated fileserver.
+
+You can specify a network which hasn't yet been defined and the system
+will create it. E.g. if your Econet is network 1, you could specify
+
+FILESERVER ON 2.254 PATH /econet
+
+... and the bridge will create network 2 as a 'Null' network (i.e. one which
+can only have local emulation or distant AUN machines in it), and then
+create station 254 and start up a fileserver at that station. You would not
+be able to define network 2 as an Econet wire later in the config if you did
+that because network 2 will already exist.
+
+The bridge will collect traffic to 2.254 off the wire, so your stations in
+network 1 will be able to talk to it (e.g. with *I AM 2.254 SYST), even though
+you have no other connections to or from the bridge than your local Econet.
+
+Defining a local printserver
+----------------------------
+
+Similar to fileserver, and all the same restrictions apply. Syntax (e.g.):
+
+PRINTSERVER ON net.station ACORN USING <unix printer name | email address>
+
+Creates a print server on net.station with Acorn printer name 'ACORN' whose
+print output is sent to either:
+
+- A unix print queue named as defined OR
+- If the print queue name contains an @ then it uses sendmail to send
+  the print job to that email address. (You will have to be responsible
+  for setting up sendmail - but you can use exim or anything else that
+  provides a sendmail command-line compatible binary!)
+
+The system insists on having a print handler script in /etc/econet-gpio - 
+and one is installed by default. See the other documentation.
+
+You can have two Acorn printers which go to the same unix printer or 
+email address but which have different Acorn names and thus can have their
+print handling set up differently. You may wish to do this, for example, to
+prevent the addition of the default print header and footer to a printer which
+will accept PostScript or PDF ouptut, since the header/footer will likely
+break it.
+
+Defining a local IP gateway
+---------------------------
+
+This bridge has integrated support for traffic on port &D2, for Phil Blundell's
+Eco/TCP ROM. You will need to look in the TCPIP guide for how to make all 
+that work, including setting up a tunnel interface before you start the bridge
+software, and giving it an IP adddress. However, the configuration line
+you need is this:
+
+IPSERVER ON net.station DEVICE tunX USING IP a.b.c.d/netmask
+
+Where:
+
+- tunX is the name of the tunnel interface you have created in advance
+- a.b.c.d is the IP address you've assigned to that tunnel interface
+- netmask is the number of 1s in the network mask (known as the mask length
+  or prefix length) assigned to the tunnel interface. E.g. if your netmask
+  is 255.255.255.0, the prefixe length is 24. For 255.255.0.0, it's 16.
+
+Same caveat as for file & print servers: If you want to put a local IP 
+gateway in a network used for something else, define the network before you
+define the IP gateway.
+
+Defining a local pipe gateway
+-----------------------------
+
+As with the older version of the bridge, connections can be made to a local
+programme which talks to the bridge over a pipe. Some examples are given in
+the repo - e.g. one which will do the equivalent of *REMOTE from the Linux
+command line.
+
+To define the pipe server (and you can have more than one station of this
+nature defined), use the command syntax:
+
+PIPESERVER ON net.station PATH /tmp/<whatever> <NONE|DIRECT>
+
+The bridge will create two pipes each with the base name /tmp/<whatever>, 
+one for traffic to the bridge and one for traffic from the bridge. It will
+work out when a client has connected and disconnected.
+
+The NONE|DIRECT flag at the end does this:
+
+NONE:	The bridge sends ACKs for traffic sent to the pipe client. It will
+	silently drop any ACK or NAK received from the pipe client. The 
+	only traffic sent over the pipe to the pipe client will be DATA,
+	IMMEDIATE, IMMEDIATE REPLY, and BROADCAST. Makes it easier if your
+	client doesn't want to track its own acks / naks.
+
+DIRECT:	The bridge does the opposite of NONE. It will not spoof any ACKs,
+	and your pipe client code must track its own ACKs and retransmissions.
+	All ACKs and NAKs will be forwarded to the pipe client, and 
+	the client is responsible for generating ACKs and NAKs of its own.
+
+Exposure of hosts and networks to AUN/IP
+----------------------------------------
+
+To allow a host which is locally emulated, on an Econet or via a trunk
+to communicate with hosts on AUN/IP, the local/Econet/trunk station must be
+'exposed' to AUN with a listener.
+
+Any known host can be exposed to AUN in a variety of flexible ways. Whole
+networks can be exposed in a single configuration line. The only type of
+host which cannot be exposed is a host which is known to be AUN/IP.
+
+Even hosts which may be learned over trunks can now be exposed locally with
+an AUN/IP listener.
+
+If a host is undefined at the time of exposure, its configuration will be
+accepted but it will be flagged as dormant until a route to that host is
+known. E.g. if you want to expose station 6.10 to AUN/IP but network 6 is
+only going to be known over a trunk or via an Acorn Econet or SJ Bridge,
+you can expose it but it will be dormant. (It will drop any received
+traffic on AUN/IP.) If and when the bridge learns where network 6 is, it will
+enable the exposure and start forwarding traffic to/from it. If network 6
+subsequently disappears, the exposure will go dormant again.
+
+Exposure of a single host
+-------------------------
+
+Configuration line:
+
+EXPOSE HOST network.nstation ON PORT [host]:[port]
+
+[host] can be any of:
+
+- An IP address (which must exist on your bridge)
+- * (which binds to all local IP addresses on the bridge)
+- A hostname (which must resolve to an IP address on your bridge)
+
+[port] must be a fixed port number (e.g. 32768)
+
+Alternatively, instead of [host]:[port], you can specify 'AUTO', which
+will bind to all interfaces with port (10000 + (256 * network) + station),
+thus enabling you to avoid keeping track of which port numbers you have
+used.
+
+NOTE: Acorn AUN/IP devices will ONLY communicate with you on port 32768. If you
+want to expose multiple hosts to such devices, you are better off creating
+a number of secondary IP addresses on your 'lo' interface and binding each
+internal host to port 32768 on one of those IP addresses each. See 
+'NETWORKING' file.
+
+Exposure of a whole network
+---------------------------
+
+In one line, you can expose and entire Econet/Trunk/Virtual network to AUN/IP:
+
+EXPOSE NET <net> ON [address] PORT <FIXED|SEQ> <AUTO|port number>
+
+When exposing a whole network, [address] must have its last octet as 0 because
+See the 'NETWORKING' document.
+
+FIXED means the port number at the end of the line is invariant and will be
+the same for every host.
+
+SEQ means that the port number given will increment by 1 for each exposed
+host.
+
+FIXED & AUTO means that the port number is calculated as follows:
+- If the [address] ends in 0, the bridge will assume that a.b.c.1 will be 
+  station <net>.1, a.b.c.2 will be <net>.2 etc. etc. - this is intended to
+  match the Acorn methodology for addressing AUN/IP hosts. You will have to
+  have addresses a.b.c.1 to a.b.c.254 defined as secondary IP addresses on 
+  your bridge machine somewhere (typically on the 'lo' interface).
+
+  AUTO in that circumstance will generate port number 32768 for compatibility
+  with Acorn AUN/IP, so that
+
+  Host <net>.1 will be found at a.b.c.1 port 32768
+  Host <net>.2 will be found at a.b.c.2 port 32768
+
+  etc.
+
+SEQ & AUTO
+
+- If the [address] does not end in 0, or SEQ is specified, then AUTO will
+  generate a port number by the same formula as for exposure of a single host -
+
+  (10000 + (network * 256) + station)
+
+Otherwise the port number is whatever you specify and:
+
+- If you specify FIXED then it will not change from station to station
+- If you specify SEQ then it will increment by 1 for each station.
+
+Exposure examples
+-----------------
+
+A) You want to make your fileserver (but none of your Econet stations) 
+   accessible to a BeebEm device somewhere. You will also have to define
+   the BeebEm device as an AUN HOST (see below), but to expose the fileserver
+   you would specify
+
+   EXPOSE HOST 1.254 ON PORT *:32768
+
+B) You want to expose the entire of your Econet (and its local fileserver)
+   to remote AUN/IP hosts which are not Acorn machines, so that you are
+   content to use distinct port numbers on any IP address on your bridge.
+
+   EXPOSE NET 1 ON * PORT SEQ AUTO
+
+   (Which will bind to ports (10000 + 256 + station) on every interface
+   on your bridge.)
+
+C) You want to epoxse the entire of your Econet (and its local fileserver)
+   to remote Acorn AUN/IP hosts
+
+   - You must first have created 254 virtual IP addresses on your bridge
+     (e.g. on the 'lo' interface) and sorted out your IP routing. See
+     'NETWORKING'. Let's say the base network for those IP addresses is
+     a.b.c.0 (though the first you would create would be a.b.c.1)
+
+   Then specify
+
+   EXPOSE NET 1 ON a.b.c.0 PORT FIXED AUTO
+
+   ... which will get you a.b.c.1 port 32768 mapping to station 1.1,
+   a.b.c.2 port 32768 mapping to station 1.2, and so on.
+
+Defining a single remote AUN/IP host
+------------------------------------
+
+Before anything attached to the bridge can talk to a system which talks
+AUN/IP, it must be exposed (see above), and you will also have to tell the
+bridge about the AUN/IP host in question. The command syntax is this:
+
+AUN MAP HOST net.station ON <hostname or IP address> PORT <port number> <AUTOACK|NONE>
+
+net.station is self-explanatory. These can be stations on an existing Econet,
+or they can be entirely separate. By that, what I mean is that if you wish
+to have one or more stations which appear to Econet hosts to be local to the
+Econet, but which are in fact AUN/IP stations elsewhere, the system will cope
+with that providing you define the AUN host *after* you define the Econet. The
+bridge will catch traffic off the Econet wire for the AUN/IP stations, and 
+convert it to AUN/IP and send it over IP to the distant host. The distant host
+must be properly configured to send traffic back to the correct host:port
+combination for the exposure of the station on the Econet that originated the
+traffic.
+
+Equally, if you simply want to have a host which is not on a physical network
+but which your Econet (and trunks / pipes / fileservers / etc.) can talk to
+over AUN/IP, you can define that too. E.g. if your local Econet is network 1,
+there is no reason you cannot define an AUN/IP host as, e.g. station 2.1, and
+the bridge will catch traffic for 2.1 wherever it comes from and send it off
+to the AUN/IP host providing the source of that traffic is exposed to AUN/IP
+(see above). The bridge will also advertise such networks to bridges on the
+Econet and over trunks.
+
+<hostname or IP address> - i.e. of the distant AUN/IP host you want to 
+   talk to.
+
+<port number> - port number of the AUN/IP implementation on the remote host.
+   For Acorn machines that will be 32768. For BeebEm, it's whatever you
+   configure it to be in BeebEm's Econet.cfg. If you use 'AUTO' then the
+   bridge will use the 10000+256x+y formula described above in exposures.
+
+AUTOACK - The bridge will automatically ACK any data traffic originating from
+   this host. This is primarily for emulators which will send what appears to 
+   be a whole new packet with a new sequence number when the BBC they are
+   emulating puts what is actually a re-tried packet on the Econet. The fast
+   ACK of the first packet stops the retransmissions. Otherwise you get
+   lots of extra packets floating around that you don't want. This is not a 
+   defect in the emulators - there is no practical way they can avoid that
+   behaviour.
+
+NONE - Don't Auto ACK. All ACKs arising from traffic from the AUN/IP remote
+   system will be those generated by the devices they are talking to. (Note
+   that for locally emulated devices and Econet machines, which have no
+   concept of ACK and NAK, the bridge will produce an ACK or NAK on their
+   behalf depending on transmission success/failure. The possible exception is
+   pipe clients, which can (as above) be configured either to have that
+   done for them by the bridge (their 'NONE' flag), or produce ACKs and NAKs
+   themselves (their 'DIRECT' flag).
+
+Example: Create station 1.235 as an AUN/IP machine on a RISC PC
+
+AUN MAP HOST 1.235 ON riscpc.mydomain.org PORT 32768 NONE
+
+- The RISC PC will be responsible for its own ACK & NAK.
+
+Defining a whole network of AUN/IP remote hosts
+-----------------------------------------------
+
+The HPB implements a form of Acorn's 'AUN MAP' functionality to achieve this.
+
+Syntax:
+
+AUN MAP NET <network> ON <IP Network> PORT <FIXED|SEQ> <port|AUTO> <NONE|AUTOACK>
+
+<network>	The network number by which stations using the bridge will
+		address these machines
+
+<IP Network>	Must end 0. Stations will be a.b.c.1, a.b.c.2, etc. for 
+                <network>.1, <network>.2 etc.
+
+FIXED|SEQ	FIXED = don't increment the port number for each station
+		(which you'll want for Acorn AUN/IP machines)
+
+		SEQ = Increment port number by 1 for each machine (which
+ 		may be handy if you have more than one AUN/IP system on
+		a given IP address - e.g. BeebEM)
+
+port		Port number. Either the fixed port number if you use FIXED
+		or the base port number if using SEQ
+
+		AUTO = for FIXED config, 32768. Otherwise (1000+256x+y) as
+		above.
+
+NONE|AUTOACK	See AUN single host exposure. Works the same way but applies
+		to all stations in the remote network.
+
+The bridge will advertise <network> to Acorn bridges and over its own trunks.
+
+DYNAMIC STATIONS
+----------------
+
+When traffic from an AUN/IP host which is not configured arrives at the bridge
+it may be that it is simply unwanted. A default bridge configuration will 
+drop it. But if you have a number of AUN/IP remote hosts whose IP addresses
+might change, or where you wish to allow access without configuring each of
+them individually, you can create one or more 'Dynamic' AUN/IP networks in
+the bridge.
+
+When the traffic turns up from an unconfigured AUN/IP source, the bridge will
+- Allocate a spare station number in one of your dynamic networks to it
+- Set a timeout of an hour (inactivity for that long will cause the address
+  to get re-used)
+- Send a logoff message to each fileserver the bridge knows about for the 
+  address it has just allocated, so that a new user does not inadvertently
+  end up logged into a fileserver with someone else's credentials.
+
+The bridge will then forward the traffic as usual.
+
+Syntax:
+
+DYNAMIC <net> <AUTOACK|NONE>
+
+<net>		Network number from which to allocate stations. This will be
+		advertised over trunks and to Acorn bridges.
+
+<AUTOACK|NONE>	See above - works the same way.
+
+TRUNKING
+--------
+
+If you wish to link up with other Pi Econet Bridges on the Internet, you 
+can configure the bridge to put more than one network over a 'trunk' to 
+a distant bridge. E.g. if you have networks 1, 2 and 3, and somewhere on the
+Internet there is a bridge with networks 4, 5 and 6, you can establish a
+'trunk' between them which will carry all 6 networks.
+
+The bridge will use Acorn bridge protocol modified for use over UDP to learn
+which networks are where.
+
+If the distant bridge has a network you don't want to talk to, you can filter
+out the advertisements of that network so that your clients cannot communicate
+with that distant network number.
+
+Equally, if there is a network number at the remote site which overlaps with
+one of yours, you can translate the inbound traffic so that your clients see
+the remote (overlapping) network by a different number.
+
+You can also filter out your bridge's advertisements of its local network so
+that some or all of your networks are never revealed to a particular 
+distant bridge.
+
+The same principles apply even if the advertisements are arriving from an 
+Acorn bridge: you can configure your bridge to ignore/translate them.
+
+In addition (see below) you can firewall specific traffic within the bridge so
+that, for example, you can prevent station x.y talking to station a.b, wherever
+they may be. The exception is that if the traffic never actually reaches the
+bridge (e.g. because it's staying purely on a single Econet, or only traversing
+Econets by means of Acorn bridges) your bridge will have no means of stopping 
+it and the traffic will be transmitted.
+
+Each trunk needs a unique port number on your local bridge. You cannot 
+run 4 bridges on the same port number at your local end (yet). 
+
+The distant end of each trunk will, similarly, have a port number and of course
+also an IP address or hostname. 
+
+Thus to define a trunk from port 20000 on your local bridge to port 25000 on
+your friend's bridge elsewhere, you would configure:
+
+TRUNK ON PORT 20000 TO <hostname>:25000
+
+(Where <hostname> is a hostname or IP address of the distant bridge).
+
+No network numbers are specified because the system learns them.
+
+You can define more than one trunk on a single bridge providing it has a
+locally unique port number.
+
+There are configuration hooks (but no more at present) to enable a trunk
+to be on a serial or dial-up line. This is not yet implemented.
+
+Trunk announcement filtering
+----------------------------
+
+To prevent your bridge announcing one of your known networks on a particular
+trunk:
+
+BRIDGE DROP NET <net> OUTBOUND ON TRUNK PORT 20000
+
+<net>	The network number not to advertise
+	Here, 20000 is one of your local trunk ports. The outbound filter
+	only takes effect on that particular trunk.
+
+	* means 'All networks'.
+
+You can also stop the bridge announcing networks to Acorn / SJ bridges on 
+an Econet (wire) by substituting 'TRUNK PORT ....' for 'WIRE NET n' where
+'n' is the network number of the Econet you do not wish the networks to be
+advertised on.
+
+To prevent your bridge accepting a network via a particular trunk or Econet
+wire, swap 'OUTBOUND' for 'INBOUND' in the above.
+
+By default, all announcements are allowed. However, you can selectively 
+filter by using multiple instances of the commands above, and substituting
+'ALLOW' for 'DROP'. E.g. If you want to accept only network 6 from a particular
+trunk, and drop all the rest, you can do this (for example):
+
+BRIDGE ALLOW NET 6 INBOUND ON TRUNK PORT 20000
+BRIDGE DROP NET * INBOUND ON TRUNK PORT 20000
+
+The config lines are processed in sequence in the bridge when running - so it
+will see the 'ALLOW' for network 6 and allow that network to be announced, but
+will then drop everything else because of the wildcard on the line below.
+
+A similar principle can be used to *announce* (OUTBOUND) only particular 
+networks.
+
+Announcement handling for known networks
+----------------------------------------
+
+The bridge will drop any incoming announcement for a network number it already
+has a means of reaching. This is to prevent loops and abject confusion.
+
+You can use address translation to avoid that if you want to talk to the
+remote network. See below.
+
+If two trunks/bridges are announcing the same network, the bridge will work on
+a first-come, first-served basis.
+
+Trunk network address translation
+---------------------------------
+
+If you wish stations communicating through your bridge to 'see' traffic from
+a network reachable via a trunk or Acorn/SJ bridge by a different network
+number, e.g. because there is a network number overlap, you can configure
+the bridge to translate the distant network number to a different local one.
+
+E.g. Supposing you have network 6 available on your bridge. Let's say it's
+a set of remote AUN/IP hosts. Either beyond an Acorn/SJ Econet bridge, or 
+via a trunk, there is another network 6. When your bridge receives the
+incoming advert for network 6 from the distant bridge, it will by default
+drop it because it already knows about a network 6. (And it will say so
+in the debug output.)
+
+If you wish to communicate with that remote network nonetheless, you can
+translate its network number to an unused local one (here, let's say 7) with
+a command such as this:
+
+TRUNK PORT 20000 XLATE DISTANT NET 6 TO LOCAL NET 7
+
+Note this occurs on a specific trunk only. Your bridge will then announce
+network 7, rather than 6, to any other bridges it knows about except the one
+from which the original advert came.
+
+Bridge firewalling
+------------------
+
+It is important to realise that in what follows firewalling only occurs when
+traffic actually transits the bridge. The bridge has no means of stopping 
+traffic which, e.g., is between two stations on an attached Econet.
+
+The filtering is always bi-directional. So, to prevent stations a.b and c.d
+from communicating in any way, use the configuration
+
+BRIDGE DROP TRAFFIC BETWEEN a.b AND c.d
+
+And of a, b, c or d can be *, which means 'all'. So 4.* means anything in 
+network 4.
+
+Where you have used address translation (see above), you need to use the
+/local/ network number, not the remote one.
+
+There is an 'ALLOW' variant which, you will be astonished to learn, allows
+traffic rather than drops it. Since the rules are processed in the sequence
+provided in the configuration, that allows selecting drops followed by a 
+more wide ranging 'allow', or vice versa.
+
+E.g.:
+
+- To allow only station 1.1 in network 1 to talk to the fileserver at 2.254
+
+  BRIDGE ALLOW TRAFFIC BETWEEN 1.1 AND 2.254
+  BRIDGE DROP TRAFFIC BETWEEN *.* AND 2.254
+
+- To prevent station 1.1 on network 1 talking to fileserver at 2.254, but
+  allow everything else in network 1 to do so, and block any other stations
+  on other networks:
+
+  BRIDGE DROP TRAFFIC BETWEEN 1.1 AND 2.254
+  BRIDGE ALLOW TRAFFIC BETWEEN 1.* AND 2.254
+  BRIDGE DROP TRAFFIC BETWEEN *.* AND 2.254
+
+Note that because the traffic is transitting the bridge, you *can* use this
+to allow or prevent traffic to:
+
+(a) locally emulated stations
+(b) AUN/IP stations which are in the same network number as a local Econet
+(c) Stations which are beyond a trunk or bridge, in the latter case providing
+    one end of the traffic is the other side of the Pi Bridge from the 
+    other end (which is reachable via an Acorn/SJ bridge).
+
+SAMPLE CONFIGURATIONS
+---------------------
+
+I've provided some sample configs. They may not cover all eventualities, but
+they'll cover a fair few.
+
+THROUGHPUT STATISTICS
+---------------------
+
+By default, the HPB creates a TCP listener on port 6809 (all interfaces).
+Upon connection, it will output (in raw form) total input and output
+bytes for each device the bridge knows above. E.g. if you have an Econet
+with a locally emulated server diverted from it, you will get a line
+for the Econet which excludes the server traffic, and a line for the
+service device itself. The traffic should not be appearing in both. 
+
+The list will be long if you have a lot of remote AUN stations, for
+example. At the moment, trunks are not included, but they probably
+will be soon. 
+
+The byte counts are simply that - a count of bytes, ever increasing.
+If you want a 5 second / 1 minute / 1 hour average, it should be 
+fairly wasy to do the calculation in your own code. I didn't want to be
+prescriptive as to the timeframes for the statistics.
+
+The idea is that if you are so minded you could create some sort of
+throughput display, or maybe feed it into SNMP. I haven't done either
+as yet, but I might do.
+
+
+
+I think that's all!
+
+Happy geekery.
+
+CR
+June 2022

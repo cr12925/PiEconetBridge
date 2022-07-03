@@ -40,5 +40,5 @@ Blowing the relevant data into a v2 board's EEPROM
 
 7. Then blow the resulting file into the EEPROM
 
-   sudo {path to eepromutils}/eepflash.sh -w -f=econet-gpio-v2.eep -t=24c64
+   sudo {path to eepromutils}/eepflash.sh -w -f=v2eeprom/econet-gpio-v2.eep -t=24c64
  

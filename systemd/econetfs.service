@@ -8,6 +8,7 @@ Type=simple
 User=pi
 Group=pi
 Restart=on-failure
+RestartSec=5
 ExecStart=/usr/local/sbin/econet-bridge -f
 
 [Install]

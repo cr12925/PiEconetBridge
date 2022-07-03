@@ -1,0 +1,46 @@
+WIRE NET 1 ON DEVICE /dev/econet-gpio
+FILESERVER ON 1.254 PATH /home/pi/econetfs
+TRUNK ON PORT 9000 TO myfriend.econet.org:9500
+
+# Filtering examples
+# Support myfriend advertises network 1, and the bridge will automatically
+# drop that because net 1 is defined as a Wire above.
+# But suppose we have a network 2 which is dynamic stations and he's
+# advertising that as well. We want to talk to his machines on HIS net 2
+# but we already have one. We translate his net 2 to net 3 locally:
+# 
+# TRUNK PORT 9000 XLATE DISTANT NET 2 TO LOCAL NET 3
+#
+# Now suppose we don't want to advertise our net 2 to him:
+# 
+# BRIDGE DROP NET 2 OUTBOUND ON TRUNK PORT 9000
+# 
+# Now support he's also got a net 6 and we don't like them and don't want
+# to talk to them:
+#
+# BRIDGE DROP NET 6 INBOUND ON TRUNK PORT 9000
+# 
+# Now suppose we have a secret network 4 that we don't want to advertise
+# to myfriend at all, so his bridge will never think to send traffic for it:
+# 
+# BRIDGE DROP NET 4 OUTBOUND ON TRUNK PORT 9000
+#
+# (Note: if we had a second trunk to another friend, the above will only
+# filter to 'myfriend.econet.org'. Our other mate will get advertisements.
+# Also this command will not prevent advertisements to Acorn/SJ bridges on
+# an Econet wire.
+# 
+# You can prevent advertisement to Econet wire bridges (and indeed prevent
+# reception of adverts from them) by replaceing 'ON TRUNK PORT x' with
+# 'ON WIRE NET y'.
+#
+# Now suppose we have a private fileserver and we're happy for myfriend
+# to talk to everything we have except that fileserver. Say it's at 1.200:
+#
+# BRIDGE ALLOW TRAFFIC BETWEEN 1.* and 1.200
+# BRIDGE ALLOW TRAFFIC BETWEEN 2.* and 1.200
+# BRIDGE DROP TRAFFIC BETWEEN *.* AND 1.200
+#
+# (Note this actually drops everything except 1.* & 2.* to 1.200 - including
+# traffic from other trunks we might be more amenable to - but you can always
+# specifically allow their traffic too.)

@@ -77,7 +77,7 @@ setgpio  13    OUTPUT     DEFAULT
 #setgpio  15    INPUT     DEFAULT
 setgpio  16    INPUT     DEFAULT
 setgpio  17    INPUT     DEFAULT
-setgpio  18    INPUT     DEFAULT
+setgpio  18    ALT5     DEFAULT
 setgpio  19    OUTPUT     DEFAULT
 setgpio  20    INPUT     DEFAULT
 setgpio  21    INPUT     DEFAULT

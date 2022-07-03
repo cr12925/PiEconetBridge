@@ -1,0 +1,16 @@
+[Unit]
+Description=Econet High Performance Bridge
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/econet-gpio/econet-hpbridge.cfg
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+Restart=on-failure
+RestartSec=5
+ExecStart=/usr/local/sbin/econet-hpbridge
+
+[Install]
+WantedBy=multi-user.target

@@ -1,4 +1,0 @@
-Known bugs as follows
-
-1. Sending traffic through the bridge to a heavily congested Econet will not work very well. Work in progress.
-
