@@ -433,6 +433,11 @@ subsequently disappears, the exposure will go dormant again.
 Exposure of a single host
 -------------------------
 
+*** Note: EXPOSE lines (both host and net variants) must come 
+    at the end of your configuration file for the present. This
+    will change soon.
+***
+
 Configuration line:
 
 EXPOSE HOST network.nstation ON PORT [host]:[port]
@@ -458,6 +463,11 @@ internal host to port 32768 on one of those IP addresses each. See
 
 Exposure of a whole network
 ---------------------------
+
+*** Note: EXPOSE lines (both host and net variants) must come 
+    at the end of your configuration file for the present. This
+    will change soon.
+***
 
 In one line, you can expose and entire Econet/Trunk/Virtual network to AUN/IP:
 
