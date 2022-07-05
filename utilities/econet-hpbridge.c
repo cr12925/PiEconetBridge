@@ -258,13 +258,13 @@ void eb_debug_fmt (uint8_t quit, uint8_t level, char *module, char *formatted)
 	if (level > EB_DEBUG_LEVEL)
 		return;
 
-//	pthread_mutex_lock(&EB_DEBUG_MUTEX);
+	//pthread_mutex_lock(&EB_DEBUG_MUTEX);
 
-	fprintf (EB_DEBUG_OUTPUT, "[+%15.6f] %-8s: %s\n", timediffstart(), module, formatted);
+	fprintf (EB_DEBUG_OUTPUT, "[+%15.6f] tid %7ld %-8s: %s\n", timediffstart(), syscall(SYS_gettid), module, formatted);
 	//fprintf (EB_DEBUG_OUTPUT, formatted);
 	//fprintf (EB_DEBUG_OUTPUT, "\n");
 
-//	pthread_mutex_unlock(&EB_DEBUG_MUTEX);
+	//pthread_mutex_unlock(&EB_DEBUG_MUTEX);
 
 	if (quit)
 		exit (EXIT_FAILURE);
@@ -295,10 +295,10 @@ void eb_debug (uint8_t quit, uint8_t level, char *module, char *fmt, ...)
 static inline void eb_free (char *file, int line, char *module, char *purpose, void *ptr)
 {
 
-	free (ptr);
-
 	if (EB_DEBUG_MALLOC)
-		eb_debug (0, 2, "MEM MGT", "%-8s         %s:%d freeing %p for purpose %s (succeeded)", module, file, line, ptr, purpose);
+		eb_debug (0, 2, "MEM MGT", "%-8s         %s:%d freeing %p for purpose %s", module, file, line, ptr, purpose);
+
+	free (ptr);
 
 }
 
@@ -727,8 +727,8 @@ void eb_set_exposures_active(uint8_t net, struct __eb_device *parent)
 
 		if (e->net == net && e->active == 0)
 		{
-			e->active = 2; // Temporarily active
 			e->parent = parent;
+			e->active = 2; // Temporarily active
 			count++;
 		}
 
@@ -892,7 +892,11 @@ static void * eb_wire_immediate_reset (void * ebic)
 {
 	struct __eb_imm_clear 	*values;
 
+	// For reasons I don't follow, debug (including the one done on free) causes a segfault here
+
 	values = (struct __eb_imm_clear *) ebic;
+
+	//eb_debug (0, 4, "IMM-RST", "%-8s %3d     Immediate reset thread started for %d.%d seq 0x%08X", "Wire", values->wire_device->net, values->p_net, values->p_stn, values->p_seq);
 
 	usleep (EB_CONFIG_WIRE_IMM_WAIT * 1000);
 
@@ -903,7 +907,7 @@ static void * eb_wire_immediate_reset (void * ebic)
 	&&	(values->p_seq == values->wire_device->p_seq)
 	) // Still the same thing waited for, so it didn't show up
 	{
-		eb_debug (0, 3, "WIREIMM", "Wire     %3d     Resetting ADLC to read mode when immediate didn't show up", values->wire_device->net);
+		//eb_debug (0, 3, "WIREIMM", "Wire     %3d     Resetting ADLC to read mode when immediate didn't show up", values->wire_device->net);
 		ioctl (values->wire_device->wire.socket, ECONETGPIO_IOC_READMODE);
 
 		values->wire_device->p_net = values->wire_device->p_stn = values->wire_device->p_seq = 0; // Reset
@@ -911,7 +915,10 @@ static void * eb_wire_immediate_reset (void * ebic)
 
 	pthread_mutex_unlock (&(values->wire_device->priority_mutex));
 
-	eb_free (__FILE__, __LINE__, "WIREIMM", "Freeing __eb_imm_clear structure", values);
+	// Free structure malloc()d by the thread which started us
+
+	//eb_free (__FILE__, __LINE__, "WIRE-IMM", "Freeing __eb_imm_clear structure", values);
+	free(values);
 
 	return NULL; // Die
 
@@ -2337,7 +2344,7 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 
 					pthread_mutex_lock (&(my_parent->qmutex_out));
 
-					eb_debug (0, 4, "QUEUE", "%-8s %3d.%3d Locks acquired for incoming search of outq for packet to %3d.%3d P:&%02X C: &%02X Length 0x%04X, combo = 0x%04X", eb_type_str(my_parent->type), incoming.p.dstnet, incoming.p.dststn, incoming.p.srcnet, incoming.p.srcstn, incoming.p.port, incoming.p.ctrl, length, combo);
+					eb_debug (0, 4, "QUEUE", "%-8s %3d.%3d Locks acquired for incoming search of outq for packet to %3d.%3d P:&%02X C: &%02X Seq: 0x%08X Length 0x%04X, combo = 0x%04X", eb_type_str(my_parent->type), incoming.p.dstnet, incoming.p.dststn, incoming.p.srcnet, incoming.p.srcstn, incoming.p.port, incoming.p.ctrl, incoming.p.seq, length, combo);
 
 					outq_parent = NULL;
 					outq = my_parent->out;
@@ -2390,6 +2397,8 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 										this_parent->n = this->n;
 									else
 										outq->p = this->n;
+
+									eb_debug (0, 4, "QUEUE", "%-8s %3d.%3d Packet spliced from outq to %3d.%3d P:&%02X C: &%02X Seq: 0x%08X Length 0x%04X, combo = 0x%04X", eb_type_str(my_parent->type), this->p->p.dstnet, this->p->p.dststn, this->p->p.srcnet, this->p->p.srcstn, this->p->p.port, this->p->p.ctrl, this->p->p.seq, this->length, combo);
 
 									eb_free (__FILE__, __LINE__, "AUN-EXP", "Free packet after locating packet to splice out because of ACK/NAK", this->p);
 									eb_free (__FILE__, __LINE__, "AUN-EXP", "Free packetq after locating packet to splice out because of ACK/NAK", this);
@@ -2484,6 +2493,8 @@ static void * eb_aun_listener (void * exposure)
 	struct __eb_aun_exposure	* my_exposures[255]; // Exposure objects stored in same order as in pfd, so we can easily see which one received traffic
 	struct __eb_aun_exposure	* e; // Loop through exposures
 
+	struct __eb_device		* parent;
+
 	uint8_t				num_fds, net, count;
 
 	num_fds = 0; // Number of entries in pfd
@@ -2491,6 +2502,8 @@ static void * eb_aun_listener (void * exposure)
 	e = exposure; 
 
 	net = e->net;
+
+	parent = eb_get_network(net);
 
 	// Obtain network number from device, create a list of all exposures, listen for them all, then poll them all	
 
@@ -2502,6 +2515,37 @@ static void * eb_aun_listener (void * exposure)
 
 			pfd[num_fds].fd = e->socket;
 			pfd[num_fds].events = POLLIN;
+
+			/* TODO - Check here to see if the exposure should be active or inactive, and set its parent up appropriately */
+
+			// By default, set inactive
+
+			pthread_mutex_lock(&(e->exposure_mutex));
+
+			e->active = 0; // If there's no parent network, can't be active.
+			e->parent = NULL; // Set no parent for now
+
+			if (parent) // Good start - our network is defined!
+			{
+
+				if (parent->type == EB_DEF_WIRE)
+				{
+					e->parent = parent;
+					if (e->parent->wire.divert[e->stn]) // There was a wire divert
+						e->parent = e->parent->wire.divert[e->stn];
+				}
+				else if (parent->type == EB_DEF_NULL && parent->null.divert[e->stn]) // Can only have diverts
+					e->parent = e->parent->null.divert[e->stn];
+				else if (parent->type == EB_DEF_TRUNK) // Existing trunk is fine, if it's come up before we started for example
+					e->parent = parent;
+				
+				// Otherwise, leave it NULL and inactive
+			}
+			
+			if (e->parent)	e->active = 1;
+
+			pthread_mutex_unlock(&(e->exposure_mutex));
+
 			my_exposures[num_fds] = e;
 		
 			num_fds++;
@@ -2553,6 +2597,7 @@ static void * eb_device_despatcher (void * device)
 	struct __eb_led			led_read, led_write;
 	pthread_t			flash_read_thread, flash_write_thread;
 	void 				*flash_read_return, *flash_write_return;
+	struct __eb_imm_clear 		*imm_sleeper; // Control structure for imm_clear sleeper thread to reset ADLC if no immediate arrives
 
 	// Initializes and starts a device.
 	// Starts a separate listener thread for the device (to read packets from it)
@@ -2682,6 +2727,12 @@ static void * eb_device_despatcher (void * device)
 
 				if (!pthread_create(&flash_write_thread, NULL, eb_flash_led, &led_write))
 					pthread_join(flash_write_thread, &flash_write_return);
+			}
+
+			if (d->wire.period) // Clock speed to set
+			{
+				ioctl(d->wire.socket, ECONETGPIO_IOC_NETCLOCK, (d->wire.period << 16) | d->wire.mark);
+				eb_debug (0, 2, "DESPATCH", "%-8s %3d     Network clock configured", "Wire", d->net);
 			}
 
 			eb_debug (0, 2, "DESPATCH", "%-8s %3d     Econet device %s opened successfully (fd %d)", "Wire", d->net, (EB_CONFIG_LOCAL ? "/dev/null" : d->wire.device), d->wire.socket);	
@@ -3114,8 +3165,8 @@ static void * eb_device_despatcher (void * device)
 	
 						if (packet.p.aun_ttype == ECONET_AUN_IMM) // Prioritize the reply
 						{
-							struct __eb_imm_clear 	*i;
 							pthread_attr_t	attrs;
+							pthread_t	sleeper;
 	
 							pthread_attr_init (&attrs);
 							pthread_attr_setstacksize(&attrs, PTHREAD_STACK_MIN);
@@ -3125,17 +3176,18 @@ static void * eb_device_despatcher (void * device)
 							d->p_stn = packet.p.dststn;
 							d->p_seq = packet.p.seq;
 
-							i = eb_malloc(__FILE__, __LINE__, "DESPATCH", "Create eb_imm_clear struct for immediate timer", sizeof(struct __eb_imm_clear));
-							if (!i)
+							imm_sleeper = eb_malloc(__FILE__, __LINE__, "DESPATCH", "Create eb_imm_clear struct for immediate timer", sizeof(struct __eb_imm_clear));
+
+							if (!imm_sleeper)
 								eb_debug (1, 0, "DESPATCH", "Unable to malloc() immediate timer structure.");
 
-							i->wire_device = d;
-							i->p_net = d->p_net;
-							i->p_stn = d->p_stn;
-							i->p_seq = d->p_seq;
+							imm_sleeper->wire_device = d;
+							imm_sleeper->p_net = d->p_net;
+							imm_sleeper->p_stn = d->p_stn;
+							imm_sleeper->p_seq = d->p_seq;
 		
-							pthread_create (&(i->me), &attrs, eb_wire_immediate_reset, i);
-							pthread_detach (i->me);
+							pthread_create (&sleeper, &attrs, eb_wire_immediate_reset, imm_sleeper);
+							pthread_detach (sleeper);
 						}
 						else
 							d->p_net = d->p_stn = d->p_seq = 0; // If we've received something else on a wire, it doesn't matter if we unset this, because it means the flag fill that the ADLC has started must have ended which means it's a while since the immediate was received
@@ -4014,9 +4066,9 @@ static void * eb_device_despatcher (void * device)
 
 						eb_add_stats (&(d->statsmutex), &(d->b_in), p->length);
 
-						
 						if (p->p->p.aun_ttype == ECONET_AUN_DATA)
 						{
+							eb_debug (0, 4, "LOCAL", "%-8s %3d.%3d from %3d.%3d attempting to send ACK from local amulator, P: &%02X, C: &%02X, Seq: 0x%08X", "Local", ack.p.dstnet, ack.p.dststn, ack.p.srcnet, ack.p.srcstn, ack.p.port, ack.p.ctrl, ack.p.seq);
 							eb_enqueue_output (d, &ack, 0); // No data on this packet
 							new_output = 1;
 						}
@@ -4660,7 +4712,8 @@ int eb_readconfig(char *f)
 		r_exposehost,
 		r_trunk_nat,
 		r_bridge_net_filter,
-		r_bridge_traffic_filter;
+		r_bridge_traffic_filter,
+		r_netclock;
 
 	/* Build Regex
 	*/
@@ -4721,6 +4774,9 @@ int eb_readconfig(char *f)
 	
 	if (regcomp(&r_bridge_traffic_filter, EB_CFG_BRIDGE_TRAFFIC_FILTER, REG_EXTENDED | REG_ICASE) != 0)
 		eb_debug(1, 0, "CONFIG", "Cannot compile bridge traffic filter regex");
+	
+	if (regcomp(&r_netclock, EB_CFG_CLOCK, REG_EXTENDED | REG_ICASE) != 0)
+		eb_debug(1, 0, "CONFIG", "Cannot compile network clock regex");
 	
 	/* Open config
 	*/
@@ -4783,6 +4839,8 @@ int eb_readconfig(char *f)
 
 				memset (&(p->wire.filter_in), 0, 256);
 				memset (&(p->wire.filter_out), 0, 256);
+
+				p->wire.period = p->wire.mark = 0;
 				
 			}
 			else if (!regexec(&r_trunk, line, 3, matches, 0))
@@ -5655,6 +5713,33 @@ int eb_readconfig(char *f)
 					search->next = entry; // Put on tail
 
 			}
+			else if (!regexec(&r_netclock, line, 5, matches, 0))
+			{
+				double	period;
+				int	mark;
+				uint8_t	net;
+
+				net = atoi(eb_getstring(line, &matches[1]));	
+				period = atof(eb_getstring(line, &matches[2]));
+				mark = atoi(eb_getstring(line, &matches[4]));
+
+				if (period > 5.5 || period < 3)
+					eb_debug (1, 0, "CONFIG", "Bad network clock period in line %s", line);
+
+				if (mark > 2)
+					eb_debug (1, 0, "CONFIG", "Bad network clock mark in line %s", line);
+
+				if (!networks[net])
+					eb_debug (1, 0, "CONFIG", "Cannot set network clock on net %d - network not yet defined", net);
+
+				if (networks[net]->type != EB_DEF_WIRE)
+					eb_debug (1, 0, "CONFIG", "Cannot set network clock on net %d - not defined as Econet", net);
+
+				//fprintf (stderr, "Configuring net %d with period %f (%f) and mark %d (%d - '%s')\n", net, period, (period * 4), mark, (mark * 4), eb_getstring(line, &matches[3]));
+				networks[net]->wire.period = period * 4;
+				networks[net]->wire.mark = mark * 4;
+					
+			}
 			else
 				eb_debug (1, 0, "CONFIG", "Unrecognized configuration line: %s", line);
 		}
@@ -5679,6 +5764,7 @@ int eb_readconfig(char *f)
 	regfree (&r_trunk_nat);
 	regfree (&r_bridge_net_filter);
 	regfree (&r_bridge_traffic_filter);
+	regfree (&r_netclock);
 	
 	return 1;
 
@@ -5894,6 +5980,13 @@ int main (int argc, char **argv)
 	if (max_fds.rlim_cur != 0) // User changed it
 		setrlimit (RLIMIT_NOFILE, &max_fds);
 
+	/* Increase core size so we can debug */
+
+	/* Temporarily re-use max_fds */
+
+	max_fds.rlim_cur = max_fds.rlim_max = RLIM_INFINITY;
+
+	setrlimit (RLIMIT_CORE, &max_fds);
 
 	/* Read config */
 
@@ -6604,7 +6697,20 @@ static void * eb_statistics (void *nothing)
 
 			device = device->next;
 
+		}
 
+		device = trunks;
+
+		while (device)
+		{
+
+			pthread_mutex_lock (&(device->statsmutex));
+
+			fprintf (output, "000|000|Trunk|%s:%d|%llu|%llu\n",	(device->trunk.hostname ? device->trunk.hostname : device->trunk.serialport), (device->trunk.hostname ? device->trunk.remote_port : device->trunk.baudrate), device->b_in, device->b_out);
+		
+			pthread_mutex_unlock (&(device->statsmutex));
+
+			device = device->next;
 		}
 
 		fclose(output);
