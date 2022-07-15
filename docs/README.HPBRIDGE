@@ -718,8 +718,11 @@ No network numbers are specified because the system learns them.
 You can define more than one trunk on a single bridge providing it has a
 locally unique port number.
 
-There are configuration hooks (but no more at present) to enable a trunk
-to be on a serial or dial-up line. This is not yet implemented.
+The previous hooks for a serial line trunk have been removed. If you 
+want the authentic slow experience of serial line bridging, set up
+a direct or dialup link using the Linux pppd, and put an IP trunk
+over it. The overhead of PPPD will add to the authenticity of 1980s
+slowness!
 
 Trunk announcement filtering
 ----------------------------

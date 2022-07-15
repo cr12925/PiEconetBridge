@@ -3141,6 +3141,10 @@ static void * eb_device_despatcher (void * device)
 					if (d->type == EB_DEF_WIRE) // Put sequence number in
 					{
 
+						// The below doesn't work - because the outbound packet will go out from 0.XX and the client will think it addressed 1.XX
+						// if (packet.p.dstnet == d->net) // Local network addressed other than as 0 - correct it
+							// packet.p.dstnet = 0;
+
 						led_read.flashtime = EB_CONFIG_FLASHTIME;
 
 						if (!EB_CONFIG_LEDS_OFF && !pthread_create(&flash_read_thread, NULL, eb_flash_led, &led_read))
@@ -4633,7 +4637,8 @@ void eb_set_single_wire_host (uint8_t net, uint8_t stn)
 	{
 		if (other->type == EB_DEF_WIRE)
 		{
-			ECONET_SET_STATION((other->wire.stations), (net == other->net ? 0 : net), stn);	 // Listen for net 0 if it's the local net
+			ECONET_SET_STATION((other->wire.stations), (net == other->net) ? 0 : net, stn);	 // Listen for native net so stations can talk to it as (e.g.) 1.254 as well as 0.254 if it's on the local network (see below)
+
 			ioctl(other->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(other->wire.stations));
 		}
 	
@@ -4882,13 +4887,14 @@ int eb_readconfig(char *f)
 				trunks = p;
 				
 			}
+/*
 			else if (!regexec(&r_serialtrunk, line, 4, matches, 0))
 			{
 
 				struct __eb_device	*p;
 				char *			destination;
 
-				/* Make our struct */
+				// Make our struct 
 
 				p = eb_device_init (0, EB_DEF_TRUNK, 0);
 
@@ -4923,12 +4929,13 @@ int eb_readconfig(char *f)
 				memset (&(p->trunk.filter_in), 0, 256);
 				memset (&(p->trunk.filter_out), 0, 256);
 				
-				/* Put it on our list of trunks */
+				// Put it on our list of trunks
 
 				p->next = trunks; // Never sits in the devices list, because it doesn't have a network number
 				trunks = p;
 				
 			}
+*/
 			else if (!regexec(&r_dynamic, line, 3, matches, 0))
 			{
 				//printf ("Identified as dynamic - network %s flags %s\n", eb_getstring(line, &matches[1]), eb_getstring(line, &matches[2]));
