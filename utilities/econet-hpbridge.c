@@ -2458,8 +2458,9 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 
 					home_device = eb_find_station (2, &incoming);
 
-					enqueue_result = eb_enqueue_input (home_device, input_packet, length - 8); // Only give data length here
-					//enqueue_result = eb_enqueue_output (e->parent, &incoming, length - 8);
+					enqueue_result = 0;
+
+					if (home_device) enqueue_result = eb_enqueue_input (home_device, input_packet, length - 8); // Only give data length here
 
 					if (!enqueue_result)
 						ack.p.aun_ttype = ECONET_AUN_NAK; // NAK if we couldn't enqueue the packet
@@ -6650,6 +6651,8 @@ static void * eb_statistics (void *nothing)
 
 		struct __eb_device	*device;
 
+		uint8_t		net;
+
 		connection = accept(stat_socket, (struct sockaddr *) NULL, NULL);
 
 		output = fdopen(connection, "w");
@@ -6660,9 +6663,30 @@ static void * eb_statistics (void *nothing)
 
 		while (device)
 		{
+			char 	trunkdest[256];
+
+			strcpy (trunkdest, "");
+
+			switch (device->type)
+			{
+				case EB_DEF_TRUNK:
+					sprintf (trunkdest, "%s:%d", 
+						(device->trunk.hostname ? device->trunk.hostname : device->trunk.serialport), 
+						(device->trunk.hostname ? device->trunk.remote_port : device->trunk.baudrate));
+					break;
+				case EB_DEF_WIRE:
+					sprintf (trunkdest, "%s", device->wire.device);
+					break;
+				case EB_DEF_NULL:
+					sprintf (trunkdest, "Local null");
+					break;
+			}
+						
 			pthread_mutex_lock (&(device->statsmutex));
 
-			fprintf (output, "%03d|000|%s|%llu|%llu\n",	device->net, eb_type_str(device->type), device->b_in, device->b_out);
+			fprintf (output, "%03d|000|%s|%s|%llu|%llu\n",	device->net, eb_type_str(device->type), 
+				trunkdest,
+				device->b_in, device->b_out);
 		
 			pthread_mutex_unlock (&(device->statsmutex));
 
@@ -6682,20 +6706,25 @@ static void * eb_statistics (void *nothing)
 
 					if (divert)
 					{
-
 						uint8_t stn;
+
+						char info[128];
+
+						strcpy (info, "");
 
 						switch (divert->type)
 						{
-							case EB_DEF_AUN:	stn = divert->aun->stn; break;
-							case EB_DEF_LOCAL:	stn = divert->local.stn; break;
-							case EB_DEF_PIPE:	stn = divert->pipe.stn; break;
+							case EB_DEF_AUN:	stn = divert->aun->stn; if (divert->aun->port == -1) sprintf (info, "Inactive"); else sprintf(info, "%08X:%d", divert->aun->addr, divert->aun->port); break;
+							case EB_DEF_LOCAL:	stn = divert->local.stn; sprintf(info, "%c%c%c", ((divert->local.printers) ? 'P' : ' '),
+								((divert->local.fs.index >= 0) ? 'F' : ' '),
+								((divert->local.ip.tunif[0] != '\0') ? 'I' : ' ')); break;
+							case EB_DEF_PIPE:	stn = divert->pipe.stn; sprintf(info, "%s", divert->pipe.base); break;
 							default:		stn = 0; break;
 						}
 	
 						pthread_mutex_lock (&(divert->statsmutex));
 
-						fprintf (output, "%03d|%03d|%s|%llu|%llu\n",	divert->net, stn, eb_type_str(divert->type), divert->b_in, divert->b_out);
+						fprintf (output, "%03d|%03d|%s|%s|%llu|%llu\n",	divert->net, stn, eb_type_str(divert->type), info, divert->b_in, divert->b_out);
 		
 						pthread_mutex_unlock (&(divert->statsmutex));
 					}
@@ -6713,11 +6742,52 @@ static void * eb_statistics (void *nothing)
 
 			pthread_mutex_lock (&(device->statsmutex));
 
-			fprintf (output, "000|000|Trunk|%s:%d|%llu|%llu\n",	(device->trunk.hostname ? device->trunk.hostname : device->trunk.serialport), (device->trunk.hostname ? device->trunk.remote_port : device->trunk.baudrate), device->b_in, device->b_out);
+			fprintf (output, "999|000|Trunk|%s:%d|%llu|%llu\n",	(device->trunk.hostname ? device->trunk.hostname : device->trunk.serialport), (device->trunk.hostname ? device->trunk.remote_port : device->trunk.baudrate), device->b_in, device->b_out);
 		
 			pthread_mutex_unlock (&(device->statsmutex));
 
 			device = device->next;
+		}
+
+		// And now the rest of the networks which are via other devices
+
+		for (net = 1; net < 255; net++)
+		{
+			struct __eb_device *device;
+
+			char 	trunkdest[256];
+
+			device = eb_get_network(net);
+
+			if (device && (device->net != net)) // Display
+			{
+
+				strcpy (trunkdest, "");
+
+				switch (device->type)
+				{
+					case EB_DEF_TRUNK:
+						sprintf (trunkdest, "%s:%d", 
+							(device->trunk.hostname ? device->trunk.hostname : device->trunk.serialport), 
+							(device->trunk.hostname ? device->trunk.remote_port : device->trunk.baudrate));
+						break;
+					case EB_DEF_WIRE:
+						sprintf (trunkdest, "%s", device->wire.device);
+						break;
+					case EB_DEF_NULL:
+						sprintf (trunkdest, "Local null");
+						break;
+				}
+							
+				pthread_mutex_lock (&(device->statsmutex));
+	
+				fprintf (output, "%03d|%03d|%s|%s|%llu|%llu\n",	net, (device->type == EB_DEF_TRUNK && (device->trunk.xlate_out[net])) ? device->trunk.xlate_out[net] : net, eb_type_str(device->type), 
+					trunkdest,
+					device->b_in, device->b_out);
+			
+				pthread_mutex_unlock (&(device->statsmutex));
+	
+			}
 		}
 
 		fclose(output);
