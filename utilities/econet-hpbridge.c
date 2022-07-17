@@ -1320,7 +1320,9 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 		if ((route = eb_get_network(net)))
 		{
 			struct __econet_packet_aun 	*reply;
-			char				reply_diags[128];
+			char				reply_diags[384];
+
+			char				hostname[256];
 
 			// We know this network - we'll reply, increment the hop count & forward it unless the network is local to us.
 
@@ -1333,26 +1335,28 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 				else if (route->type == EB_DEF_NULL && route->null.divert[stn])	route = route->null.divert[stn];
 			}
 				
+			gethostname(hostname, 255);
+
 			switch (route->type)
 			{
 				case EB_DEF_WIRE:
-					snprintf(reply_diags, 127, "%03d via Wire on %s (%d)", net, route->wire.device, route->net); break;
+					snprintf(reply_diags, 383, "%s %03d via Wire on %s (%d)", hostname, net, route->wire.device, route->net); break;
 				case EB_DEF_TRUNK:
-					snprintf(reply_diags, 127, "%03d via Trunk to %s:%d", net, route->trunk.hostname, route->trunk.remote_port); break;
+					snprintf(reply_diags, 383, "%s %03d via Trunk to %s:%d", hostname, net, route->trunk.hostname, route->trunk.remote_port); break;
 				case EB_DEF_NULL:
-					snprintf(reply_diags, 127, "%03d via Local Null - undefined divert", net); break;
+					snprintf(reply_diags, 383, "%s %03d via Local Null - undefined divert", hostname, net); break;
 				case EB_DEF_LOCAL:
-					snprintf(reply_diags, 127, "%03d.%03d via Local Emulation", net, stn); break;
+					snprintf(reply_diags, 383, "%s %03d.%03d via Local Emulation", hostname, net, stn); break;
 				case EB_DEF_PIPE:
-					snprintf(reply_diags, 127, "%03d.%03d via Local Pipe %s", net, stn, route->pipe.base); break;
+					snprintf(reply_diags, 383, "%s %03d.%03d via Local Pipe %s", hostname, net, stn, route->pipe.base); break;
 				case EB_DEF_AUN:
 				{
 					if (route->aun->port == -1)
-						snprintf(reply_diags, 127, "%03d.%03d via AUN (Inactive)", net, stn); 
+						snprintf(reply_diags, 383, "%s %03d.%03d via AUN (Inactive)", hostname, net, stn); 
 					else
-						snprintf(reply_diags, 127, "%03d.%03d via AUN at %08X:%d", net, stn, route->aun->addr, route->aun->port); 
+						snprintf(reply_diags, 383, "%s %03d.%03d via AUN at %08X:%d", hostname, net, stn, route->aun->addr, route->aun->port); 
 				} break;
-				default:	snprintf(reply_diags, 127, "%03d Unkonwn destination type", net); break;
+				default:	snprintf(reply_diags, 383, "%s %03d Unkonwn destination type", hostname, net); break;
 			}
 
 			reply = eb_malloc (__FILE__, __LINE__, "TRACE", "Allocating reply packet for a trace query", 12 + strlen(reply_diags) + 4);

@@ -137,14 +137,14 @@ uint8_t econet_remote_poll(int ms, uint8_t net, uint8_t stn)
 		{
 
 			uint8_t hop, final, net, stn;
-			char diag[127];
+			char diag[384];
 
 			len -= 13; // Drop the 0x0d on the end as well
 
 			memcpy (diag, &(r.p.data[4]), len-3);
 			diag[len-3] = '\0';
 
-			fprintf (stderr, "%3d from bridge %03d, net %s (%s)\n", r.p.data[0], r.p.srcnet, diag, r.p.data[1] ? "Final" : "Intermediate");
+			fprintf (stderr, "%3d from bridge %03d, %s (%s)\n", r.p.data[0], r.p.srcnet, diag, r.p.data[1] ? "Final" : "Intermediate");
 
 			return 1;
 		}
