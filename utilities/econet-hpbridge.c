@@ -1336,9 +1336,9 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 			switch (route->type)
 			{
 				case EB_DEF_WIRE:
-					snprintf(reply_diags, 127, "%03d via Wire %s (%d)", net, route->wire.device, route->net); break;
+					snprintf(reply_diags, 127, "%03d via Wire on %s (%d)", net, route->wire.device, route->net); break;
 				case EB_DEF_TRUNK:
-					snprintf(reply_diags, 127, "%03d via Trunk %s:%d", net, route->trunk.hostname, route->trunk.remote_port); break;
+					snprintf(reply_diags, 127, "%03d via Trunk to %s:%d", net, route->trunk.hostname, route->trunk.remote_port); break;
 				case EB_DEF_NULL:
 					snprintf(reply_diags, 127, "%03d via Local Null - undefined divert", net); break;
 				case EB_DEF_LOCAL:
