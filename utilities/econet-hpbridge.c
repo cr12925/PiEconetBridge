@@ -1364,7 +1364,7 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 				reply->p.port = ECONET_TRACE_PORT;
 				reply->p.ctrl = 0x83;
 				reply->p.srcstn = 0;
-				reply->p.srcnet = route->net;
+				reply->p.srcnet = devices->net; // First operative network number on our bridge
 				reply->p.dststn = p->p.srcstn;
 				reply->p.dstnet = p->p.srcnet;
 				reply->p.aun_ttype = ECONET_AUN_DATA;
@@ -1376,7 +1376,7 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 				reply->p.data[3] = stn;
 				memcpy (&(reply->p.data[4]), reply_diags, strlen(reply_diags));
 				
-				//eb_enqueue_input (source, reply, strlen(reply_diags) + 4);
+				eb_enqueue_input (source, reply, strlen(reply_diags) + 4);
 	
 				return 1;
 			}
@@ -1811,7 +1811,7 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 
 	if (!(source = eb_find_station(1, packet)))
 	{
-		eb_free (__FILE__, __LINE__, "Q-IN", "Freeing inbound packet after destination not found", packet);
+		eb_free (__FILE__, __LINE__, "Q-IN", "Freeing inbound packet after source not found", packet);
 		return 0;
 	}
 

@@ -144,7 +144,7 @@ uint8_t econet_remote_poll(int ms, uint8_t net, uint8_t stn)
 			memcpy (diag, &(r.p.data[4]), len-3);
 			diag[len-3] = '\0';
 
-			fprintf (stderr, "%3d %s (%s)\n", r.p.data[0], diag, r.p.data[1] ? "Final" : "Intermediate");
+			fprintf (stderr, "%3d from bridge %03d, net %s (%s)\n", r.p.srcnet, r.p.data[0], diag, r.p.data[1] ? "Final" : "Intermediate");
 
 			return 1;
 		}
