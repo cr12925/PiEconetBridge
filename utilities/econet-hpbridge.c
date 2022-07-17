@@ -1309,6 +1309,10 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 		net = p->p.dstnet;
 		stn = p->p.dststn;
 
+		if (p->p.aun_ttype != ECONET_AUN_DATA) return 0; // Don't forward it, whatever it is.
+
+		if (net == 0) return 1; 
+
 		p->p.data[0]++;
 
 		final = 0; // Set to 1 if we are last hop / end of the road
@@ -1355,7 +1359,7 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 
 			if (reply)
 			{
-				eb_debug (0, 2, "TRACE", "%-8s %3d     Received trace request for known net %d, hop %d - %s (%s)", eb_type_str(source->type), net, hop, reply_diags, final ? "last hop" : "intermediate hop");
+				eb_debug (0, 2, "TRACE", "%-8s %3d.%3d Received trace request for known net %d, hop %d - %s (%s)", eb_type_str(source->type), p->p.srcnet, p->p.srcstn, net, hop + 1, reply_diags, final ? "last hop" : "intermediate hop");
 
 				reply->p.port = ECONET_TRACE_PORT;
 				reply->p.ctrl = 0x83;
@@ -1371,7 +1375,8 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 				reply->p.data[2] = net;
 				reply->p.data[3] = stn;
 				memcpy (&(reply->p.data[4]), reply_diags, strlen(reply_diags));
-				eb_enqueue_input (source, reply, strlen(reply_diags) + 4);
+				
+				//eb_enqueue_input (source, reply, strlen(reply_diags) + 4);
 	
 				return 1;
 			}
