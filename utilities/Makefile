@@ -1,4 +1,4 @@
-all:	econet-bridge econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock
+all:	econet-bridge econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace
 
 econet-hpbridge:	econet-hpbridge.o fsv2.o 
 	cc -g -o econet-hpbridge econet-hpbridge.o fsv2.o -lpthread
@@ -32,6 +32,8 @@ econet-fslist: econet-fslist.o econet-pipe.o
 
 econet-ipgw: econet-ipgw.o econet-pipe.o
 
+econet-trace: econet-trace.o econet-pipe.o
+
 pipe-eg: pipe-eg.o econet-pipe.o
 
 econet-clock: econet-clock.o
@@ -63,5 +65,7 @@ econet-ipgw.o: econet-ipgw.c econet-pipe.c ../include/econet-gpio-consumer.h
 
 econet-clock.o: econet-clock.c ../include/econet-gpio-consumer.h
 
+econet-trace.o: econet-trace.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
+
 clean:
-	rm -f *.o econet-imm econet-test econet-bridge econet-monitor pipe-eg econet-notify econet-remote eb2 econet-hpbridge econet-ledtest econet-clock
+	rm -f *.o econet-imm econet-test econet-bridge econet-monitor pipe-eg econet-notify econet-remote eb2 econet-hpbridge econet-ledtest econet-clock econet-trace

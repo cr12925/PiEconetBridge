@@ -874,6 +874,18 @@ The idea is that if you are so minded you could create some sort of
 throughput display, or maybe feed it into SNMP. I haven't done either
 as yet, but I might do.
 
+NETWORK TRACE
+-------------
+
+The econet-trace utility (which operates ONLY with HP Bridges)
+will show a trace through the network to a given destination host.
+Each bridge along the way reports its hop number back to the caller.
+This utility requires a pipe connection. See its help text for
+details.
+
+Example, to trace the route to 51.254:
+
+$ econet-trace -p [pipe base] -n 51 -s 254
 
 
 I think that's all!

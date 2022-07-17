@@ -42,6 +42,8 @@
 #define EB_DEV_CONF_DIRECT	0x01	// Passes all traffic, unqueued, unmolested (including ACK, NAK) to the destination. Otherwise deals with ACK, NAK itself.
 #define EB_DEV_CONF_AUTOACK	0x02	// When data traffic received from this station (usually AUN) send it an ACK immediately and don't bother tracking what actually got delivered or where from
 
+#define ECONET_TRACE_PORT	0x9B	// Port number used for HPB traceroute functionality
+
 struct __eb_packetqueue {
 	struct __econet_packet_aun 	*p;
 	struct timeval 			last_tx; // Last transmission attempt on an input queue (i.e. sending to the destination driver); on an output queue this is when the packet got put on the queue - used to time it out and dump the rest of the queue if need be

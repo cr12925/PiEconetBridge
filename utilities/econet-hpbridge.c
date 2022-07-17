@@ -1275,6 +1275,118 @@ void eb_send_broadcast_diverted (struct __eb_device *s, struct __eb_device *d, s
 
 }
 
+/* Trace handler
+ *
+ * Replies to source if we have a route to the destination station
+ *
+ * Port 0x9B is the trace port, Ctrl &82 is request, &83 is a reply
+ *
+ * Devices must not reply if they have no route to the destination
+ *
+ * Being attached to the relevant destination network is considered
+ * final, because Beebs / Arcs won't actually reply to the traffic,
+ * so the immediately adjacent bridge does it.
+ *
+ * Acorn bridges don't do this.
+ *
+ * If we actually have a defined station, we'll reply with info
+ * about the defined station.
+ *
+ * Returns 1 when the packet should be forwarded on
+ * Returns 0 when it shouldn't.
+ * This will increment the hop count within the packet!
+ */
+
+uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun *p, uint16_t length)
+{
+
+	if (p->p.port == ECONET_TRACE_PORT && p->p.ctrl == 0x82) // We are using this for the HPB's traceroute facility. &82 means trace query. &83 is a response. Bridges do NOT respond if they have no route to the destination.
+	{
+		uint8_t			hop, final, net, stn;
+		struct __eb_device	*route;
+
+		hop = p->p.data[0];
+		net = p->p.dstnet;
+		stn = p->p.dststn;
+
+		p->p.data[0]++;
+
+		final = 0; // Set to 1 if we are last hop / end of the road
+
+		if ((route = eb_get_network(net)))
+		{
+			struct __econet_packet_aun 	*reply;
+			char				reply_diags[128];
+
+			// We know this network - we'll reply, increment the hop count & forward it unless the network is local to us.
+
+			if (route->net == net)
+				final = 1;
+			
+			if (final)
+			{
+				if (route->type == EB_DEF_WIRE && route->wire.divert[stn])	route = route->wire.divert[stn];
+				else if (route->type == EB_DEF_NULL && route->null.divert[stn])	route = route->null.divert[stn];
+			}
+				
+			switch (route->type)
+			{
+				case EB_DEF_WIRE:
+					snprintf(reply_diags, 127, "%03d via Wire %s (%d)", net, route->wire.device, route->net); break;
+				case EB_DEF_TRUNK:
+					snprintf(reply_diags, 127, "%03d via Trunk %s:%d", net, route->trunk.hostname, route->trunk.remote_port); break;
+				case EB_DEF_NULL:
+					snprintf(reply_diags, 127, "%03d via Local Null - undefined divert", net); break;
+				case EB_DEF_LOCAL:
+					snprintf(reply_diags, 127, "%03d.%03d via Local Emulation", net, stn); break;
+				case EB_DEF_PIPE:
+					snprintf(reply_diags, 127, "%03d.%03d via Local Pipe %s", net, stn, route->pipe.base); break;
+				case EB_DEF_AUN:
+				{
+					if (route->aun->port == -1)
+						snprintf(reply_diags, 127, "%03d.%03d via AUN (Inactive)", net, stn); 
+					else
+						snprintf(reply_diags, 127, "%03d.%03d via AUN at %08X:%d", net, stn, route->aun->addr, route->aun->port); 
+				} break;
+				default:	snprintf(reply_diags, 127, "%03d Unkonwn destination type", net); break;
+			}
+
+			reply = eb_malloc (__FILE__, __LINE__, "TRACE", "Allocating reply packet for a trace query", 12 + strlen(reply_diags) + 4);
+
+			if (reply)
+			{
+				eb_debug (0, 2, "TRACE", "%-8s %3d     Received trace request for known net %d, hop %d - %s (%s)", eb_type_str(source->type), net, hop, reply_diags, final ? "last hop" : "intermediate hop");
+
+				reply->p.port = ECONET_TRACE_PORT;
+				reply->p.ctrl = 0x83;
+				reply->p.srcstn = 0;
+				reply->p.srcnet = route->net;
+				reply->p.dststn = p->p.srcstn;
+				reply->p.dstnet = p->p.srcnet;
+				reply->p.aun_ttype = ECONET_AUN_DATA;
+				reply->p.seq = 0x0004; // A proper Cornelius, that one.
+				reply->p.padding = 0;
+				reply->p.data[0] = hop + 1;
+				reply->p.data[1] = final;
+				reply->p.data[2] = net;
+				reply->p.data[3] = stn;
+				memcpy (&(reply->p.data[4]), reply_diags, strlen(reply_diags));
+				eb_enqueue_input (source, reply, strlen(reply_diags) + 4);
+	
+				return 1;
+			}
+
+		}
+		else
+			eb_debug (0, 2, "TRACE", "%-8s %3d     Received trace request for unknown net %d, hop %d - not replying",	eb_type_str(source->type), net, hop);
+
+		if (final || (hop > 20)) return 0; // Stop any potential storms
+
+	}
+
+	return 1; // Flag as processed. We return 0 if we don't want this traffic forwarded - to avoid storms.
+}
+
 /* Broadcast handler.
  * 
  * If it's bridge traffic (port 0x9C) then handle locally only.
@@ -3338,7 +3450,10 @@ static void * eb_device_despatcher (void * device)
 				if (packet.p.aun_ttype == ECONET_AUN_BCAST) // Send to broadcast handler
 					eb_broadcast_handler (d, &packet, length - 12);
 				else
-					eb_enqueue_output (d, &packet, length - 12);
+				{
+					if (((packet.p.port == ECONET_TRACE_PORT) && eb_trace_handler (d, &packet, length - 12)) || (packet.p.port != ECONET_TRACE_PORT))
+						eb_enqueue_output (d, &packet, length - 12);
+				}
 
 				// new_output = 1; // Added when output processing moved above
 
