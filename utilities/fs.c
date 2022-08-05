@@ -143,13 +143,14 @@ struct {
 	uint8_t	fs_acorn_home; // != 0 means implement acorn home directory ownership semantics
 	uint8_t fs_sjfunc; // != 0 means turn on SJ MDFS functionality
 	uint8_t fs_bigchunks; // Whether we use 4k chunks on data bursts, or 1.25k (BeebEm compatibility - it appears to have a buffer overrun!)
-	uint8_t pad[253]; // Spare spare in the config
+	uint8_t fs_pwtenchar; // Set to non-zero when the FS has run the 6 to 10 character password conversion, by moving the fullname field along by 5 chracters
+	uint8_t pad[252]; // Spare spare in the config
 } fs_config[ECONET_MAX_FS_SERVERS];
 
 struct {
 	unsigned char username[10];
-	unsigned char password[6];
-	unsigned char fullname[30];
+	unsigned char password[11];
+	unsigned char fullname[25];
 	unsigned char priv;
 	unsigned char bootopt;
 	unsigned char home[96];
@@ -2034,7 +2035,7 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 	int old_fs_count = fs_count;
 	
 	FILE *passwd;
-	char passwordfile[280];
+	char passwordfile[280], passwordfilecopy[300];
 	int length;
 	int portcount;
 	char regex[256];
@@ -2149,6 +2150,8 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 	else
 	{
 
+		FILE * cfgfile;
+
 		strncpy ((char * ) fs_stations[fs_count].directory, (const char * ) serverparam, 1023);
 		fs_stations[fs_count].directory[1024] = (char) 0; // Just in case
 		fs_stations[fs_count].net = net;
@@ -2174,31 +2177,31 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 		// Set up some defaults in case we are writing a new file
 		fs_config[fs_count].fs_acorn_home = 0;
 		fs_config[fs_count].fs_sjfunc = 1;
+		fs_config[fs_count].fs_pwtenchar = 1;
 
 		sprintf(passwordfile, "%s/Configuration", fs_stations[fs_count].directory);
-		passwd = fopen(passwordfile, "r+");
+		cfgfile = fopen(passwordfile, "r+");
 
-		if (!passwd) // Config file not present
+		if (!cfgfile) // Config file not present
 		{
-			if ((passwd = fopen(passwordfile, "w+")))
-				fwrite(&(fs_config[fs_count]), 256, 1, passwd);
+			if ((cfgfile = fopen(passwordfile, "w+")))
+				fwrite(&(fs_config[fs_count]), 256, 1, cfgfile);
 			else fs_debug (0, 1, "Unable to write configuration file at %s - not initializing", passwordfile);
 		}
 
-		if (passwd)
+		if (cfgfile)
 		{
 			int configlen;
 
-			fseek(passwd, 0, SEEK_END);
-			configlen = ftell(passwd);
-			rewind(passwd);
+			fseek(cfgfile, 0, SEEK_END);
+			configlen = ftell(cfgfile);
+			rewind(cfgfile);
 
 			if (configlen != 256)
 				fs_debug (0, 1, "Configuration file is incorrect length!");
 			else
 			{
-				fread (&(fs_config[fs_count]), 256, 1, passwd);
-				fclose(passwd);
+				fread (&(fs_config[fs_count]), 256, 1, cfgfile);
 				fs_debug (0, 2, "Configuration file loaded");
 			}
 		}
@@ -2214,8 +2217,8 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 		{
 			fs_debug (0, 1, "No password file - initializing %s with SYST", passwordfile);
 			sprintf (users[fs_count][0].username, "%-10s", "SYST");
-			sprintf (users[fs_count][0].password, "%-6s", "");
-			sprintf (users[fs_count][0].fullname, "%-30s", "System User"); 
+			sprintf (users[fs_count][0].password, "%-10s", "");
+			sprintf (users[fs_count][0].fullname, "%-24s", "System User"); 
 			users[fs_count][0].priv = FS_PRIV_SYSTEM;
 			users[fs_count][0].bootopt = 0;
 			sprintf (users[fs_count][0].home, "%-96s", "$");
@@ -2246,6 +2249,53 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 				fs_stations[fs_count].total_users = (length / 256);
 				fs_stations[fs_count].total_discs = 0;
 		
+				if (fs_config[fs_count].fs_pwtenchar == 0) // Shuffle full name field along 5 characters and blank out the 5 spaces
+				{
+
+					int u; // user count
+					struct tm *t; 
+					time_t	now;
+					char sys_str[600];
+
+					now = time(NULL);
+
+					t = localtime(&now);
+
+					snprintf (passwordfilecopy, 299, "%s.%04d%02d%02d:%02d%02d",
+						passwordfile,
+						t->tm_year, t->tm_mon, t->tm_mday,
+						t->tm_hour, t->tm_min);
+
+					snprintf (sys_str, 599, "cp %s %s", passwordfile, passwordfilecopy);
+
+					system(sys_str);
+					
+					for (u = 0; u < fs_stations[fs_count].total_users; u++)
+					{
+						char old_realname[30];
+						// Move real name 5 bytes further on (but our struct has been updated, so it's actually 5 bytes earlier than the struct suggests! And copy it, less 5 bytes
+
+						memcpy (old_realname, &(users[fs_count][u].password[6]), 30);
+						memcpy (users[fs_count][u].fullname, old_realname, 25);
+						memset (&(users[fs_count][u].password[6]), 32, 5);
+
+					}
+
+					rewind(passwd);
+					fwrite(&(users[fs_count]), length, 1, passwd);
+					rewind(passwd);
+
+					fs_config[fs_count].fs_pwtenchar = 1;
+
+					rewind(cfgfile);
+					fwrite (&(fs_config[fs_count]), 256, 1, cfgfile);
+					rewind(cfgfile);
+
+					fs_debug (0, 1, "Updated password file for 10 character passwords, and backed up password file to %s", passwordfilecopy);
+				}
+
+				fclose (cfgfile);
+
 				// Now load up the discs. These are named 0XXX, 1XXX ... FXXXX for discs 0-15
 				while ((entry = readdir(d)) && discs_found < ECONET_MAX_FS_DISCS)
 				{
@@ -2539,7 +2589,7 @@ void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned ch
 
 void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, unsigned short net, unsigned short stn, unsigned char *params)
 {
-	char pw_cur[7], pw_new[7], pw_old[7];
+	char pw_cur[11], pw_new[11], pw_old[11];
 	int ptr;
 	int new_ptr;
 
@@ -2549,20 +2599,22 @@ void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, uns
 		return;
 	}
 
-	strncpy((char * ) pw_cur, (const char * ) users[server][userid].password, 6);
-	pw_cur[6] = '\0';
+	// Possibly replace with memcpy() ?
+	strncpy((char * ) pw_cur, (const char * ) users[server][userid].password, 10);
+	pw_cur[10] = '\0';
 
 	// Find end of current password in params
 	ptr = 0;
-	while (ptr < strlen(params) && *(params+ptr) != 0x0d && *(params+ptr) != ' ')
+	while (ptr < strlen(params) && (ptr < 10) && *(params+ptr) != 0x0d && *(params+ptr) != ' ')
 	{
 		pw_old[ptr] = *(params+ptr);
 		ptr++;
 	}
 
 	new_ptr = ptr; // Temp use of new_ptr
-	while (new_ptr < 6) pw_old[new_ptr++] = ' ';
-	pw_old[6] = '\0';
+	while (new_ptr < 10) pw_old[new_ptr++] = ' ';
+
+	pw_old[10] = '\0';
 
 	if (ptr == strlen(params))
 		fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
@@ -2570,33 +2622,40 @@ void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, uns
 	{
 
 		new_ptr = 0;
-		ptr++;
+		while (*(params+ptr) == ' ') ptr++; // Skip space
+		//ptr++;
 
 		// Copy new password
-		while (ptr < strlen(params) && (*(params+ptr) != 0x0d) & (new_ptr < 6))
+		while (ptr < strlen(params) && (*(params+ptr) != 0x0d) && (new_ptr < 10))
+		{
+			//fs_debug (0, 1, "Copying new password - ptr = %d, new_ptr = %d, character = %c", ptr, new_ptr, *(params+ptr));
 			pw_new[new_ptr++] = *(params+ptr++);
+		}
 
-		if (new_ptr == 6 && *(params+ptr) != 0x0d)
-			fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
+		if (new_ptr == 10 && *(params+ptr) != 0x00) // The packet comes in with a 0x0d terminator, but the OSCLI (FSOp 0) command parser changes that to null termination
+		{
+			//fs_debug (0, 1, "Character at params+ptr = %d (%c), ptr = %d, new_ptr = %d", *(params+ptr), (*(params+ptr) < 32 || *(params+ptr) > 126) ? '.' : *(params+ptr) , ptr, new_ptr);
+			fs_error(server, reply_port, net, stn, 0xFE, "Bad new password");
+		}
 		else
 		{	
-			for (; new_ptr < 6; new_ptr++)	pw_new[new_ptr] = ' ';
+			for (; new_ptr < 10; new_ptr++)	pw_new[new_ptr] = ' ';
 
-			pw_new[6] = '\0';
+			pw_new[10] = '\0';
 
 			if (	(*params == '\"' && *(params+1) == '\"' && !strcmp(pw_cur, "      "))    // Existing password blank and pass command starts with ""
-				||	!strncasecmp((const char *) pw_cur, pw_old, 6))
+				||	!strncasecmp((const char *) pw_cur, pw_old, 10))
 			{
 				unsigned char username[10];
-				unsigned char blank_pw[7];
+				unsigned char blank_pw[11];
 				
 				strcpy ((char * ) blank_pw, (const char * ) "      ");
 
 				// Correct current password
-				if (!strncmp(pw_new, "\"\"    ", 6)) // user wants to change to blank password
-					strncpy((char * ) users[server][userid].password, (const char * ) blank_pw, 6);
+				if (!strncmp(pw_new, "\"\"        ", 10)) // user wants to change to blank password
+					strncpy((char * ) users[server][userid].password, (const char * ) blank_pw, 10);
 				else
-					strncpy((char * ) users[server][userid].password, (const char * ) pw_new, 6);
+					strncpy((char * ) users[server][userid].password, (const char * ) pw_new, 10);
 				fs_write_user(server, userid, (char *) &(users[server][userid]));	
 				fs_reply_success(server, reply_port, net, stn, 0, 0);
 				strncpy((char * ) username, (const char * ) users[server][userid].username, 10);
@@ -2639,14 +2698,14 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 {
 
 	char username[11];
-	char password[7];
+	char password[11];
 
 	unsigned short counter, stringptr;
 	unsigned short found = 0;
 
 	fs_toupper(command);
 	memset (username, ' ', 10);
-	memset (password, ' ', 6);
+	memset (password, ' ', 10);
 
 	stringptr = counter = 0; // Pointer in command now starts where the start of the username should be
 
@@ -2686,17 +2745,16 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 	
 		if (*(command + stringptr) == '"') stringptr++; // Skip any preliinary double quote
 
-		while ((*(command + stringptr) != 0x00) && (pw_counter < 6) && (*(command + stringptr) != '"'))
+		while ((*(command + stringptr) != 0x00) && (pw_counter < 10) && (*(command + stringptr) != '"'))
 		{
 			password[pw_counter++] = *(command + stringptr);
 			stringptr++;
 		}
 
-		for (; pw_counter < 6; pw_counter++) password[pw_counter] = ' ';
+		for (; pw_counter < 10; pw_counter++) password[pw_counter] = ' ';
 	}
 
-
-	password[6] = 0; // Terminate for logging purposes
+	password[10] = 0; // Terminate for logging purposes
 
 	counter = 0;
 
@@ -2710,7 +2768,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 
 	if (found)
 	{
-		if (strncasecmp((const char *) users[server][counter].password, password, 6))
+		if (strncasecmp((const char *) users[server][counter].password, password, 10))
 		{
 			fs_error(server, reply_port, net, stn, 0xBC, "Wrong password");
 			fs_debug(0, 1, "            from %3d.%3d Login attempt - username '%s' - Wrong password", net, stn, username);
@@ -7816,8 +7874,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							char homepath[300];
 
 							snprintf((char * ) users[server][id].username, 11, "%-10s", username);
-							snprintf((char * ) users[server][id].password, 7, "%-6s", "");
-							snprintf((char * ) users[server][id].fullname, 31, "%-30s", &(username[ptr]));
+							snprintf((char * ) users[server][id].password, 11, "%-10s", "");
+							snprintf((char * ) users[server][id].fullname, 25, "%-24s", &(username[ptr]));
 							//users[server][id].home[0] = '\0';
 							//users[server][id].lib[0] = '\0';
 							snprintf((char * ) users[server][id].home, 97, "$.%s", username);
