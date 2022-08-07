@@ -6468,7 +6468,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	else
 		eofreached = 0;
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() offset %04lX, file length %04lX, beyond EOF %s", "", net, stn, offset, length, (eofreached ? "Yes" : "No"));
+	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() offset %06lX, file length %06lX, beyond EOF %s", "", net, stn, offset, length, (eofreached ? "Yes" : "No"));
 
 	fseek(fs_files[server][internal_handle].handle, offset, SEEK_SET);
 	active[server][active_id].fhandles[handle].cursor_old = offset; // Store old cursor
@@ -6494,7 +6494,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 		received = fread(readbuffer, 1, readlen, fs_files[server][internal_handle].handle);
 
-		fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() bulk transfer: bytes required %04lX, bytes already sent %04lX, buffer size %04X, bytes to read %04X, bytes actually read %04X", "", net, stn, bytes, sent, (unsigned short) sizeof(readbuffer), readlen, received);
+		fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() bulk transfer: bytes required %06lX, bytes already sent %06lX, buffer size %04X, ftell() = %06lX, bytes to read %04X, bytes actually read %04X", "", net, stn, bytes, sent, (unsigned short) sizeof(readbuffer), ftell(fs_files[server][internal_handle].handle), readlen, received);
 
 		if (received != readlen) // Either FEOF or error
 		{
