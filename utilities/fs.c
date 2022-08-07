@@ -6501,7 +6501,8 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 			if (feof(fs_files[server][internal_handle].handle)) eofreached = 1;
 			else
 			{
-				fs_debug (0, 2, "%12sfrom %3d.%3d fread returned %d, expected %d", "", net, stn, received, readlen);
+				fs_debug (0, 2, "%12sfrom %3d.%3d fread returned %d, expected %d - ferror() returned %d", "", net, stn, received, readlen, ferror(fs_files[server][internal_handle].handle));
+				if (ferror(fs_files[server][internal_handle].handle)) clearerr(fs_files[server][internal_handle].handle);
 				fserroronread = 1;
 			}
 		}
