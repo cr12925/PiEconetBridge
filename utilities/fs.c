@@ -6425,7 +6425,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	bytes = (((*(data+7))) + ((*(data+8)) << 8) + (*(data+9) << 16));
 	offset = (((*(data+10))) + ((*(data+11)) << 8) + (*(data+12) << 16));
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX by user %04x on handle %02x, ctrl seq is %s (stored: %02X, received: %02X)", "", net, stn, bytes, offset, active[server][active_id].userid, handle,
+	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX (%s) by user %04x on handle %02x, ctrl seq is %s (stored: %02X, received: %02X)", "", net, stn, bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), active[server][active_id].userid, handle,
 		fs_check_seq(ctrl, active[server][active_id].fhandles[handle].sequence) ? "OK" : "WRONG", active[server][active_id].fhandles[handle].sequence, ctrl);
 
 	if (active[server][active_id].fhandles[handle].handle == -1) // Invalid handle
@@ -6451,6 +6451,17 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	// Seek to end to detect end of file
 	fseek(fs_files[server][internal_handle].handle, 0, SEEK_END);
 	length = ftell(fs_files[server][internal_handle].handle);
+
+	if (length == -1) // Error
+	{
+		char error_str[128];
+
+		strerror_r(errno, error_str, 127);
+
+		fs_error(server, reply_port, net, stn, 0xFF, "Cannot find file length");
+		fs_debug (0, 1, "%12s from %3d.%3d fs_getbytes() on channel %d - error on finding length of file: %s", "", net, stn, handle, error_str);
+		return;
+	}
 
 	if (offset >= length) // At or eyond EOF
 		eofreached = 1;
