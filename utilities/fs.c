@@ -48,6 +48,7 @@
 #include <resolv.h>
 #include <sys/socket.h>
 #include <termios.h>
+#include <libexplain/ferror.h>
 
 #include "../include/econet-gpio-consumer.h"
 #ifdef BRIDGE_V2
@@ -6516,7 +6517,13 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 				//else
 					fs_debug (0, 2, "%12sfrom %3d.%3d short file read returned %d, expected %d but not end of file", "", net, stn, received, readlen);
 		
-				if (ferror(fs_files[server][internal_handle].handle)) clearerr(fs_files[server][internal_handle].handle);
+				if (ferror(fs_files[server][internal_handle].handle))
+				{
+					clearerr(fs_files[server][internal_handle].handle);
+					// explain_ferror() is not threadsafe - so it requires the global fs mutex
+					fs_debug (0, 2, "%12sfrom %3d.%3d short file read returned %d, expected %d but not end of file - error flagged: %s", "", net, stn, received, readlen, explain_ferror(fs_files[server][internal_handle].handle));
+				
+				}
 				fserroronread = 1;
 			}
 		}

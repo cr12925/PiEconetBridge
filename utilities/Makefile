@@ -1,20 +1,20 @@
 all:	econet-bridge econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace
 
 econet-hpbridge:	econet-hpbridge.o fsv2.o 
-	cc -g -o econet-hpbridge econet-hpbridge.o fsv2.o -lpthread
+	cc -o econet-hpbridge econet-hpbridge.o fsv2.o -lpthread -lexplain
 	-chgrp econet econet-hpbridge
 	-sudo setcap cap_net_admin=pe econet-hpbridge
 
 econet-hpbridge.o:	econet-hpbridge.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-pserv.h
-	cc -g -c econet-hpbridge.c -Wall
+	cc -c econet-hpbridge.c -Wall
 
 fsv2.o: fs.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
-	cc -g -D BRIDGE_V2 -c fs.c -o fsv2.o -Wall -Wno-pointer-sign
+	cc -D BRIDGE_V2 -c fs.c -o fsv2.o -Wall -Wno-pointer-sign
 
 fs.o:	fs.c ../include/econet-gpio-consumer.h 
 	cc -c fs.c -Wall -Wno-pointer-sign
 
-econet-bridge: econet-bridge.o fs.o sockets.o -lpthread
+econet-bridge: econet-bridge.o fs.o sockets.o -lexplain
 
 econet-monitor: econet-monitor.o
 
@@ -39,8 +39,8 @@ pipe-eg: pipe-eg.o econet-pipe.o
 econet-clock: econet-clock.o
 
 econet-bridge.o: econet-bridge.c fs.c sockets.c ../include/econet-gpio-consumer.h
-	cc -g -c econet-bridge.c -Wall
-	cc -g -c fs.c -Wall -Wno-pointer-sign 
+	cc -c econet-bridge.c -Wall
+	cc -c fs.c -Wall -Wno-pointer-sign 
 	cc -c sockets.c -Wall
 
 econet-monitor.o: econet-monitor.c ../include/econet-gpio-consumer.h
