@@ -6494,14 +6494,28 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 		received = fread(readbuffer, 1, readlen, fs_files[server][internal_handle].handle);
 
-		fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() bulk transfer: bytes required %06lX, bytes already sent %06lX, buffer size %04X, ftell() = %06lX, bytes to read %04X, bytes actually read %04X", "", net, stn, bytes, sent, (unsigned short) sizeof(readbuffer), ftell(fs_files[server][internal_handle].handle), readlen, received);
+		// Use read() so we can get at errno!
+
+		// received = read(fileno(fs_files[server][internal_handle].handle), readbuffer, readlen);
+
+		fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() bulk transfer: bytes required %06lX, bytes already sent %06lX, buffer size %04X, ftell() = %06lX, bytes to read %06X, bytes actually read %06X", "", net, stn, bytes, sent, (unsigned short) sizeof(readbuffer), ftell(fs_files[server][internal_handle].handle), readlen, received);
 
 		if (received != readlen) // Either FEOF or error
 		{
 			if (feof(fs_files[server][internal_handle].handle)) eofreached = 1;
+			//if ((offset + received) >= length) eofreached = 1;
 			else
 			{
-				fs_debug (0, 2, "%12sfrom %3d.%3d fread returned %d, expected %d - ferror() returned %d", "", net, stn, received, readlen, ferror(fs_files[server][internal_handle].handle));
+				//char err_string[128];
+
+				//if (received == -1) 
+				//{
+					//strerror_r(errno, err_string, 127);
+					//fs_debug (0, 2, "%12sfrom %3d.%3d file read returned %d, expected %d - error on read: %s", "", net, stn, received, readlen, err_string);
+				//}
+				//else
+					fs_debug (0, 2, "%12sfrom %3d.%3d short file read returned %d, expected %d but not end of file", "", net, stn, received, readlen);
+		
 				if (ferror(fs_files[server][internal_handle].handle)) clearerr(fs_files[server][internal_handle].handle);
 				fserroronread = 1;
 			}
