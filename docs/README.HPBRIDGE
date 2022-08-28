@@ -724,6 +724,15 @@ a direct or dialup link using the Linux pppd, and put an IP trunk
 over it. The overhead of PPPD will add to the authenticity of 1980s
 slowness!
 
+If you have a multihomed machine, outbound trunk advertisements and
+may not be sent from the interface you want them to go from depending
+on your routing table. More particularly, if you are using VRRP (e.g. with
+something like keepalived) they may go from the *wrong* interface (i.e. the
+base ethernet interface instead of the VIP). You can bind trunk interfaces
+to a specific interface with
+
+TRUNK BIND TO <hostname or IP address>
+
 Trunk announcement filtering
 ----------------------------
 

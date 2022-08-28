@@ -72,6 +72,8 @@ extern short fs_sevenbitbodge;
 
 // Some globals
 
+in_addr_t 	bindhost = 0; // IP to bind to if specified. Only used for trunks at the moment.
+
 struct __eb_fw *bridge_fw; // Bridge-wide firewall policy
 
 struct __eb_fs_list { // List of known fileservers, to whom we spoof a *BYE when a dynamic station logs in
@@ -2955,7 +2957,7 @@ static void * eb_device_despatcher (void * device)
 	
 	
 				service.sin_family = AF_INET;
-				service.sin_addr.s_addr = INADDR_ANY;
+				service.sin_addr.s_addr = htonl(bindhost); // INADDR_ANY;
 				service.sin_port = htons(d->trunk.local_port);
 	
 				if (bind(d->trunk.socket, (struct sockaddr *) &service, sizeof(service)) != 0)
@@ -4843,7 +4845,8 @@ int eb_readconfig(char *f)
 		r_trunk_nat,
 		r_bridge_net_filter,
 		r_bridge_traffic_filter,
-		r_netclock;
+		r_netclock,
+		r_bindto;
 
 	/* Build Regex
 	*/
@@ -4907,6 +4910,9 @@ int eb_readconfig(char *f)
 	
 	if (regcomp(&r_netclock, EB_CFG_CLOCK, REG_EXTENDED | REG_ICASE) != 0)
 		eb_debug(1, 0, "CONFIG", "Cannot compile network clock regex");
+	
+	if (regcomp(&r_bindto, EB_CFG_BINDTO, REG_EXTENDED | REG_ICASE) != 0)
+		eb_debug(1, 0, "CONFIG", "Cannot compile interface bind regex");
 	
 	/* Open config
 	*/
@@ -5872,6 +5878,21 @@ int eb_readconfig(char *f)
 				networks[net]->wire.mark = mark * 4;
 					
 			}
+			else if (!regexec(&r_bindto, line, 2, matches, 0))
+			{
+				char		host[255];
+				struct hostent	*h;
+
+				strncpy (host, eb_getstring(line, &matches[1]), 254);
+
+				h = gethostbyname2(host, AF_INET); // IPv4 only
+
+				if (h)
+				{
+					bindhost = ntohl(*((in_addr_t *)h->h_addr));
+				}
+				else	eb_debug (1, 0, "CONFIG", "Cannot resolve IP address for host to bind to (%s) in line: %s", host, line);
+			}
 			else
 				eb_debug (1, 0, "CONFIG", "Unrecognized configuration line: %s", line);
 		}
@@ -5897,6 +5918,7 @@ int eb_readconfig(char *f)
 	regfree (&r_bridge_net_filter);
 	regfree (&r_bridge_traffic_filter);
 	regfree (&r_netclock);
+	regfree (&r_bindto);
 	
 	return 1;
 
