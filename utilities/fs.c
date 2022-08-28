@@ -2644,13 +2644,13 @@ void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, uns
 
 			pw_new[10] = '\0';
 
-			if (	(*params == '\"' && *(params+1) == '\"' && !strcmp(pw_cur, "      "))    // Existing password blank and pass command starts with ""
+			if (	(*params == '\"' && *(params+1) == '\"' && !strcmp(pw_cur, "          "))    // Existing password blank and pass command starts with ""
 				||	!strncasecmp((const char *) pw_cur, pw_old, 10))
 			{
 				unsigned char username[10];
 				unsigned char blank_pw[11];
 				
-				strcpy ((char * ) blank_pw, (const char * ) "      ");
+				strcpy ((char * ) blank_pw, (const char * ) "          ");
 
 				// Correct current password
 				if (!strncmp(pw_new, "\"\"        ", 10)) // user wants to change to blank password
@@ -6884,7 +6884,8 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 				reply.p.ptype = ECONET_AUN_DATA;
 				reply.p.port = reply_port;
 				reply.p.ctrl = 0x80;
-				reply.p.data[0] = 0x07; // *DIR command code. FS3 does this. Not sure why
+				//reply.p.data[0] = 0x07; // *DIR command code. FS3 does this. Not sure why. When debugging PanOS, L3 was not doing this!
+				reply.p.data[0] = 0x00; 
 				reply.p.data[1] = 0;
 				reply.p.data[2] = (unsigned char) (userhandle & 0xff);
 	
