@@ -146,10 +146,13 @@ uint8_t econet_remote_poll(int ms, uint8_t net, uint8_t stn)
 
 			fprintf (stderr, "%3d from bridge %03d, %s (%s)\n", r.p.data[0], r.p.srcnet, diag, r.p.data[1] ? "Final" : "Intermediate");
 
+			if (r.p.data[1]) return 2; // Final
+		
 			return 1;
 		}
 	}
 
+	return 0; // No response
 }
 
 // Main loop here
@@ -210,10 +213,12 @@ void econet_pipeeg_run(uint8_t net, uint8_t stn)
 
 	fprintf (stderr, "Tracing route to %d.%d...\n\n", net, stn);
 
-	while ((now.tv_sec - start.tv_sec) < 5)
+	while (!final && (now.tv_sec - start.tv_sec) < 5)
 	{
-		econet_remote_poll(1000, net, stn);
+		uint8_t result;
+		result = econet_remote_poll(1000, net, stn);
 		gettimeofday (&now, 0);
+		if (result == 2) final = 1;
 	}
 }
 
