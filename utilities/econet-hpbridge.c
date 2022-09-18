@@ -1413,7 +1413,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 	{
 		if (p->p.ctrl >= 0x82) // What/IsNet
 		{
-			if (!strncmp((char *) &(p->p.data), "BRIDGE", 6))
+			if (!strncasecmp((char *) &(p->p.data), "BRIDGE", 6))
 				eb_bridge_whatis_net (source, p->p.srcnet, p->p.srcstn, p->p.ctrl, p->p.data[6], p->p.data[7]);
 
 		}
