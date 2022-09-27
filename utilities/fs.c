@@ -1401,7 +1401,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	{
 		result->disc = active[server][user].current_disc; // Replace the rogue if we are not selecting a specific disc
 		strcpy ((char * ) result->discname, (const char * ) fs_discs[server][result->disc].name);
-		if (normalize_debug) fs_debug (0, 1, "No disc specified, choosing current disc: %d - %s\n", active[server][user].current_disc, fs_discs[server][result->disc].name);
+		if (normalize_debug) fs_debug (0, 1, "No disc specified, choosing current disc: %d (%d) on server %d - %s (%s)\n", active[server][user].current_disc, result->disc, server, fs_discs[server][result->disc].name, result->discname);
 	}
 
 	if (normalize_debug) fs_debug (0, 1, "Disc selected = %d, %s\n", result->disc, (result->disc != -1) ? (char *) fs_discs[server][result->disc].name : (char *) "");
@@ -2153,14 +2153,14 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 
 		FILE * cfgfile;
 
-		strncpy ((char * ) fs_stations[fs_count].directory, (const char * ) serverparam, 1023);
-		fs_stations[fs_count].directory[1024] = (char) 0; // Just in case
+		strncpy ((char * ) fs_stations[fs_count].directory, (const char * ) serverparam, 255);
+		fs_stations[fs_count].directory[255] = (char) 0; // Just in case
 		fs_stations[fs_count].net = net;
 		fs_stations[fs_count].stn = stn;
 
 		// Clear state
 		memset(active[fs_count], 0, sizeof(active)/ECONET_MAX_FS_SERVERS);
-		memset(fs_discs[fs_count], 0, sizeof(fs_discs)/ECONET_MAX_FS_SERVERS);
+		//memset(fs_discs[fs_count], 0, sizeof(fs_discs)/ECONET_MAX_FS_SERVERS); // First character set to NULL in loop below
 		memset(fs_files[fs_count], 0, sizeof(fs_files)/ECONET_MAX_FS_SERVERS);
 		memset(fs_dirs[fs_count], 0, sizeof(fs_dirs)/ECONET_MAX_FS_SERVERS);
 		memset(users[fs_count], 0, sizeof(users)/ECONET_MAX_FS_SERVERS); // Added 18.04.22 - we didn't seem to be doing this!
@@ -2169,7 +2169,7 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 
 		for (length = 0; length < ECONET_MAX_FS_DISCS; length++) // used temporarily as counter
 		{
-			sprintf (fs_discs[fs_count][length].name, "%29s", "");
+			//sprintf (fs_discs[fs_count][length].name, "%29s", "");
 			fs_discs[fs_count][length].name[0] = '\0';
 		}
 	
