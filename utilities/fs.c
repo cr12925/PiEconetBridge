@@ -990,6 +990,16 @@ void fs_wildcard_to_regex(char *input, char *output)
 				strcat(internal, FSREGEX);
 				strcat(internal, "*");
 				break;
+			case '-': // Fall through
+			case '+': // Escape these
+			{
+				unsigned char t[3];
+				t[0] = '\\';
+				t[1] = *(input+counter);
+				t[2] = '\0';
+				strcat(internal, t);
+			}
+				break;
 			default:
 			{
 				unsigned char t[2];
@@ -1079,6 +1089,8 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 	fs_acorn_to_unix(needle);
 
 	fs_wildcard_to_regex(needle, needle_wildcard);
+
+	//fs_debug (0, 2, "fs_get_wildcard_entries() - needle_wildcard = %s", needle_wildcard);
 
 	if (fs_compile_wildcard_regex(needle_wildcard) != 0) // Error
 		return -1;
@@ -8152,6 +8164,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				// Silently accept but ignore
 				struct __econet_packet_udp reply;
 
+				reply.p.ptype = ECONET_AUN_DATA;
 				reply.p.port = reply_port;
 				reply.p.ctrl = 0x80;
 
@@ -8176,6 +8189,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 				reply.p.port = reply_port;
 				reply.p.ctrl = 0x80;
+				reply.p.ptype = ECONET_AUN_DATA;
 				
 				reply.p.data[0] = 0;
 				reply.p.data[1] = 0;

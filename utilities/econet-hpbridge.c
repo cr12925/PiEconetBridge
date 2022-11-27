@@ -69,6 +69,7 @@ extern void fs_dequeue(int);
 extern void fs_garbage_collect(int);
 
 extern short fs_sevenbitbodge;
+extern short normalize_debug;
 
 // Some globals
 
@@ -3072,7 +3073,7 @@ static void * eb_device_despatcher (void * device)
 			break;
 		case EB_DEF_PIPE:
 			l_socket = d->pipe.skt_read;
-			d->p_reset.events |= POLLHUP; // Detect client wandering off
+			d->p_reset.events |= POLLHUP; // Detect client wandering off // This is probably unnecessary - looks like POLLHUP ignored in events
 			break;
 		case EB_DEF_LOCAL:
 			l_socket = d->local.ip.socket;
@@ -6079,6 +6080,7 @@ int main (int argc, char **argv)
 		{"flashtime", 		required_argument,	0,	0 },
 		{"led-blink-on",	0,			0,	0 },
 		{"leds-off",		0,			0,	0 },
+		{"normalize-debug@",	0,			0,	0 },
 		{0, 			0,			0,	0 }
 	};
 
@@ -6105,6 +6107,7 @@ int main (int argc, char **argv)
 					case 10:	EB_CONFIG_FLASHTIME = atoi(optarg); break;
 					case 11:	EB_CONFIG_BLINK_ON = 1; break;
 					case 12:	EB_CONFIG_LEDS_OFF = 1; EB_CONFIG_BLINK_ON = 1; break;
+					case 13:	normalize_debug = 1; break;
 				}
 			} break;
 			case 'c':	strncpy(config_path, optarg, 1023); break;
