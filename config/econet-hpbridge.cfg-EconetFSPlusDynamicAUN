@@ -1,0 +1,13 @@
+#
+# Local Econet is net 1
+# Fileserver is emulated at 1.254
+# Only the fileserver can use AUN to talk to remote AUN/IP stations
+# (use EXPOSE NET if you want the whole network - but see NETWORKING
+# doc!)
+# Network 2 is allocated to remote AUN/IP stations that we might hear from
+# without having to specify them all.
+
+WIRE NET 1 ON DEVICE /dev/econet-gpio
+FILESERVER ON 1.254 PATH /home/pi/econetfs
+EXPOSE HOST 1.254 ON PORT *:32768
+DYNAMIC 2 AUTOACK

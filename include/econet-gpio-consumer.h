@@ -149,6 +149,11 @@ struct __econet_packet_pipe {
 			unsigned char data[ECONET_MAX_PACKET_SIZE-9];
 };
 
+#define ECONETGPIO_READLED	0x02
+#define ECONETGPIO_WRITELED	0x00 // Bit 1 clear
+#define ECONETGPIO_LEDON	0x01 
+#define ECONETGPIO_LEDOFF	0x00 // Bit 0 clear
+
 /* IOCTL Magic */
 
 #define ECONETGPIO_MAGIC        (0xa9) /* LDA Opcode for a 6502 */
@@ -163,6 +168,8 @@ struct __econet_packet_pipe {
 #define ECONETGPIO_IOC_TXERR		_IOR(ECONETGPIO_MAGIC, 8, int) /* Read last tx error number  */
 #define ECONETGPIO_IOC_READMODE		_IO(ECONETGPIO_MAGIC, 9) /* Set module to read mode  */
 #define ECONETGPIO_IOC_GETAUNSTATE	_IOR(ECONETGPIO_MAGIC, 10, int) /* Read current AUN state */
+#define ECONETGPIO_IOC_LED		_IOW(ECONETGPIO_MAGIC, 11, char) /* Turn an activity LED on / off */
+#define ECONETGPIO_IOC_NETCLOCK		_IOW(ECONETGPIO_MAGIC, 12, uint32_t) /* Set network clock via hardware PWM on v2r3 boards */
 
 /* The following are for debugging and testing only, and only with interrupts off */
 #define ECONETGPIO_IOC_SETA		_IOW(ECONETGPIO_MAGIC, 100, int) /* bit0 is A0, bit1 is A1 */

@@ -8,7 +8,8 @@
 
 //#define GPIO_PERI_BASE (PERIBASE + 0x200000)
 #define GPIO_PERI_BASE ((econet_data->peribase) + 0x200000)
-#define CLOCK_PERI_BASE ((econet_data->peribase) + 0x00101070)
+#define CLOCK_PERI_BASE ((econet_data->peribase) + 0x101000)
+#define PWM_PERI_BASE ((econet_data->peribase) + 0x20C000)
 
 /* GPIO PINS - Broadcom numbering */
 
@@ -22,6 +23,9 @@
 #define ECONET_GPIO_PIN_BUSY     16      /* v.2 hardware busy line */
 #define ECONET_GPIO_PIN_CSRETURN	18	/* Pin on which we read /CS as fed to the 68B54 after the D-Type flipflop */
 #define ECONET_GPIO_PIN_WIRECLK		ECONET_GPIO_PIN_CSRETURN /* On v2c boards, this pin is used to output a PWM waveform to source a clock for the wire */
+#define ECONET_GPIO_PIN_LED_WRITE	11 /* Drives the write LED */
+#define ECONET_GPIO_PIN_LED_READ	8 /* Drives the read LED */
+#define ECONET_GPIO_PIN_NET_CLOCK	ECONET_GPIO_PIN_CSRETURN	/* PWM output for network clock on v2r3 board */
 
 #define ECONET_GPIO_CLRMASK_DATA        (0xff << (ECONET_GPIO_PIN_DATA))
 #define ECONET_GPIO_CLRMASK_ADDR        (0x03 << (ECONET_GPIO_PIN_ADDR))
@@ -32,7 +36,13 @@
 #define ECONET_GPIO_CLRMASK_RW          (0x01 << ECONET_GPIO_PIN_RW)
 #define ECONET_GPIO_CLRMASK_BUSY         (0x01 << ECONET_GPIO_PIN_BUSY)
 
-#define ECONET_GPIO_CMCTL 0x00 /* The offset within Clock base address to the Clock Manager Control for the pin we are using - here, BCM4, so 0 */
+// GP CLK 0
+#define ECONET_GPIO_CMCTL 28 /* The offset within Clock base address to the Clock Manager Control for the pin we are using - here, BCM4 */
+
+// PWM CLK
+#define ECONET_GPIO_PWM_CLKCTL 40 // PWM Control within the clock space 
+#define ECONET_GPIO_PWM_CLKDIV 41 // PWM Div within the clock space 
+
 #define ECONET_GPIO_CLOCKPASSWD 0x5A000000
 #define ECONET_GPIO_CLOCKSRC 0x06 /* PLLD */
 #define ECONET_GPIO_CLOCKDISABLE (ECONET_GPIO_CLOCKPASSWD | 0x00000020)
@@ -47,6 +57,28 @@
 #define GPSET0 0x07
 #define GPCLR0 0x0a
 #define GPLEV0 0x0d
+
+// PWM defines (with thanks to the authors of PiGPIO)
+#define PWM_CTL      0
+#define PWM_STA      1
+#define PWM_DMAC     2
+#define PWM_RNG1     4
+#define PWM_DAT1     5
+#define PWM_FIFO     6
+#define PWM_RNG2     8
+#define PWM_DAT2     9
+
+#define PWM_CTL_MSEN2 (1<<15)
+#define PWM_CTL_PWEN2 (1<<8)
+#define PWM_CTL_MSEN1 (1<<7)
+#define PWM_CTL_CLRF1 (1<<6)
+#define PWM_CTL_USEF1 (1<<5)
+#define PWM_CTL_MODE1 (1<<1)
+#define PWM_CTL_PWEN1 (1<<0)
+
+#define PWM_DMAC_ENAB      (1 <<31)
+#define PWM_DMAC_PANIC(x) ((x)<< 8)
+#define PWM_DMAC_DREQ(x)   (x)
 
 // IRQ debug
 #define GPREN0 19
@@ -74,7 +106,9 @@ enum econet_gpio_pin_index {
 	EGP_RW,
 	EGP_DIR,
 	EGP_IRQ,
-	EGP_CSRETURN };
+	EGP_CSRETURN,
+	EGP_READLED,
+	EGP_WRITELED };
 
 #endif
 

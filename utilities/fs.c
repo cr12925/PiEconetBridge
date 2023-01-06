@@ -47,6 +47,8 @@
 #include <stdarg.h>
 #include <resolv.h>
 #include <sys/socket.h>
+#include <termios.h>
+#include <libexplain/ferror.h>
 
 #include "../include/econet-gpio-consumer.h"
 #ifdef BRIDGE_V2
@@ -142,13 +144,14 @@ struct {
 	uint8_t	fs_acorn_home; // != 0 means implement acorn home directory ownership semantics
 	uint8_t fs_sjfunc; // != 0 means turn on SJ MDFS functionality
 	uint8_t fs_bigchunks; // Whether we use 4k chunks on data bursts, or 1.25k (BeebEm compatibility - it appears to have a buffer overrun!)
-	uint8_t pad[253]; // Spare spare in the config
+	uint8_t fs_pwtenchar; // Set to non-zero when the FS has run the 6 to 10 character password conversion, by moving the fullname field along by 5 chracters
+	uint8_t pad[252]; // Spare spare in the config
 } fs_config[ECONET_MAX_FS_SERVERS];
 
 struct {
 	unsigned char username[10];
-	unsigned char password[6];
-	unsigned char fullname[30];
+	unsigned char password[11];
+	unsigned char fullname[25];
 	unsigned char priv;
 	unsigned char bootopt;
 	unsigned char home[96];
@@ -987,6 +990,16 @@ void fs_wildcard_to_regex(char *input, char *output)
 				strcat(internal, FSREGEX);
 				strcat(internal, "*");
 				break;
+			case '-': // Fall through
+			case '+': // Escape these
+			{
+				unsigned char t[3];
+				t[0] = '\\';
+				t[1] = *(input+counter);
+				t[2] = '\0';
+				strcat(internal, t);
+			}
+				break;
 			default:
 			{
 				unsigned char t[2];
@@ -1076,6 +1089,8 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 	fs_acorn_to_unix(needle);
 
 	fs_wildcard_to_regex(needle, needle_wildcard);
+
+	//fs_debug (0, 2, "fs_get_wildcard_entries() - needle_wildcard = %s", needle_wildcard);
 
 	if (fs_compile_wildcard_regex(needle_wildcard) != 0) // Error
 		return -1;
@@ -1398,7 +1413,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	{
 		result->disc = active[server][user].current_disc; // Replace the rogue if we are not selecting a specific disc
 		strcpy ((char * ) result->discname, (const char * ) fs_discs[server][result->disc].name);
-		if (normalize_debug) fs_debug (0, 1, "No disc specified, choosing current disc: %d - %s\n", active[server][user].current_disc, fs_discs[server][result->disc].name);
+		if (normalize_debug) fs_debug (0, 1, "No disc specified, choosing current disc: %d (%d) on server %d - %s (%s)\n", active[server][user].current_disc, result->disc, server, fs_discs[server][result->disc].name, result->discname);
 	}
 
 	if (normalize_debug) fs_debug (0, 1, "Disc selected = %d, %s\n", result->disc, (result->disc != -1) ? (char *) fs_discs[server][result->disc].name : (char *) "");
@@ -2033,7 +2048,7 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 	int old_fs_count = fs_count;
 	
 	FILE *passwd;
-	char passwordfile[280];
+	char passwordfile[280], passwordfilecopy[300];
 	int length;
 	int portcount;
 	char regex[256];
@@ -2148,14 +2163,16 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 	else
 	{
 
-		strncpy ((char * ) fs_stations[fs_count].directory, (const char * ) serverparam, 1023);
-		fs_stations[fs_count].directory[1024] = (char) 0; // Just in case
+		FILE * cfgfile;
+
+		strncpy ((char * ) fs_stations[fs_count].directory, (const char * ) serverparam, 255);
+		fs_stations[fs_count].directory[255] = (char) 0; // Just in case
 		fs_stations[fs_count].net = net;
 		fs_stations[fs_count].stn = stn;
 
 		// Clear state
 		memset(active[fs_count], 0, sizeof(active)/ECONET_MAX_FS_SERVERS);
-		memset(fs_discs[fs_count], 0, sizeof(fs_discs)/ECONET_MAX_FS_SERVERS);
+		//memset(fs_discs[fs_count], 0, sizeof(fs_discs)/ECONET_MAX_FS_SERVERS); // First character set to NULL in loop below
 		memset(fs_files[fs_count], 0, sizeof(fs_files)/ECONET_MAX_FS_SERVERS);
 		memset(fs_dirs[fs_count], 0, sizeof(fs_dirs)/ECONET_MAX_FS_SERVERS);
 		memset(users[fs_count], 0, sizeof(users)/ECONET_MAX_FS_SERVERS); // Added 18.04.22 - we didn't seem to be doing this!
@@ -2164,7 +2181,7 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 
 		for (length = 0; length < ECONET_MAX_FS_DISCS; length++) // used temporarily as counter
 		{
-			sprintf (fs_discs[fs_count][length].name, "%29s", "");
+			//sprintf (fs_discs[fs_count][length].name, "%29s", "");
 			fs_discs[fs_count][length].name[0] = '\0';
 		}
 	
@@ -2173,31 +2190,31 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 		// Set up some defaults in case we are writing a new file
 		fs_config[fs_count].fs_acorn_home = 0;
 		fs_config[fs_count].fs_sjfunc = 1;
+		fs_config[fs_count].fs_pwtenchar = 1;
 
 		sprintf(passwordfile, "%s/Configuration", fs_stations[fs_count].directory);
-		passwd = fopen(passwordfile, "r+");
+		cfgfile = fopen(passwordfile, "r+");
 
-		if (!passwd) // Config file not present
+		if (!cfgfile) // Config file not present
 		{
-			if ((passwd = fopen(passwordfile, "w+")))
-				fwrite(&(fs_config[fs_count]), 256, 1, passwd);
+			if ((cfgfile = fopen(passwordfile, "w+")))
+				fwrite(&(fs_config[fs_count]), 256, 1, cfgfile);
 			else fs_debug (0, 1, "Unable to write configuration file at %s - not initializing", passwordfile);
 		}
 
-		if (passwd)
+		if (cfgfile)
 		{
 			int configlen;
 
-			fseek(passwd, 0, SEEK_END);
-			configlen = ftell(passwd);
-			rewind(passwd);
+			fseek(cfgfile, 0, SEEK_END);
+			configlen = ftell(cfgfile);
+			rewind(cfgfile);
 
 			if (configlen != 256)
 				fs_debug (0, 1, "Configuration file is incorrect length!");
 			else
 			{
-				fread (&(fs_config[fs_count]), 256, 1, passwd);
-				fclose(passwd);
+				fread (&(fs_config[fs_count]), 256, 1, cfgfile);
 				fs_debug (0, 2, "Configuration file loaded");
 			}
 		}
@@ -2213,8 +2230,8 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 		{
 			fs_debug (0, 1, "No password file - initializing %s with SYST", passwordfile);
 			sprintf (users[fs_count][0].username, "%-10s", "SYST");
-			sprintf (users[fs_count][0].password, "%-6s", "");
-			sprintf (users[fs_count][0].fullname, "%-30s", "System User"); 
+			sprintf (users[fs_count][0].password, "%-10s", "");
+			sprintf (users[fs_count][0].fullname, "%-24s", "System User"); 
 			users[fs_count][0].priv = FS_PRIV_SYSTEM;
 			users[fs_count][0].bootopt = 0;
 			sprintf (users[fs_count][0].home, "%-96s", "$");
@@ -2245,6 +2262,53 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 				fs_stations[fs_count].total_users = (length / 256);
 				fs_stations[fs_count].total_discs = 0;
 		
+				if (fs_config[fs_count].fs_pwtenchar == 0) // Shuffle full name field along 5 characters and blank out the 5 spaces
+				{
+
+					int u; // user count
+					struct tm *t; 
+					time_t	now;
+					char sys_str[600];
+
+					now = time(NULL);
+
+					t = localtime(&now);
+
+					snprintf (passwordfilecopy, 299, "%s.%04d%02d%02d:%02d%02d",
+						passwordfile,
+						t->tm_year, t->tm_mon, t->tm_mday,
+						t->tm_hour, t->tm_min);
+
+					snprintf (sys_str, 599, "cp %s %s", passwordfile, passwordfilecopy);
+
+					system(sys_str);
+					
+					for (u = 0; u < fs_stations[fs_count].total_users; u++)
+					{
+						char old_realname[30];
+						// Move real name 5 bytes further on (but our struct has been updated, so it's actually 5 bytes earlier than the struct suggests! And copy it, less 5 bytes
+
+						memcpy (old_realname, &(users[fs_count][u].password[6]), 30);
+						memcpy (users[fs_count][u].fullname, old_realname, 25);
+						memset (&(users[fs_count][u].password[6]), 32, 5);
+
+					}
+
+					rewind(passwd);
+					fwrite(&(users[fs_count]), length, 1, passwd);
+					rewind(passwd);
+
+					fs_config[fs_count].fs_pwtenchar = 1;
+
+					rewind(cfgfile);
+					fwrite (&(fs_config[fs_count]), 256, 1, cfgfile);
+					rewind(cfgfile);
+
+					fs_debug (0, 1, "Updated password file for 10 character passwords, and backed up password file to %s", passwordfilecopy);
+				}
+
+				fclose (cfgfile);
+
 				// Now load up the discs. These are named 0XXX, 1XXX ... FXXXX for discs 0-15
 				while ((entry = readdir(d)) && discs_found < ECONET_MAX_FS_DISCS)
 				{
@@ -2538,7 +2602,7 @@ void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned ch
 
 void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, unsigned short net, unsigned short stn, unsigned char *params)
 {
-	char pw_cur[7], pw_new[7], pw_old[7];
+	char pw_cur[11], pw_new[11], pw_old[11];
 	int ptr;
 	int new_ptr;
 
@@ -2548,20 +2612,22 @@ void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, uns
 		return;
 	}
 
-	strncpy((char * ) pw_cur, (const char * ) users[server][userid].password, 6);
-	pw_cur[6] = '\0';
+	// Possibly replace with memcpy() ?
+	strncpy((char * ) pw_cur, (const char * ) users[server][userid].password, 10);
+	pw_cur[10] = '\0';
 
 	// Find end of current password in params
 	ptr = 0;
-	while (ptr < strlen(params) && *(params+ptr) != 0x0d && *(params+ptr) != ' ')
+	while (ptr < strlen(params) && (ptr < 10) && *(params+ptr) != 0x0d && *(params+ptr) != ' ')
 	{
 		pw_old[ptr] = *(params+ptr);
 		ptr++;
 	}
 
 	new_ptr = ptr; // Temp use of new_ptr
-	while (new_ptr < 6) pw_old[new_ptr++] = ' ';
-	pw_old[6] = '\0';
+	while (new_ptr < 10) pw_old[new_ptr++] = ' ';
+
+	pw_old[10] = '\0';
 
 	if (ptr == strlen(params))
 		fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
@@ -2569,33 +2635,40 @@ void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, uns
 	{
 
 		new_ptr = 0;
-		ptr++;
+		while (*(params+ptr) == ' ') ptr++; // Skip space
+		//ptr++;
 
 		// Copy new password
-		while (ptr < strlen(params) && (*(params+ptr) != 0x0d) & (new_ptr < 6))
+		while (ptr < strlen(params) && (*(params+ptr) != 0x0d) && (new_ptr < 10))
+		{
+			//fs_debug (0, 1, "Copying new password - ptr = %d, new_ptr = %d, character = %c", ptr, new_ptr, *(params+ptr));
 			pw_new[new_ptr++] = *(params+ptr++);
+		}
 
-		if (new_ptr == 6 && *(params+ptr) != 0x0d)
-			fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
+		if (new_ptr == 10 && *(params+ptr) != 0x00) // The packet comes in with a 0x0d terminator, but the OSCLI (FSOp 0) command parser changes that to null termination
+		{
+			//fs_debug (0, 1, "Character at params+ptr = %d (%c), ptr = %d, new_ptr = %d", *(params+ptr), (*(params+ptr) < 32 || *(params+ptr) > 126) ? '.' : *(params+ptr) , ptr, new_ptr);
+			fs_error(server, reply_port, net, stn, 0xFE, "Bad new password");
+		}
 		else
 		{	
-			for (; new_ptr < 6; new_ptr++)	pw_new[new_ptr] = ' ';
+			for (; new_ptr < 10; new_ptr++)	pw_new[new_ptr] = ' ';
 
-			pw_new[6] = '\0';
+			pw_new[10] = '\0';
 
-			if (	(*params == '\"' && *(params+1) == '\"' && !strcmp(pw_cur, "      "))    // Existing password blank and pass command starts with ""
-				||	!strncasecmp((const char *) pw_cur, pw_old, 6))
+			if (	(*params == '\"' && *(params+1) == '\"' && !strcmp(pw_cur, "          "))    // Existing password blank and pass command starts with ""
+				||	!strncasecmp((const char *) pw_cur, pw_old, 10))
 			{
 				unsigned char username[10];
-				unsigned char blank_pw[7];
+				unsigned char blank_pw[11];
 				
-				strcpy ((char * ) blank_pw, (const char * ) "      ");
+				strcpy ((char * ) blank_pw, (const char * ) "          ");
 
 				// Correct current password
-				if (!strncmp(pw_new, "\"\"    ", 6)) // user wants to change to blank password
-					strncpy((char * ) users[server][userid].password, (const char * ) blank_pw, 6);
+				if (!strncmp(pw_new, "\"\"        ", 10)) // user wants to change to blank password
+					strncpy((char * ) users[server][userid].password, (const char * ) blank_pw, 10);
 				else
-					strncpy((char * ) users[server][userid].password, (const char * ) pw_new, 6);
+					strncpy((char * ) users[server][userid].password, (const char * ) pw_new, 10);
 				fs_write_user(server, userid, (char *) &(users[server][userid]));	
 				fs_reply_success(server, reply_port, net, stn, 0, 0);
 				strncpy((char * ) username, (const char * ) users[server][userid].username, 10);
@@ -2622,7 +2695,7 @@ void fs_set_bootopt(int server, unsigned char reply_port, unsigned int userid, u
 		return;
 	}
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d Set boot option %d", "", net, stn, new_bootopt);
+	fs_debug (0, 2, "%12sfrom %3d.%3d Set boot option %d", "", net, stn, new_bootopt);
 	
 	users[server][userid].bootopt = new_bootopt;
 	active[server][fs_stn_logged_in(server,net,stn)].bootopt = new_bootopt;
@@ -2638,14 +2711,14 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 {
 
 	char username[11];
-	char password[7];
+	char password[11];
 
 	unsigned short counter, stringptr;
 	unsigned short found = 0;
 
 	fs_toupper(command);
 	memset (username, ' ', 10);
-	memset (password, ' ', 6);
+	memset (password, ' ', 10);
 
 	stringptr = counter = 0; // Pointer in command now starts where the start of the username should be
 
@@ -2685,17 +2758,16 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 	
 		if (*(command + stringptr) == '"') stringptr++; // Skip any preliinary double quote
 
-		while ((*(command + stringptr) != 0x00) && (pw_counter < 6) && (*(command + stringptr) != '"'))
+		while ((*(command + stringptr) != 0x00) && (pw_counter < 10) && (*(command + stringptr) != '"'))
 		{
 			password[pw_counter++] = *(command + stringptr);
 			stringptr++;
 		}
 
-		for (; pw_counter < 6; pw_counter++) password[pw_counter] = ' ';
+		for (; pw_counter < 10; pw_counter++) password[pw_counter] = ' ';
 	}
 
-
-	password[6] = 0; // Terminate for logging purposes
+	password[10] = 0; // Terminate for logging purposes
 
 	counter = 0;
 
@@ -2709,7 +2781,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 
 	if (found)
 	{
-		if (strncasecmp((const char *) users[server][counter].password, password, 6))
+		if (strncasecmp((const char *) users[server][counter].password, password, 10))
 		{
 			fs_error(server, reply_port, net, stn, 0xBC, "Wrong password");
 			fs_debug(0, 1, "            from %3d.%3d Login attempt - username '%s' - Wrong password", net, stn, username);
@@ -3437,9 +3509,9 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 	fs_copy_to_cr(path, (data+filenameposition), 1023);
 
 	if (command != 4)
-		fs_debug (0, 1, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d", "", net, stn, path, relative_to == active[server][active_id].root ? "Root" : relative_to == active[server][active_id].lib ? "Library" : "Current", command);
+		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d", "", net, stn, path, relative_to == active[server][active_id].root ? "Root" : relative_to == active[server][active_id].lib ? "Library" : "Current", command);
 	else
-		fs_debug (0, 1, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d, attribute &%02X", "", net, stn, path, relative_to == active[server][active_id].root ? "Root" : relative_to == active[server][active_id].lib ? "Library" : "Current", command, (*(data + 6)));
+		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d, attribute &%02X", "", net, stn, path, relative_to == active[server][active_id].root ? "Root" : relative_to == active[server][active_id].lib ? "Library" : "Current", command, (*(data + 6)));
 	
 	if (!fs_normalize_path(server, active_id, path, relative_to, &p) || p.ftype == FS_FTYPE_NOTFOUND)
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
@@ -3882,7 +3954,7 @@ void fs_free(int server, unsigned short reply_port, unsigned char net, unsigned 
 	fs_copy_to_cr(tmp, data+5, 16);
 	snprintf((char * ) discname, 17, "%-16s", (const char * ) tmp);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d Read free space on %s", "", net, stn, discname);
+	fs_debug (0, 2, "%12sfrom %3d.%3d Read free space on %s", "", net, stn, discname);
 
 	disc = 0;
 	while (disc < ECONET_MAX_FS_DISCS)
@@ -4514,7 +4586,7 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	sprintf(tmppath, ":%s.%s", discname, home_dir);
 	sprintf(tmppath2, ":%s.$", discname);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d Change disc to %s", "", net, stn, discname);
+	fs_debug (0, 2, "%12sfrom %3d.%3d Change disc to %s", "", net, stn, discname);
 
 	if (!fs_normalize_path(server, active_id, tmppath, -1, &p_root))
 	{
@@ -4575,13 +4647,13 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	fs_store_tail_path(active[server][active_id].fhandles[root].acorntailpath, p_root.acornfullpath);
 	active[server][active_id].fhandles[root].mode = 1;
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d Successfully mapped new URD - uHandle %02X, full path %s", "", net, stn, root, active[server][active_id].fhandles[root].acornfullpath);
+	fs_debug (0, 2, "%12sfrom %3d.%3d Successfully mapped new URD - uHandle %02X, full path %s", "", net, stn, root, active[server][active_id].fhandles[root].acornfullpath);
 
 	strcpy(active[server][active_id].fhandles[cur].acornfullpath, p_root.acornfullpath);
 	fs_store_tail_path(active[server][active_id].fhandles[cur].acorntailpath, p_root.acornfullpath);
 	active[server][active_id].fhandles[cur].mode = 1;
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d Successfully mapped new CWD - uHandle %02X, full path %s", "", net, stn, cur, active[server][active_id].fhandles[cur].acornfullpath);
+	fs_debug (0, 2, "%12sfrom %3d.%3d Successfully mapped new CWD - uHandle %02X, full path %s", "", net, stn, cur, active[server][active_id].fhandles[cur].acornfullpath);
 
 	sprintf(tmppath, ":%s.%s", discname, lib_dir);
 
@@ -4622,7 +4694,7 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 
 		active[server][active_id].lib = lib;
 	
-		fs_debug (0, 1, "%12sfrom %3d.%3d Successfully mapped new Library - uHandle %02X, full path %s", "", net, stn, lib, active[server][active_id].fhandles[lib].acornfullpath);
+		fs_debug (0, 2, "%12sfrom %3d.%3d Successfully mapped new Library - uHandle %02X, full path %s", "", net, stn, lib, active[server][active_id].fhandles[lib].acornfullpath);
 	}
 	else	lib = active[server][active_id].lib;
 
@@ -4640,7 +4712,7 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	strncpy((char *) active[server][active_id].root_dir, (const char *) "", 11);
 	strncpy((char *) active[server][active_id].root_dir_tail, (const char *) "$         ", 11);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d New (URD, CWD) = (%s, %s)", "", net, stn, 
+	fs_debug (0, 2, "%12sfrom %3d.%3d New (URD, CWD) = (%s, %s)", "", net, stn, 
 		active[server][active_id].fhandles[root].acorntailpath, 
 		active[server][active_id].fhandles[cur].acorntailpath );
 
@@ -5000,7 +5072,7 @@ void fs_info(int server, unsigned short reply_port, int active_id, unsigned char
 	r.p.data[0] = 0x04; // Anything else and we get weird results. 0x05, for example, causes the client machine to *RUN the file immediately after getting the answer...
 	r.p.data[1] = 0;
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d *INFO %s", "", net, stn, path);
+	fs_debug (0, 2, "%12sfrom %3d.%3d *INFO %s", "", net, stn, path);
 
 	if (!fs_normalize_path(server, active_id, path, relative_to, &p))
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
@@ -5265,7 +5337,7 @@ void fs_read_discs(int server, unsigned short reply_port, unsigned char net, uns
 	r.p.data[0] = 10;
 	r.p.data[1] = 0;
 	
-	fs_debug (0, 1, "%12sfrom %3d.%3d Read Discs from %d (up to %d)", "", net, stn, start, number);
+	fs_debug (0, 2, "%12sfrom %3d.%3d Read Discs from %d (up to %d)", "", net, stn, start, number);
 
 	while (disc_ptr < ECONET_MAX_FS_DISCS && found < start)
 	{
@@ -5305,7 +5377,7 @@ void fs_read_time(int server, unsigned short reply_port, unsigned char net, unsi
 	time_t now;
 	unsigned char monthyear, day;
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d Read FS time", "", net, stn);
+	fs_debug (0, 2, "%12sfrom %3d.%3d Read FS time", "", net, stn);
 
 	now = time(NULL);
 	t = *localtime(&now);
@@ -5350,7 +5422,7 @@ void fs_read_logged_on_users(int server, unsigned short reply_port, unsigned cha
 
 	ptr = 3;
 	
-	fs_debug (0, 1, "%12sfrom %3d.%3d Read logged on users", "", net, stn);
+	fs_debug (0, 2, "%12sfrom %3d.%3d Read logged on users", "", net, stn);
 
 	// Get to the start entry in active[server][]
 
@@ -5413,7 +5485,7 @@ void fs_read_user_info(int server, unsigned short reply_port, unsigned char net,
 
 	snprintf (username_padded, 11, "%-10s", username);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d Read user info for %s", "", net, stn, username);
+	fs_debug (0, 2, "%12sfrom %3d.%3d Read user info for %s", "", net, stn, username);
 
 	count = 0;
 
@@ -5456,7 +5528,7 @@ void fs_read_version(int server, unsigned short reply_port, unsigned char net, u
 	r.p.data[0] = r.p.data[1] = 0;
 	sprintf((char * ) &(r.p.data[2]), "%s%c", FS_VERSION_STRING, 0x0d);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d Read FS version", "", net, stn);
+	fs_debug (0, 2, "%12sfrom %3d.%3d Read FS version", "", net, stn);
 
 	fs_aun_send(&r, server, strlen(FS_VERSION_STRING)+3, net, stn);
 
@@ -5474,7 +5546,7 @@ void fs_cat_header(int server, unsigned short reply_port, int active_id, unsigne
 
 	fs_copy_to_cr(path, data+5, 1022);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d Read catalogue header %s", "", net, stn, path);
+	fs_debug (0, 2, "%12sfrom %3d.%3d Read catalogue header %s", "", net, stn, path);
 
 	if (!fs_normalize_path(server, active_id, path, relative_to, &p))
 		fs_error(server, reply_port, net, stn, 0xd6, "Not found");
@@ -6123,7 +6195,7 @@ void fs_putbyte(int server, unsigned char reply_port, unsigned char net, unsigne
 
 			active[server][active_id].fhandles[handle].cursor_old = ftell(h);
 
-			fs_debug (0, 1, "%12sfrom %3d.%3d Put byte %02X on channel %02x, cursor %06lX ctrl seq is %s (stored: %02X, received: %02X)", "", net, stn, b, handle, active[server][active_id].fhandles[handle].cursor,
+			fs_debug (0, 2, "%12sfrom %3d.%3d Put byte %02X on channel %02x, cursor %06lX ctrl seq is %s (stored: %02X, received: %02X)", "", net, stn, b, handle, active[server][active_id].fhandles[handle].cursor,
 				fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl) ? "OK" : "WRONG", (active[server][active_id].fhandles[handle].sequence), ctrl);
 
 			if (fwrite(buffer, 1, 1, h) != 1)
@@ -6366,7 +6438,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	bytes = (((*(data+7))) + ((*(data+8)) << 8) + (*(data+9) << 16));
 	offset = (((*(data+10))) + ((*(data+11)) << 8) + (*(data+12) << 16));
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX by user %04x on handle %02x, ctrl seq is %s (stored: %02X, received: %02X)", "", net, stn, bytes, offset, active[server][active_id].userid, handle,
+	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX (%s) by user %04x on handle %02x, ctrl seq is %s (stored: %02X, received: %02X)", "", net, stn, bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), active[server][active_id].userid, handle,
 		fs_check_seq(ctrl, active[server][active_id].fhandles[handle].sequence) ? "OK" : "WRONG", active[server][active_id].fhandles[handle].sequence, ctrl);
 
 	if (active[server][active_id].fhandles[handle].handle == -1) // Invalid handle
@@ -6393,12 +6465,23 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	fseek(fs_files[server][internal_handle].handle, 0, SEEK_END);
 	length = ftell(fs_files[server][internal_handle].handle);
 
+	if (length == -1) // Error
+	{
+		char error_str[128];
+
+		strerror_r(errno, error_str, 127);
+
+		fs_error(server, reply_port, net, stn, 0xFF, "Cannot find file length");
+		fs_debug (0, 1, "%12s from %3d.%3d fs_getbytes() on channel %d - error on finding length of file: %s", "", net, stn, handle, error_str);
+		return;
+	}
+
 	if (offset >= length) // At or eyond EOF
 		eofreached = 1;
 	else
 		eofreached = 0;
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() offset %04lX, file length %04lX, beyond EOF %s", "", net, stn, offset, length, (eofreached ? "Yes" : "No"));
+	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() offset %06lX, file length %06lX, beyond EOF %s", "", net, stn, offset, length, (eofreached ? "Yes" : "No"));
 
 	fseek(fs_files[server][internal_handle].handle, offset, SEEK_SET);
 	active[server][active_id].fhandles[handle].cursor_old = offset; // Store old cursor
@@ -6424,14 +6507,35 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 		received = fread(readbuffer, 1, readlen, fs_files[server][internal_handle].handle);
 
-		fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() bulk transfer: bytes required %04lX, bytes already sent %04lX, buffer size %04X, bytes to read %04X, bytes actually read %04X", "", net, stn, bytes, sent, (unsigned short) sizeof(readbuffer), readlen, received);
+		// Use read() so we can get at errno!
+
+		// received = read(fileno(fs_files[server][internal_handle].handle), readbuffer, readlen);
+
+		fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() bulk transfer: bytes required %06lX, bytes already sent %06lX, buffer size %04X, ftell() = %06lX, bytes to read %06X, bytes actually read %06X", "", net, stn, bytes, sent, (unsigned short) sizeof(readbuffer), ftell(fs_files[server][internal_handle].handle), readlen, received);
 
 		if (received != readlen) // Either FEOF or error
 		{
 			if (feof(fs_files[server][internal_handle].handle)) eofreached = 1;
+			//if ((offset + received) >= length) eofreached = 1;
 			else
 			{
-				fs_debug (0, 2, "%12sfrom %3d.%3d fread returned %d, expected %d", "", net, stn, received, readlen);
+				//char err_string[128];
+
+				//if (received == -1) 
+				//{
+					//strerror_r(errno, err_string, 127);
+					//fs_debug (0, 2, "%12sfrom %3d.%3d file read returned %d, expected %d - error on read: %s", "", net, stn, received, readlen, err_string);
+				//}
+				//else
+					fs_debug (0, 2, "%12sfrom %3d.%3d short file read returned %d, expected %d but not end of file", "", net, stn, received, readlen);
+		
+				if (ferror(fs_files[server][internal_handle].handle))
+				{
+					clearerr(fs_files[server][internal_handle].handle);
+					// explain_ferror() is not threadsafe - so it requires the global fs mutex
+					fs_debug (0, 2, "%12sfrom %3d.%3d short file read returned %d, expected %d but not end of file - error flagged: %s", "", net, stn, received, readlen, explain_ferror(fs_files[server][internal_handle].handle));
+				
+				}
 				fserroronread = 1;
 			}
 		}
@@ -6792,7 +6896,8 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 				reply.p.ptype = ECONET_AUN_DATA;
 				reply.p.port = reply_port;
 				reply.p.ctrl = 0x80;
-				reply.p.data[0] = 0x07; // *DIR command code. FS3 does this. Not sure why
+				//reply.p.data[0] = 0x07; // *DIR command code. FS3 does this. Not sure why. When debugging PanOS, L3 was not doing this!
+				reply.p.data[0] = 0x00; 
 				reply.p.data[1] = 0;
 				reply.p.data[2] = (unsigned char) (userhandle & 0xff);
 	
@@ -7009,7 +7114,7 @@ void fs_garbage_collect(int server)
 		{
 			if (fs_bulk_ports[server][count].last_receive < ((unsigned long long) time(NULL) - 10)) // 10 seconds and no traffic
 			{
-				fs_debug (0, 1, "%12sfrom %3d.%3d Garbage collecting stale incoming bulk port %d used %lld seconds ago", "", 
+				fs_debug (0, 2, "%12sfrom %3d.%3d Garbage collecting stale incoming bulk port %d used %lld seconds ago", "", 
 					fs_bulk_ports[server][count].net, fs_bulk_ports[server][count].stn, count, ((unsigned long long) time(NULL) - fs_bulk_ports[server][count].last_receive));
 
 				// fs_close_interlock(server, fs_bulk_ports[server][count].handle, fs_bulk_ports[server][count].mode); // Commented so that bulk transfers to ordinary files don't close the file
@@ -7815,8 +7920,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							char homepath[300];
 
 							snprintf((char * ) users[server][id].username, 11, "%-10s", username);
-							snprintf((char * ) users[server][id].password, 7, "%-6s", "");
-							snprintf((char * ) users[server][id].fullname, 31, "%-30s", &(username[ptr]));
+							snprintf((char * ) users[server][id].password, 11, "%-10s", "");
+							snprintf((char * ) users[server][id].fullname, 25, "%-24s", &(username[ptr]));
 							//users[server][id].home[0] = '\0';
 							//users[server][id].lib[0] = '\0';
 							snprintf((char * ) users[server][id].home, 97, "$.%s", username);
@@ -7901,7 +8006,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		
 								snprintf(username_padded, 11, "%-10s", username);
 								
-								fs_debug (0, 1, "%12sfrom %3d.%3d Attempt to change privilege for %s to %02x ", "", net, stn, username, priv_byte);
 
 								while ((count < ECONET_MAX_FS_USERS) && !found)
 								{
@@ -7909,16 +8013,15 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 									{
 										users[server][count].priv = priv_byte;
 										fs_write_user(server, count, (unsigned char *) &(users[server][count]));
-										fs_debug (0, 1, " - success");
 										fs_reply_ok(server, reply_port, net, stn);
 										found = 1;
 									}
 									count++;
 								}
 								
+								fs_debug (0, 1, "%12sfrom %3d.%3d Attempt to change privilege for %s to %02x (%s)", "", net, stn, username, priv_byte, found ? "Success" : "Failed");
 								if (count == ECONET_MAX_FS_USERS) 
 								{
-									fs_debug (0, 1, " - unknown user");
 									fs_error(server, reply_port, net, stn, 0xbc, "User not found");
 								}
 
@@ -8061,6 +8164,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				// Silently accept but ignore
 				struct __econet_packet_udp reply;
 
+				reply.p.ptype = ECONET_AUN_DATA;
 				reply.p.port = reply_port;
 				reply.p.ctrl = 0x80;
 
@@ -8085,6 +8189,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 				reply.p.port = reply_port;
 				reply.p.ctrl = 0x80;
+				reply.p.ptype = ECONET_AUN_DATA;
 				
 				reply.p.data[0] = 0;
 				reply.p.data[1] = 0;
@@ -8183,7 +8288,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					{
 						case 0: // Reset print server information	
 						{
-							fs_debug (0, 1, "%12sfrom %3d.%3d SJ Reset printer information", "", net, stn);
+							fs_debug (0, 2, "%12sfrom %3d.%3d SJ Reset printer information", "", net, stn);
 							// Later we might code this to put the priority things back in order etc.
 							break; // Do nothing - no data in reply
 						}
@@ -8197,7 +8302,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 							printer = *(data+6) - 1; // we zero base; the spec is 1-8
 
-							fs_debug (0, 1, "%12sfrom %3d.%3d SJ Read printer information for printer %d", "", net, stn, printer);
+							fs_debug (0, 2, "%12sfrom %3d.%3d SJ Read printer information for printer %d", "", net, stn, printer);
 
 							if (!get_printer_info(fs_stations[server].net, fs_stations[server].stn,
 								printer,
@@ -8231,7 +8336,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							short user;
 
 							printer = *(data+6);
-							fs_debug (0, 1, "%12sfrom %3d.%3d SJ Write printer information for printer %d", "", net, stn, printer);
+							fs_debug (0, 2, "%12sfrom %3d.%3d SJ Write printer information for printer %d", "", net, stn, printer);
 							control = *(data+13);
 							user = *(data+14) + (*(data+15) << 8);
 
@@ -8254,7 +8359,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						case 5: // Read system message channel
 						case 6: // Set system message channel (deliberate fall through)
 						{
-							fs_debug (0, 1, "%12sfrom %3d.%3d SJ %s system message channel", "", net, stn, (rw_op == 5 ? "Read" : "Set"));
+							fs_debug (0, 2, "%12sfrom %3d.%3d SJ %s system message channel", "", net, stn, (rw_op == 5 ? "Read" : "Set"));
 							if (rw_op == 5)
 							{
 								reply.p.data[2] = 1; // Always 1 (Parallel)
@@ -8269,7 +8374,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						{
 							unsigned char level = 0;
 
-							fs_debug (0, 1, "%12sfrom %3d.%3d SJ Read system message level", "", net, stn);
+							fs_debug (0, 2, "%12sfrom %3d.%3d SJ Read system message level", "", net, stn);
 #ifndef BRIDGE_V2
 							if (!fs_quiet) level = 130; // "Function codes"
 							if (fs_noisy) level = 150; // "All activity"
@@ -8285,7 +8390,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						{
 							unsigned char level = *(data+6);
 	
-							fs_debug (0, 1, "%12sfrom %3d.%3d SJ Set system message level = %d", "", net, stn, level);
+							fs_debug (0, 2, "%12sfrom %3d.%3d SJ Set system message level = %d", "", net, stn, level);
 #ifndef BRIDGE_V2
 							fs_quiet = 1; fs_noisy = 0;
 							if (level > 0) fs_quiet = 0;
@@ -8299,19 +8404,19 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						case 10: // Write default printer
 						{
 
-							fs_debug (0, 1, "%12sfrom %3d.%3d SJ %s system default printer", "", net, stn, (rw_op == 9 ? "Read" : "Set"));
+							fs_debug (0, 2, "%12sfrom %3d.%3d SJ %s system default printer", "", net, stn, (rw_op == 9 ? "Read" : "Set"));
 							if (rw_op == 9) reply.p.data[reply_length++] = 1; // Always 1...
 							// We always just accept the set command
 						}
 						case 11: // Read priv required to change system time
 						{
-							fs_debug (0, 1, "%12sfrom %3d.%3d SJ Read privilege required to set system time", "", net, stn);
+							fs_debug (0, 2, "%12sfrom %3d.%3d SJ Read privilege required to set system time", "", net, stn);
 							reply.p.data[2] = 0; // Always privileged;
 							reply_length++;
 						} break;
 						case 12: // Write priv required to change system time
 						{
-							fs_debug (0, 1, "%12sfrom %3d.%3d SJ Set privilege required to set system time (ignored)", "", net, stn);
+							fs_debug (0, 2, "%12sfrom %3d.%3d SJ Set privilege required to set system time (ignored)", "", net, stn);
 							// Silently ignore - we are not going to let Econet users change the system time...
 						} break;
 						case 15: // Read printer info. Always return 0 printers for now
@@ -8327,7 +8432,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							short account;
 
 							number = *(data+6); start = *(data+7);
-							fs_debug (0, 1, "%12sfrom %3d.%3d SJ Read printer information, starting at %d (max %d entries)", "", net, stn, start, number);
+							fs_debug (0, 2, "%12sfrom %3d.%3d SJ Read printer information, starting at %d (max %d entries)", "", net, stn, start, number);
 							reply.p.data[2] = 0; reply_length++; // Number of entries
 
 // This broke EDITPRINT							if ((start + number) > get_printer_total(fs_stations[server].net, fs_stations[server].stn)) reply.p.data[1] = 0x80; // Attempt to flag end of list (guessing here)

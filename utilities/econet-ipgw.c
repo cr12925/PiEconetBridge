@@ -56,11 +56,10 @@ char pipebase[256]; // Starting path to pipe. We append 'frombridge' and 'tobrid
 extern void econet_setbase(char *);
 extern int econet_openreader();
 extern int econet_openwriter();
-extern int aun_send (struct __econet_packet_aun *, int);
 extern int aun_read (struct __econet_packet_aun *);
 extern int econet_poll(int);
 extern void econet_dump (struct __econet_packet_aun *, int, uint8_t);
-
+extern int aun_send (struct __econet_packet_aun *, int);
 uint8_t noisy = 1; // Packet stuff
 uint8_t localnet = 0, distantnet = 0; // local net = the number associated with our local network, distantnet is the network notionally on the other side of the bridge (in Pi world, there may be several)
 

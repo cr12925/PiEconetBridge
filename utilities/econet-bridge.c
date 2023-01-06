@@ -37,6 +37,9 @@
 #include <time.h>
 #include <stdint.h>
 #include <inttypes.h>
+#ifdef ECONET_THREAD
+	#include <pthread.h>
+#endif
 #include "../include/econet-gpio-consumer.h"
 #include "../include/econet-pserv.h"
 
@@ -78,6 +81,33 @@ extern short normalize_debug;
 #define ECONET_SERVER_SOCKET 0x04
 
 #define DEVICE_PATH "/dev/econet-gpio"
+
+#ifdef ECONET_THREAD
+pthread_t econet_wire_worker, econet_stats_worker;
+pthread_mutex_t wire_queue_mutex = PTHREAD_MUTEX_INITIALIZER, stats_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+#define TP_IN 0
+#define TP_INERR 1
+#define TP_OUT 2
+#define TP_OUTERR 3
+
+struct throughput {
+	uint32_t mins[4][60]; // Stores BYTES in each second
+	uint32_t secs[4][5]; // Stores BYTES in each second
+	uint16_t rate_min[4]; // Stores bits per second 1 minute average
+	uint16_t rate_fivesec[4]; // Stores bits per second 5 second average
+};
+	
+struct throughput tp_stations[256][256];
+struct throughput tp_trunks[256];
+struct throughput allwire;
+struct throughput alltrunks;
+struct throughput allaun;
+struct throughput alllocal;
+struct throughput allpipes;
+
+uint8_t cur_min = 0, cur_sec = 0;
+#endif
 
 struct timeval start;
 
@@ -368,6 +398,224 @@ float timediffstart()
 	return (float) timediffmsec(&start, &now) / 1000;
 }
 
+#ifdef ECONET_THREAD
+/* Statistics Updater 
+   dir is TP_IN, or TP_OUT, TP_INERR, TP_OUTERR
+   net, stn are the source or destination network as appropriate
+   stype is the type of station - ECONET_HOSTTYPE_TAUN, TNAMEDPIPE, TWIRE, TLOCAL; a negative number is a trunk number
+   bytes is the number of bytes received/sent
+*/
+void econet_stats_insert (uint8_t dir, uint8_t net, uint8_t stn, short stype, uint32_t bytes)
+{
+
+	pthread_mutex_lock(&stats_mutex);
+
+	switch (stype)
+	{
+		case ECONET_HOSTTYPE_TDIS:
+			allaun.mins[dir][cur_min] += bytes;
+			allaun.secs[dir][cur_sec] += bytes;
+			break;
+		case ECONET_HOSTTYPE_TNAMEDPIPE:
+			allpipes.mins[dir][cur_min] += bytes;
+			allpipes.secs[dir][cur_sec] += bytes;
+			break;
+		case ECONET_HOSTTYPE_TWIRE:
+			allwire.mins[dir][cur_min] += bytes;
+			allwire.secs[dir][cur_sec] += bytes;
+			break;
+		case ECONET_HOSTTYPE_TLOCAL:
+			alllocal.mins[dir][cur_min] += bytes;
+			alllocal.secs[dir][cur_sec] += bytes;
+			break;
+		default:
+			alltrunks.mins[dir][cur_min] += bytes;
+			alltrunks.secs[dir][cur_sec] += bytes;
+			break;
+	}
+
+	if (stype < 0 && stype >= -254)
+	{
+		tp_trunks[stype * -1].mins[dir][cur_min] += bytes;
+		tp_trunks[stype * -1].secs[dir][cur_sec] += bytes;	
+	}
+	else
+	{
+		tp_stations[net][stn].mins[dir][cur_min] += bytes;
+		tp_stations[net][stn].secs[dir][cur_sec] += bytes;
+	}
+
+	pthread_mutex_unlock(&stats_mutex);
+}
+
+/* Stats initializer */
+void econet_stats_init (void)
+{
+
+	struct timeval now;
+
+	memset(&allaun, 0, sizeof(allaun));
+	memset(&allpipes, 0, sizeof(allpipes));
+	memset(&allwire, 0, sizeof(allwire));
+	memset(&alllocal, 0, sizeof(alllocal));
+	memset(&alltrunks, 0, sizeof(alltrunks));
+	memset(&tp_trunks, 0, sizeof(tp_trunks));
+	memset(&tp_stations, 0, sizeof(tp_stations));
+
+	gettimeofday(&now, 0);
+
+	cur_min = now.tv_sec % 60;
+	cur_sec = now.tv_sec % 5;
+
+}
+
+/* 5 sec avg calculator - also resets cur_sec to 0 */
+uint16_t econet_get_avg_five (uint32_t *s)
+{
+
+	short count;
+	uint16_t total = 0;
+
+	pthread_mutex_lock(&stats_mutex);
+
+	for (count = 0; count < 5; count++)
+		total += s[count];
+
+	s[cur_sec] = 0;
+
+	pthread_mutex_unlock(&stats_mutex);
+
+	return ((total * 8) / 5); // to bits per second avg
+
+}
+
+/* 1 minute avg calculator */
+uint16_t econet_get_avg_min (uint32_t *s)
+{
+
+	short count;
+	uint16_t total = 0;
+
+	pthread_mutex_lock(&stats_mutex);
+
+	for (count = 0; count < 60; count++)
+		total += s[count];
+
+	s[cur_min] = 0;
+
+	pthread_mutex_unlock(&stats_mutex);
+
+	return ((total * 8) / 60); // to bits per second avg
+
+}
+
+/* Stats updater thread */
+void * econet_stats_calc (void * param)
+{
+
+	uint8_t dir_count;
+	uint16_t stn;
+	struct timeval now;
+
+
+// We don't put a timestamp on in a thread so we don't mess up the gettimeofday() in timediffstart()
+
+	if (pkt_debug) fprintf (stderr, "                   STATS: Statistics calculator running\n");
+
+	while (1)
+	{
+
+
+		gettimeofday (&now, 0);
+
+		/* Update 5 second rates */
+	
+		for (dir_count = 0; dir_count < 4; dir_count++)
+		{
+/*
+				for (stn = 0; stn < 65536; stn++)
+				{
+
+					if (pkt_debug) fprintf (stderr, " station %3d.%3d ... ", (stn / 256), (stn % 256));
+					tp_stations[stn / 256][stn % 256].rate_fivesec[dir_count] = econet_get_avg_five((tp_stations[stn / 256][stn % 256].secs[dir_count]));
+					tp_stations[stn / 256][stn % 256].rate_min[dir_count] = econet_get_avg_min((tp_stations[stn / 256][stn % 256].mins[dir_count]));
+				}
+
+				for (stn = 1; stn < 255; stn++) // Used to index trunks. trunk[0] doesn't exist.
+				{
+					tp_trunks[stn].rate_fivesec[dir_count] = econet_get_avg_five((tp_trunks[stn].secs[dir_count]));
+					tp_trunks[stn].rate_min[dir_count] = econet_get_avg_min((tp_trunks[stn].mins[dir_count]));
+				}
+
+*/
+
+				allaun.rate_fivesec[dir_count] = econet_get_avg_five((allaun.secs[dir_count]));
+				allpipes.rate_fivesec[dir_count] = econet_get_avg_five((allpipes.secs[dir_count]));
+				allwire.rate_fivesec[dir_count] = econet_get_avg_five((allwire.secs[dir_count]));
+				alllocal.rate_fivesec[dir_count] = econet_get_avg_five((alllocal.secs[dir_count]));
+				alltrunks.rate_fivesec[dir_count] = econet_get_avg_five((alltrunks.secs[dir_count]));
+	
+
+				allaun.rate_min[dir_count] = econet_get_avg_min((allaun.mins[dir_count]));
+				allpipes.rate_min[dir_count] = econet_get_avg_min((allpipes.mins[dir_count]));
+				allwire.rate_min[dir_count] = econet_get_avg_min((allwire.mins[dir_count]));
+				alllocal.rate_min[dir_count] = econet_get_avg_min((alllocal.mins[dir_count]));
+				alltrunks.rate_min[dir_count] = econet_get_avg_min((alltrunks.mins[dir_count]));
+
+			
+		}
+
+		pthread_mutex_lock(&stats_mutex);
+
+		cur_sec = now.tv_sec % 5;
+		cur_min = now.tv_sec % 60;
+
+		pthread_mutex_unlock(&stats_mutex);
+		
+		sleep(1);
+
+	}
+
+	return NULL;
+}
+
+/* Display single throughput stat to user
+*/
+void econet_stats_display_inner (char * device, struct throughput * stats)
+{
+	fprintf (stderr, "[+%15.6f] STATS: %10s: In/InErr/Out/OutErr 5 sec bps: %d / %d / %d / %d\n", timediffstart(),
+		device,
+		stats->rate_fivesec[TP_IN],
+		stats->rate_fivesec[TP_INERR],
+		stats->rate_fivesec[TP_OUT],
+		stats->rate_fivesec[TP_OUTERR]);
+
+	fprintf (stderr, "[+%15.6f] STATS: %10s: In/InErr/Out/OutErr 1 min bps: %d / %d / %d / %d\n", timediffstart(),
+		device,
+		stats->rate_min[TP_IN],
+		stats->rate_min[TP_INERR],
+		stats->rate_min[TP_OUT],
+		stats->rate_min[TP_OUTERR]);
+
+}
+
+/* Display stats to user
+*/
+void econet_stats_display (void)
+{
+	pthread_mutex_lock(&stats_mutex);
+
+	econet_stats_display_inner ("All wire", &allwire);
+	econet_stats_display_inner ("All AUN", &allaun);
+	econet_stats_display_inner ("All local", &alllocal);
+	econet_stats_display_inner ("All pipes", &allpipes);
+	econet_stats_display_inner ("All trunks", &alltrunks);
+
+	pthread_mutex_unlock(&stats_mutex);
+}
+
+#endif
+
 #define QUEUE_HEAD 1
 #define QUEUE_TAIL 2
 #define QUEUE_AUTO 3
@@ -569,6 +817,14 @@ unsigned int econet_write_wire(struct __econet_packet_aun *p, int len, int cache
 				err = ioctl(econet_fd, ECONETGPIO_IOC_TXERR);
 			}
 
+#ifdef ECONET_THREAD
+
+			if (err == ECONET_TX_SUCCESS)
+				econet_stats_insert (TP_OUT, p->p.srcnet, p->p.srcstn, ECONET_HOSTTYPE_TWIRE, len - 12); // to count only the data portion
+			else
+				econet_stats_insert (TP_OUTERR, p->p.srcnet, p->p.srcstn, ECONET_HOSTTYPE_TWIRE, len - 12); // to count only the data portion
+
+#endif
 			if (err == ECONET_TX_SUCCESS)
 			{
 				return len;
@@ -619,6 +875,14 @@ int econet_write_general(struct __econet_packet_aun *p, int len)
 				(network[sender].type & ECONET_HOSTTYPE_TNAMEDPIPE) ? network[sender].pipeudpsocket : network[sender].listensocket,  // If it's a named pipe, we don't send from listensocket, we send from pipeudpsocket
 				&(p->p.aun_ttype), len-4, MSG_DONTWAIT, (struct sockaddr *)&n, sizeof(n));
 			
+#ifdef ECONET_THREAD
+
+			if (result == len-4)
+				econet_stats_insert (TP_OUT, p->p.srcnet, p->p.srcstn, ECONET_HOSTTYPE_TDIS, len - 12); // r-8 to count only the data portion
+			else
+				econet_stats_insert (TP_OUTERR, p->p.srcnet, p->p.srcstn, ECONET_HOSTTYPE_TDIS, len - 12); // r-8 to count only the data portion
+
+#endif
 			if (result == len-4) return len; // Because we drop the 4 header bytes off!
 			else return result;
 
@@ -638,6 +902,14 @@ int econet_write_general(struct __econet_packet_aun *p, int len)
 
 				r = write(network[ptr].pipewritesocket, &delivery, len+2);
 
+#ifdef ECONET_THREAD
+
+			if (r == len+2)
+				econet_stats_insert (TP_OUT, p->p.srcnet, p->p.srcstn, ECONET_HOSTTYPE_TNAMEDPIPE, len - 14); // r-8 to count only the data portion
+			else
+				econet_stats_insert (TP_OUTERR, p->p.srcnet, p->p.srcstn, ECONET_HOSTTYPE_TNAMEDPIPE, len - 14); // r-8 to count only the data portion
+
+#endif
 				if (r == (len+2)) return r-2;
 				else return r;
 			}
@@ -2246,10 +2518,13 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 	struct __econet_packet_aun reply;
 	int s_ptr, d_ptr;
 
-	//fprintf (stderr, "Local handler invoked; AUN type %d len %d\n", a->p.aun_ttype, packlen);
-
 	s_ptr = econet_ptr[a->p.srcnet][a->p.srcstn];
 	d_ptr = econet_ptr[a->p.dstnet][a->p.dststn];
+
+#ifdef ECONET_THREAD
+	econet_stats_insert (TP_OUT, a->p.dstnet, a->p.dststn, ECONET_HOSTTYPE_TLOCAL, packlen-12); // r-12 to count only the data portion
+#endif
+
 
 	if (a->p.aun_ttype == ECONET_AUN_IMM) // Immediate
 	{
@@ -2727,6 +3002,12 @@ int aun_trunk_send_internal (struct __econet_packet_aun *p, int len, int t)
 		fprintf (stderr, "[+%15.6f] ERROR: to %3d.%3d from %3d.%3d Unknown destination\n", timediffstart(),
 			p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn);
 
+#ifdef ECONET_THREAD
+	if (result == len)
+		econet_stats_insert (TP_OUT, p->p.srcnet, p->p.srcstn, t * -1, len-12); // r-12 to count only the data portion
+	else
+		econet_stats_insert (TP_OUTERR, p->p.srcnet, p->p.srcstn, t * -1, len-12); // r-12 to count only the data portion
+#endif
 	return result;
 }
 
@@ -2820,6 +3101,11 @@ int aun_send_internal (struct __econet_packet_aun *p, int len, int source)
 			return result;
 		}
 	}
+
+#ifdef ECONET_THREAD
+	if (s != -1 && network[s].type & ECONET_HOSTTYPE_TLOCAL)
+		econet_stats_insert (TP_IN, p->p.srcnet, p->p.srcstn, ECONET_HOSTTYPE_TLOCAL, len-12); // r-12 to count only the data portion
+#endif
 
 	if (s != -1 && (p->p.aun_ttype == ECONET_AUN_DATA || p->p.aun_ttype == ECONET_AUN_IMM)) // Particular source
 	{
@@ -3122,6 +3408,12 @@ int main(int argc, char **argv)
 	int last_active_fd = 0;
 	int poll_timeout; // Used in order to reset the chip if we send an immediate to an AUN or NAMED PIPE station and it doesn't reply
 
+#ifdef ECONET_THREAD
+	uint8_t stats_minute;
+	struct timeval stats_time;
+	int stats_display = 0;
+#endif
+
 	unsigned short from_found, to_found; // Used to see if we know a station or not
 
 	struct __econet_packet_aun rx;
@@ -3144,7 +3436,7 @@ int main(int argc, char **argv)
 	//fs_sevenbitbodge = fs_sjfunc = 1; // On by default 
 	fs_sevenbitbodge = 1; // On by default 
 
-	while ((opt = getopt(argc, argv, "a:bc:de:fg:hiklnmqrsw:xzh7")) != -1)
+	while ((opt = getopt(argc, argv, "a:bc:de:fg:hiklnmqrsw:xyzh7")) != -1)
 	{
 		switch (opt) {
 			case 'a': econet_aun_interpacket_gap = atoi(optarg); break;
@@ -3172,6 +3464,9 @@ int main(int argc, char **argv)
 			case 's': dump_station_table = 1; break;
 			case 'w': econet_imm_wait_time = atoi(optarg); break;
 			case 'x': use_xattr = 0; break;
+#ifdef ECONET_THREAD
+			case 'y': stats_display = 1; break;
+#endif
 			case 'z': wired_eject = 0; break;
 			case '7': fs_sevenbitbodge = 0; break;
 			case 'h':	
@@ -3200,6 +3495,7 @@ Options:\n\
 \t-s\tDump station table on startup\n\
 \t-x\tNever use filesystem extended attributes and force use of dotfiles\n\
 \t-w\tChange wait time for immediate replies (ms, default 500)\n\
+\t-y\tDisplay stats (threaded compiles only\n\
 \t-z\tDisable wired fileserver eject on dynamic allocation (see readme)\n\
 \t-7\tDisable fileserver 7 bit bodge\n\
 \n\
@@ -3401,6 +3697,22 @@ Options:\n\
 
 	srand(time(NULL));
 
+#ifdef ECONET_THREAD
+
+	gettimeofday(&stats_time, 0);
+	stats_minute = ((stats_time.tv_sec / 60) % 60);
+
+	// Do stats init
+
+	econet_stats_init();
+
+	// Start the stats calculator - sits in the background calculating 1min and 5sec averages
+
+	if (stats_display) // Don't bother with the thread unless we're actually displaying stats!
+		pthread_create(&econet_stats_worker, NULL, econet_stats_calc, NULL);
+
+#endif
+
    while (1) // Loop to allow reset of chip if we have an immediate timeout
    {
 
@@ -3507,6 +3819,11 @@ Options:\n\
 				}
 
 */
+
+#ifdef ECONET_THREAD
+				econet_stats_insert (TP_IN, rx.p.srcnet, rx.p.srcstn, ECONET_HOSTTYPE_TWIRE, r-12); // r-12 to count only the data portion
+#endif
+
 				lensent = aun_send_internal (&rx, r, 0);
 
 				if ((rx.p.aun_ttype == ECONET_AUN_IMM)) // Failed immediate - reset the module (otherwise it'll be stuck waiting for a reply)
@@ -3612,6 +3929,12 @@ Options:\n\
 
 				policy = trunk_xlate_fw(&p, count, 0); // 0 = inbound translation && firewalling
 
+#ifdef ECONET_THREAD
+
+				econet_stats_insert (TP_IN, p.p.srcnet, p.p.srcstn, from_found * -1, r-12); // r-12 to count only the data portion
+
+#endif
+
 				if (p.p.aun_ttype == ECONET_AUN_BCAST && from_found != 0xffff)
 					aun_send_internal (&p, r, from_found);
 
@@ -3656,6 +3979,11 @@ Options:\n\
 					p.p.srcnet = network[from_found].network;
 					p.p.srcstn = network[from_found].station;
 
+#ifdef ECONET_THREAD
+
+					econet_stats_insert (TP_IN, p.p.srcnet, p.p.srcstn, ECONET_HOSTTYPE_TDIS, r-12); // r-12 to count only the data portion
+
+#endif
 					p.p.ctrl |= 0x80; // Put the high bit back on the ctrl 
 
 					if (network[netptr].pipewritesocket != -1) // We have a live writer socket
@@ -3710,6 +4038,11 @@ Options:\n\
 					p.p.srcnet = network[fd_ptr[pset[realfd].fd]].network;
 					p.p.srcstn = network[fd_ptr[pset[realfd].fd]].station;
 
+#ifdef ECONET_THREAD
+
+					econet_stats_insert (TP_IN, p.p.srcnet, p.p.srcstn, ECONET_HOSTTYPE_TNAMEDPIPE, r-12); // r-12 to count only the data portion
+
+#endif
 					network[fd_ptr[realfd]].last_transaction = time(NULL);
 					
 					gettimeofday (&(network[fd_ptr[realfd]].aun_last_rx), 0); // Mark last RX
@@ -3753,6 +4086,7 @@ Options:\n\
 		
 					to_found = fd_ptr[pset[realfd].fd];
 	
+					network[fd_ptr[realfd]].last_transaction = time(NULL);
 					/* TODO - If this is an ACK for something we sent, check it against ackimm_seq_awaited */
 
 					if ((from_found == 0xFFFF) && (learned_net != -1) & (to_found != 0xFFFF)) // See if we can dynamically allocate a station number to this unknown traffic source, since we know where the traffic going, and we have learning mode on, but we don't know where the traffic came *from* 
@@ -3839,6 +4173,10 @@ Options:\n\
 	
 						network[from_found].last_transaction = time(NULL);
 						
+#ifdef ECONET_THREAD
+						econet_stats_insert (TP_IN, p.p.srcnet, p.p.srcstn, ECONET_HOSTTYPE_TDIS, r-8); // r-8 to count only the data portion
+#endif
+
 						if (p.p.aun_ttype == ECONET_AUN_ACK || p.p.aun_ttype == ECONET_AUN_IMMREP || p.p.aun_ttype == ECONET_AUN_NAK)
 						{
 							struct timeval now;
@@ -4145,6 +4483,7 @@ Options:\n\
 							}
 							else
 							{
+
 								if (queue_debug) fprintf (stderr, " - sent ");
 								if (network[count].aun_head->p->p.aun_ttype == ECONET_AUN_DATA || network[count].aun_head->p->p.aun_ttype == ECONET_AUN_IMM)
 								{
@@ -4242,6 +4581,22 @@ Options:\n\
 		}
 
 		start_fd = last_active_fd;
+
+#ifdef ECONET_THREAD
+		if (stats_display)
+		{
+			uint8_t stats_min_now;
+
+			gettimeofday(&stats_time, 0);
+			stats_min_now = (stats_time.tv_sec / 60) % 60;
+
+			if (stats_minute != stats_min_now)
+			{
+				econet_stats_display();
+				stats_minute = stats_min_now;
+			}
+		}
+#endif
 
 		if (queue_debug) fprintf (stderr, "[+%15.6f] DEBUG: End loop: wire_haed = %p, aun_queued = %ld, trunk_head = %p, poll_timeout = %d\n", timediffstart(), wire_head, aun_queued, trunk_head, poll_timeout);
 	}
