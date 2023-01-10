@@ -7431,21 +7431,21 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 				save_addr = load_addr = exec_addr = length = 0;
 
-				if ((parsed = sscanf(param, "%s %08x +%08x %08x %08x", filename, &save_addr, &length, &load_addr, &exec_addr)) >= 3)
+				if ((parsed = sscanf(param, "%s %08x +%08x %08x %08x", filename, &save_addr, &length, &exec_addr, &load_addr)) >= 3)
 				{ 
 					if (parsed < 4)
-						load_addr = save_addr;
+						exec_addr = save_addr;
 					if (parsed < 5)
-						exec_addr = load_addr;
+						load_addr = save_addr;
 				}
-				else if ((parsed = sscanf(param, "%s %08x %08x %08x %08x", filename, &save_addr, &length, &load_addr, &exec_addr)) >= 3) // NB not really length
+				else if ((parsed = sscanf(param, "%s %08x %08x %08x %08x", filename, &save_addr, &length, &exec_addr, &load_addr)) >= 3) // NB not really length
 				{
-					length = (length - save_addr + 1);
+					length = (length - save_addr);
 
 					if (parsed < 4)
-						load_addr = save_addr;
+						exec_addr = save_addr;
 					if (parsed < 5)
-						exec_addr = load_addr;
+						load_addr = save_addr;
 				}
 				else
 				{
