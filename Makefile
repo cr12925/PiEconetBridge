@@ -36,7 +36,7 @@ install:	install-old
 	-sudo systemctl stop econethpb
 	-sudo systemctl disable econethpb
 	[ -f /etc/econet-gpio/econet.cfg ] || sudo cp config/econet.cfg /etc/econet-gpio/econet.cfg
-	[ -f /etc/systemd/system/ecoentfs.service ] || (sudo cp systemd/econetfs.service /etc/systemd/system && sudo systemctl daemon-reload && sudo systemctl enable econetfs)
+	[ -f /etc/systemd/system/econetfs.service ] || (sudo cp systemd/econetfs.service /etc/systemd/system && sudo systemctl daemon-reload && sudo systemctl enable econetfs)
 	@echo "Install routine finished. Please ensure you have 'arm_freq=1000' (or your chosen frequency) and 'force_turbo=1' in /boot/config.txt (see README). Then please reboot. Note that Econet library utilities for use on your server are NOT included, but they may be found distributed with BeebEm for Windows, and copied using the CopyFiles utility onto your network."	
 
 install-hp:	install-old
