@@ -7291,8 +7291,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 	if (active_id >= 0) // If logged in, update handles from the incoming packet
 	{
 		active[server][active_id].root = *(data+2);
-		active[server][active_id].current = *(data+3);
-		active[server][active_id].lib = *(data+4);
+		if (datalen >= 4) active[server][active_id].current = *(data+3);
+		if (datalen >= 5) active[server][active_id].lib = *(data+4);
 	
 		if (fsop != 0x09) // Not a putbyte
 			active[server][active_id].sequence = 2; // Reset so that next putbyte will be taken to be in sequence.
@@ -7431,21 +7431,21 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 				save_addr = load_addr = exec_addr = length = 0;
 
-				if ((parsed = sscanf(param, "%s %08x +%08x %08x %08x", filename, &save_addr, &length, &load_addr, &exec_addr)) >= 3)
+				if ((parsed = sscanf(param, "%s %08x +%08x %08x %08x", filename, &save_addr, &length, &exec_addr, &load_addr)) >= 3)
 				{ 
 					if (parsed < 4)
-						load_addr = save_addr;
+						exec_addr = save_addr;
 					if (parsed < 5)
-						exec_addr = load_addr;
+						load_addr = load_addr;
 				}
-				else if ((parsed = sscanf(param, "%s %08x %08x %08x %08x", filename, &save_addr, &length, &load_addr, &exec_addr)) >= 3) // NB not really length
+				else if ((parsed = sscanf(param, "%s %08x %08x %08x %08x", filename, &save_addr, &length, &exec_addr, &load_addr)) >= 3) // NB not really length
 				{
-					length = (length - save_addr + 1);
+					length = (length - save_addr);
 
 					if (parsed < 4)
-						load_addr = save_addr;
+						exec_addr = save_addr;
 					if (parsed < 5)
-						exec_addr = load_addr;
+						load_addr = load_addr;
 				}
 				else
 				{
