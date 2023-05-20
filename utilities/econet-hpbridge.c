@@ -857,11 +857,12 @@ struct __eb_device * eb_find_station (uint8_t dir, struct __econet_packet_aun *p
 
 	eb_debug (0, 4, "BRIDGE", "%-8s %3d.%3d Looking for station struct... eb_get_network() returns %p", "", net, stn, (result = eb_get_network(net)));
 
-	eb_debug (0, 5, "BRIDGE", "%-8s %3d.%3d eb_get_network() result->net is %d", "", net, stn, result->net);
 
 	if ((net != 255) && (stn != 255) && result) // Good start, this network looks like it might exist, and we aren't looking for a broadcast
 	{
 	
+		eb_debug (0, 5, "BRIDGE", "%-8s %3d.%3d eb_get_network() result->net is %d", "", net, stn, result->net);
+
 		if (stn == 0) // Bridge internal - don't look for diversions
 			return result;
 
@@ -881,6 +882,7 @@ struct __eb_device * eb_find_station (uint8_t dir, struct __econet_packet_aun *p
 			result = result->wire.divert[stn];
 
 	}
+	else	eb_debug (0, 5, "BRIDGE", "%-8s %3d.%3d eb_get_network() result->net returned NULL - network unknown", "", net, stn);
 
 	eb_debug (0, 4, "BRIDGE", "%-8s %3d.%3d eb_find_station() returning %p", "", net, stn, result);
 
