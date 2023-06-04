@@ -1,4 +1,4 @@
-all:	econet-bridge econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace
+all:	econet-bridge econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers
 
 econet-hpbridge:	econet-hpbridge.o fsv2.o 
 	cc -o econet-hpbridge econet-hpbridge.o fsv2.o -lpthread -lexplain -lssl -lcrypto
@@ -30,6 +30,8 @@ econet-remote: econet-remote.o econet-pipe.o
 
 econet-fslist: econet-fslist.o econet-pipe.o
 
+econet-servers: econet-servers.o econet-pipe.o
+
 econet-ipgw: econet-ipgw.o econet-pipe.o
 
 econet-trace: econet-trace.o econet-pipe.o
@@ -60,6 +62,8 @@ econet-notify.o: econet-notify.c econet-pipe.c ../include/econet-gpio-consumer.h
 econet-remote.o: econet-remote.c econet-pipe.c ../include/econet-gpio-consumer.h
 
 econet-fslist.o: econet-fslist.c econet-pipe.c ../include/econet-gpio-consumer.h
+
+econet-servers.o: econet-servers.c econet-pipe.c ../include/econet-gpio-consumer.h
 
 econet-ipgw.o: econet-ipgw.c econet-pipe.c ../include/econet-gpio-consumer.h
 

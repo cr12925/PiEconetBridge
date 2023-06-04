@@ -27,7 +27,7 @@ install-old: all
 	sudo chgrp econet utilities/econet-hpbridge utilities/econet-bridge utilities/econet-imm utilities/econet-monitor utilities/econet-test utilities/econet-clock utilities/econet-ledtest
 	sudo chmod u=rx,g=rxs utilities/econet-bridge utilities/econet-hpbridge utilities/econet-imm utilities/econet-monitor utilities/econet-test utilities/econet-clock utilities/econet-ledtest
 	sudo cp utilities/econet-bridge utilities/econet-hpbridge utilities/econet-monitor utilities/econet-test utilities/econet-clock utilities/econet-ledtest /usr/local/sbin
-	sudo cp utilities/econet-imm utilities/econet-ipgw utilities/econet-notify utilities/econet-remote utilities/econet-fslist utilities/econet-trace /usr/local/bin
+	sudo cp utilities/econet-imm utilities/econet-ipgw utilities/econet-notify utilities/econet-remote utilities/econet-fslist utilities/econet-trace econet-servers /usr/local/bin
 	sudo cp utilities/remove_xattr utilities/xattr_to_dotfile /usr/local/bin
 	sudo cp module/econet-gpio.ko /lib/modules/`uname -r`/kernel/drivers/net
 	sudo /usr/sbin/depmod
