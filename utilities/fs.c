@@ -48,7 +48,11 @@
 #include <resolv.h>
 #include <sys/socket.h>
 #include <termios.h>
-#include <libexplain/ferror.h>
+#if __has_include(<libexplain/ferror.h>)
+	#include <libexplain/ferror.h>
+#else
+	#define __NO_LIB_EXPLAIN
+#endif
 
 #include "../include/econet-gpio-consumer.h"
 #ifdef BRIDGE_V2
@@ -59,7 +63,7 @@
 
 // the ] as second character is a special location for that character - it loses its
 // special meaning as 'end of character class' so you can match on it.
-#define FSREGEX "[]\\*\\#A-Za-z0-9\\+_\xA0;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
+#define FSREGEX "[]\\*\\#A-Za-z0-9\\+_\x81-\xfe;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 #define FS_NETCONF_REGEX_ONE "^NETCONF\\s+([\\+\\-][A-Z]+)\\s*"
 
 regex_t fs_netconf_regex_one;
@@ -1144,7 +1148,7 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 
 		if (stat(new_p->unixpath, &statbuf) != 0) // Error
 		{
-			fs_debug (0, 2, "Unable to stat %s", p->unixpath);
+			fs_debug (0, 2, "Unable to stat %s", new_p->unixpath);
 			free (new_p);
 			counter++;
 			continue;
@@ -2916,6 +2920,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
 				}
 
+				fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, active[server][usercount].root, internal_handle);
 				strcpy(active[server][usercount].fhandles[active[server][usercount].root].acornfullpath, p.acornfullpath);
 				fs_store_tail_path(active[server][usercount].fhandles[active[server][usercount].root].acorntailpath, p.acornfullpath);
 				active[server][usercount].fhandles[active[server][usercount].root].mode = 1;
@@ -2939,6 +2944,8 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 					fs_deallocate_user_dir_channel(server, usercount, active[server][usercount].root);
 					return;
 				}
+
+				fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, active[server][usercount].current, internal_handle);
 
 				strcpy(active[server][usercount].fhandles[active[server][usercount].current].acornfullpath, p.acornfullpath);
 				fs_store_tail_path(active[server][usercount].fhandles[active[server][usercount].current].acorntailpath, p.acornfullpath);
@@ -2989,6 +2996,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
 				}
 
+				fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, active[server][usercount].lib, internal_handle);
 				strcpy(active[server][usercount].fhandles[active[server][usercount].lib].acornfullpath, p.acornfullpath);
 				fs_store_tail_path(active[server][usercount].fhandles[active[server][usercount].lib].acorntailpath, p.acornfullpath);
 				active[server][usercount].fhandles[active[server][usercount].lib].mode = 1;
@@ -3555,7 +3563,7 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 	
 			case 4: // Set attributes only
 				// Need to convert acorn to PiFS
-				attr.perm = fs_perm_from_acorn(server, *(data+6)) | ((*(data+6) & 0x0c) == 0) ? (FS_PERM_OWN_W | FS_PERM_OWN_R) : 0;
+				attr.perm = fs_perm_from_acorn(server, *(data+6)) | (((*(data+6) & 0x0c) == 0) ? (FS_PERM_OWN_W | FS_PERM_OWN_R) : 0);
 				break;
 
 			case 5: // Set file date
@@ -4628,6 +4636,8 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 		return;
 	}
 
+	fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, root, internal_root_handle);
+
 	if ((internal_cur_handle = fs_open_interlock(server, p_root.unixpath, 1, active[server][active_id].userid)) == -1)
 	{
 		fs_error(server, reply_port, net, stn, 0xFF, "CWD inaccessible!");
@@ -4642,6 +4652,8 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 		fs_close_interlock(server, internal_cur_handle, 1);
 		return;
 	}
+
+	fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, cur, internal_cur_handle);
 
 	strcpy(active[server][active_id].fhandles[root].acornfullpath, p_root.acornfullpath);
 	fs_store_tail_path(active[server][active_id].fhandles[root].acorntailpath, p_root.acornfullpath);
@@ -4682,6 +4694,8 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 			fs_close_interlock(server, internal_lib_handle, 1);
 			return;
 		}
+
+		fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, lib, internal_lib_handle);
 
 		strcpy(active[server][active_id].fhandles[lib].acornfullpath, p_lib.acornfullpath);
 		fs_store_tail_path(active[server][active_id].fhandles[lib].acorntailpath, p_lib.acornfullpath);
@@ -6532,8 +6546,12 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 				if (ferror(fs_files[server][internal_handle].handle))
 				{
 					clearerr(fs_files[server][internal_handle].handle);
-					// explain_ferror() is not threadsafe - so it requires the global fs mutex
-					fs_debug (0, 2, "%12sfrom %3d.%3d short file read returned %d, expected %d but not end of file - error flagged: %s", "", net, stn, received, readlen, explain_ferror(fs_files[server][internal_handle].handle));
+					#ifndef __NO_LIBEXPLAIN
+						// explain_ferror() is not threadsafe - so it requires the global fs mutex
+						fs_debug (0, 2, "%12sfrom %3d.%3d short file read returned %d, expected %d but not end of file - error flagged: %s", "", net, stn, received, readlen, explain_ferror(fs_files[server][internal_handle].handle));
+					#else
+						fs_debug (0, 2, "%12sfrom %3d.%3d short file read returned %d, expected %d but not end of file - error flagged: %s", "", net, stn, received, readlen, "Unknown (no libexplain)");
+					#endif
 				
 				}
 				fserroronread = 1;
@@ -6883,6 +6901,7 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 			}
 			else
 			{	
+				fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, userhandle, handle);
 				active[server][active_id].fhandles[userhandle].handle = handle;
 				active[server][active_id].fhandles[userhandle].mode = mode;
 				active[server][active_id].fhandles[userhandle].cursor = 0;	
@@ -7606,6 +7625,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								old = active[server][active_id].lib;
 
 								active[server][active_id].lib = n_handle;
+								fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, n_handle, l);
 								strncpy((char * ) active[server][active_id].lib_dir, (const char * ) p.path_from_root, 255);
 								if (p.npath == 0)	strcpy((char * ) active[server][active_id].lib_dir_tail, (const char * ) "$         ");
 								else			sprintf(active[server][active_id].lib_dir_tail, "%-10s", p.path[p.npath-1]);
@@ -7676,6 +7696,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								
 								old = active[server][active_id].current;
 								active[server][active_id].current = n_handle;
+								fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, n_handle, l);
 								strncpy((char * ) active[server][active_id].current_dir, (const char * ) p.path_from_root, 255);
 								if (p.npath == 0)	strcpy((char * ) active[server][active_id].current_dir_tail, (const char * ) "$         ");
 								else			sprintf(active[server][active_id].current_dir_tail, "%-10s", p.path[p.npath-1]);
