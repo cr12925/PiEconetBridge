@@ -949,13 +949,25 @@ uint8_t eb_bridge_sender_net (struct __eb_device *destnet)
 	uint8_t			result = 0; // Rogue for none found
 	uint8_t			count = 1;
 
-	// Search for active net which is not destnet
+	// Search for active net which is not destnet and which we are prepared to announce on this network
 
 	pthread_mutex_lock (&networks_update);
 
 	while (count < 255 && !result)
 	{
-		if (networks[count] && (networks[count] != destnet) && (networks[count]->net != destnet->net))
+		uint8_t 	filtered;
+
+		filtered = 0;
+
+		if (networks[count] &&
+			(
+				(networks[count]->type == EB_DEF_WIRE && networks[count]->wire.filter_out[count])
+			||	(networks[count]->type == EB_DEF_TRUNK && networks[count]->trunk.filter_out[count])
+			)
+		)
+			filtered = 1;
+
+		if (networks[count] && (networks[count] != destnet) && (networks[count]->net != destnet->net) && !filtered)
 			result = count;
 		else	count++;
 		
@@ -1035,10 +1047,7 @@ void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *d
 		eb_debug (0, 2, "BRIDGE", "%-8s         Send bridge %s to %s net %d%s", (trigger ? eb_type_str(trigger->type) : "Internal"), (ctrl == 0x80 ? "reset" : "update"), eb_type_str(dest->type), dest->net, debug_string);
 	else
 	{
-		if (dest->trunk.hostname)
-			eb_debug (0, 2, "BRIDGE", "%-8s         Send bridge %s to Trunk on %s:%d%s", (trigger ? eb_type_str(trigger->type) : "Internal"), (ctrl == 0x80 ? "reset" : "update"), dest->trunk.hostname, dest->trunk.remote_port, debug_string);
-		else
-			eb_debug (0, 2, "BRIDGE", "%-8s         Send bridge %s to Trunk on %s%s", (trigger ? eb_type_str(trigger->type) : "Internal"), (ctrl == 0x80 ? "reset" : "update"), dest->trunk.serialport, debug_string);
+		eb_debug (0, 2, "BRIDGE", "%-8s         Send bridge %s to Trunk on %s:%d%s", (trigger ? eb_type_str(trigger->type) : "Internal"), (ctrl == 0x80 ? "reset" : "update"), (dest->trunk.hostname ? dest->trunk.hostname : "(Not connected)"), dest->trunk.hostname ? dest->trunk.remote_port : 0, debug_string);
 	}
 
 }
@@ -1347,7 +1356,7 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 				case EB_DEF_WIRE:
 					snprintf(reply_diags, 383, "%s %03d via Wire on %s (%d)", hostname, net, route->wire.device, route->net); break;
 				case EB_DEF_TRUNK:
-					snprintf(reply_diags, 383, "%s %03d via Trunk to %s:%d", hostname, net, route->trunk.hostname, route->trunk.remote_port); break;
+					snprintf(reply_diags, 383, "%s %03d via Trunk to %s:%d", hostname, net, route->trunk.hostname ? route->trunk.hostname : "(Not connected)", route->trunk.hostname ? route->trunk.remote_port : 0); break;
 				case EB_DEF_NULL:
 					snprintf(reply_diags, 383, "%s %03d via Local Null - undefined divert", hostname, net); break;
 				case EB_DEF_LOCAL:
@@ -1510,10 +1519,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 				eb_debug (0, 2, "BRIDGE", "Wire     %3d     Received bridge %s with %s%s", source->net, (p->p.ctrl == 0x80 ? "reset" : "update"), (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string);
 			else
 			{
-				if (source->trunk.hostname)
-					eb_debug (0, 2, "BRIDGE", "Trunk            Received bridge %s from %s:%d with %s%s", (p->p.ctrl == 0x80 ? "reset" : "update"), source->trunk.hostname, source->trunk.remote_port, (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string);
-				else
-					eb_debug (0, 2, "BRIDGE", "Trunk            Received bridge %s from %s with %s%s", (p->p.ctrl == 0x80 ? "reset" : "update"), source->trunk.serialport, (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string);
+				eb_debug (0, 2, "BRIDGE", "Trunk            Received bridge %s from %s:%d with %s%s", (p->p.ctrl == 0x80 ? "reset" : "update"), source->trunk.hostname ? source->trunk.hostname : "(Not connected)", source->trunk.hostname ? source->trunk.remote_port : 0, (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string);
 			}
 
 			eb_bridge_update (source, p->p.ctrl);
@@ -2310,7 +2316,7 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 		struct sockaddr_in		addr;
 		socklen_t			addrlen;
 		
-		addrlen = sizeof(struct sockaddr);
+		addrlen = sizeof(addr);
 
 		length = recvfrom(e->socket, &(incoming.p.aun_ttype), sizeof(struct __econet_packet_aun), 0, (struct sockaddr *) &addr, &addrlen);
 
@@ -2738,7 +2744,7 @@ static void * eb_device_despatcher (void * device)
 	else if (d->type != EB_DEF_TRUNK)
 		eb_debug (0, 2, "DESPATCH", "%-8s %3d     Thread started (tid %d)", eb_type_str(d->type), d->net, syscall(SYS_gettid));
 	else
-		eb_debug (0, 2, "DESPATCH", "%-8s         Thread started for trunk on port %d to %s:%d (tid %d)", eb_type_str(d->type), d->trunk.local_port, d->trunk.hostname, d->trunk.remote_port, syscall(SYS_gettid));
+		eb_debug (0, 2, "DESPATCH", "%-8s         Thread started for trunk on port %d to %s:%d (tid %d)", eb_type_str(d->type), d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Unregistered dynamic host)", d->trunk.hostname ? d->trunk.remote_port : 0, syscall(SYS_gettid));
 
 	if (d->type == EB_DEF_WIRE && !strcasecmp("/dev/null", d->wire.device)) // Flag as a dummy wire so we don't try and receive traffic from it
 		wire_null = 1;
@@ -2932,126 +2938,57 @@ static void * eb_device_despatcher (void * device)
 		case EB_DEF_TRUNK:
 		{
 
-			if (d->trunk.hostname) // IP trunk
+			char 			portname[6];
+			struct addrinfo		hints;
+			struct sockaddr_in	service;
+			int			s;
+
+			// No longer required - can still operate plaintext trunks if defined host
+			//if (!(d->trunk.sharedkey))
+				//eb_debug (1, 0, "DESPATCH", "%-8s         Unable to start trunk for local port %d - No shared key defined!", "Trunk", d->trunk.local_port);
+
+			if (!(d->trunk.is_dynamic)) // IP trunk and is defined
 			{
-				char 			portname[6];
-				struct addrinfo		hints;
-				struct sockaddr_in	service;
-				int			s;
 	
+				if (!(d->trunk.hostname))
+					eb_debug (1, 0, "DESPATCH", "%-8s         Unable to open trunk listener socket for local port %d - Static remote host but no hostname defined!", "Trunk", d->trunk.local_port);
+
 				snprintf(portname, 6, "%d", d->trunk.remote_port);
-	
+
 				memset (&hints, 0, sizeof(struct addrinfo));
-	
+
 				hints.ai_family = AF_INET;
 				hints.ai_socktype = SOCK_DGRAM;
 				hints.ai_flags = 0;
 				hints.ai_protocol = 0;
-	
+
 				if ((s = getaddrinfo(d->trunk.hostname, portname, &hints, &(d->trunk.remote_host))) != 0)
 					eb_debug (1, 0, "DESPATCH", "%-8s         Unable to resolve hostname %s: %s", d->trunk.hostname, gai_strerror(s));
-	
-				// Set up local listener
-	
-				d->trunk.socket = socket(AF_INET, SOCK_DGRAM, 0);
-	
-				if (d->trunk.socket == -1)
-					eb_debug (1, 0, "DESPATCH", "%-8s         Unable to open trunk listener socket for local port %d to %s:%d", "Trunk", d->trunk.local_port, d->trunk.hostname, d->trunk.remote_port);
-	
-	
-				service.sin_family = AF_INET;
-				service.sin_addr.s_addr = htonl(bindhost); // INADDR_ANY;
-				service.sin_port = htons(d->trunk.local_port);
-	
-				if (bind(d->trunk.socket, (struct sockaddr *) &service, sizeof(service)) != 0)
-					eb_debug (1, 0, "DESPATCH", "%-8s         Unable to bind trunk listener socket for local port %d to %s:%d (%s)", "Trunk", d->trunk.local_port, d->trunk.hostname, d->trunk.remote_port, strerror(errno));
-	
-				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk initialized between port %d and %s:%d", "Trunk", d->trunk.local_port, d->trunk.hostname, d->trunk.remote_port);
-			} // else serial
-			else
-			{
-				// Initialize termios & set up serial connection - TODO
-	
-				d->trunk.socket = open(d->trunk.serialport, O_RDWR);
-
-				if (d->trunk.socket < 0)
-					eb_debug (1, 0, "DESPATCH", "%-8s         Unable to open trunk serial port %s (%s)", "Serial", d->trunk.serialport, strerror(errno));
-
-				if (tcgetattr(d->trunk.socket, &d->trunk.tty) != 0)
-					eb_debug (1, 0, "DESPATCH", "%-8s         Unable to read config for trunk serial port %s (%s)", "Serial", d->trunk.serialport, strerror(errno));
-	
-				// Raw mode
-
-				cfmakeraw(&(d->trunk.tty));
-
-				// no delays...
-				d->trunk.tty.c_cc[VMIN] = d->trunk.tty.c_cc[VTIME] = 0;
-
-				// Sort out a few input flags
-
-				d->trunk.tty.c_iflag |= IGNBRK;
-
-				// And output
-
-				d->trunk.tty.c_oflag &= ~(ONLCR | OCRNL | ONOCR | ONLRET);
-
-				// And some control bits
-
-				d->trunk.tty.c_cflag &= ~(CSTOPB);
-				d->trunk.tty.c_cflag |= HUPCL | CRTSCTS | PARENB;
-
-				cfsetspeed(&(d->trunk.tty), B9600); // Default
-
-				switch (d->trunk.baudrate) // We only work symmetrically on here
-				{
-					case 3:
-						cfsetspeed(&(d->trunk.tty), B300); // Default
-						break;
-					case 12:
-						cfsetspeed(&(d->trunk.tty), B1200); // Default
-						break;
-					case 96:
-						cfsetspeed(&(d->trunk.tty), B9600); // Default
-						break;
-					case 576:
-						cfsetspeed(&(d->trunk.tty), B57600); // Default
-						break;
-					case 1152:
-						cfsetspeed(&(d->trunk.tty), B115200); // Default
-						break;
-					case 2304:
-						cfsetspeed(&(d->trunk.tty), B230400); // Default
-						break;
-					default:
-						eb_debug (1, 0, "DESPATCH", "%-8s         Unsupported baudrate %d00 serial port %s", "Serial", d->trunk.baudrate, d->trunk.serialport);
-				}			
-		
-				if (tcsetattr (d->trunk.socket, TCSANOW, &(d->trunk.tty)))
-					eb_debug (1, 0, "DESPATCH", "%-8s         Unable to set termios for serial port %s (%s)", "Serial", d->trunk.serialport, strerror(errno));
-				
-				// Empty both directions
-
-				tcflush (d->trunk.socket, TCIOFLUSH);
-
-				// Set our receiver state and packet pointer
-				
-				d->trunk.num_ffs = 0; // Number of sequential FFs so far
-			
-				d->trunk.serialstate = TRUNK_SERIAL_IDLE;
-		
-				d->trunk.serialptr = 0; // Nothing in the buffer
-
-				// Create the buffer
-
-				d->trunk.serialbuf = eb_malloc (__FILE__, __LINE__, "DESPATCH", "Allocating input buffer for serial trunk", ECONET_MAX_PACKET_SIZE + 12);
-
-				if (!(d->trunk.serialbuf))
-					eb_debug (1, 0, "DESPATCH", "%-8s         Unable to allocate buffer memory for trunk serial port %s", "Serial", d->trunk.serialport);
-		
-				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk port %s successfully initialized at %d00 baud", "Serial", d->trunk.serialport, d->trunk.baudrate);
 
 			}
+			else if (d->trunk.is_dynamic) // Dynamic
+				d->trunk.remote_host = NULL; // Flags as unresolved dynamic
 
+			// Set up local listener
+
+			d->trunk.socket = socket(AF_INET, SOCK_DGRAM, 0);
+
+			if (d->trunk.socket == -1)
+				eb_debug (1, 0, "DESPATCH", "%-8s         Unable to open trunk listener socket for local port %d to %s:%d", "Trunk", d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0);
+
+
+			service.sin_family = AF_INET;
+			service.sin_addr.s_addr = htonl(bindhost); // INADDR_ANY;
+			service.sin_port = htons(d->trunk.local_port);
+
+			if (bind(d->trunk.socket, (struct sockaddr *) &service, sizeof(service)) != 0)
+				eb_debug (1, 0, "DESPATCH", "%-8s         Unable to bind trunk listener socket for local port %d to %s:%d (%s)", "Trunk", d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0, strerror(errno));
+
+			if (!(d->trunk.is_dynamic))
+				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk initialized between port %d and %s:%d with key %s", "Trunk", d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0, d->trunk.sharedkey);
+			else
+				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk initialized between port %d and dynamic remote host with key %s", "Trunk", d->trunk.local_port, d->trunk.sharedkey);
+	
 		} break;
 
 		case EB_DEF_NULL:
@@ -3194,65 +3131,117 @@ static void * eb_device_despatcher (void * device)
 			if (d->type == EB_DEF_WIRE || (d->type == EB_DEF_TRUNK)) // Read straight to packet structure (Restrict to IP trunks)
 			{
 
-				if (!((d->type == EB_DEF_TRUNK) && !(d->trunk.hostname))) // Not a serial trunk	
+				if (d->type == EB_DEF_TRUNK)
+				{
+
+					uint16_t		datalength; // Stores length as set out in received encrypted packet
+
+					unsigned char		temp_packet[ECONET_MAX_PACKET_SIZE+6];
+
+					struct sockaddr_in	src_addr;
+					socklen_t		addr_len;
+
+					//length = read (l_socket, &(d->trunk.cipherpacket), TRUNK_CIPHER_TOTAL);
+
+					addr_len = sizeof(src_addr);
+
+					length = recvfrom (l_socket, &(d->trunk.cipherpacket), TRUNK_CIPHER_TOTAL, 0, (struct sockaddr *) &src_addr, &addr_len);
+
+					if (d->trunk.sharedkey && (length < (TRUNK_CIPHER_DATA + AES_BLOCK_SIZE)) )
+						eb_debug (0, 2, "DESPATCH", "%-8s %3d     Encrypted runt packet received - discarded", eb_type_str(d->type), d->net);
+					else if (d->trunk.sharedkey) // Encrypted trunk
+					{
+						if (!(d->trunk.ctx_dec = EVP_CIPHER_CTX_new()))
+							eb_debug (1, 0, "DESPATCH", "%-8s         Unable to set up decryption control for local port %d", "Trunk", d->trunk.local_port);
+
+						eb_debug (0, 3, "DESPATCH", "%-8s %3d     Encrypted trunk packet received - type %d, IV bytes %02x %02x %02x ...", eb_type_str(d->type), d->net, d->trunk.cipherpacket[TRUNK_CIPHER_ALG], d->trunk.cipherpacket[TRUNK_CIPHER_IV], d->trunk.cipherpacket[TRUNK_CIPHER_IV+1], d->trunk.cipherpacket[TRUNK_CIPHER_IV+2]);
+
+						switch (d->trunk.cipherpacket[TRUNK_CIPHER_ALG])
+						{
+							case 1:
+								EVP_DecryptInit_ex(d->trunk.ctx_dec, EVP_aes_256_cbc(), NULL, d->trunk.sharedkey, &(d->trunk.cipherpacket[TRUNK_CIPHER_IV]));
+								break;
+							default:
+								eb_debug (0, 2, "DESPATCH", "%-8s %3d     Encryption type %02x in encrypted unknown - discarded", eb_type_str(d->type), d->net, d->trunk.cipherpacket[TRUNK_CIPHER_ALG]);
+								break;
+						}
+
+						if (d->trunk.cipherpacket[TRUNK_CIPHER_ALG] && (d->trunk.cipherpacket[TRUNK_CIPHER_ALG] <= 1))
+						{
+
+							int	tmp_len;
+
+							eb_debug (0, 3, "DESPATCH", "%-8s %3d     Encryption type in encrypted is valid - %02x; encrypted data length %04x", eb_type_str(d->type), d->net, d->trunk.cipherpacket[TRUNK_CIPHER_ALG], (length - TRUNK_CIPHER_DATA));
+
+							if ((!EVP_DecryptUpdate(d->trunk.ctx_dec, temp_packet, &(d->trunk.encrypted_length), (unsigned char *) &(d->trunk.cipherpacket[TRUNK_CIPHER_DATA]), length - TRUNK_CIPHER_DATA)))
+								eb_debug (0, 2, "DESPATCH", "%-8s %3d     DecryptUpdate of trunk packet failed", eb_type_str(d->type), d->net);
+							else if (EVP_DecryptFinal_ex(d->trunk.ctx_dec, (unsigned char *) &(temp_packet[d->trunk.encrypted_length]), &tmp_len))
+							{
+
+								d->trunk.encrypted_length += tmp_len;
+
+								eb_debug (0, 3, "DESPATCH", "%-8s %3d     Trunk packet length %04x", eb_type_str(d->type), d->net, d->trunk.encrypted_length);
+
+								datalength = (temp_packet[0] * 256) + temp_packet[1];
+
+								if (datalength >= 12) // Valid packet size received
+								{
+									eb_debug (0, 3, "DESPATCH", "%-8s %3d     Encrypted trunk packet validly received - specified length %04x, decrypted length %04x", eb_type_str(d->type), d->net, datalength, d->trunk.encrypted_length);
+									memcpy(&packet, &(temp_packet[2]), datalength); // data length always ignores the ECONET part of the data
+									length = datalength;
+									packetreceived = 1;
+
+									// Having received a valid packet, let's update our remote end status if we are dynamic
+
+									if (d->trunk.is_dynamic)
+									{
+
+										if (d->trunk.remote_host || (!d->trunk.remote_host && (d->trunk.remote_host = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk remote_host structure", sizeof(struct addrinfo)))))
+										{
+
+											if ((d->trunk.remote_host->ai_addr = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk remote_host->ai_addr structure", sizeof(struct sockaddr_in))) && (d->trunk.hostname = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk hostname space", 20))) // 20 because for now it'll just be an IP address
+											{
+
+												memcpy (d->trunk.remote_host->ai_addr, &src_addr, sizeof(struct sockaddr_in));
+												d->trunk.remote_host->ai_addrlen = sizeof(struct sockaddr_in);
+
+												d->trunk.remote_port = ntohs(src_addr.sin_port);
+
+												strncpy (d->trunk.hostname, inet_ntoa(src_addr.sin_addr), 19);
+												eb_debug (0, 1, "DESPATCH", "%-8s %3d     Dynamic trunk endpoint found for local port %d at host %s port %d (addr_len = %d, family = %d)", eb_type_str(d->type), d->net, d->trunk.local_port, d->trunk.hostname, ntohs(src_addr.sin_port), addr_len, src_addr.sin_family);
+											}
+											else
+												eb_debug (1, 1, "DESPATCH", "%-8s %3d     Dynamic trunk endpoint found for local port %d at host %s port %d, but failed to allocate memory for sockaddr_in structure!", eb_type_str(d->type), d->net, d->trunk.local_port, inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port));
+										}
+										else if (!d->trunk.remote_host)
+											eb_debug (1, 1, "DESPATCH", "%-8s %3d     Dynamic trunk endpoint found for local port %d at host %s port %d, but failed to allocate memory for addrinfo structure!", eb_type_str(d->type), d->net, d->trunk.local_port, inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port));
+									}
+								}
+								else
+									eb_debug (0, 2, "DESPATCH", "%-8s %3d     Decrypted trunk packet too small (data length = %04x) - discarded", eb_type_str(d->type), d->net, datalength);
+							}
+							else
+								eb_debug (0, 2, "DESPATCH", "%-8s %3d     DecryptFinal of trunk packet failed - decrypted length before call was %04x", eb_type_str(d->type), d->net, d->trunk.encrypted_length);
+						}
+
+						EVP_CIPHER_CTX_free(d->trunk.ctx_dec);
+					}
+					else // Plaintext trunk
+					{
+
+						// Old code without encryption
+						//length = read (l_socket, &packet, ECONET_MAX_PACKET_SIZE);
+						// Copy packet from cipherpacket to packet
+
+						memcpy (&packet, &d->trunk.cipherpacket, length);
+
+						if (length >= 12) packetreceived = 1;
+					}
+				}
+				if (d->type == EB_DEF_WIRE)
 				{
 					length = read (l_socket, &packet, ECONET_MAX_PACKET_SIZE);
 					if (length >= 12) packetreceived = 1;
-				}
-				else // serial trunk read procedure
-				{
-					packetreceived = 0; // Set this to 1 if the routine below detects end of packet
-
-					while (!packetreceived && read(d->trunk.socket, d->trunk.serialbuf + d->trunk.serialptr, 1) > 0)
-					{
-
-						char c;
-
-						c = *(d->trunk.serialbuf + d->trunk.serialptr);
-
-						//fprintf (stderr, "Trunk serial ptr = %d, serial state = %02X, character read = 0x%02X\n", d->trunk.serialptr, d->trunk.serialstate, (int) c);
-
-						if (c == 0xff)
-							d->trunk.num_ffs++;
-						else	d->trunk.num_ffs = 0;
-					
-						if (d->trunk.serialstate == TRUNK_SERIAL_IDLE && d->trunk.num_ffs == 10) // Start of packet
-						{
-							// Reset pointer and change state	
-
-							d->trunk.serialptr = 0;
-							d->trunk.serialstate = TRUNK_SERIAL_PACKET;
-							d->trunk.num_ffs = 0;
-						}
-						else if (d->trunk.serialstate == TRUNK_SERIAL_PACKET && d->trunk.num_ffs == 10) // Found end of packet
-						{
-							packetreceived = 1;
-							length = d->trunk.serialptr - 9; // serialptr starts at 0
-							memcpy (&packet, d->trunk.serialbuf, length);
-							d->trunk.serialptr = 0;
-							d->trunk.serialstate = TRUNK_SERIAL_IDLE;
-							d->trunk.num_ffs = 0;
-						}
-						else if (d->trunk.serialstate == TRUNK_SERIAL_9FF) // We read 9 FFs and then a 0. If this is an FF, we have zero byte insertion
-						{
-							if (c == 0xff)
-							{
-								d->trunk.serialptr--;
-								*(d->trunk.serialbuf + d->trunk.serialptr) = 0xff;
-								d->trunk.num_ffs = 0;
-							}
-							d->trunk.serialstate = TRUNK_SERIAL_PACKET;
-						}
-						else if (d->trunk.serialstate == TRUNK_SERIAL_PACKET && d->trunk.num_ffs == 9 && c == 0x00) // 9 FFs and this might be a zero byte insertion
-						{
-							d->trunk.serialstate = TRUNK_SERIAL_9FF;
-							d->trunk.serialptr++;
-						}
-						else if (d->trunk.serialstate == TRUNK_SERIAL_PACKET) // Everything else resets num_ffs to 0
-						{
-							d->trunk.serialptr++;
-						}
-					}
 				}
 
 				if (packetreceived && (length >= 12))
@@ -3982,59 +3971,57 @@ static void * eb_device_despatcher (void * device)
 						int result;
 						struct __econet_packet_aun *ap;
 
-						ap = eb_malloc(__FILE__, __LINE__, "DESPATCH", "Trunk send packet copy", p->length+12);
+						ap = eb_malloc(__FILE__, __LINE__, "DESPATCH", "Trunk send packet copy", p->length+12 + 6);
 
-						if (ap) // And if !ap, just remove, below.
+						if (ap && (d->trunk.remote_host)) // And if !ap, just remove, below. If remote_host is NULL, this is a dynamic trunk with no remote endpoint yet
 						{
 
-							memcpy (ap, p->p, p->length + 12);
+							unsigned char temp_packet[ECONET_MAX_PACKET_SIZE + 12 + 2];
+							int 	tmp_len;
+
+							memcpy(ap, p->p, p->length + 12);
 
 							ap->p.dstnet = (d->trunk.xlate_out[ap->p.dstnet] ? d->trunk.xlate_out[ap->p.dstnet] : ap->p.dstnet);
 
-							if (d->trunk.hostname) // IP trunk
-								result = sendto (d->trunk.socket, ap, p->length + 12, MSG_DONTWAIT, d->trunk.remote_host->ai_addr, d->trunk.remote_host->ai_addrlen);
-							else
+// Encrypted version starts here
+							if (d->trunk.sharedkey) // Encryption on
 							{
+								RAND_bytes(d->trunk.iv, AES_BLOCK_SIZE);
 
-								char	frameflag[10];
-								uint16_t	counter;
-								uint8_t		num_ffs;
-								char		zero;
+								d->trunk.cipherpacket[TRUNK_CIPHER_ALG] = 1;
 
-								memset (&frameflag, 0xff, 10);
+								memcpy (&(d->trunk.cipherpacket[TRUNK_CIPHER_IV]), &(d->trunk.iv), EVP_MAX_IV_LENGTH);
+								temp_packet[0] = ((p->length+12) & 0xff00) >> 8;
+								temp_packet[1] = (p->length+12) & 0xff;
 
-								write(d->trunk.socket, frameflag, 10);
+								memcpy (&(temp_packet[2]), ap, p->length + 12);
 
-								num_ffs = 0;
-							
-								counter = 0;
+								if (!(d->trunk.ctx_enc = EVP_CIPHER_CTX_new()))
+									eb_debug (1, 0, "DESPATCH", "%-8s         Unable to set up encryption control for local port %d", "Trunk", d->trunk.local_port);
 
-								zero = '\0';
-	
-								while (counter < p->length + 12)
+								EVP_EncryptInit_ex(d->trunk.ctx_enc, EVP_aes_256_cbc(), NULL, d->trunk.sharedkey, d->trunk.iv);
+
+								if ((!EVP_EncryptUpdate(d->trunk.ctx_enc, (unsigned char *) &(d->trunk.cipherpacket[TRUNK_CIPHER_DATA]), &(d->trunk.encrypted_length), temp_packet, p->length + 12 + 2)))
+									eb_debug (0, 2, "DESPATCH", "%-8s %3d     EncryptUpdate of trunk packet failed", eb_type_str(d->type), d->net);
+								else if  ((!EVP_EncryptFinal_ex(d->trunk.ctx_enc, (unsigned char *) &(d->trunk.cipherpacket[TRUNK_CIPHER_DATA + d->trunk.encrypted_length]), &tmp_len)))
+									eb_debug (0, 2, "DESPATCH", "%-8s %3d     EncryptFinal of trunk packet failed", eb_type_str(d->type), d->net);
+								else
 								{
-									if (num_ffs == 9 && ap->raw[counter] == 0xff)
-									{
-										write(d->trunk.socket, &zero, 1);
-										write(d->trunk.socket, &(ap->raw[counter]), 1);
-										num_ffs = 0;
-									}
-									else
-									{
-										if (ap->raw[counter] == 0xff)	num_ffs++;
-										else				num_ffs = 0;
+	
+									d->trunk.encrypted_length += tmp_len;
+	
+									result = sendto (d->trunk.socket, (unsigned char *) &(d->trunk.cipherpacket), TRUNK_CIPHER_DATA + d->trunk.encrypted_length, MSG_DONTWAIT, d->trunk.remote_host->ai_addr, d->trunk.remote_host->ai_addrlen);
+									eb_debug (0, 3, "DESPATCH", "Trunk            Encryption succeeded: cleartext length %04x, encrypted length %04x", (p->length + 12 + 2), d->trunk.encrypted_length);
+								}	
+	
+								EVP_CIPHER_CTX_free(d->trunk.ctx_enc);
 
-										write(d->trunk.socket, &(ap->raw[counter]), 1);
-									}
-								
-									counter++;
-								}
-
-								write(d->trunk.socket, frameflag, 10);
-
-								result = p->length + 12;
+// Encrypted version stops here
 							}
+							else // Plaintext - just spit the packet out
+								result = sendto (d->trunk.socket, ap, p->length + 12, MSG_DONTWAIT, d->trunk.remote_host->ai_addr, d->trunk.remote_host->ai_addrlen);
 
+					
 							eb_free (__FILE__, __LINE__, "DESPATCH", "Trunk send packet copy free", ap);
 							eb_add_stats (&(d->statsmutex), &(d->b_in), p->length);
 
@@ -4043,6 +4030,9 @@ static void * eb_device_despatcher (void * device)
 
 							eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
 						}
+
+						if (ap && !(d->trunk.remote_host))
+							eb_debug (0, 1, "DESPATCH", "Trunk            Packet transmission on trunk port %d failed - dynamic remote endpoint not established", d->trunk.local_port); 
 
 						remove = 1;
 					} break;
@@ -4488,6 +4478,87 @@ static void * eb_device_despatcher (void * device)
 							}
 
 						}
+						else if (p->p->p.port == 0xB0 && p->p->p.ctrl == 0x80) // FindServer query
+						{
+
+							char	findserver_type[9], server_type[9];
+							uint8_t	my_length;
+							struct __econet_packet_aun	*reply;
+								
+							reply = eb_malloc (__FILE__, __LINE__, "FINDSRV", "Allocate status query reply packet", 128);
+
+							if (!reply)
+								eb_debug (1, 0, "FINDSRVR", "Unable to malloc() new FindServer reply packet");
+							reply->p.srcnet = d->net;
+							reply->p.srcstn = d->local.stn;
+							reply->p.dstnet = p->p->p.srcnet;
+							reply->p.dststn = p->p->p.srcstn;
+							reply->p.aun_ttype = ECONET_AUN_DATA;
+							reply->p.port = 0xb1;
+							reply->p.ctrl = p->p->p.ctrl;
+							reply->p.seq = get_local_seq(d->net, d->local.stn);
+			
+							reply->p.data[0] = 0;
+							reply->p.data[2] = EB_VERSION;
+							strcpy ((char *) &(reply->p.data[12]), EB_SERVERID);
+							reply->p.data[11] = strlen(EB_SERVERID);
+
+							my_length = 12 + strlen(EB_SERVERID);
+
+							if (reply->p.dstnet == 0)
+								reply->p.dstnet = d->net;
+
+							memset (findserver_type, 0, 9);
+
+							memcpy (findserver_type, p->p->p.data, 8);
+
+							eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
+
+							eb_debug (0, 1, "FIND", "%-8s %3d.%3d FindServer request received - type '%-8s'",
+								eb_type_str(d->type), d->net, d->local.stn, findserver_type);
+
+							if (d->local.fs.index >= 0) // Is fileserver
+							{
+								strcpy (server_type, "FILE    ");	
+								if (!strcasecmp(findserver_type, "FILE    ") || !strcasecmp(findserver_type, "        "))
+								{
+									memcpy (&(reply->p.data[3]), server_type, 8);
+									eb_enqueue_output (d, reply, my_length);
+									new_output = 1;
+								}
+							}
+
+							if (d->local.ip.tunif[0]) // Non-null tunnel - IP server
+							{
+
+								strcpy (server_type, "IPGW    ");	
+
+								if (!strcasecmp(findserver_type, "IPGW    ") || !strcasecmp(findserver_type, "        "))
+								{
+									memcpy (&(reply->p.data[3]), server_type, 8);
+									eb_enqueue_output (d, reply, my_length);
+									new_output = 1;
+								}
+							}
+							
+							if (d->local.printers) // Print server
+							{
+
+								strcpy (server_type, "PRINT   ");	
+
+								if (!strcasecmp(findserver_type, "PRINT   ") || !strcasecmp(findserver_type, "        "))
+								{
+									memcpy (&(reply->p.data[3]), server_type, 8);
+									eb_enqueue_output (d, reply, my_length);
+									new_output = 1;
+
+								}
+
+							}
+
+							eb_free (__FILE__, __LINE__, "FINDSRVR", "Freeing FindServer reply packet", reply);
+
+						}
 						else if (p->p->p.port == 0xD2 && d->local.ip.tunif[0]) // IP/Econet
 						{
 							uint32_t src_ip, dst_ip;
@@ -4833,7 +4904,7 @@ int eb_readconfig(char *f)
 		r_empty,
 		r_wire,
 		r_trunk,
-		r_serialtrunk,
+		r_trunk_plaintext,
 		r_dynamic,
 		r_fileserver,
 		r_printserver,
@@ -4866,8 +4937,8 @@ int eb_readconfig(char *f)
 	if (regcomp(&r_trunk, EB_CFG_TRUNK, REG_EXTENDED | REG_ICASE) != 0)
 		eb_debug(1, 0, "CONFIG", "Cannot compile IP trunk regex");
 	
-	if (regcomp(&r_serialtrunk, EB_CFG_SERIALTRUNK, REG_EXTENDED | REG_ICASE) != 0)
-		eb_debug(1, 0, "CONFIG", "Cannot compile serial trunk regex");
+	if (regcomp(&r_trunk_plaintext, EB_CFG_TRUNK_PLAINTEXT, REG_EXTENDED | REG_ICASE) != 0)
+		eb_debug(1, 0, "CONFIG", "Cannot compile Plaintext IP trunk regex");
 	
 	if (regcomp(&r_dynamic, EB_CFG_DYNAMIC, REG_EXTENDED | REG_ICASE) != 0)
 		eb_debug(1, 0, "CONFIG", "Cannot compile dynamic AUN regex");
@@ -4932,6 +5003,7 @@ int eb_readconfig(char *f)
 	{
 		char		line[1024];
 		regmatch_t	matches[10];
+		uint8_t		is_plaintext = 0; // Used in the recgcomp to detect a plaintext trunk
 		
 		if (fgets (line, 1023, cfg))
 		{
@@ -4982,11 +5054,16 @@ int eb_readconfig(char *f)
 				p->wire.period = p->wire.mark = 0;
 				
 			}
-			else if (!regexec(&r_trunk, line, 3, matches, 0))
+			else if (!regexec(&r_trunk, line, 4, matches, 0) ||
+				(!regexec(&r_trunk_plaintext, line, 3, matches, 0) && (is_plaintext = 1)))
 			{
 				struct __eb_device	*p;
 				char *			destination;
 				char *			colon;
+
+
+				if (!regexec(&r_trunk_plaintext, line, 3, matches, 0))
+					is_plaintext = 1; // Old non-keyed trunk - cannot do dynamic
 
 				/* Make our struct */
 
@@ -4997,79 +5074,64 @@ int eb_readconfig(char *f)
 
 				if (!destination)	eb_debug (1, 0, "CONFIG", "Unable to malloc() string for trunk destination %s", eb_getstring(line, &matches[2]));
 
-				colon = strchr(destination, ':');
-
-				if (!colon)	eb_debug (1, 0, "CONFIG", "Bad configuration line - no port specifier on trunk destination: %s", destination);
-				
-				*colon = '\0';
-
-				colon++; // Now points to port
-
 				p->trunk.local_port = atoi(eb_getstring(line, &matches[1]));
-				p->trunk.remote_port = atoi(colon);
-				p->trunk.hostname = destination;
 				p->trunk.head = NULL;
 				p->trunk.tail = NULL;
 				memset (&(p->trunk.xlate_in), 0, 256);
 				memset (&(p->trunk.xlate_in), 0, 256);
 				memset (&(p->trunk.filter_in), 0, 256);
 				memset (&(p->trunk.filter_out), 0, 256);
+
+				// Initialize shared key to NULL so we can tell if it is unset
+				p->trunk.sharedkey = NULL;
+
+				if (!strcasecmp(destination, "dynamic") && !is_plaintext) // Insist on encrypted traffic if remote is dynamic IP
+				{
+					p->trunk.is_dynamic = 1;
+					p->trunk.remote_port = 0;
+					p->trunk.hostname = NULL;
+				}
+				else
+				{
+					// Traditional, end-identified trunk
+					p->trunk.is_dynamic = 0;
+
+					colon = strchr(destination, ':');
+
+					if (!colon)	eb_debug (1, 0, "CONFIG", "Bad configuration line - no port specifier on trunk destination: %s", destination);
 				
+					*colon = '\0';
+
+					colon++; // Now points to port
+
+					p->trunk.remote_port = atoi(colon);
+					p->trunk.hostname = destination;
+				}
+	
+				if (!is_plaintext)
+				{
+					// Get the PSK
+
+					p->trunk.sharedkey = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create trunk shared key string", 32);
+						
+					// Pad supplied key with zeros
+					memset (p->trunk.sharedkey, 0, 32);
+				
+
+					if (!(p->trunk.sharedkey))
+						eb_debug (1, 0, "CONFIG", "Unable to malloc() string for trunk shared key - trunk port %d", p->trunk.local_port);
+
+					strncpy ((char *) p->trunk.sharedkey, eb_getstring (line, &matches[3]), strlen(eb_getstring(line, &matches[3])) + 1);
+				}
+				else
+					p->trunk.sharedkey = NULL;  // Rogue for 'don't encrypt'.
+
 				/* Put it on our list of trunks */
 
 				p->next = trunks; // Never sits in the devices list, because it doesn't have a network number
 				trunks = p;
 				
 			}
-/*
-			else if (!regexec(&r_serialtrunk, line, 4, matches, 0))
-			{
-
-				struct __eb_device	*p;
-				char *			destination;
-
-				// Make our struct 
-
-				p = eb_device_init (0, EB_DEF_TRUNK, 0);
-
-				destination = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create Trunk dial string", strlen(eb_getstring(line, &matches[3])) + 1);
-
-				if (!destination)	eb_debug (1, 0, "CONFIG", "Unable to malloc() string for trunk dialstring %s", eb_getstring(line, &matches[2]));
-
-				strncpy (destination, eb_getstring(line, &matches[2]), strlen(eb_getstring(line, &matches[2])) + 1);
-
-				p->trunk.local_port = 0;
-				p->trunk.remote_port = 0;
-				p->trunk.hostname = NULL;
-				p->trunk.dialstring = destination;
-				if (!strcasecmp(destination, "DIRECT"))
-				{
-					eb_free(__FILE__, __LINE__, "CONFIG", "Freeing trunk dial string - direct connection", destination);
-					p->trunk.dialstring = NULL;
-				}
-
-				p->trunk.serialport = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create Trunk serial port storage", strlen(eb_getstring(line, &matches[1])) + 1);
-
-				if (!(p->trunk.serialport))	eb_debug (1, 0, "CONFIG", "Unable to malloc() string for trunk serial port %s", eb_getstring(line, &matches[1]));
-
-				strncpy (p->trunk.serialport, eb_getstring(line, &matches[1]), strlen(eb_getstring(line, &matches[1])) + 1);
-
-				p->trunk.baudrate = atoi(eb_getstring(line, &matches[2]));
-
-				p->trunk.head = NULL;
-				p->trunk.tail = NULL;
-				memset (&(p->trunk.xlate_in), 0, 256);
-				memset (&(p->trunk.xlate_in), 0, 256);
-				memset (&(p->trunk.filter_in), 0, 256);
-				memset (&(p->trunk.filter_out), 0, 256);
-				
-				// Put it on our list of trunks
-
-				p->next = trunks; // Never sits in the devices list, because it doesn't have a network number
-				trunks = p;
-				
-			}
-*/
 			else if (!regexec(&r_dynamic, line, 3, matches, 0))
 			{
 				//printf ("Identified as dynamic - network %s flags %s\n", eb_getstring(line, &matches[1]), eb_getstring(line, &matches[2]));
@@ -6344,14 +6406,11 @@ int main (int argc, char **argv)
 			while (t)
 			{
 
-				if (t->trunk.hostname) // IP trunk
-					fprintf (stderr, "%5d        %-30s %5d\n", 
-						t->trunk.local_port,
-						t->trunk.hostname,
-						t->trunk.remote_port
-					);
-				else // Serial trunk
-					fprintf (stderr, "            %-30s %s\n", t->trunk.serialport, t->trunk.dialstring ? t->trunk.dialstring : "Direct cable");
+				fprintf (stderr, "%5d        %-30s %5d\n", 
+					t->trunk.local_port,
+					t->trunk.hostname ? t->trunk.hostname : "(Dynamic)",
+					t->trunk.hostname ? t->trunk.remote_port : 0
+				);
 				
 				t = t->next;
 			}
@@ -6822,8 +6881,8 @@ static void * eb_statistics (void *nothing)
 			{
 				case EB_DEF_TRUNK:
 					sprintf (trunkdest, "%s:%d", 
-						(device->trunk.hostname ? device->trunk.hostname : device->trunk.serialport), 
-						(device->trunk.hostname ? device->trunk.remote_port : device->trunk.baudrate));
+						(device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), 
+						(device->trunk.hostname ? device->trunk.remote_port : 0));
 					break;
 				case EB_DEF_WIRE:
 					sprintf (trunkdest, "%s", device->wire.device);
@@ -6893,7 +6952,7 @@ static void * eb_statistics (void *nothing)
 
 			pthread_mutex_lock (&(device->statsmutex));
 
-			fprintf (output, "999|000|Trunk|%s:%d|%llu|%llu\n",	(device->trunk.hostname ? device->trunk.hostname : device->trunk.serialport), (device->trunk.hostname ? device->trunk.remote_port : device->trunk.baudrate), device->b_in, device->b_out);
+			fprintf (output, "999|000|Trunk|Local %d to %s:%d|%llu|%llu\n",	(device->trunk.local_port), (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), (device->trunk.hostname ? device->trunk.remote_port : 0), device->b_in, device->b_out);
 		
 			pthread_mutex_unlock (&(device->statsmutex));
 
@@ -6919,8 +6978,8 @@ static void * eb_statistics (void *nothing)
 				{
 					case EB_DEF_TRUNK:
 						sprintf (trunkdest, "%s:%d", 
-							(device->trunk.hostname ? device->trunk.hostname : device->trunk.serialport), 
-							(device->trunk.hostname ? device->trunk.remote_port : device->trunk.baudrate));
+							(device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), 
+							(device->trunk.hostname ? device->trunk.remote_port : 0));
 						break;
 					case EB_DEF_WIRE:
 						sprintf (trunkdest, "%s", device->wire.device);

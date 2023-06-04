@@ -158,7 +158,7 @@ nor should you do anything that is in the 'EEPROM' file.
    by 'sudo ' if you are not root) (You will not need the 2nd line if you
    already have 'git' installed):
 
-	sudo apt install raspberrypi-kernel-headers libexplain51 libexplain-dev libexplain-doc
+	sudo apt install raspberrypi-kernel-headers libexplain51 libexplain-dev libexplain-doc libssl-dev
 	sudo apt install git
 	sudo apt upgrade
 	sudo shutdown -r now

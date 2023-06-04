@@ -1,15 +1,15 @@
 all:	econet-bridge econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace
 
 econet-hpbridge:	econet-hpbridge.o fsv2.o 
-	cc -o econet-hpbridge econet-hpbridge.o fsv2.o -lpthread -lexplain
+	cc -o econet-hpbridge econet-hpbridge.o fsv2.o -lpthread -lexplain -lssl -lcrypto
 	-chgrp econet econet-hpbridge
 	-sudo setcap cap_net_admin=pe econet-hpbridge
 
 econet-hpbridge.o:	econet-hpbridge.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-pserv.h
-	cc -c econet-hpbridge.c -Wall
+	cc -g -c econet-hpbridge.c -Wall
 
 fsv2.o: fs.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
-	cc -D BRIDGE_V2 -c fs.c -o fsv2.o -Wall -Wno-pointer-sign
+	cc -D BRIDGE_V2 -g -c fs.c -o fsv2.o -Wall -Wno-pointer-sign
 
 fs.o:	fs.c ../include/econet-gpio-consumer.h 
 	cc -c fs.c -Wall -Wno-pointer-sign

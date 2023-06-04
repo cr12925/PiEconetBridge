@@ -17,6 +17,14 @@
 #ifndef __ECONETBRIDGE_H__
 #define __ECONETBRIDGE_H__
 
+#include <openssl/evp.h>
+#include <openssl/aes.h>
+#include <openssl/rand.h>
+
+// Server version number advertised
+#define EB_VERSION	0x20 // i.e. 2.0
+#define EB_SERVERID	"Pi HP Bridge"
+
 #define EB_TRUNK 	0x01
 #define EB_WIRE 	0x02
 #define EB_PIPE		0x04
@@ -209,18 +217,30 @@ struct __eb_device { // Structure holding information about a "physical" device 
 	union {
 
 		struct { // A trunk will simply receive traffic and pass it straight to one of the other drivers for the network concerned, after doing NAT and firewalling
+
+			// General parameters
 			int 		socket;
 			char 		*hostname;
 			struct addrinfo	*remote_host;
 			int 		local_port, remote_port;
-			struct termios	tty; // Used for serial comms. Serial if hostname is NULL.
-			char		*serialport; // Only used for serial trunks
-			char		*dialstring; // Only used for serial trunks. NULL for direct connection.
-			uint32_t	baudrate; // Only used for serial trunks
-			uint8_t		num_ffs; // Number of sequential FFs - zero byte insertion/removal. 10xFF signals frame start & end. If there is a sequence of 10xFF in the data, a zero is inserted after the 9th.
-			uint8_t		serialstate; // See #defines
-			char		* serialbuf; // Gets allocated for serial trunks only to save memory. Will be allocated at 32780 bytes (32768 data + 12 header)
-			uint16_t	serialptr; // Pointer into serialbuf - contains number of characters received as part of a packet, so 0 means none, and that's where the next received byte will go after a frame start marker
+			int		is_dynamic; // 0 = fixed other end; 1 = dynamic other end
+
+			// Encryption parameters
+			unsigned char	*sharedkey; // PSK for SHA hash on authenticated trunks
+			EVP_CIPHER_CTX	*ctx_enc, *ctx_dec; // Encryption control
+			unsigned char	iv[EVP_MAX_IV_LENGTH];
+#define TRUNK_CIPHER_ALG 0
+#define TRUNK_CIPHER_IV 1
+#define TRUNK_CIPHER_DATA (TRUNK_CIPHER_IV + EVP_MAX_IV_LENGTH)
+#define TRUNK_CIPHER_TOTAL (TRUNK_CIPHER_DATA + (((ECONET_MAX_PACKET_SIZE + 12 + AES_BLOCK_SIZE) / AES_BLOCK_SIZE) * AES_BLOCK_SIZE))
+			uint8_t		cipherpacket[TRUNK_CIPHER_TOTAL];
+			int		encrypted_length;	
+			AES_KEY		aes_key; // Key converted to AES-usable format
+
+			// Timeouts
+			struct timeval	last_rx; // Last reception on this device - used to time out dead trunks
+
+			// Links
 			struct __eb_fw *head, *tail;
 			uint8_t 	xlate_in[256], xlate_out[256]; // Network number translation. _in translates a source network when the trunk receives traffic (and translates bridge advertised network numbers); _out translates a destination network when the trunk sends traffic.  Set up when config is read.
 			uint8_t		filter_in[256], filter_out[256]; // Networks we ignore (i.e. we ditch traffic, and we ignore/don't send adverts)
@@ -414,8 +434,8 @@ struct __eb_config {
 #define EB_CFG_COMMENT "^\\s*#.*$"
 #define EB_CFG_EMPTY "^\\s*$"
 #define EB_CFG_WIRE "^\\s*WIRE\\s+NET\\s+([[:digit:]]{1,3})\\s+ON\\s+DEVICE\\s+(/.+)\\s*$"
-#define EB_CFG_TRUNK "^\\s*TRUNK\\s+ON\\s+PORT\\s+([[:digit:]]{1,5})\\s+TO\\s+([a-z0-9\\-\\.]{4,128}\\:[[:digit:]]{2,5})\\s*$"
-#define EB_CFG_SERIALTRUNK "^\\s*TRUNK\\s+ON\\s+SERIAL\\s+PORT\\s+(\\/.+)\\s+SPEED\\s+([[:digit:]]+)00\\s+(TO\\s+[[:digit:]]{4,}|DIRECT)\\s*$"
+#define EB_CFG_TRUNK "^\\s*TRUNK\\s+ON\\s+PORT\\s+([[:digit:]]{1,5})\\s+TO\\s+([a-z0-9\\-\\.]{4,128}\\:[[:digit:]]{2,5}|DYNAMIC)\\s+KEY\\s+([0-9a-z]{16,32})\\s*$"
+#define EB_CFG_TRUNK_PLAINTEXT "^\\s*TRUNK\\s+ON\\s+PORT\\s+([[:digit:]]{1,5})\\s+TO\\s+([a-z0-9\\-\\.]{4,128}\\:[[:digit:]]{2,5})\\s*$"
 #define EB_CFG_DYNAMIC "^\\s*DYNAMIC\\s+([[:digit:]]{1,3})\\s+(AUTOACK|NONE)\\s*$"
 #define EB_CFG_FILESERVER "^\\s*FILESERVER\\s+ON\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+PATH\\s+(/.+)\\s*$"
 #define EB_CFG_PRINTSERVER "^\\s*PRINTSERVER\\s+ON\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+([a-z0-9]{1,6})\\s+USING\\s+([a-z0-9@\\-\\.]{1,128})\\s*$"

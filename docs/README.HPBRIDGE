@@ -733,6 +733,52 @@ to a specific interface with
 
 TRUNK BIND TO <hostname or IP address>
 
+Encrypted trunks
+----------------
+
+There is now an optional 'KEY abc123' parmeter on the TRUNK ON PORT
+configuration - e.g.
+
+TRUNK ON PORT 20000 TO <hostname>:25000 KEY abcdefghijklmnopqrstuvwxyz
+
+Keys can consist of 0-9, a-z and A-Z. Minimum length 16 characters,
+maximmum 32. The key is shared and must be configured a both ends
+of the trunk. Traffic will then be encrypted using AES-256.
+
+Trunks to hosts with dynamic IP addresses
+-----------------------------------------
+
+One end (only) of a trunk can be configured to have a dynamic IP
+address so as to avoid the need for VPNs when working in NAT, cellular
+or other environments where an IP may change.
+
+Obviously one of the two ends must have a known address (by DNS or 
+IP). Let us call that the 'fixed' end. The other is the 'dynamic' end.
+
+To use a dynamic trunk, encryption MUST be used (see above for 
+configuration) so that the successful decryption of the traffic
+indicates a legitimate trunk counterparty on the given port number.
+
+So at the fixed end, configure for example
+
+TRUNK ON PORT 20000 TO DYNAMIC KEY abcdefghijklmnopqrstuvwxyz
+
+... and on the dynamic end
+
+TRUNK ON PORT 20000 TO <fixed hostname>:20000 KEY abcdefghijklmnopqrstuvwxyz
+
+The fixed end will drop all traffic on the trunk until a known
+good counterparty arrives, at which point the trunk will enable 
+itself and behave normally.
+
+In a future release, there will be a timeout system which, if no
+traffic is received on a dynamic trunk for some period of time
+will cause a bridge reset (i.e. trunks & wire bridges will 
+re-negotiate their list of networks) in order to enable the
+reconnection of a dynamic host from some other IP address 
+(which works at present, but doesn't renegotiate the networks 
+list).
+
 Trunk announcement filtering
 ----------------------------
 
