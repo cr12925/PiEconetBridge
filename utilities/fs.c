@@ -51,7 +51,7 @@
 #if __has_include(<libexplain/ferror.h>)
 	#include <libexplain/ferror.h>
 #else
-	#define __NO_LIB_EXPLAIN
+	#define __NO_LIBEXPLAIN
 #endif
 
 #include "../include/econet-gpio-consumer.h"
