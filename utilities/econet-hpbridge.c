@@ -1683,6 +1683,11 @@ uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_au
 				eb_free (__FILE__, __LINE__, "Q-OUT", "Free packet after dest device unknown", p);
 				eb_free (__FILE__, __LINE__, "Q-OUT", "Free packetq after dest device unknown", packetq);
 				eb_free (__FILE__, __LINE__, "Q-OUT", "Free outq after dest device unknown", outq);
+
+				eb_debug (0, 4, "QUEUE", "%-8s %3d     Output queue manager releasing mutex", eb_type_str(source->type), source->net);
+
+				pthread_mutex_unlock (&(source->qmutex_out));
+	
 				return 0;
 			}
 
