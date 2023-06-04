@@ -2179,11 +2179,26 @@ static void * eb_device_listener (void * device)
 		if ((p.revents & POLLHUP) && d->type == EB_DEF_PIPE && (d->pipe.skt_write != -1)) // Presumably PIPE - close writer socket
 		{
 			struct __eb_packetqueue 	*q, *q_next;
+			char	readerfile[512];
 
 			close (d->pipe.skt_write);
 			d->pipe.skt_write = -1;
 
 			eb_debug (0, 1, "LISTEN", "%-8s %3d.%3d Pipe client went away - closing writer socket", "Pipe", d->net, d->pipe.stn);
+
+			// Close & re-open the reader socket
+
+			close (d->pipe.skt_read);
+			snprintf(readerfile, 510, "%s.tobridge", d->pipe.base);
+			d->pipe.skt_read = open (readerfile, O_RDONLY | O_NONBLOCK | O_SYNC);
+
+                        if (d->pipe.skt_read < 0) // Failed
+                                eb_debug (1, 0, "DESPATCH", "%-8s %3d.%3d Cannot re-open pipe reader socket %s", "", d->net, d->
+pipe.stn, readerfile);
+                        else
+                                eb_debug (0, 2, "DESPATCH", "%-8s %3d.%3d Pipe reader device %s re-opened", "", d->net, d->pipe.
+stn, readerfile);
+			d->p_reset.fd = d->pipe.skt_read;
 
 			// Dump the input queue
 
