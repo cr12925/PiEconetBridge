@@ -217,6 +217,12 @@ The next few switches ought not to be needed but just in case:
 --flashtime <n>		Number of milliseconds to flash each of the activity
 			LEDs (read, write) *off* to signal activity on the
 			Econet.
+
+--trunk-keepalive-interval <n>	Number of seconds between trunk keepalives
+
+--trunk-dead-interval <n>	Seconds without traffic before trunk
+				considered dead
+
 			
 CONFIGURATION
 -------------
@@ -733,6 +739,30 @@ to a specific interface with
 
 TRUNK BIND TO <hostname or IP address>
 
+Trunk keepalives
+----------------
+
+In order to detect a dead remote end of a trunk, the trunks send
+keepalives (port &9C ctrl &D0) every so many seconds (30 by default).
+
+When a trunk received has not received any traffic (keepalive or
+otherwise) for more than 75 seconds, it treats its trunk counterpart
+as dead and will send a full bridge reset. This has the effect of
+ensuring that networks which have in fact become unreachable are no
+longer considered reacahable by existing bridges. 
+
+Where a trunk counterpart is dead, if the remote end is dynamically
+addressed, the bridge will clear down the IP address and port number
+of the remote (dynamic) end so that no more trunk traffic goes over
+the trunk. If the remote end re-awakens, it will send encrypted 
+traffic and the trunk will spring to life again.
+
+The keepalive interval can be set with the command line option
+--trunk-keepalive-interval
+
+Likewise the dead interval can be set with
+--trunk-dead-interval
+
 Encrypted trunks
 ----------------
 
@@ -924,6 +954,9 @@ The byte counts are simply that - a count of bytes, ever increasing.
 If you want a 5 second / 1 minute / 1 hour average, it should be 
 fairly wasy to do the calculation in your own code. I didn't want to be
 prescriptive as to the timeframes for the statistics.
+
+The last figure on each line (which for all but trunks is empty)
+is the seconds since the last reception on the trunk.
 
 The idea is that if you are so minded you could create some sort of
 throughput display, or maybe feed it into SNMP. I haven't done either

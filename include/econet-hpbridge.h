@@ -51,6 +51,7 @@
 #define EB_DEV_CONF_AUTOACK	0x02	// When data traffic received from this station (usually AUN) send it an ACK immediately and don't bother tracking what actually got delivered or where from
 
 #define ECONET_TRACE_PORT	0x9B	// Port number used for HPB traceroute functionality
+#define ECONET_BRIDGE_KEEPALIVE_CTRL	0xD0	// Ctrl byte used for trunk keepalive packets
 
 struct __eb_packetqueue {
 	struct __econet_packet_aun 	*p;
@@ -213,6 +214,9 @@ struct __eb_device { // Structure holding information about a "physical" device 
 	struct __eb_device	*self; // Pointer to own struct in case of need
 	struct pollfd		p_reset; // The fresh pollfd structure used by device listeners. Saves recreating it every time
 	
+	// Timeouts
+	time_t			last_rx; // Last reception on this device - used to time out dead trunks and dynamic AUN stations (when I've written that bit!)
+
 	// Per device type information
 	union {
 
@@ -237,13 +241,14 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			int		encrypted_length;	
 			AES_KEY		aes_key; // Key converted to AES-usable format
 
-			// Timeouts
-			struct timeval	last_rx; // Last reception on this device - used to time out dead trunks
 
 			// Links
 			struct __eb_fw *head, *tail;
 			uint8_t 	xlate_in[256], xlate_out[256]; // Network number translation. _in translates a source network when the trunk receives traffic (and translates bridge advertised network numbers); _out translates a destination network when the trunk sends traffic.  Set up when config is read.
 			uint8_t		filter_in[256], filter_out[256]; // Networks we ignore (i.e. we ditch traffic, and we ignore/don't send adverts)
+	
+			// Keepalive thread
+			pthread_t	keepalive_thread;
 		} trunk;
 
 		struct { // Network on a real econet wire via a bridge board
@@ -355,6 +360,9 @@ struct __eb_config {
 	uint16_t	flashtime; // Time in ms that we turn an LED off when there's activity
 	uint8_t		led_blink_on; // Set to 1 and the LEDs will blink ON for activity, not OFF
 	uint8_t		leds_off; // Set to 1 and the userspace code will turn the LEDs off and leave them off
+	uint8_t		trunk_keepalive_interval; // Seconds between trunk keepalive packets
+	uint8_t		trunk_dead_interval; // Seconds after which trunk considered dead (bridge reset) if no traffic received
+	uint8_t		trunk_keepalive_ctrl; // Ctrl byte used for trunk keepalive packets
 };
 
 /* Global debug vars */
@@ -392,6 +400,9 @@ struct __eb_config {
 #define EB_CONFIG_FLASHTIME	(config.flashtime)
 #define EB_CONFIG_BLINK_ON	(config.led_blink_on)
 #define EB_CONFIG_LEDS_OFF	(config.leds_off)
+#define EB_CONFIG_TRUNK_KEEPALIVE_INTERVAL	(config.trunk_keepalive_interval)
+#define EB_CONFIG_TRUNK_DEAD_INTERVAL		(config.trunk_dead_interval)
+#define EB_CONFIG_TRUNK_KEEPALIVE_CTRL		(config.trunk_keepalive_ctrl)
 
 // Printer status
 

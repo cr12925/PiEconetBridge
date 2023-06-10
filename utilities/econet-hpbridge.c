@@ -99,6 +99,8 @@ pthread_mutex_t		threadcount_mutex; // Locks the thread counter
 #define eb_thread_started() { pthread_mutex_lock(&threadcount_mutex); threads_started++; pthread_mutex_unlock(&threadcount_mutex); }
 #define eb_thread_ready() { pthread_mutex_lock(&threadcount_mutex); threads_ready++; pthread_mutex_unlock(&threadcount_mutex); }
 	
+#define eb_update_lastrx(d) { pthread_mutex_lock(&(d->statsmutex)); d->last_rx = time(NULL); pthread_mutex_unlock(&(d->statsmutex)); }
+
 pthread_mutex_t         networks_update; // Must acquire before changing/reading networks[] array
 
 pthread_mutex_t		fs_mutex, ps_mutex, ip_mutex; // Mutexes (mutices?) for ensuring only one thread talks to a FS, PS, or IPS at the same time
@@ -1423,7 +1425,11 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 
 	if (p->p.port == 0x9C) // Bridge traffic
 	{
-		if (p->p.ctrl >= 0x82) // What/IsNet
+		if (p->p.ctrl == EB_CONFIG_TRUNK_KEEPALIVE_CTRL)
+		{
+			// This is a keepalive - ignore it. So long as it got marked as a received packet, it's fine
+		}
+		else if (p->p.ctrl >= 0x82) // What/IsNet
 		{
 			if (!strncasecmp((char *) &(p->p.data), "BRIDGE", 6))
 				eb_bridge_whatis_net (source, p->p.srcnet, p->p.srcstn, p->p.ctrl, p->p.data[6], p->p.data[7]);
@@ -2681,6 +2687,11 @@ static void * eb_aun_listener (void * exposure)
 			if (parent) // Good start - our network is defined!
 			{
 
+				// Credit to @sweh for spotting the bug here
+
+
+				// See if this is a WIRE or NULL divert
+
 				if (parent->type == EB_DEF_WIRE)
 				{
 					e->parent = parent;
@@ -2688,10 +2699,10 @@ static void * eb_aun_listener (void * exposure)
 						e->parent = e->parent->wire.divert[e->stn];
 				}
 				else if (parent->type == EB_DEF_NULL && parent->null.divert[e->stn]) // Can only have diverts
-					e->parent = e->parent->null.divert[e->stn];
-				else if (parent->type == EB_DEF_TRUNK) // Existing trunk is fine, if it's come up before we started for example
-					e->parent = parent;
-				
+					e->parent = parent->null.divert[e->stn];
+				else if (parent->type == EB_DEF_TRUNK)
+					e->parent = parent; // Just sent to trunk
+
 				// Otherwise, leave it NULL and inactive
 			}
 			
@@ -2725,6 +2736,101 @@ static void * eb_aun_listener (void * exposure)
 				eb_process_incoming_aun(my_exposures[count]); // Does the read off the socket & processes it
 
 		memcpy (&pfd, &pfd_initial, sizeof(pfd)); // Reset poll structure and go again
+	}
+
+	return NULL;
+}
+
+/* Trunk keepalive generator, and dead detector
+ */
+
+static void * eb_trunk_keepalive (void * device)
+{
+
+	struct __econet_packet_aun	*p;
+	struct __eb_device		*d;
+	time_t				last_reset, last_rx;
+
+	d = device;
+
+	eb_debug (0, 2, "DESPATCH", "%-8s         Thread started (tid %d) - Trunk keepalive for local port %d", eb_type_str(d->type), syscall(SYS_gettid), d->trunk.local_port);
+
+	last_reset = 0; // To make sure we do a *first* reset...
+
+	eb_thread_ready();
+
+	while (1)
+	{
+		uint8_t		dead;
+
+		p = eb_malloc (__FILE__, __LINE__, "TRUNK", "Memory for trunk keepalive packet", 12);
+	
+		if (!p)
+			eb_debug (1, 0, "FSLIST", "Unable to malloc() new trunk keepalive packet");
+
+		// Distant trunks ignore src/destination on trunk keepalives, so we don't need to worry about them
+
+		p->p.srcstn = 0;
+		p->p.srcnet = eb_bridge_sender_net(d);
+		p->p.dststn = p->p.dstnet = 0xff;
+		p->p.aun_ttype = ECONET_AUN_DATA;
+		p->p.seq = 0x00000000;
+		p->p.port = 0x9C; // Bridge traffic
+		p->p.ctrl = EB_CONFIG_TRUNK_KEEPALIVE_CTRL;
+
+		// Send packet on trunk
+
+		eb_enqueue_input (d, p, 0);
+		pthread_cond_signal(&(d->qwake));
+
+		eb_debug (0, 3, "BRIDGE", "%-8s         Trunk keepalive sent on local port %d", eb_type_str(d->type), d->trunk.local_port);
+
+		// Check last_rx to see if dead
+
+		dead = 0;
+
+		// See if it's dead
+		pthread_mutex_lock (&(d->statsmutex));
+		last_rx = d->last_rx;
+		pthread_mutex_unlock (&(d->statsmutex));
+
+		if (difftime(time(NULL), d->last_rx) > EB_CONFIG_TRUNK_DEAD_INTERVAL)
+			dead = 1;
+
+		if (dead) 
+		{
+
+			// If dynamic, clear the dynamic variables and signal disconnected
+
+			if (d->trunk.is_dynamic)
+			{
+				pthread_mutex_lock (&(d->qmutex_in));
+
+				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk local port %d dead - clearing dynamic host data", eb_type_str(d->type), d->trunk.local_port);
+
+				if (d->trunk.remote_host && d->trunk.remote_host->ai_addr) eb_free(__FILE__, __LINE__, "TRUNK", "Freeing trunk.remote_host.ai_addr structure", d->trunk.remote_host->ai_addr);
+				if (d->trunk.remote_host) eb_free(__FILE__, __LINE__, "TRUNK", "Freeing trunk.remote_host structure", d->trunk.remote_host);
+				if (d->trunk.hostname) eb_free(__FILE__, __LINE__, "TRUNK", "Freeing trunk.hostname string", d->trunk.hostname);
+
+				d->trunk.remote_host = NULL;
+				d->trunk.hostname = NULL;
+
+				pthread_mutex_unlock (&(d->qmutex_in));
+			}
+
+			// Global bridge reset if our last reset was before the last reception time (so we don't constantly reset on a dead trunk)
+
+			if (last_rx > last_reset)
+			{
+				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk local port %d dead - sending bridge reset", eb_type_str(d->type), d->trunk.local_port);
+				eb_bridge_reset(NULL);
+				last_reset = time(NULL);
+			}
+
+		}
+
+		usleep (EB_CONFIG_TRUNK_KEEPALIVE_INTERVAL * 1000000); // Sleep
+
 	}
 
 	return NULL;
@@ -2765,6 +2871,8 @@ static void * eb_device_despatcher (void * device)
 		eb_debug (0, 2, "DESPATCH", "%-8s %3d     Thread started (tid %d)", eb_type_str(d->type), d->net, syscall(SYS_gettid));
 	else
 		eb_debug (0, 2, "DESPATCH", "%-8s         Thread started for trunk on port %d to %s:%d (tid %d)", eb_type_str(d->type), d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Unregistered dynamic host)", d->trunk.hostname ? d->trunk.remote_port : 0, syscall(SYS_gettid));
+
+	d->last_rx = 0; // Reset timeout
 
 	if (d->type == EB_DEF_WIRE && !strcasecmp("/dev/null", d->wire.device)) // Flag as a dummy wire so we don't try and receive traffic from it
 		wire_null = 1;
@@ -3004,6 +3112,17 @@ static void * eb_device_despatcher (void * device)
 			if (bind(d->trunk.socket, (struct sockaddr *) &service, sizeof(service)) != 0)
 				eb_debug (1, 0, "DESPATCH", "%-8s         Unable to bind trunk listener socket for local port %d to %s:%d (%s)", "Trunk", d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0, strerror(errno));
 
+			// Set up keepalive thread
+
+			if ((err = pthread_create(&(d->trunk.keepalive_thread), NULL, eb_trunk_keepalive, d)))
+				eb_debug (1, 0, "DESPATCH", "%-8s         Unable to create trunk keepalive thread");
+			else
+			{
+				eb_debug (0, 1, "DESPATCH", "%-8s         Trunk keepalive thread started");
+				pthread_detach (d->trunk.keepalive_thread);
+				eb_thread_started();
+			}
+			
 			if (!(d->trunk.is_dynamic))
 				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk initialized between port %d and %s:%d with key %s", "Trunk", d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0, d->trunk.sharedkey);
 			else
@@ -3210,6 +3329,9 @@ static void * eb_device_despatcher (void * device)
 									memcpy(&packet, &(temp_packet[2]), datalength); // data length always ignores the ECONET part of the data
 									length = datalength;
 									packetreceived = 1;
+									
+									// Mark receipt
+									eb_update_lastrx(d);
 
 									// Having received a valid packet, let's update our remote end status if we are dynamic
 
@@ -3219,15 +3341,19 @@ static void * eb_device_despatcher (void * device)
 										if (d->trunk.remote_host || (!d->trunk.remote_host && (d->trunk.remote_host = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk remote_host structure", sizeof(struct addrinfo)))))
 										{
 
-											if ((d->trunk.remote_host->ai_addr = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk remote_host->ai_addr structure", sizeof(struct sockaddr_in))) && (d->trunk.hostname = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk hostname space", 20))) // 20 because for now it'll just be an IP address
+											if ((d->trunk.remote_host->ai_addr = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk remote_host->ai_addr structure", sizeof(struct sockaddr_in))) && (d->trunk.hostname = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk hostname space", HOST_NAME_MAX))) // 20 because for now it'll just be an IP address
 											{
 
+		d->trunk.remote_host->ai_family = AF_INET;
+		d->trunk.remote_host->ai_next = NULL;
+		d->trunk.remote_host->ai_canonname = NULL;
 												memcpy (d->trunk.remote_host->ai_addr, &src_addr, sizeof(struct sockaddr_in));
 												d->trunk.remote_host->ai_addrlen = sizeof(struct sockaddr_in);
 
 												d->trunk.remote_port = ntohs(src_addr.sin_port);
 
-												strncpy (d->trunk.hostname, inet_ntoa(src_addr.sin_addr), 19);
+		if (getnameinfo((struct sockaddr *) d->trunk.remote_host->ai_addr, sizeof (struct sockaddr_in), d->trunk.hostname, HOST_NAME_MAX, NULL, 0, 0) != 0) // = is success and we'll have the hostname in d->trunk.hostname; otherwise put numeric in there
+			strncpy (d->trunk.hostname, inet_ntoa(src_addr.sin_addr), 19);
 												eb_debug (0, 1, "DESPATCH", "%-8s %3d     Dynamic trunk endpoint found for local port %d at host %s port %d (addr_len = %d, family = %d)", eb_type_str(d->type), d->net, d->trunk.local_port, d->trunk.hostname, ntohs(src_addr.sin_port), addr_len, src_addr.sin_family);
 											}
 											else
@@ -3255,13 +3381,19 @@ static void * eb_device_despatcher (void * device)
 
 						memcpy (&packet, &d->trunk.cipherpacket, length);
 
-						if (length >= 12) packetreceived = 1;
+						if (length >= 12)
+						{
+							packetreceived = 1;
+							// Mark receipt
+							eb_update_lastrx(d);
+						}
+
 					}
 				}
 				if (d->type == EB_DEF_WIRE)
 				{
 					length = read (l_socket, &packet, ECONET_MAX_PACKET_SIZE);
-					if (length >= 12) packetreceived = 1;
+					if (length >= 12) { eb_update_lastrx(d); packetreceived = 1; }
 				}
 
 				if (packetreceived && (length >= 12))
@@ -3351,6 +3483,9 @@ static void * eb_device_despatcher (void * device)
 					eb_add_stats (&(d->local.ip.statsmutex), &(d->local.ip.b_in), length);
 					outgoing = eb_malloc (__FILE__, __LINE__, "IPGW", "Econet AUN packet for incoming IP transmission", length + 12);
 					packetreceived = 1;
+
+					// Mark receipt
+					eb_update_lastrx(d);
 
 					if (outgoing)
 					{
@@ -3445,6 +3580,9 @@ static void * eb_device_despatcher (void * device)
 				else
 				{
 					packetreceived = 1;
+
+					// Mark receipt
+					eb_update_lastrx(d);
 
 					// Insert source address
 
@@ -6043,6 +6181,8 @@ Queuing management options (usually need not be adjusted:\n\
 --flashtime n\t\tTime in ms to flash each activity LED off to show activity. (Current: %d)\n\
 --led-blink-on\t\tActivity LEDs are off by default, and blink on for activity (Current: ON and blink OFF)\n\
 --leds-off\t\tTurn the activity LEDs off and leave them off\n\
+--trunk-keepalive-interval n\tSeconds between trunk keepalive packets\n\
+--trunk-dead-interval n\tSeconds without reception before trunk considered dead\n\
 \n\
 Statistics port control:\n\
 \n\
@@ -6129,6 +6269,9 @@ int main (int argc, char **argv)
 	EB_CONFIG_FLASHTIME = 100; // 0.1s flash time on the Read/Write LEDs
 	EB_CONFIG_BLINK_ON = 0; // LEDs are on and blink off by default
 	EB_CONFIG_LEDS_OFF = 0; // Disable LEDs - turn them off at the start and don't blink them
+	EB_CONFIG_TRUNK_KEEPALIVE_INTERVAL = 30; // Default 30s keepalive interval
+	EB_CONFIG_TRUNK_KEEPALIVE_CTRL = 0xD0; // Default keepalive packet ctrl byte
+	EB_CONFIG_TRUNK_DEAD_INTERVAL = 75; // Default trunk dead interval
 
 	strcpy (config_path, "/etc/econet-gpio/econet-hpbridge.cfg");
 	/* Clear networks[] table */
@@ -6164,7 +6307,9 @@ int main (int argc, char **argv)
 		{"flashtime", 		required_argument,	0,	0 },
 		{"led-blink-on",	0,			0,	0 },
 		{"leds-off",		0,			0,	0 },
-		{"normalize-debug@",	0,			0,	0 },
+		{"normalize-debug",	0,			0,	0 },
+		{"trunk-keepalive-interval", 	required_argument, 	0, 	0},
+		{"trunk-dead-interval", 	required_argument, 	0, 	0},
 		{0, 			0,			0,	0 }
 	};
 
@@ -6192,6 +6337,8 @@ int main (int argc, char **argv)
 					case 11:	EB_CONFIG_BLINK_ON = 1; break;
 					case 12:	EB_CONFIG_LEDS_OFF = 1; EB_CONFIG_BLINK_ON = 1; break;
 					case 13:	normalize_debug = 1; break;
+					case 14:	EB_CONFIG_TRUNK_KEEPALIVE_INTERVAL = atoi(optarg); break;
+					case 15:	EB_CONFIG_TRUNK_DEAD_INTERVAL = atoi(optarg); break;
 				}
 			} break;
 			case 'c':	strncpy(config_path, optarg, 1023); break;
@@ -6914,7 +7061,7 @@ static void * eb_statistics (void *nothing)
 						
 			pthread_mutex_lock (&(device->statsmutex));
 
-			fprintf (output, "%03d|000|%s|%s|%llu|%llu\n",	device->net, eb_type_str(device->type), 
+			fprintf (output, "%03d|000|%s|%s|%llu|%llu||\n",	device->net, eb_type_str(device->type), 
 				trunkdest,
 				device->b_in, device->b_out);
 		
@@ -6954,7 +7101,7 @@ static void * eb_statistics (void *nothing)
 	
 						pthread_mutex_lock (&(divert->statsmutex));
 
-						fprintf (output, "%03d|%03d|%s|%s|%llu|%llu\n",	divert->net, stn, eb_type_str(divert->type), info, divert->b_in, divert->b_out);
+						fprintf (output, "%03d|%03d|%s|%s|%llu|%llu||\n",	divert->net, stn, eb_type_str(divert->type), info, divert->b_in, divert->b_out);
 		
 						pthread_mutex_unlock (&(divert->statsmutex));
 					}
@@ -6972,7 +7119,7 @@ static void * eb_statistics (void *nothing)
 
 			pthread_mutex_lock (&(device->statsmutex));
 
-			fprintf (output, "999|000|Trunk|Local %d to %s:%d|%llu|%llu\n",	(device->trunk.local_port), (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), (device->trunk.hostname ? device->trunk.remote_port : 0), device->b_in, device->b_out);
+			fprintf (output, "999|000|Trunk|Local %d to %s:%d|%llu|%llu|%.0f|\n",	(device->trunk.local_port), (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), (device->trunk.hostname ? device->trunk.remote_port : 0), device->b_in, device->b_out, difftime(time(NULL), device->last_rx));
 		
 			pthread_mutex_unlock (&(device->statsmutex));
 
@@ -7011,7 +7158,7 @@ static void * eb_statistics (void *nothing)
 							
 				pthread_mutex_lock (&(device->statsmutex));
 	
-				fprintf (output, "%03d|%03d|%s|%s|%llu|%llu\n",	net, (device->type == EB_DEF_TRUNK && (device->trunk.xlate_out[net])) ? device->trunk.xlate_out[net] : net, eb_type_str(device->type), 
+				fprintf (output, "%03d|%03d|%s|%s|%llu|%llu||\n",	net, (device->type == EB_DEF_TRUNK && (device->trunk.xlate_out[net])) ? device->trunk.xlate_out[net] : net, eb_type_str(device->type), 
 					trunkdest,
 					device->b_in, device->b_out);
 			

@@ -135,17 +135,26 @@ uint8_t econet_remote_poll(int ms)
 		if (len > 12 && r.p.port == 0x90)
 		{
 
-			len -= 13; // Drop the 0x0d on the end as well
+			char 	*cr_ptr;
+			int	count;
 
 			if (r.p.srcnet == 0)
 				fprintf (stderr, "    %3d ", r.p.srcstn);
 			else
 				fprintf (stderr, "%3d.%3d ", r.p.srcnet, r.p.srcstn);
 
-			for (int count = 0; count < len; count++)
-				fprintf (stderr, "%c", r.p.data[count]);
+			count = 2;
 
-			fprintf (stderr, "\n");
+			while (count < len-12)
+			{
+				if (r.p.data[count] == 0x0d)
+					break;
+				else	count++;
+			}
+
+			r.p.data[count] = 0x00;
+
+			fprintf (stderr, "%s\n", &(r.p.data[2]));
 
 			return 1;
 		}
