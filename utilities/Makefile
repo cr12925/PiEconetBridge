@@ -1,7 +1,7 @@
 all:	econet-bridge econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers
 
 econet-hpbridge:	econet-hpbridge.o fsv2.o 
-	cc -o econet-hpbridge econet-hpbridge.o fsv2.o -lpthread -lexplain -lssl -lcrypto
+	if [ -f .noexplain ]; then cc -g -o econet-hpbridge econet-hpbridge.o fsv2.o -lpthread -lssl -lcrypto; else cc -g -o econet-hpbridge econet-hpbridge.o fsv2.o -lpthread -lssl -lcrypto -lexplain; fi
 	-chgrp econet econet-hpbridge
 	-sudo setcap cap_net_admin=pe econet-hpbridge
 
@@ -14,7 +14,8 @@ fsv2.o: fs.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
 fs.o:	fs.c ../include/econet-gpio-consumer.h 
 	cc -c fs.c -Wall -Wno-pointer-sign
 
-econet-bridge: econet-bridge.o fs.o sockets.o -lexplain
+econet-bridge: econet-bridge.o fs.o sockets.o
+	if [ -f .noexplain ]; then cc -g econet-bridge.o fs.o sockets.o -o econet-bridge; else cc -g econet-bridge.o fs.o sockets.o -o econet-bridge -lexplain; fi
 
 econet-monitor: econet-monitor.o
 
