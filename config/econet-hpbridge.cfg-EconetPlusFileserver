@@ -1,2 +1,2 @@
 WIRE NET 1 ON DEVICE /dev/econet-gpio
-FILESERVER ON 1.254 PATH /home/pi/econetfs
+FILESERVER ON 1.254 PATH /home/__USER__/econetfs

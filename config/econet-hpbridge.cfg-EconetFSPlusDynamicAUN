@@ -8,6 +8,6 @@
 # without having to specify them all.
 
 WIRE NET 1 ON DEVICE /dev/econet-gpio
-FILESERVER ON 1.254 PATH /home/pi/econetfs
+FILESERVER ON 1.254 PATH /home/__USER__/econetfs
 EXPOSE HOST 1.254 ON PORT *:32768
 DYNAMIC 2 AUTOACK

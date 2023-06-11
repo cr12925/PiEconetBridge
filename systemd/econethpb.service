@@ -6,8 +6,8 @@ ConditionPathExists=/etc/econet-gpio/econet-hpbridge.cfg
 
 [Service]
 Type=simple
-User=pi
-Group=pi
+User=__USER__
+Group=__USER__
 Restart=on-failure
 RestartSec=5
 ExecStart=/usr/local/sbin/econet-hpbridge

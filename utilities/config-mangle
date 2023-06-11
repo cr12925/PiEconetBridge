@@ -1,0 +1,5 @@
+#!/bin/sh
+
+user=`whoami`
+
+sed "s/__USER__/"$user"/g" < $1 > ${1}.local
