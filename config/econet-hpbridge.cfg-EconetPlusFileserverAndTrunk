@@ -1,6 +1,9 @@
 WIRE NET 1 ON DEVICE /dev/econet-gpio
 FILESERVER ON 1.254 PATH /home/__USER__/econetfs
-TRUNK ON PORT 9000 TO myfriend.econet.org:9500
+# The trunk key must match both ends
+TRUNK ON PORT 9000 TO myfriend.econet.org:9500 KEY abcdef123456
+# If you do not know your friend's IP address/hostname, but they know yours, try
+# TRUNK ON PORT 9000 TO DYNAMIC KEY abcdef123456
 
 # Filtering examples
 # Support myfriend advertises network 1, and the bridge will automatically

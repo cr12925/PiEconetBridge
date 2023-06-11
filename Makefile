@@ -29,7 +29,11 @@ install-utilities:	install-mkgroup utilities
 	sudo cp utilities/econet-bridge utilities/econet-hpbridge utilities/econet-monitor utilities/econet-test utilities/econet-clock utilities/econet-ledtest /usr/local/sbin
 	sudo cp utilities/econet-imm utilities/econet-ipgw utilities/econet-notify utilities/econet-remote utilities/econet-fslist utilities/econet-trace utilities/econet-servers /usr/local/bin
 	sudo cp utilities/remove_xattr utilities/xattr_to_dotfile /usr/local/bin
-	for a in econet.cfg econet-hpbridge.cfg-EconetPlusFileserver econet-hpbridge.cfg-EconetFSPlusAcornAUN econet-hpbridge.cfg-EconetPlusFileserverAndTrunk econet-hpbridge.cfg-EconetFSPlusDynamicAUN; do utilities/config-mangle config/$a; done
+        utilities/config-mangle config/econet.cfg
+        utilities/config-mangle config/econet-hpbridge.cfg-EconetPlusFileserver
+        utilities/config-mangle config/econet-hpbridge.cfg-EconetFSPlusAcornAUN
+        utilities/config-mangle config/econet-hpbridge.cfg-EconetPlusFileserverAndTrunk
+        utilities/config-mangle config/econet-hpbridge.cfg-EconetFSPlusDynamicAUN
 	utilities/config-mangle systemd/econetfs.service
 	utilities/config-mangle systemd/econethpb.service
 	[ -f /etc/econet-gpio/econet.cfg ] || sudo cp config/econet.cfg.local /etc/econet-gpio/econet.cfg
