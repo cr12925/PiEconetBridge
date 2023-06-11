@@ -3341,20 +3341,31 @@ static void * eb_device_despatcher (void * device)
 										if (d->trunk.remote_host || (!d->trunk.remote_host && (d->trunk.remote_host = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk remote_host structure", sizeof(struct addrinfo)))))
 										{
 
-											if ((d->trunk.remote_host->ai_addr = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk remote_host->ai_addr structure", sizeof(struct sockaddr_in))) && (d->trunk.hostname = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk hostname space", HOST_NAME_MAX))) // 20 because for now it'll just be an IP address
+											if ((d->trunk.remote_host->ai_addr || (d->trunk.remote_host->ai_addr = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk remote_host->ai_addr structure", sizeof(struct sockaddr_in)))) && (d->trunk.hostname || (d->trunk.hostname = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk hostname space", HOST_NAME_MAX)))) // 20 because for now it'll just be an IP address
 											{
 
-		d->trunk.remote_host->ai_family = AF_INET;
-		d->trunk.remote_host->ai_next = NULL;
-		d->trunk.remote_host->ai_canonname = NULL;
-												memcpy (d->trunk.remote_host->ai_addr, &src_addr, sizeof(struct sockaddr_in));
-												d->trunk.remote_host->ai_addrlen = sizeof(struct sockaddr_in);
+												// Is it the same host as we had before?
 
-												d->trunk.remote_port = ntohs(src_addr.sin_port);
+												if (memcmp(&src_addr, d->trunk.remote_host->ai_addr, sizeof(struct sockaddr_in))) // Not equal - host has changed
+												{
+													d->trunk.remote_host->ai_family = AF_INET;
+													d->trunk.remote_host->ai_next = NULL;
+													d->trunk.remote_host->ai_canonname = NULL;
+													memcpy (d->trunk.remote_host->ai_addr, &src_addr, sizeof(struct sockaddr_in));
+													d->trunk.remote_host->ai_addrlen = sizeof(struct sockaddr_in);
 
-		if (getnameinfo((struct sockaddr *) d->trunk.remote_host->ai_addr, sizeof (struct sockaddr_in), d->trunk.hostname, HOST_NAME_MAX, NULL, 0, 0) != 0) // = is success and we'll have the hostname in d->trunk.hostname; otherwise put numeric in there
-			strncpy (d->trunk.hostname, inet_ntoa(src_addr.sin_addr), 19);
-												eb_debug (0, 1, "DESPATCH", "%-8s %3d     Dynamic trunk endpoint found for local port %d at host %s port %d (addr_len = %d, family = %d)", eb_type_str(d->type), d->net, d->trunk.local_port, d->trunk.hostname, ntohs(src_addr.sin_port), addr_len, src_addr.sin_family);
+													d->trunk.remote_port = ntohs(src_addr.sin_port);
+
+													if (getnameinfo((struct sockaddr *) d->trunk.remote_host->ai_addr, sizeof (struct sockaddr_in), d->trunk.hostname, HOST_NAME_MAX, NULL, 0, 0) != 0) // = is success and we'll have the hostname in d->trunk.hostname; otherwise put numeric in there
+														strncpy (d->trunk.hostname, inet_ntoa(src_addr.sin_addr), 19);
+
+													eb_debug (0, 1, "DESPATCH", "%-8s %3d     Dynamic trunk endpoint found for local port %d at host %s port %d (addr_len = %d, family = %d)", eb_type_str(d->type), d->net, d->trunk.local_port, d->trunk.hostname, ntohs(src_addr.sin_port), addr_len, src_addr.sin_family);
+
+													// Do a bridge reset
+
+													eb_bridge_reset(NULL);
+
+												}
 											}
 											else
 												eb_debug (1, 1, "DESPATCH", "%-8s %3d     Dynamic trunk endpoint found for local port %d at host %s port %d, but failed to allocate memory for sockaddr_in structure!", eb_type_str(d->type), d->net, d->trunk.local_port, inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port));
@@ -6271,7 +6282,7 @@ int main (int argc, char **argv)
 	EB_CONFIG_LEDS_OFF = 0; // Disable LEDs - turn them off at the start and don't blink them
 	EB_CONFIG_TRUNK_KEEPALIVE_INTERVAL = 30; // Default 30s keepalive interval
 	EB_CONFIG_TRUNK_KEEPALIVE_CTRL = 0xD0; // Default keepalive packet ctrl byte
-	EB_CONFIG_TRUNK_DEAD_INTERVAL = 75; // Default trunk dead interval
+	EB_CONFIG_TRUNK_DEAD_INTERVAL = EB_CONFIG_TRUNK_KEEPALIVE_INTERVAL * 2.5; // Default trunk dead interval
 
 	strcpy (config_path, "/etc/econet-gpio/econet-hpbridge.cfg");
 	/* Clear networks[] table */

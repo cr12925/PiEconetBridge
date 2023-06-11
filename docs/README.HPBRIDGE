@@ -219,9 +219,11 @@ The next few switches ought not to be needed but just in case:
 			Econet.
 
 --trunk-keepalive-interval <n>	Number of seconds between trunk keepalives
+				Default 30
 
 --trunk-dead-interval <n>	Seconds without traffic before trunk
-				considered dead
+				considered dead. Default 2.5 x keepalive
+				interval.
 
 			
 CONFIGURATION
@@ -746,10 +748,11 @@ In order to detect a dead remote end of a trunk, the trunks send
 keepalives (port &9C ctrl &D0) every so many seconds (30 by default).
 
 When a trunk received has not received any traffic (keepalive or
-otherwise) for more than 75 seconds, it treats its trunk counterpart
-as dead and will send a full bridge reset. This has the effect of
-ensuring that networks which have in fact become unreachable are no
-longer considered reacahable by existing bridges. 
+otherwise) for more than 2.5 x the keepalive interval, 
+it treats its trunk counterpart as dead and will send a full bridge
+reset. This has the effect of ensuring that networks which have in
+fact become unreachable are no longer considered reacahable by
+existing bridges. 
 
 Where a trunk counterpart is dead, if the remote end is dynamically
 addressed, the bridge will clear down the IP address and port number
@@ -762,6 +765,12 @@ The keepalive interval can be set with the command line option
 
 Likewise the dead interval can be set with
 --trunk-dead-interval
+
+The default periods are 30 seconds for keepalives, and thus 75 
+seconds for dead (in case we lose a keepalive somewhere). You can
+alter just the keepalive interval and the bridge will still use
+a default of 2.5 times that interval as the dead interval, but you
+can also manually set the dead interval if you wish.
 
 Encrypted trunks
 ----------------
