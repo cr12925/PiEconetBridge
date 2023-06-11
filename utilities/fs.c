@@ -693,7 +693,7 @@ unsigned short fs_allocate_user_dir_channel(int server, unsigned int active_id, 
 	while (active[server][active_id].fhandles[count].handle != -1 && count < FS_MAX_OPEN_FILES)
 		count++;
 
-	if (count == FS_MAX_OPEN_FILES) return -1; // No handle available
+	if (count == FS_MAX_OPEN_FILES) return 0; // No handle available
 
 	active[server][active_id].fhandles[count].handle = d;
 	active[server][active_id].fhandles[count].cursor = 0;
@@ -2913,7 +2913,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 
 				internal_handle = fs_open_interlock(server, p.unixpath, 1, active[server][usercount].userid);
 
-				if ((active[server][usercount].root = fs_allocate_user_dir_channel(server, usercount, internal_handle)) == -1) // Can't allocate
+				if ((active[server][usercount].root = fs_allocate_user_dir_channel(server, usercount, internal_handle)) == 0) // Can't allocate
 				{
 					fs_error (server, reply_port, net, stn, 0xDE, "Root directory channel ?");
 					fs_close_interlock(server, internal_handle, 1);
@@ -2934,7 +2934,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 
 				internal_handle = fs_open_interlock(server, p.unixpath, 1, active[server][usercount].userid);
 
-				if ((active[server][usercount].current = fs_allocate_user_dir_channel(server, usercount, internal_handle)) == -1) // Can't allocate a second handle for CWD on the root internal_handle
+				if ((active[server][usercount].current = fs_allocate_user_dir_channel(server, usercount, internal_handle)) == 0) // Can't allocate a second handle for CWD on the root internal_handle
 				{
 
 					fs_error (server, reply_port, net, stn, 0xA8, "Can't map CWD!");
@@ -2984,7 +2984,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 					
 				internal_handle = fs_open_interlock(server, p.unixpath, 1, active[server][usercount].userid);
 
-				if ((active[server][usercount].lib = fs_allocate_user_dir_channel(server, usercount, internal_handle)) == -1) // Can't allocate
+				if ((active[server][usercount].lib = fs_allocate_user_dir_channel(server, usercount, internal_handle)) == 0) // Can't allocate
 				{
 					fs_error (server, reply_port, net, stn, 0xDE, "Library dir channel ?");
 					//fs_close_dir_handle(server, internal_handle);
@@ -4628,7 +4628,7 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 		return;
 	}
 
-	if ((root = fs_allocate_user_dir_channel(server, active_id, internal_root_handle)) == -1) // Can't allocate handle
+	if ((root = fs_allocate_user_dir_channel(server, active_id, internal_root_handle)) == 0) // Can't allocate handle
 	{
 		fs_error(server, reply_port, net, stn, 0xFF, "Root directory channel ?");
 		//fs_close_dir_handle(server, internal_root_handle);
@@ -4644,7 +4644,7 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 		return;
 	}
 
-	if ((cur = fs_allocate_user_dir_channel(server, active_id, internal_cur_handle)) == -1) // Can't allocate handle
+	if ((cur = fs_allocate_user_dir_channel(server, active_id, internal_cur_handle)) == 0) // Can't allocate handle
 	{
 		fs_error(server, reply_port, net, stn, 0xFF, "CWD channel ?");
 		fs_deallocate_user_dir_channel (server, active_id, root);
@@ -4683,10 +4683,9 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 			return;
 		}
 	
-		if ((lib = fs_allocate_user_dir_channel(server, active_id, internal_lib_handle)) == -1) // Can't allocate handle
+		if ((lib = fs_allocate_user_dir_channel(server, active_id, internal_lib_handle)) == 0) // Can't allocate handle
 		{
 			fs_error(server, reply_port, net, stn, 0xFF, "Library directory channel ?");
-			fs_error(server, reply_port, net, stn, 0xFF, "Library directory inaccessible!");
 			fs_deallocate_user_dir_channel(server, active_id, root);
 			fs_deallocate_user_dir_channel(server, active_id, cur);
 			fs_close_interlock(server, internal_root_handle, 1);
@@ -7617,7 +7616,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						if (l != -1) // Found
 						{
 							n_handle = fs_allocate_user_dir_channel(server, active_id, l);
-							if (n_handle >= 0)
+							if (n_handle > 0)
 							{
 								int old;
 								struct __econet_packet_udp r;
@@ -7689,7 +7688,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						if (l != -1) // Found
 						{
 							n_handle = fs_allocate_user_dir_channel(server, active_id, l);
-							if (n_handle >= 0)
+							if (n_handle > 0)
 							{
 								int old;
 								struct __econet_packet_udp r;
