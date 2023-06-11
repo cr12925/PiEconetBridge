@@ -29,10 +29,13 @@ install-utilities:	install-mkgroup utilities
 	sudo cp utilities/econet-bridge utilities/econet-hpbridge utilities/econet-monitor utilities/econet-test utilities/econet-clock utilities/econet-ledtest /usr/local/sbin
 	sudo cp utilities/econet-imm utilities/econet-ipgw utilities/econet-notify utilities/econet-remote utilities/econet-fslist utilities/econet-trace utilities/econet-servers /usr/local/bin
 	sudo cp utilities/remove_xattr utilities/xattr_to_dotfile /usr/local/bin
-	[ -f /etc/econet-gpio/econet.cfg ] || sudo cp config/econet.cfg /etc/econet-gpio/econet.cfg
-	[ -f /etc/systemd/system/econetfs.service ] || sudo cp systemd/econetfs.service /etc/systemd/system
-	[ -f /etc/econet-gpio/econet-hpbridge.cfg ] || sudo cp config/econet-hpbridge.cfg-EconetPlusFileserver /etc/econet-gpio/econet-hpbridge.cfg
-	[ -f /etc/systemd/system/econethpb.service ] || sudo cp systemd/econethpb.service /etc/systemd/system
+	for a in econet.cfg econet-hpbridge.cfg-EconetPlusFileserver econet-hpbridge.cfg-EconetFSPlusAcornAUN econet-hpbridge.cfg-EconetPlusFileserverAndTrunk econet-hpbridge.cfg-EconetFSPlusDynamicAUN; do utilities/config-mangle config/$a; done
+	utilities/config-mangle systemd/econetfs.service
+	utilities/config-mangle systemd/econethpb.service
+	[ -f /etc/econet-gpio/econet.cfg ] || sudo cp config/econet.cfg.local /etc/econet-gpio/econet.cfg
+	[ -f /etc/systemd/system/econetfs.service ] || sudo cp systemd/econetfs.service.local /etc/systemd/system/econetfs.service
+	[ -f /etc/econet-gpio/econet-hpbridge.cfg ] || sudo cp config/econet-hpbridge.cfg-EconetPlusFileserver.local /etc/econet-gpio/econet-hpbridge.cfg
+	[ -f /etc/systemd/system/econethpb.service ] || sudo cp systemd/econethpb.service.local /etc/systemd/system/econethpb.service
 
 install-old-utilities:	install-mkgroup utilities install-utilities
 	-sudo systemctl daemon-reload
