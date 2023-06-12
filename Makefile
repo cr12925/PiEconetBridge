@@ -1,16 +1,7 @@
 all:	install-old
 
-module:
-	cd module
-	make clean
-	make
-	make reload
-
-utilities:
-	cd utilities
-	make
-
-install-module:	install-mkgroup module 
+install-module:	install-mkgroup
+	cd module ; make clean ; make
 	[ -f /etc/udev/rules.d/90-econet.rules ] || sudo cp udev/90-econet.rules /etc/udev/rules.d/90-seconet.rules
 	sudo cp module/econet-gpio.ko /lib/modules/`uname -r`/kernel/drivers/net
 	sudo /usr/sbin/depmod
@@ -18,6 +9,9 @@ install-module:	install-mkgroup module
 install-mkgroup:
 	-sudo groupadd econet
 	-sudo usermod -a -G econet `whoami`
+
+utilities: install-mkgroup
+	cd utilities ; make
 
 install-utilities:	install-mkgroup utilities
 	[ -d /etc/econet-gpio ] || sudo mkdir -p /etc/econet-gpio
@@ -41,7 +35,7 @@ install-utilities:	install-mkgroup utilities
 	[ -f /etc/econet-gpio/econet-hpbridge.cfg ] || sudo cp config/econet-hpbridge.cfg-EconetPlusFileserver.local /etc/econet-gpio/econet-hpbridge.cfg
 	[ -f /etc/systemd/system/econethpb.service ] || sudo cp systemd/econethpb.service.local /etc/systemd/system/econethpb.service
 
-install-old-utilities:	install-mkgroup utilities install-utilities
+install-old-utilities:	install-utilities
 	-sudo systemctl daemon-reload
 	-sudo systemctl disable econethpb
 	-sudo systemctl stop econethpb
@@ -49,7 +43,7 @@ install-old-utilities:	install-mkgroup utilities install-utilities
 	-sudo systemctl start econetfs
 	@echo "Install routine finished. Please ensure you have 'arm_freq=1000' (or your chosen frequency) and 'force_turbo=1' in /boot/config.txt (see README). Then please reboot. Note that Econet library utilities for use on your server are NOT included, but they may be found distributed with BeebEm for Windows, and copied using the CopyFiles utility onto your network."	
 
-install-hp-utilities:	install-mkgroup utilities install-utilities
+install-hp-utilities:	install-utilities
 	-sudo systemctl daemon-reload
 	-sudo systemctl stop econetfs
 	-sudo systemctl disable econetfs
@@ -57,13 +51,11 @@ install-hp-utilities:	install-mkgroup utilities install-utilities
 	-sudo systemctl start econethpb
 	@echo "Install routine finished. Please ensure you have 'arm_freq=1000' (or your chosen frequency) and 'force_turbo=1' in /boot/config.txt (see README). Then please reboot. Note that Econet library utilities for use on your server are NOT included, but they may be found distributed with BeebEm for Windows, and copied using the CopyFiles utility onto your network."	
 
-install-old:	module install-module install-old-utilities
+install-old:	install-module install-old-utilities
 
-install-hp:	module install-module install-hp-utilities
+install-hp:	install-module install-hp-utilities
 
 clean:
-	cd module
-	make clean
-	cd utilities
-	make clean
+	cd module ; make clean
+	cd utilities ; make clean
 
