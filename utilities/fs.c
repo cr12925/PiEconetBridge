@@ -4712,10 +4712,14 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	else	lib = active[server][active_id].lib;
 
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d Attempting to deallocate handles %d, %d, %d", "", net, stn, active[server][active_id].root, active[server][active_id].current, active[server][active_id].lib);
+	fs_debug (0, 2, "%12sfrom %3d.%3d Attempting to deallocate handles for URD (%d), CWD (%d)", "", net, stn, active[server][active_id].root, active[server][active_id].current);
 	
 	fs_close_interlock(server, active[server][active_id].fhandles[active[server][active_id].root].handle, active[server][active_id].fhandles[active[server][active_id].root].mode);
 	fs_deallocate_user_dir_channel(server, active_id, active[server][active_id].root);
+	
+
+	fs_close_interlock(server, active[server][active_id].fhandles[active[server][active_id].current].handle, active[server][active_id].fhandles[active[server][active_id].current].mode);
+	fs_deallocate_user_dir_channel(server, active_id, active[server][active_id].current);
 	
 	// active[server][active_id].lib = lib; // Lib no longer changing
 	active[server][active_id].current = cur;
