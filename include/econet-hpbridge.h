@@ -433,7 +433,7 @@ struct __eb_config {
 
 // Client to Printer server port &9f Query codes
 
-#define PRN_QUERY_NAME  6
+#define PRN_QUERY_NAME  	6
 #define PRN_QUERY_STATUS        1
 
 // Printer spool file template
@@ -449,8 +449,8 @@ struct __eb_config {
 #define EB_CFG_TRUNK_PLAINTEXT "^\\s*TRUNK\\s+ON\\s+PORT\\s+([[:digit:]]{1,5})\\s+TO\\s+([a-z0-9\\-\\.]{4,128}\\:[[:digit:]]{2,5})\\s*$"
 #define EB_CFG_DYNAMIC "^\\s*DYNAMIC\\s+([[:digit:]]{1,3})\\s+(AUTOACK|NONE)\\s*$"
 #define EB_CFG_FILESERVER "^\\s*FILESERVER\\s+ON\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+PATH\\s+(/.+)\\s*$"
-#define EB_CFG_PRINTSERVER "^\\s*PRINTSERVER\\s+ON\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+([a-z0-9]{1,6})\\s+USING\\s+([a-z0-9@\\-\\.]{1,128})\\s*$"
-#define EB_CFG_PRINTSERVER_WITHUSER "^\\s*PRINTSERVER\\s+ON\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+([a-z0-9]{1,6})\\s+USING\\s+([a-z0-9@\\-\\.]{1,128})\\s+ONLY\\s+FOR\\s+([a-z0-9]{1,6})\\s*$"
+#define EB_CFG_PRINTSERVER "^\\s*PRINTSERVER\\s+ON\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+([a-z0-9]{1,6})\\s+USING\\s+([a-z0-9@_\\-\\.]{1,128})\\s*$"
+#define EB_CFG_PRINTSERVER_WITHUSER "^\\s*PRINTSERVER\\s+ON\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+([a-z0-9]{1,6})\\s+USING\\s+([a-z0-9@_\\-\\.]{1,128})\\s+ONLY\\s+FOR\\s+([a-z0-9]{1,6})\\s*$"
 #define EB_CFG_PRINTHANDLER "^\\s*PRINTHANDLER\\s+ON\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+([0-9a-z]{1,6})\\s+IS\\s+(/.+)\\s*$"
 #define EB_CFG_IPSERVER "^\\s*IPSERVER\\s+ON\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+DEVICE\\s+(.+)\\s+USING\\s+IP\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3}\\.[[:digit:]]{1,3}\\.[[:digit:]]{1,3}\\/[[:digit:]]{1,2})\\s*$"
 #define EB_CFG_PIPESERVER "^\\s*PIPESERVER\\s+ON\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+PATH\\s+(/.+)\\s+(PASSTHRU|NONE)\\s*$"

@@ -8239,6 +8239,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 				reply.p.port = reply_port;
 				reply.p.ctrl = 0x80;
+				reply.p.ptype = ECONET_AUN_DATA;
 				strncpy(reply.p.data, users[server][active[server][active_id].userid].username, 10);
 				counter = 0;
 				while (counter < 10 && reply.p.data[counter] != ' ') counter++;
@@ -8273,6 +8274,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					reply.p.port = reply_port;
 					reply.p.ctrl = 0x80;
 
+					reply.p.ptype = ECONET_AUN_DATA;
+
 					fs_debug (0, 1, "%12sfrom %3d.%3d SJ Read Account information from %d for %d entries on disc no. %d - Not yet implemented", "", net, stn, start, count, disc);
 
 					// For now, return a dummy entry
@@ -8300,6 +8303,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 				reply.p.port = reply_port;
 				reply.p.ctrl = 0x80;
+				reply.p.ptype = ECONET_AUN_DATA;
 		
 				reply.p.data[0] = reply.p.data[1] = 0; // Normal OK result
 				reply_length = 2;
@@ -8339,14 +8343,16 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							snprintf(&(reply.p.data[reply_length]), 7, "%-6.6s", pname);
 							reply_length += 6;
 
-							reply.p.data[reply_length] = control;
+							reply.p.data[reply_length++] = control;
 	
 							reply.p.data[reply_length++] = (account & 0xff);
 							reply.p.data[reply_length++] = ((account & 0xff00) >> 8);
 
-							snprintf(&(reply.p.data[reply_length]), 24, "%-23.23s", banner);
+							snprintf(&(reply.p.data[reply_length]), 24, "%-s", banner);
 
 							reply_length += strlen(banner);
+							if (strlen(banner) < 23)
+								reply.p.data[reply_length++] = 0x0d;
 
 							break;
 
@@ -8503,6 +8509,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 					}	
 
+					//fprintf (stderr, "*** GOT HERE *** Calling fs_aun_send() with server = %d, reply_length = %d, to %d.%d\n", server, reply_length, net, stn);
 					fs_aun_send (&reply, server, reply_length, net, stn);
 				}
 				else

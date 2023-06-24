@@ -4444,9 +4444,21 @@ static void * eb_device_despatcher (void * device)
 
 								if (found) 
 								{
+									eb_debug (0, 3, "PRINTER", "Local    %3d.%3d from %3d.%3d Printer %s query for printer %s - found at %p", 
+										d->net, d->local.stn,
+										p->p->p.srcnet, p->p->p.srcstn,	
+										(querytype == PRN_QUERY_STATUS) ? "status" : "name",
+										pname, printer);
+
 									eb_enqueue_output (d, reply, 3);	
 									new_output = 1;
 								}
+								else eb_debug (0, 2, "PRINTER", "Local    %3d.%3d from %3d.%3d Printer %s query for printer %s NOT FOUND",
+                                                                	d->net, d->local.stn,
+                                                                	p->p->p.srcnet, p->p->p.srcstn,
+                                                                	(querytype == PRN_QUERY_STATUS) ? "status" : "name",
+                                                                	pname);
+
 							}
 							else if (querytype == PRN_QUERY_NAME)
 							{
@@ -6139,6 +6151,7 @@ int eb_readconfig(char *f)
 	regfree (&r_empty);
 	regfree (&r_wire);
 	regfree (&r_trunk);
+	regfree (&r_trunk_plaintext);
 	regfree (&r_dynamic);
 	regfree (&r_fileserver);
 	regfree (&r_printserver);
