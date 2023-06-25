@@ -538,7 +538,13 @@ unsigned short fs_day_from_two_bytes(unsigned char day, unsigned char monthyear)
 int fs_alphacasesort(const struct dirent **d1, const struct dirent **d2)
 {
 
-	return strcasecmp((*d1)->d_name, (*d2)->d_name);
+	int result;
+
+	result = strcasecmp((*d1)->d_name, (*d2)->d_name);
+
+	//fs_debug (0, 3, "fs_alphacasesort() comparing '%s' with '%s' and returning %d", (*d1)->d_name, (*d2)->d_name, result);
+
+	return result;
 }
 
 // Often Econet clients send strings which are terminated with 0x0d. This copies them so we don't repeat the routine.
@@ -1006,6 +1012,8 @@ void fs_wildcard_to_regex(char *input, char *output)
 				break;
 			default:
 			{
+				// QUERY: Deal with high bit character regex here?
+
 				unsigned char t[2];
 				t[0] = *(input+counter);
 				t[1] = '\0';
@@ -1035,7 +1043,14 @@ int fs_compile_wildcard_regex(char *string)
 // the caller must have already provided and compiled)
 int fs_scandir_filter(const struct dirent *d)
 {
-	if ((regexec(&r_wildcard, d->d_name, 0, NULL, 0) == 0) && (strlen(d->d_name) <= 10) && strcasecmp(d->d_name, "lost+found"))
+	
+	int		result;
+
+	result = regexec(&r_wildcard, d->d_name, 0, NULL, 0);
+
+	//fs_debug (0, 3, "fs_scandir_filter() checking '%s' against regex returned %s", d->d_name, (result == 0 ? "success" : "failure"));
+
+	if ((result == 0) && (strlen(d->d_name) <= 10) && strcasecmp(d->d_name, "lost+found"))
 		return 1;
 	else	return 0;
 
@@ -1094,7 +1109,7 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 
 	fs_wildcard_to_regex(needle, needle_wildcard);
 
-	//fs_debug (0, 2, "fs_get_wildcard_entries() - needle_wildcard = %s", needle_wildcard);
+	//fs_debug (0, 2, "fs_get_wildcard_entries() - needle = '%s', needle_wildcard = '%s'", needle, needle_wildcard);
 
 	if (fs_compile_wildcard_regex(needle_wildcard) != 0) // Error
 		return -1;
@@ -1106,13 +1121,12 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 
 	// Convert to a path_entry chain here and assign head & tail.
 
-
 	fs_read_xattr(haystack, &oa_parent);
 	
 	while (counter < results)
 	{
 		//fprintf (stderr, "fs_get_wildcard_entries() loop counter %d of %d - %s\n", counter+1, results, namelist[counter]->d_name);
-		//fs_debug (0, 2, "fs_get_wildcard_entries() loop counter %d of %d - %s", counter+1, results, namelist[counter]->d_name);
+		//fs_debug (0, 3, "fs_get_wildcard_entries() loop counter %d of %d - %s", counter+1, results, namelist[counter]->d_name);
 
 		new_p = malloc(sizeof(struct path_entry));	
 		new_p->next = NULL;
@@ -1153,6 +1167,8 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 			counter++;
 			continue;
 		}
+
+		//fs_debug (0, 3, "fs_get_wildcard_entries() loop counter %d of %d - ACORN:'%s', UNIX '%s'", counter+1, results, new_p->acornname, new_p->unixfname);
 
 		p = new_p; // update p
 
@@ -3207,6 +3223,8 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 
 	while (examined < n && (e != NULL))
 	{	
+		//fs_debug (0, 3, "Examining '%s'", e->acornname);
+
 		if ((e->perm & FS_PERM_H) == 0 || (e->owner == active[server][active_id].userid)) // not hidden or we are the owner
 		{
 			switch (arg)
