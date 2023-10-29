@@ -16,3 +16,4 @@ utilities/econet-clock
 utilities/econet-fslist
 utilities/econet-ledtest
 utilities/econet-remote
+utilities/econet-trace
