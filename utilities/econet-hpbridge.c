@@ -6192,7 +6192,7 @@ Options:\n\
 \t-s\t\tDump configuration at startup (repeat for extra debug)\n\
 \t-z\t\tDebug Level (each occurrence increases; max 5)\n\
 \n\
-Queuing management options (usually need not be adjusted:\n\
+Queuing management options (usually need not be adjusted):\n\
 \n\
 --wire-max-tx n\t\tMaximum number of retransmits for wire packets (current: %d)\n\
 --wire-interval n\tMinimum wait before wire retransmission of failed packet (ms) (current: %d)\n\
@@ -6201,7 +6201,7 @@ Queuing management options (usually need not be adjusted:\n\
 --aun-interval n\tMinimum wait before AUN retransmission of unacknowledged packet (ms) (current: %d)\n\
 --aun-nak-tolerance n\tNumber of AUN NAKs to tolerate before dumping packet. (Current: %d)\n\
 --max-sockets n\t\tMaximum numbers of sockets that can be open (increase if system cannot do AUN listens)\n\
-\t\t\t(Minimum 1. Used because sometimes RiscOS isn't listening when it should be!\n\
+\t\t\t(Minimum 1. Used because sometimes RiscOS isn't listening when it should be!)\n\
 --flashtime n\t\tTime in ms to flash each activity LED off to show activity. (Current: %d)\n\
 --led-blink-on\t\tActivity LEDs are off by default, and blink on for activity (Current: ON and blink OFF)\n\
 --leds-off\t\tTurn the activity LEDs off and leave them off\n\
@@ -6215,6 +6215,7 @@ Statistics port control:\n\
 Fileserver control (global to all servers):\n\
 \n\
 --disable-7bitbodge\tDisable Y2K date compliance which uses an extra 3 bits for year\n\
+\n\
 Deep-level debugging options:\n\
 \n\
 --malloc-debug\t\tTurn on (very verbose) malloc()/free() debug when at loglevel 2 or above\n\

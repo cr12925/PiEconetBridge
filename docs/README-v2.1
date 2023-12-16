@@ -1,0 +1,828 @@
+AUN to Econet Bridge
+--------------------
+
+
+/*
+  (c) 2023 Chris Royle
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+*/
+
+THANKS
+------
+
+Two individuals, KL and IW (you know who you are) did extensive testing
+of both the hardware and software involved in this project (aka trying
+quite hard to break it!) in July and August 2021. I am very grateful to
+them for their efforts. I should also like to express my thanks to
+the following on the stardot.org.uk forums for their help, ideas, and
+patience: @arg, @sweh, @IanJeffray, @Simon - and there are probably 
+others whom I have inexcusably failed to remember - thank you all.
+
+The fileserver code in this repository would not have been possible to
+develop without sight of the code at github.com/stardot/ArduinoFilestore.
+I am told it is stardot.org.uk user @gazzaD - well, @gazzaD, thank you -
+I could not have done it without you.
+
+Introduction
+------------
+
+The combination of this hardware and software is intended to provide a
+bridge between a real BBC Econet and the AUN world of BeebEm (and probably
+other things which use AUN). It contains also contains a relatively operable
+Level3-ish fileserver, and an emulation of an Acorn print server, capable
+of use by both BeebEm and real BBCs.
+
+It is possible to put two (or more) of these bridges 'back to back' and join
+two real BBC Econets together over the IP network, including the Internet,
+providing the correct ports are opened. The necessary ports are the ones you
+configure in the configuration file.
+
+It is unnecessary for the two networks in a 'back to back' configuration such
+as that to have discrete Econet network numbers. Properly configured, all
+stations can be on the same network number, including 0.
+
+What is more, if you are connecting to your friends' Econets and some of them
+use the same network number as you, you can configure their networks to 
+have a different number in your config and it should all work, thus the
+overlapping network numbers no longer matter.
+
+At the moment, each individual host on each individual network must be 
+individually configured. A wildcard entry can be inserted to match 'all
+other undefined stations on a network' but it MUST come after all defined
+stations. See below.
+
+What is is NOT
+--------------
+
+Whilst called a 'Bridge', do *not* mistake this for a direct substitute for
+an Acorn(R) Econet bridge, which will join two real BBC networks together
+with different network numbers. You *can* do that with this software and
+its associated hardware, but you need TWO sets to do it, and the 'bridge'
+is performed over AUN over IP in between the two bridges.
+
+Prerequisites
+-------------
+
+** Do NOT attempt to run this on PiOS 64 bit yet. There is an incompatibility
+   with the kernel module which will crash your system. I suspect it is the
+   direct writes to the GPIO hardware. This is on the list to fix.
+**
+
+The system will require:
+	- Raspberry Pi (unless you are running a version 1 bridge board
+	  in which case nothing less than a Pi 4B will do, and you must
+	  not install the desktop!).
+	- A proper RPi 4 PSU. Experimentation shows that the Econet hardware
+          has quite a current draw and an underpowered PSU can lead to
+          rx/tx problems
+	- No other GPIO usage on the system
+	- Disable Wifi sleep on your Pi, especially if that is your network
+	  connectivity of choice.
+	- Whilst there was an early hardware diagram, there have been
+	  significant improvements to the design, by dint of hard work
+	  on the part of @KenLowe and input from people like @arg. I no
+	  longer recommend the original hardware design: if you want
+	  Econet wired connectivity (e.g. to a real BBC) rather than just
+	  a fileserver for (say) some BeebEm machines, then buy a hardware
+	  HAT from @KenLowe, or use his latest design.
+	- Your installation of PiOS having the kernel headers installed (see
+          below)
+	- A pre-existing functioning Econet (with clock) with a spare station
+          port to connect to the hardware, if you want to use real BBCs
+
+You will need to fix the clock on your Pi - i.e. it MUST NOT switch in and
+out of turbo mode. If you don't, then expect unreliability.
+
+In your /boot/config.txt file, set
+arm_freq=900
+force_turbo=1
+
+... and reboot. 900MHz is conservative. It'll probably work at a faster
+speed quite happily.
+
+WARNING - NO, REALLY, YOU SHOULD READ THIS!
+-------------------------------------------
+
+I was once told that the difference between a professional musician and an 
+amateur is that the amateur practices until he gets the piece right; the
+professional practices until the piece simply will not go wrong.
+
+On any view, by analogy, this is amateur code.
+
+This is work which I have produced with no real experience of either
+electronics, the 68B54 ADLC, or kernel module programming.
+
+In particular, the following undesirable characteristics of this system should
+be noted. These are typically owing to a lack of talent on my part. I well
+understand the desirability of fixing them all. If anyone with more talent
+than me wishes to have a go, I would be genuinely very happy. Notwithstanding
+the list below, I am a huge fan of doing things the 'proper' way. It is a
+matter of regret that I have not managed to do so. In particular:
+
+	- It reads and writes directly from the GPIO hardware instead of using
+	  the kernel routines. I accept this renders it less portable even
+	  within Raspberry Pi systems, though at least the Peripheral Base
+	  address is in a #define!
+
+	- It probably does not handle AUN ACK and NAK quite the way it should.
+
+It is some time since I saw a kernel crash with this module, but you should be
+alive to the prospect that it might happen. If you use this on a production
+system that's doing something else, you have been warned!
+
+
+INSTALLATION
+------------
+
+@KenLowe has produced a very effective quick start guide here:
+
+https://stardot.org.uk/forums/viewtopic.php?p=364719#p364719
+
+I have put a text version of it in docs/KL.QUICKSTART - though I have
+removed references to the original bridge software, which is now no
+longer supported.
+
+Acknowledgment to @KenLowe for his excellent work - it is his, not 
+mine.
+
+
+LOADING THE KERNEL MODULE
+-------------------------
+
+This should only be necessary if you have an older board which does not
+have the EEPROM properly wired in and populated, because the EEPROM
+in the HAT will cause the kernel module to load.
+
+If you really want to load it manually then here is how.
+
+	cd module
+	sudo insmod ./econet-gpio.ko
+
+If you are not running the utilities are root, you should change the
+permissions on the newly arrived /dev/econet-gpio, e.g.:
+
+	sudo chmod a+rw /dev/econet-gpio
+
+If you want to choose the group / permissions for the /dev/econet-gpio device,
+you can put a file such as that in the 'udev' directory into /etc/udev/rules.d
+
+Obviously if you want to use the group 'econet' as set out in the example file,
+then you will need to create it as root with something like
+
+	groupadd econet
+
+And then add the pi user to it with something like
+
+	usermod -a -G econet pi
+
+You should then find that the pi user can run the utilities (rather than root)
+but can still talk to the Econet device.
+
+
+A WORD ON THE KERNEL MODULE
+---------------------------
+
+The kernel module does two things:
+
+	- First, it transmits and receives packets through the ADLC.
+	- Second, it implements a state machine which does the 4-way handshake
+	  and converts data packets off the wire into AUN-style packets.
+	  (Internally, and when communicating with the utilities, it adds an
+	  extra four bytes on the start of each packet which match those on an
+	  Econet frame to make it easier to work out where a packet is going,
+	  viz.  destination station, destination network, source station,
+	  source network (in that order).
+	
+	  Similarly, any packet delivered to the kernel module when it is in
+	  AUN mode must have those four extra bytes on it.
+
+The AUN (4-way-handshake) mode is enabled when a 'station set' is delivered to
+the kernel module. The station set map tells the module which stations it
+should handshake for, or otherwise capture traffic for (e.g. immediates, 
+broadcasts). Only stations which appear in the map (and there are macros to put
+stations in the map) will have their traffic forwarded to userspace when in AUN
+mode.
+
+If no station map is put into the kernel module after a reload or reset, the
+module will remain in non-AUN mode. In that mode, it captures all packets off
+the wire, and does *no* 4-way handshake. It simply delivers raw packets through
+/dev/econet-gpio to userspace. This mode is not useful practically, but
+provides a means of doing network monitoring. Thus the 'econet-monitor'
+utilities does not upload a station map, so that the module remains in 'raw'
+mode.
+
+Immediate queries are now handled properly (and forwarded on to AUN etc. if
+appropriate). If you want the kernel module to spoof Immediate replies like
+it used to, you must now turn on the -i command line switch to the Econet
+bridge. There should be no need to do so and use is discouraged.
+
+
+ON BOARD CLOCK / TERMINATION
+----------------------------
+
+On v2 revision 2a boards and above, the HAT has optional termination and
+clock circuitry on the board. The kernel module will detect a version 2
+board (including those earlier than 2a) and will:
+
+- Put an 8MHz clock out on GPIO 4 (BCM numbering), which can be used to
+  clock the ADLC. There is a hardware solder bridge which switches from
+  an on-board oscillator to the Pi-supplied clock. (The 8MHz waveform
+  is divided down before it gets to the ADLC, which needs 2MHz.)
+
+- Turn on the PWM on GPIO 18 (BCM numbering) which feeds the clock
+  generation circuitry on a v2r2a (and above) HAT. It will turn the
+  clock on at a relatively slow speed (5us period, 1us mark).
+  
+  You can alter the period and mark with the econet-clock utility.
+  (See below.)
+
+If you have a board which is *earlier* than v2 r2a then do not expect 
+clock generation on board - the electronics simply are not there.
+
+(On a v1 board, the pin which is used for the PWM clock output is
+used for something else, so the kernel module will not put a clock out
+on it at all.)
+
+
+THE UTILITIES
+-------------
+
+These run from simple to more complex. Each responds to -h on the command line
+to give you help.
+
+econet-hpbridge
+---------------
+
+See README.HPBRIDGE
+
+econet-monitor
+--------------
+
+First, econet-monitor. This reads /dec/econet-gpio with the kernel module in
+raw mode and simply dumps every packet it sees.
+
+You should see streams of packets (on an active network) which will include all
+four packets (separately) of the four-way handshakes. This utilities does *not*
+glue them together into one line like Acorn's own NETMON. You literally see
+what's on the wire.
+
+The output is verbose by default. You can get a one-line-per-packet (ish)
+output by specifying '-b' (brief) on the command line.
+
+One easy way to see some traffic is to run the monitor on a live econet and
+press BREAK on a real BBC with the network software loaded. Certainly on a 
+Master (which is all I have), the ANFS will send 9 bridge queries out. These
+are short broadcasts whose packet data includes the word 'BRIDGE' and you
+should see them appear on the monitor screen.
+
+
+econet-imm
+----------
+
+This utility performs various sorts of 'immediate' queries on the econet. It
+leaves the kernel in raw mode, sends the query and reads the next packet off
+the wire and (save for the continue and halt operations) tells you what was in
+it.  
+
+It implements the following operations: Halt, Continue, Machine Peek, Memory
+Peek.
+
+In every case you *must* provide a source and destination station number. They
+will both be treated as being on net 0 for the purposes of this utility, so
+only local stations can be queried (i.e. not those over traditional Econet
+bridges). Obviously your own source station number should not already be in
+use on the network.
+
+Examples (but see help for detail) with example output:
+
+Send machine peek to station 1 from station 250
+
+$ ./econet-imm -s 1 -d 250 -m
+Station reports being a BBC Master 128 OS 3, NFS version 4.25.
+$
+
+Send HALT to station 1 from station 250
+
+$ ./econet-imm -s 1 -d 250 -j
+$
+
+Send CONTINUE to station 1 from station 250
+
+$ ./econet-imm -s  1 -d 250 -c
+$
+
+Send memory peak to station 1 from station 250 for addresses &2000 to &21FF
+
+$ ./econet-imm -s 1 -d 250 -p -q 2000 -r 21FF
+Remote memory peek received:
+00002000 78 56 34 12 d0 04 a9 d4 d0 18 18 20 c3 20 20 3a 21 20 48 21 d0 0c 20 0f 22 d0 07 20 7a 22 d0 02 xV4........ .  :! H!.. .".. z"..
+00002020 a9 00 48 a0 04 ad 6b 8c 91 b0 c8 ad 6c 8c 91 b0 c8 ad 72 8c 91 b0 68 4c 60 18 20 7d 1a a0 06 b1 ..H...k.....l.....r...hL`. }....
+00002040 b0 20 4c 11 d0 0f 20 8d 1d d0 0a a0 09 b1 46 29 02 d0 04 a9 c1 d0 69 38 20 c3 20 ad 72 8c f0 3c . L... .......F)......i8 . .r..<
+00002060 18 a0 00 b1 7c a0 09 71 b0 8d 6f 8c c8 b1 b0 a0 01 71 7c 8d 70 8c c8 b1 7c 69 00 8d 71 8c 18 a9 ....|..q..o......q|.p...|i..q...
+00002080 ff 6d 6f 8c a9 04 6d 70 8c 8d 70 8c a9 00 8d 6f 8c 6d 71 8c 8d 71 8c 20 25 1d d0 24 a0 09 b1 b0 .mo...mp..p....o.mq..q. %..$....
+000020a0 8d 6d 8c c8 b1 b0 8d 6e 8c 20 3a 21 20 7f 21 d0 0f 20 13 22 d0 0a 20 a8 22 d0 05 20 b0 23 a9 00 .m.....n. :! .!.. .".. .".. .#..
+000020c0 4c 60 18 a9 00 8d 72 8c a0 09 b0 03 a0 06 38 b1 7c c8 8c 66 8c a0 00 f1 7c 8d 6d 8c ac 66 8c b1 L`....r.......8.|..f....|.m..f..
+000020e0 7c a0 01 f1 7c 8d 6e 8c ee 66 8c ac 66 8c b1 7c a0 02 f1 7c b0 08 a9 00 8d 6d 8c 8d 6e 8c d0 18 |...|.n..f..f..|...|.....m..n...
+00002100 38 ad 6d 8c a0 09 f1 b0 8d 66 8c ad 6e 8c c8 f1 b0 0d 66 8c f0 12 90 10 a0 09 b1 b0 8d 6d 8c c8 8.m......f..n.....f..........m..
+00002120 b1 b0 8d 6e 8c 4c 2d 21 a9 80 8d 72 8c ad 6d 8c 8d 6b 8c ad 6e 8c 8d 6c 8c 60 a0 07 b1 b0 8d 69 ...n.L-!...r..m..k..n..l.`.....i
+00002140 8c c8 b1 b0 8d 6a 8c 60 20 b9 21 c9 00 d0 03 a9 00 60 8d 66 8c 20 77 1e d0 f7 ad 69 8c 85 24 ad .....j.` .!......`.f. w....i..$.
+00002160 6a 8c 85 25 a0 00 b1 7c 18 65 28 85 22 a5 29 69 00 85 23 ae 66 8c 20 59 07 20 d2 21 4c 4f 21 20 j..%...|.e(.".)i..#.f. Y. .!LO!
+00002180 b9 21 c9 00 d0 03 a9 00 60 8d 66 8c 20 77 1e d0 f7 ad 69 8c 85 22 ad 6a 8c 85 23 a0 00 b1 7c 18 .!......`.f. w....i..".j..#...|.
+000021a0 65 28 85 24 a5 29 69 00 85 25 ae 66 8c 20 59 07 20 67 07 20 d2 21 4c 86 21 a9 00 38 a0 00 f1 7c e(.$.)i..%.f. Y. g. .!L.!..8...|
+000021c0 4c c3 21 ae 6e 8c f0 01 60 cd 6d 8c 90 fa ad 6d 8c 60 38 ad 6d 8c ed 66 8c 8d 6d 8c ad 6e 8c e9 L.!.n...`.m....m.`8.m..f..m..n..
+000021e0 00 8d 6e 8c 18 ad 69 8c 6d 66 8c 8d 69 8c ad 6a 8c 69 00 8d 6a 8c 18 a0 00 b1 7c 6d 66 8c 91    ..n...i.mf..i..j.i..j.....|mf..
+$
+
+Note the first four bytes at &2000, which were put there on the real BBC with
+station number 1 with the following BASIC comment:
+
+!&2000=&12345678
+
+
+econet-ledtest
+--------------
+
+Test harness utility for the activity LEDs introduced on v2 r2a boards.
+
+When run, the system will run through a cycle of LED patterns in order
+to determine whether the LED components are functional.
+
+
+econet-clock
+------------
+
+If you have a v2 r2a (or above) HAT, then this utility can be used to 
+set the period and mark of the Econet clock generated by the Pi and
+the line drivers on the HAT. It will achieve precisely nothing if you
+have a board which is lower than that revision.
+
+Examples:
+
+econet-clock -p 5.5 -m 1
+
+... sets a 5.5us period with a 1us mark, apparently suitable if
+you have BBCs with second processors enableed on your Econet.
+
+For faster clocks (which may not play nicely with BBCs at all,
+but may well do with Archimedes), try (for example)
+
+econet-clock -p 3 -m 1
+
+
+econet-fslist
+-------------
+
+Uses the PIPE client connector (see configuration instructions) to
+do the equivalent of the MDFS *FSLIST utility. It broadcasts a file
+server version query and displays the answers. Without a pipe connector
+configured, this will not do anything for you.
+
+-p specifies the named pipe pair that the utility will use to talk to the
+network.
+
+
+econet-servers
+--------------
+
+In similar vein to econet-fslist, this attempts to do the equivalent of
+the MDFS *SERVERS command. The command line takes just the -p parameter.
+
+
+econet-trace
+------------
+
+This takes -p, -n and -s parameters for pipe filename, destination net
+and station respectively. It will attempt to trace a route across a 
+network linked by PiBridge trunks, and inform you of each hop the traffic
+passes through on the way, including what kind of transport the next
+hop is (e.g. trunk, wire, final station, local pipe). Acorn bridges will
+not respond to the probes this utility puts out. Although I have no
+Acorn bridges at PiBridge Towers, I would expect that if the traffic
+traverses an Acorn or MDFS bridge, but thereafter hits a PiBridge for
+onward transmission, there will simply be a gap in the trace rather than
+a failure - but I don't know!
+
+
+econet-remote
+-------------
+
+Takes the -p, -n and -s command line parameters and implements a version
+of *REMOTE . This will not work against BeebEm-type stations because they
+do not implement the 4-way handshake required on immediate queries with
+control byte &85 like a real BBC does. But it will allow basic remote
+control of a BBC that is not protected from *REMOTE with *PROT.
+
+Note, obviously, that certain output characters from the BBCs are for
+things like changing text colour in MODE 7 and so forth, and will not
+do anything on a unix-like terminal, or may cause weird characters to
+appear on screen.
+
+
+TO DO
+-----
+
+- Implement device tree so that the GPIO pins are defined outside the code
+- Use better routines to access GPIOs in kernel
+
+
+KNOWN BUGS
+----------
+
+- Incompatible with PiOS 64 bit
+
+
+PRINT HANDLERS
+--------------
+
+If you use a print serer, you can control the headers and footers
+sent by the bridge to the printer in question by adding files into
+or modifying files within /etc/econet-gpio/printers.
+
+Examples are provided in the repo.
+
+The content of the printers directory provides default & specific ways
+of introducing header files and command line switches to the lp or
+sendmail commands which are finally used to deliver print jobs to their
+ultimate destinations.
+
+The files are called header.XXX and conf.XXX where the 'header' file
+is prepended to the print job when it is sent, and 'conf' contains
+bash variable definitions to enable command line switches to be
+pre-pended to the sendmail or lp command line (i.e. after 'lp' but
+before any other parameters) in case you want to tweak how your
+system prints things.
+
+Suppose a user ("CHRIS") prints a job to a printer ("LASER"), the
+system will search for header and conf files in priority as follows
+(all within /etc/econet-gpio/printers):
+
+LASER.CHRIS.header
+LASER.header
+default.header
+
+Thus the particular user can have a specific header file, but if not
+then the printer itself can have a specific header, and otherwise
+the default header will be picked up.
+
+The header files can have variables substituted into them before
+the job is sent. They are fairly self-explanatory in most cases:
+
+_USERNAME_ : Logged in username, or 'ANONYMOUS' if not logged in
+_SERVERNETWORK_ : Network number of print server
+_SERVERSTATION_ : Station number of print server
+_NETWORK_ : Network number of client station
+_STATION_ : Station number of client station
+_DESTINATION_ : Unix destination of print job (e.g. 'printer1'
+   or 'example@examle.com'
+_DATE_ : Date in dd/mm/YYYY format
+_TIME_ : Time in hh:mm format
+
+The same priority system happens for the conf files.
+
+If the printing user is not logged into a PiFS fileserver, their
+username will show as 'ANONYMOUS'. Thus, a particular header for
+not logged in users can be created with, e.g., a massive banner
+saying that someone is trying to print without logging in(!).
+
+If you are sending by email, you should really have a bespoke
+header file because it can put the minimal email headers (To:
+and Subject:) into the output. An example for a printer called
+'EMAIL' is provided.
+
+The conf files simply have two lines (both optional):
+
+cmdopts="..."
+cmdexec="..."
+
+The first is the command options to put after the name of the
+deliverying binary (lp or sendmail depending on whether there is
+an '@' in the unix destination for the job).
+
+The second (cmdexec) allows you to specify a particular binary
+to do final delivery if you don't want lp or sendmail for this
+printer. E.g. if you wanted to send the print job by some 
+sort of messaging service you can access over the Internet.
+
+THE FILESERVER
+--------------
+
+The bridge code now includes what appears to be a relatively stable Level3-ish
+fileserver. 
+
+FURTHER IMPORTANT NOTE: No Library, Welcome or Utilities are provided with
+this software. You will need your own and you will need to copy them onto
+the system using something like COPYF. If you search the various enthusiast
+sites, I am sure you will find them. COPYF should work to copy them to a 
+newly created Library directory as SYST once you get the server up and running.
+
+One function not implemented is user quotas. READFREE will return something,
+but it will be erroneous. SETFREE will appear to complete but achieve nothing.
+
+The server is *broadly* a Level 3-esque server. One day I will implement
+the SJ Research addons. It has some differences:
+
+ - It has permissions on directories which are typically enforced
+ - The passwords file is not in $ but is held in the directory hierarcy
+   above where the virutal disks are created (see below) - but it can
+   still be read by a system user by accessing the special file
+   %Passwords
+ - There is a concept of an 'owner' for each file or directory. Whereas
+   Level 3's semantics were that a user owned everything below their
+   home direcotry, that is not so in this implementation. Ownership can
+   be viewed with *OWNER, and changed with *CHOWN. 
+ - Thus permissions on a file in your home directory as an ordinary user
+   *may* be the ones *after* the / in the permissions if you don't
+   own it.
+ - Where the L3 server will not permit *DIR ^ within your home directory
+   or $, this server *will*. From home it has the expected behaviour.
+   From $ (or if $ is home) it will effectively be ignored.
+ - One day there may be switches to turn some of this on and off.
+
+Configuration file syntax: see README.HPBRIDGE
+
+Basically you need to identify a directory for each virtual fileserver
+which has permissions that the bridge can read and write from, and
+into which it will store the fileserver's files.
+
+Within that directory you need to create directories for each disk
+the virtual server will present. The install routine will do this
+for you within the installer's home directory. However, for example,
+say (i) you use the directory /econet (with appropriate permissions)
+for your filestore, and (ii) you want disk 0 to be named ECONET,
+you would create a folder 
+
+	0ECONET
+
+(note the leading 0 for disk 0) within /econet, so that it's full
+path would be
+	
+	/econet/0ECONET
+
+If you want a second virtual disk (up to 16 - numbered 0 to F)
+you could create disk '1' named 'STORAGE' as follows
+
+	/econet/1STORAGE
+
+It is unnecessary to have contiguous numbering - the bridge
+FS will find all the disks from 0 to F whether they exist or not.
+If you thus only create disks 0, A and F, they'll be found.
+
+You can mount each disc as a separate filesystem if you wish. The FS code will
+ignore the lost+found directory. Mounting each one separately is
+really just a nicety because it will cause the FS to report
+an actual size on *FREE instead of the maximum. If you create, 
+for example, a filesystem contained in a partition or regular
+file which is only, say, 30Mb long, and mount it on /econet/1STORAGE
+then *FREE will show STORAGE as being 30Mb instead of some massive
+modern figure.
+
+If your installer user is 'econet', you can create the set of
+storage locations above with the sample commands below, whilst
+logged in as (or sudo'd to) root:
+
+	mkdir /econet
+	mkdir /econet/0ECONET
+	mkdir /econet/1STORAGE
+
+	chown -R pi /econet
+
+The fileserver translates certain non-Linux-friendly characters in filenames
+so that they can be stored. It also handles high-bit characters used by
+Archimedes class machines in filenames.
+
+The version of the FS in v.2.1 also handles long filenames EXPERIMENTALLY.
+See the documentation below about *FNLENGTH
+
+On first execution, if Passwords does not exist it will be created with one
+user 'SYST' with a blank password.
+
+By default, Load, Execute and Econet owner are stored as extended attributes,
+so you need to make sure your filesystem supports them. Ext4 does by default
+on the standard Pi installation.
+
+If your filesystem does not support extended attributes then you can force
+the FS to store the attributes in a separate .inf file for each stored file
+by creating a file 'auto_inf' in the server root directory. Thus if your
+FS uses /econet as its root, just create a blank file /econet/auto_info
+and the FS will cease to use extended attributes and instead use .inf
+files.
+
+	touch /econet/auto_inf
+
+Thus a file !BOOT will have a corresponding !BOOT.inf file with its 
+file attributes contained within it.
+
+If you wish to switch from xattr to .inf files, there is a utility
+xattr_to_dotfile in the utilities folder which should help. It takes 
+a filename (or wildcard) as a parameter, reads the xattrs and writes out
+the corresponding .inf file. 
+
+The .inf files do not show in directory listings on client stations.
+
+Wildcards
+---------
+
+I have implemented the * and # BBC wildcards best I can. I think they work.
+If you get odd results, please post somewhere and if I get to hear about it
+I will try to investigate when I can.
+
+Permissions
+-----------
+
+More complex than Level 3. Directories can have WR attributes as well,
+and a lack of write access to a directory ought to prevent creation of 
+a new file / directory therein.
+
+There is an 'H' attribute which hides the file from directory listings for
+all but the owner & system users.
+
+The 'L' attribute does what the Acorn one does. However, if you use the
+*LINK functionality (see below), the FS will automatically set the L attribute
+in the hope that it will remind you that one of the apparently identical files
+is the *actual* unix file because if you delete that one, things will go 
+haywire. (There is a need for some sanity checking there - be prepared for
+seg faults if you push this too hard.)
+
+Special files
+-------------
+
+System privilege users can open the file %Passwords in any directory
+and will receive a handle to the system passwords file which is not in fact
+accessible in the Econet directory hierarchy.
+
+CLI commands implemented in the server
+--------------------------------------
+
+Non-privileged commands:
+
+*ACCESS <filespec> <attr>
+	- Change attributes on <filespec> which can be wildcard
+	- attr must contain LHWR before the /, and only WR after (or some
+	  subset of each).
+	- If no / provided, all attr letters presumed to relate to owner.
+	- Letters after the '/' are for non-owner (public) access.
+	
+*BYE
+	- Log out
+
+*CDIR <dirname>
+	- Create new directory
+
+*CHOWN <filename>
+	- Take ownership of <filename> if you own the directory it's in
+	  or are a system user
+
+*COPY <source> <destination>
+	- Source can be wildcard. If it resolves to more than one file, then
+	  <destination> *must* be a directory
+	- Done inside the server - does not use network time.
+
+*DELETE <filespec>
+	- Delete files matching wildcard specification given
+	- Will refuse to delete locked files, and directories which are not
+	  empty.
+
+*DIR <directory>
+	- Change current working directory
+
+*I AM (<station>) <username> (<password>)
+	- Log in
+
+*INFO <filename>
+	- Show load, execute, length & system internal name for one file
+	- Abbreviated to *I.
+
+*LIB <directory>
+	- Temporarily change library directory
+
+*LOGIN
+	- As * I AM
+
+*OWNER <filename>
+	- Display owner name as an error
+
+*PASS <old password> <: or new password>
+	- Change password
+
+*PRINTER <printer>
+	- Select one of several printers on the fileserver. Note,
+	  this command only works if your print server is also a
+	  fileserver, because the *PRINTER command operates only on
+	  printers which are configured on the same local server as
+	  the fileserver you are logged into. This mirrors what I
+	  understand to be the SJ Research functionality of the
+	  command.
+	  ALSO only works if the SJ functionality is turned on
+	  (which is the default; turned off with the -j switch)
+
+*RENAME <old filename> <new filename>
+	- Does what it says on the tin.
+	- Can be abbreviated to *REN.
+
+*SDISC <discname>
+	- Select different fileserver disc.
+	- (The library utility *DISCS should show a list)
+
+*SETLIB <dir>
+	- Set your library directory. Effective from next login.
+	- Setting the directory to % removes the setting and gives you
+  	  the system default library.
+
+Privileged commands:
+
+*FLOG <station>
+	- Force log a station off
+
+*FNLENGTH <length>
+	- Change maximum filename length in the fileserver to which the 
+	  command is addressed. Valid values are 10..80. 
+	- This operates immediately without a restart, and the value you
+	  set is stored persistently in the configuration file for the
+	  particular FS upon which it is used so that it is not necessary
+	  to re-run the command on a restart
+
+*LINK <source> <destination>
+	- Create symlink in the filesystem. <destination> will be the identical
+	  file to source.
+	- Note that the system will automatically set the L attribute on the
+	  original file to remind you not to delete it, but it will show on 
+	  all the linked copies too. Take care - if you remove the underlying
+	  file, you will likely get a Seg fault when accessing any of the links.
+	- This is all rather experimental.
+	- Also, the file interlocks (which are implemented!) will not notice
+	  one user opening the original file for writing and another opening
+	  a link for writing.
+
+*NETCONF <+/-OPTION>
+	- (This may be disabled at present - not sure why.)
+	- Turns FS options on/off. These persist across restarts.
+	- There are two at present:
+	
+		*NETCONF +ACORNHOME / *NETCONF -ACORNHOME
+			Turns Acorn home directory semantics on/off
+			When on, a user will be treated as owning everything
+			in and below their home directory regardless of how
+			ownership is actually set in the permissions.
+
+		*NETCONF +MDFS / *NETCONF -MDFS
+			Turns SJ MDFS functionality on off. 
+			(Previously this was global across all fileservers
+			 running on a particular bridge.)
+	
+*NEWUSER <username>
+	- Create new user.
+	- This now DOES create a home directory $.Username on the first disc
+	- And will set its ownership up correctly
+	- Note that you can change a user's home directory with *SETHOME
+	- but that will NOT change ownership - a user can thereby have 
+	- a home directory they do not own.
+
+	- NOTE: If you turn on the ACORNHOME option (*NETCONF +ACORNHOME)
+	- then Acorn Home directory ownership semantics will apply, and
+	- the user will be treated as owning everything below their
+	- home directory, whether the FS thinks they really own it or 
+	- not.
+
+	- To delete a user, see *PRIV
+
+*PRIV <user> <priv>
+	- Set user privilege. Applicable privileges are:
+		D - Deleted - user cannot log in, password entry will be reused
+		L - Locked user - cannot log in
+		N - Unlocked (normal) user, but cannot change password
+		S - System user
+		U - Unlocked (normal) user
+		
+*REMUSER <username>
+	- Removes the user specified. 
+	- What this actually does is emulate *PRIV <username> D
+	- It does NOT remove the home directory, since they can be shared
+
+*SETHOME (<username>) <directory>
+	- Permanently set replacement home directory (effective next login)
+	- If <username> omitted, works for the calling user.
+	- Otherwise operates on the named user if they exist.
+	- <directory> can include a :DISC prefix
+
+*SETLIB (<username>) <directory>
+	- See above. System users may specify the optional username.
+
+*UNLINK <link>
+	- Removes a symlink created with *LINK
+
+THE END
+-------
+
+Enjoy!

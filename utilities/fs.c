@@ -103,9 +103,9 @@ void fs_close_interlock(int, unsigned short, unsigned short);
 uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 
 #ifndef BRIDGE_V2
-	#define FS_VERSION_STRING "PiEconetBridge FS 1.0"
+	#define FS_VERSION_STRING "PiEconetBridge FS 2.1"
 #else
-	#define FS_VERSION_STRING "PiEconetHPB FS 1.1"
+	#define FS_VERSION_STRING "Pi Econet HP Bridge FS 2.1"
 #endif
 
 #define FS_DEFAULT_NAMELEN 10
@@ -118,8 +118,12 @@ uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 #define ECONET_MAX_FS_DIRS 256 // maximum number of active directory handles
 #define ECONET_MAX_FS_FILES 512 // Maximum number of active file handles
 
-// Don't get excited - these are provision for long filenames if they ever come, but for now changing them will achieve not a lot
-#define ECONET_MAX_FILENAME_LENGTH 10
+#define ECONET_MAX_FILENAME_LENGTH (fs_config[server].fs_fnamelen)
+// Do NOT change this. Some format string lengths and array lengths are still hard coded.  (And some of the 
+// arrays are of length 81 to take a null byte as well. So to make this fully flexible, a number of arrays
+// need to be altered, and some format strings need to be built with sprintf so that the right length
+// can be incorporated before that (second) format string can be used... sort of a work in progress!
+#define ECONET_ABS_MAX_FILENAME_LENGTH 80
 #define ECONET_MAX_PATH_ENTRIES 30
 #define ECONET_MAX_PATH_LENGTH ((ECONET_MAX_PATH_ENTRIES * (ECONET_MAX_FILENAME_LENGTH + 1)) + 1)
 
@@ -149,7 +153,8 @@ struct {
 	uint8_t fs_sjfunc; // != 0 means turn on SJ MDFS functionality
 	uint8_t fs_bigchunks; // Whether we use 4k chunks on data bursts, or 1.25k (BeebEm compatibility - it appears to have a buffer overrun!)
 	uint8_t fs_pwtenchar; // Set to non-zero when the FS has run the 6 to 10 character password conversion, by moving the fullname field along by 5 chracters
-	uint8_t pad[252]; // Spare spare in the config
+	uint8_t fs_fnamelen; // Live (modifiable!) max filename length. Must be less than ECONET_MAX_FILENAME_LENGTH. When changed, this has to recompile the fs regex
+	uint8_t pad[251]; // Spare spare in the config
 } fs_config[ECONET_MAX_FS_SERVERS];
 
 struct {
@@ -176,8 +181,8 @@ struct {
 	unsigned char net, stn;
 	unsigned int userid; // Index into users[n][]
 	unsigned char root, current, lib; // Handles
-	char root_dir[261], current_dir[258], lib_dir[258]; // Paths relative to root
-	char root_dir_tail[15], lib_dir_tail[15], current_dir_tail[15]; // Just the last element of path, or $
+	char root_dir[1024], current_dir[1024], lib_dir[1024]; // Paths relative to root
+	char root_dir_tail[81], lib_dir_tail[81], current_dir_tail[81]; // Just the last element of path, or $ // these were 15
 	unsigned int home_disc, current_disc, lib_disc; // Currently selected disc for each of the three handles
 	unsigned char bootopt;
 	unsigned char priv;
@@ -232,7 +237,7 @@ struct {
 	unsigned short active_id; // 0 = no user handle because we are doing a fs_save
 	unsigned short user_handle; // index into active[server][active_id].fhandles[] so that cursor can be updated
 	unsigned long long last_receive; // Time of last receipt so that we can garbage collect	
-	unsigned char acornname[12]; // Tail path segment - enables *SAVE to return it on final close
+	unsigned char acornname[83]; // Tail path segment - enables *SAVE to return it on final close // Was 12
 } fs_bulk_ports[ECONET_MAX_FS_SERVERS][256];
 
 struct objattr {
@@ -261,7 +266,7 @@ struct path_entry {
 	unsigned short perm, parent_perm, my_perm;
 	unsigned short homeof;
 	unsigned long load, exec, length, internal;
-	unsigned char unixpath[1024], unixfname[15], acornname[15];
+	unsigned char unixpath[1024], unixfname[81], acornname[81]; // unixfname / acornname were 15, but now 81 to handle max 80 character filenames
 	unsigned char day, monthyear, hour, min, sec; // Modified date / time
 	unsigned char c_day, c_monthyear, c_hour, c_min, c_sec;
 	void *next, *parent;
@@ -279,10 +284,10 @@ struct path {
 	// If ftype == NOTFOUND, the rest of the fields are invalid
 	unsigned char discname[30]; // Actually max 10 chars. This is just safety.
 	short disc; // Disc number
-	unsigned char path[30][11]; // Path elements in order, relative to root
-	unsigned char acornname[11]; // Acorn format filename - tail end - gets populated on not found for non-wildcard searches to enable *SAVE to return it
+	unsigned char path[12][81]; // Path elements in order, relative to root // Was 30, 11 - adjusted to 12 paths to keep within the typical 1024 byte path block in the code
+	unsigned char acornname[81]; // Acorn format filename - tail end - gets populated on not found for non-wildcard searches to enable *SAVE to return it
 	short npath; // Number of entries in path[]. 1 means last entry is [0]
-	unsigned char path_from_root[256]; // Path from root directory in Econet format
+	unsigned char path_from_root[2560]; // Path from root directory in Econet format // Was 256 - extended for long fnames
 	int owner; // Owner user ID
 	int parent_owner;
 	unsigned short homeof;
@@ -295,7 +300,7 @@ struct path {
 	struct objattr attr; // Not yet in use generally
 	unsigned char unixpath[1024]; // Full unix path from / in the filesystem (done because Econet is case insensitive)
 	unsigned char acornfullpath[1024]; // Full acorn path within this server, including disc name
-	unsigned char unixfname[15]; // As stored on disc, in case different case to what was requested
+	unsigned char unixfname[85]; // As stored on disc, in case different case to what was requested // Was 15 before long fnames
 	unsigned char day; // day of month last written
 	unsigned char monthyear; // Top 4 bits years since 1981; bottom four are month (Not very y2k...)
 	unsigned char hour, min, sec; // Hours mins sec of modification time
@@ -1050,7 +1055,7 @@ int fs_scandir_filter(const struct dirent *d)
 
 	//fs_debug (0, 3, "fs_scandir_filter() checking '%s' against regex returned %s", d->d_name, (result == 0 ? "success" : "failure"));
 
-	if ((result == 0) && (strlen(d->d_name) <= 10) && strcasecmp(d->d_name, "lost+found"))
+	if ((result == 0) /* && (strlen(d->d_name) <= ECONET_MAX_FILENAME_LENGTH) */ && strcasecmp(d->d_name, "lost+found")) // Length criteria commented out - cannot pass server parameter to scandir filter
 		return 1;
 	else	return 0;
 
@@ -1093,7 +1098,7 @@ void fs_free_wildcard_list(struct path *p)
 int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needle, struct path_entry **head, struct path_entry **tail)
 {
 
-	unsigned short counter;
+	unsigned short counter, found;
 	short results;
 	struct path_entry *p, *new_p;
 	char needle_wildcard[2048];
@@ -1102,7 +1107,7 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 	struct objattr oa, oa_parent;
 	struct tm ct;
 
-	counter = 0;
+	found = counter = 0;
 	*head = *tail = p = NULL;
 
 	fs_acorn_to_unix(needle);
@@ -1128,111 +1133,123 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 		//fprintf (stderr, "fs_get_wildcard_entries() loop counter %d of %d - %s\n", counter+1, results, namelist[counter]->d_name);
 		//fs_debug (0, 3, "fs_get_wildcard_entries() loop counter %d of %d - %s", counter+1, results, namelist[counter]->d_name);
 
-		new_p = malloc(sizeof(struct path_entry));	
-		new_p->next = NULL;
-		if (p == NULL)
+		// if() added when long filename support added because scandir filter cannot take server parameter
+
+		if (strlen(namelist[counter]->d_name) <= ECONET_MAX_FILENAME_LENGTH)
 		{
-			new_p->parent = NULL;
-			*head = new_p;
-		}
-		else
-		{
-			new_p->parent = p;
-			p->next = new_p;
-		}
 
-		*tail = new_p;
+			found++;
 
-		// Read parent information
-
-		// ** Bug found by @sweh
-		//fs_read_xattr(p->unixpath, &oa_parent);
-
-		// Fill the struct
-		
-		strncpy (new_p->unixfname, namelist[counter]->d_name, 10);
-		new_p->unixfname[10] = '\0';
-
-		strncpy (new_p->acornname, namelist[counter]->d_name, 10);
-		new_p->acornname[10] = '\0';
-
-		fs_unix_to_acorn(new_p->acornname);
-
-		sprintf (new_p->unixpath, "%s/%s", haystack, new_p->unixfname);
-
-		if (stat(new_p->unixpath, &statbuf) != 0) // Error
-		{
-			fs_debug (0, 2, "Unable to stat %s", new_p->unixpath);
-			free (new_p);
-			counter++;
-			continue;
-		}
-
-		//fs_debug (0, 3, "fs_get_wildcard_entries() loop counter %d of %d - ACORN:'%s', UNIX '%s'", counter+1, results, new_p->acornname, new_p->unixfname);
-
-		p = new_p; // update p
-
-		fs_read_xattr(p->unixpath, &oa);
-
-		p->load = oa.load;
-		p->exec = oa.exec;
-		p->owner = oa.owner;
-		p->perm = oa.perm;
-		p->homeof = oa.homeof;
-		p->length = statbuf.st_size;
-
-		// If we own the object and it's a directory, and it has permissions 0, then spoof RW/
-		if ((p->owner == userid) && S_ISDIR(statbuf.st_mode) && (p->perm == 0))
-			p->perm = FS_PERM_OWN_R | FS_PERM_OWN_W;	
-
-		p->parent_owner = oa_parent.owner;
-		p->parent_perm = oa_parent.perm;
-
-		// Parent must be a directory, so we frig the permissions to be WR/ if we own the parent and permissions are &00 (which L3FS would let us read/write to because we own it)
-		
-		if ((p->parent_owner == userid) && (p->parent_perm == 0))
-			p->parent_perm = FS_PERM_OWN_R | FS_PERM_OWN_W;
-
-		if (users[server][userid].priv & FS_PRIV_SYSTEM)
-			p->my_perm = (p->perm & (FS_PERM_L | FS_PERM_OWN_W | FS_PERM_OWN_R));
-		else if (p->owner == userid)
-			p->my_perm = (p->perm & ~(FS_PERM_OTH_W | FS_PERM_OTH_R));
-		else
-			p->my_perm = (p->perm & (FS_PERM_L | FS_PERM_H)) | ((p->perm & (FS_PERM_OTH_W | FS_PERM_OTH_R)) >> 4);
-
-		if (S_ISREG(statbuf.st_mode))
-			p->ftype = FS_FTYPE_FILE;
-		else if (S_ISDIR(statbuf.st_mode))
-			p->ftype = FS_FTYPE_DIR;
-		else	p->ftype = FS_FTYPE_SPECIAL;
-
-		if (!(S_ISREG(statbuf.st_mode)))
-			p->load = p->exec = 0;
+			new_p = malloc(sizeof(struct path_entry));	
+			new_p->next = NULL;
+			if (p == NULL)
+			{
+				new_p->parent = NULL;
+				*head = new_p;
+			}
+			else
+			{
+				new_p->parent = p;
+				p->next = new_p;
+			}
 	
-		localtime_r(&(statbuf.st_mtime), &ct);
-
-		fs_date_to_two_bytes (ct.tm_mday, ct.tm_mon+1, ct.tm_year, &(p->monthyear), &(p->day));	
-		p->hour = ct.tm_hour;
-		p->min = ct.tm_min;
-		p->sec = ct.tm_sec;
-
-		// Create time
-		localtime_r(&(statbuf.st_ctime), &ct);
-		fs_date_to_two_bytes(ct.tm_mday, ct.tm_mon+1, ct.tm_year, &(p->c_day), &(p->c_monthyear));
-		p->c_hour = ct.tm_hour;
-		p->c_min = ct.tm_min;
-		p->c_sec = ct.tm_sec;
-
-		p->internal = statbuf.st_ino;
-		strncpy(p->ownername, users[server][p->owner].username, 10);
-		p->ownername[10] = '\0';
+			*tail = new_p;
+	
+			// Read parent information
+	
+			// ** Bug found by @sweh
+			//fs_read_xattr(p->unixpath, &oa_parent);
+	
+			// Fill the struct
+			
+			strncpy (new_p->unixfname, namelist[counter]->d_name, ECONET_MAX_FILENAME_LENGTH);
+			new_p->unixfname[ECONET_MAX_FILENAME_LENGTH] = '\0';
+	
+			strncpy (new_p->acornname, namelist[counter]->d_name, ECONET_MAX_FILENAME_LENGTH);
+			new_p->acornname[ECONET_MAX_FILENAME_LENGTH] = '\0';
+	
+			fs_unix_to_acorn(new_p->acornname);
+	
+			sprintf (new_p->unixpath, "%s/%s", haystack, new_p->unixfname);
+	
+			if (stat(new_p->unixpath, &statbuf) != 0) // Error
+			{
+				fs_debug (0, 2, "Unable to stat %s", new_p->unixpath);
+				free (new_p);
+				counter++;
+				continue;
+			}
+	
+			//fs_debug (0, 3, "fs_get_wildcard_entries() loop counter %d of %d - ACORN:'%s', UNIX '%s'", counter+1, results, new_p->acornname, new_p->unixfname);
+	
+			p = new_p; // update p
+	
+			fs_read_xattr(p->unixpath, &oa);
+	
+			p->load = oa.load;
+			p->exec = oa.exec;
+			p->owner = oa.owner;
+			p->perm = oa.perm;
+			p->homeof = oa.homeof;
+			p->length = statbuf.st_size;
+	
+			// If we own the object and it's a directory, and it has permissions 0, then spoof RW/
+			if ((p->owner == userid) && S_ISDIR(statbuf.st_mode) && (p->perm == 0))
+				p->perm = FS_PERM_OWN_R | FS_PERM_OWN_W;	
+	
+			p->parent_owner = oa_parent.owner;
+			p->parent_perm = oa_parent.perm;
+	
+			// Parent must be a directory, so we frig the permissions to be WR/ if we own the parent and permissions are &00 (which L3FS would let us read/write to because we own it)
+			
+			if ((p->parent_owner == userid) && (p->parent_perm == 0))
+				p->parent_perm = FS_PERM_OWN_R | FS_PERM_OWN_W;
+	
+			if (users[server][userid].priv & FS_PRIV_SYSTEM)
+				p->my_perm = (p->perm & (FS_PERM_L | FS_PERM_OWN_W | FS_PERM_OWN_R));
+			else if (p->owner == userid)
+				p->my_perm = (p->perm & ~(FS_PERM_OTH_W | FS_PERM_OTH_R));
+			else
+				p->my_perm = (p->perm & (FS_PERM_L | FS_PERM_H)) | ((p->perm & (FS_PERM_OTH_W | FS_PERM_OTH_R)) >> 4);
+	
+			if (S_ISREG(statbuf.st_mode))
+				p->ftype = FS_FTYPE_FILE;
+			else if (S_ISDIR(statbuf.st_mode))
+				p->ftype = FS_FTYPE_DIR;
+			else	p->ftype = FS_FTYPE_SPECIAL;
+	
+			if (!(S_ISREG(statbuf.st_mode)))
+				p->load = p->exec = 0;
+		
+			localtime_r(&(statbuf.st_mtime), &ct);
+	
+			fs_date_to_two_bytes (ct.tm_mday, ct.tm_mon+1, ct.tm_year, &(p->monthyear), &(p->day));	
+			p->hour = ct.tm_hour;
+			p->min = ct.tm_min;
+			p->sec = ct.tm_sec;
+	
+			// Create time
+			localtime_r(&(statbuf.st_ctime), &ct);
+			fs_date_to_two_bytes(ct.tm_mday, ct.tm_mon+1, ct.tm_year, &(p->c_day), &(p->c_monthyear));
+			p->c_hour = ct.tm_hour;
+			p->c_min = ct.tm_min;
+			p->c_sec = ct.tm_sec;
+	
+			p->internal = statbuf.st_ino;
+			strncpy(p->ownername, users[server][p->owner].username, 10);
+			p->ownername[10] = '\0';
+	
+		} // End of name length if() above
 
 		counter++;
 	}
 
-	if (results > 0) fs_free_scandir_list(&namelist, results);
+	if (results > 0) fs_free_scandir_list(&namelist, results); // This needs to check results (not 'found') because results is how many scandir returned, not all of which might be 'found' because we apply the length criteria locally.
 
-	return results;
+	// This version from update to long filenames, because this function (rather than scandir with its filter) now ascertains how many results matched, because scandir cannot apply the length criteria. 
+	return found;
+
+	// return results; // Old non-long-filenames version
 }
 
 
@@ -1518,7 +1535,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 		result->ftype = FS_FTYPE_DIR;
 		
-		sprintf(result->acornname, "%-10s", "$");
+		sprintf(result->acornname, "%-10s", "$"); // Probably don't need to update this for >10 char filenames, all it does is put $ in the front of the path
 
 		strcpy((char * ) result->unixfname, (const char * ) "");	 // Root dir - no name
 		result->internal = s.st_ino; // Internal name = Inode number
@@ -1651,8 +1668,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			result->homeof = result->paths->homeof;
 			result->length = result->paths->length;
 			result->internal = result->paths->internal;
-			strncpy (result->acornname, result->paths->acornname, 10);
-			result->acornname[10] = '\0';
+			strncpy (result->acornname, result->paths->acornname, ECONET_MAX_FILENAME_LENGTH);
+			result->acornname[ECONET_MAX_FILENAME_LENGTH] = '\0';
 
 			// If we are in Acorn Home Semantics mode, and we've found a home directory then update the info accordingly
 			// I.e. once we are below a home directory, set owner for everything in there to the ID whose home directory we traversed
@@ -1694,8 +1711,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 			strcpy (result->unixpath, result->paths->unixpath); // Always copy first entry to unixpath - means that our next npath entry will look in the first thing we found on the last wildcard search. That means, e.g. :ECONET.$.A*.WOMBAT.DR* will match the first thing in $ beginning 'A'.
 
-			strncpy (result->unixfname, result->paths->unixfname, 10);
-			result->unixfname[10] = '\0';
+			strncpy (result->unixfname, result->paths->unixfname, ECONET_MAX_FILENAME_LENGTH);
+			result->unixfname[ECONET_MAX_FILENAME_LENGTH] = '\0';
 
 			result->day = result->paths->day;
 			result->monthyear = result->paths->monthyear;
@@ -1737,7 +1754,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 		r_counter = 0; 
 
-		while (result->path[count][r_counter] != '\0' && r_counter < 10)
+		while (result->path[count][r_counter] != '\0' && r_counter < ECONET_MAX_FILENAME_LENGTH)
 		{
 			if (result->path[count][r_counter] == '/')
 				path_segment[r_counter] = ':';
@@ -1807,7 +1824,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			
 				unsigned short r_counter = 0;
 				char unix_segment[12];
-				while (result->path[count][r_counter] != '\0' && r_counter < 10)
+				while (result->path[count][r_counter] != '\0' && r_counter < ECONET_MAX_FILENAME_LENGTH)
 				{
 					if (result->path[count][r_counter] == '/')
 						unix_segment[r_counter] = ':';
@@ -1956,8 +1973,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			}
 			
 			strcpy((char * ) result->unixfname, (const char * ) unix_segment);
-			strncpy(result->acornname, unix_segment, 10);
-			result->acornname[10] = '\0';
+			strncpy(result->acornname, unix_segment, ECONET_MAX_FILENAME_LENGTH);
+			result->acornname[ECONET_MAX_FILENAME_LENGTH] = '\0';
 			fs_unix_to_acorn(result->acornname);
 
 		}
@@ -2152,11 +2169,6 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 		use_xattr = 0;
 	}
 	free(autoinf);
-	sprintf(regex, "^(%s{1,10})", FSREGEX);
-
-	//if (regcomp(&r_pathname, "^([A-Za-z0-9\\+_;\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]{1,10})", REG_EXTENDED) != 0)
-	if (regcomp(&r_pathname, regex, REG_EXTENDED) != 0)
-		fs_debug (1, 0, "Unable to compile regex for file and directory names.");
 
 	sprintf(regex, "^(%s{1,16})", FSREGEX);
 	if (regcomp(&r_discname, regex, REG_EXTENDED) != 0)
@@ -2211,6 +2223,7 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 		fs_config[fs_count].fs_acorn_home = 0;
 		fs_config[fs_count].fs_sjfunc = 1;
 		fs_config[fs_count].fs_pwtenchar = 1;
+		fs_config[fs_count].fs_fnamelen = FS_DEFAULT_NAMELEN;
 
 		sprintf(passwordfile, "%s/Configuration", fs_stations[fs_count].directory);
 		cfgfile = fopen(passwordfile, "r+");
@@ -2239,6 +2252,17 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 			}
 		}
 
+		if (fs_config[fs_count].fs_fnamelen < 10 || fs_config[fs_count].fs_fnamelen > ECONET_ABS_MAX_FILENAME_LENGTH)
+			fs_config[fs_count].fs_fnamelen = 10;
+
+		// Filename regex compile moved here so we know how long the filenames are. We set this to maximum length because
+		// the normalize routine sifts out maximum length for each individual server and there is only one regex compiled
+		// because the scandir filter uses it, and that routine cannot take a server number as a parameter.
+
+		sprintf(regex, "^(%s{1,%d})", FSREGEX, ECONET_ABS_MAX_FILENAME_LENGTH);
+
+		if (regcomp(&r_pathname, regex, REG_EXTENDED) != 0)
+			fs_debug (1, 0, "Unable to compile regex for file and directory names.");
 
 		// Load / Create password file
 
@@ -2622,7 +2646,7 @@ void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned ch
 
 void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, unsigned short net, unsigned short stn, unsigned char *params)
 {
-	char pw_cur[11], pw_new[11], pw_old[11];
+	char pw_cur[11], pw_new[13], pw_old[11]; // pw_new is 13 to cope with 10 character password in quotes
 	int ptr;
 	int new_ptr;
 
@@ -2654,27 +2678,54 @@ void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, uns
 	else
 	{
 
+		uint8_t termination_char;
+
 		new_ptr = 0;
 		while (*(params+ptr) == ' ') ptr++; // Skip space
 		//ptr++;
 
 		// Copy new password
-		while (ptr < strlen(params) && (*(params+ptr) != 0x0d) && (new_ptr < 10))
+		while (ptr < strlen(params) && (*(params+ptr) != 0x0d) && (new_ptr < 12))
 		{
 			//fs_debug (0, 1, "Copying new password - ptr = %d, new_ptr = %d, character = %c", ptr, new_ptr, *(params+ptr));
 			pw_new[new_ptr++] = *(params+ptr++);
 		}
 
-		if (new_ptr == 10 && *(params+ptr) != 0x00) // The packet comes in with a 0x0d terminator, but the OSCLI (FSOp 0) command parser changes that to null termination
+		termination_char = *(params+ptr);
+
+		// If next character is not null and we have 10 characters then bad password
+
+		if (new_ptr >= 10 && termination_char != 0x00) // The packet comes in with a 0x0d terminator, but the OSCLI (FSOp 0) command parser changes that to null termination
 		{
 			//fs_debug (0, 1, "Character at params+ptr = %d (%c), ptr = %d, new_ptr = %d", *(params+ptr), (*(params+ptr) < 32 || *(params+ptr) > 126) ? '.' : *(params+ptr) , ptr, new_ptr);
 			fs_error(server, reply_port, net, stn, 0xFE, "Bad new password");
 		}
 		else
 		{	
-			for (; new_ptr < 10; new_ptr++)	pw_new[new_ptr] = ' ';
+			for (; new_ptr < 12; new_ptr++)	pw_new[new_ptr] = ' ';
 
-			pw_new[10] = '\0';
+			pw_new[12] = '\0';
+
+			// Strip quotes from new password if they are present
+
+			if (pw_new[0] == '"' && strrchr(pw_new, '"') && strrchr(pw_new, '"') != &(pw_new[0])) // properly quoted password
+			{
+				uint8_t ctr = 1;
+	
+				while (ctr < 12)
+				{
+					pw_new[ctr-1] = pw_new[ctr];
+					if (pw_new[ctr] == '"') 	pw_new[ctr-1] = ' ';
+					ctr++;
+				}
+
+			}
+			else if (pw_new[0] == '"') // Badly quoted password
+			{
+				fs_error(server, reply_port, net, stn, 0xB9, "Bad password");
+				return;
+			}
+
 
 			if (	(*params == '\"' && *(params+1) == '\"' && !strcmp(pw_cur, "          "))    // Existing password blank and pass command starts with ""
 				||	!strncasecmp((const char *) pw_cur, pw_old, 10))
@@ -2941,10 +2992,10 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 				fs_store_tail_path(active[server][usercount].fhandles[active[server][usercount].root].acorntailpath, p.acornfullpath);
 				active[server][usercount].fhandles[active[server][usercount].root].mode = 1;
 
-				snprintf(active[server][usercount].root_dir, 260, "$.%s", p.path_from_root);
+				snprintf(active[server][usercount].root_dir, 2600, "$.%s", p.path_from_root); // Was 260 
 
 				if (p.npath == 0)	sprintf(active[server][usercount].root_dir_tail, "$         ");
-				else			sprintf(active[server][usercount].root_dir_tail, "%-10s", p.path[p.npath-1]);
+				else			sprintf(active[server][usercount].root_dir_tail, "%-80s", p.path[p.npath-1]); // WAS 10
 
 				// Just set CWD to URD
 
@@ -3021,7 +3072,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 				if (p.npath == 0)
 					strcpy((char * ) active[server][usercount].lib_dir_tail, (const char * ) "$         ");
 				else
-					sprintf(active[server][usercount].lib_dir_tail, "%-10s", p.path[p.npath-1]);
+					sprintf(active[server][usercount].lib_dir_tail, "%-80s", p.path[p.npath-1]); // WAS 10
 
 				fs_debug (0, 1, "            from %3d.%3d Login as %s, index %d, id %d, disc %d, URD %s, CWD %s, LIB %s, priv 0x%02x", net, stn, username, usercount, active[server][usercount].userid, active[server][usercount].current_disc, home, home, lib, active[server][usercount].priv);
 
@@ -3071,7 +3122,7 @@ void fs_read_user_env(int server, unsigned short reply_port, unsigned char net, 
 
 	// If either current or library handle is invalid, barf massively.
 
-	fs_debug (0, 2, "Current.is_dir = %d, handle = %d, Lib.is_dir = %d, handle = %d\n", active[server][active_id].fhandles[active[server][active_id].current].is_dir, active[server][active_id].fhandles[active[server][active_id].current].handle, active[server][active_id].fhandles[active[server][active_id].lib].is_dir, active[server][active_id].fhandles[active[server][active_id].lib].handle);
+	//fs_debug (0, 2, "Current.is_dir = %d, handle = %d, Lib.is_dir = %d, handle = %d\n", active[server][active_id].fhandles[active[server][active_id].current].is_dir, active[server][active_id].fhandles[active[server][active_id].current].handle, active[server][active_id].fhandles[active[server][active_id].lib].is_dir, active[server][active_id].fhandles[active[server][active_id].lib].handle);
 
 	if (!(active[server][active_id].fhandles[active[server][active_id].current].is_dir) ||
 	    !(active[server][active_id].fhandles[active[server][active_id].lib].is_dir) ||
@@ -3103,11 +3154,11 @@ void fs_read_user_env(int server, unsigned short reply_port, unsigned char net, 
 void fs_examine(int server, unsigned short reply_port, unsigned char net, unsigned char stn, unsigned int active_id, unsigned char *data, unsigned int datalen)
 {
 	unsigned short relative_to, arg, start, n;
-	unsigned char path[256];
+	unsigned char path[1024]; // Was 256 before long filenames
 	struct path p;
 	struct path_entry *e;
 	struct __econet_packet_udp r;
-	int replylen;
+	int replylen, replyseglen;
 	unsigned short examined, dirsize;
 	// Next 4 lines only used in the old non-wildcard code
 	//DIR *d;
@@ -3201,7 +3252,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 	if (strlen(acornpathfromroot) != 0) strcat(acornpathfromroot, ".");
 	strcat(acornpathfromroot, "*"); // It should already have $ on it if root.
 
-	// Wildcard renormalize
+	// Wildcard renormalize - THE LONG FILENAMES MODS CAUSE THIS TO RETURN NOT FOUND ON AN EMPTY DIRECTORY
 	if (!fs_normalize_path_wildcard(server, active_id, acornpathfromroot, relative_to, &p, 1)) // || p.ftype == FS_FTYPE_NOTFOUND)
 	{
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
@@ -3221,7 +3272,17 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 		replylen--;
 */
 
-	while (examined < n && (e != NULL))
+	/* Add a check here to make sure we don't tip over a 255 byte packet */
+
+	switch (arg)
+	{
+		case 0:	replyseglen = 27; break;
+		case 1: replyseglen = ECONET_MAX_FILENAME_LENGTH + 57; break;
+		case 2: replyseglen = ECONET_MAX_FILENAME_LENGTH + 1; break;
+		case 3: replyseglen = ECONET_MAX_FILENAME_LENGTH + 9; break;
+	}
+
+	while (examined < n && (e != NULL) && (replylen < (255-replyseglen)))
 	{	
 		//fs_debug (0, 3, "Examining '%s'", e->acornname);
 
@@ -3272,6 +3333,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 				{
 					unsigned char tmp[256];
 					unsigned char permstring_l[10], permstring_r[10];
+					unsigned char hr_fmt_string[80];
 	
 					sprintf(permstring_l, "%s%s%s%s",
 						(e->ftype == FS_FTYPE_DIR ? "D" : e->ftype == FS_FTYPE_SPECIAL ? "S" : ""),
@@ -3283,7 +3345,10 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 						((e->perm & FS_PERM_OTH_W) ? "W" : ""),
 						((e->perm & FS_PERM_OTH_R) ? "R" : "") );
 
-					sprintf (tmp, "%-10s %08lX %08lX   %06lX   %4s/%-2s     %02d/%02d/%02d %06lX", 
+					sprintf (hr_fmt_string, "%%-%ds %%08lX %%08lX   %%06lX   %%4s/%%-2s     %%02d/%%02d/%%02d %%06lX", ECONET_MAX_FILENAME_LENGTH);
+
+					//sprintf (tmp, "%-10s %08lX %08lX   %06lX   %4s/%-2s     %02d/%02d/%02d %06lX", 
+					sprintf (tmp, hr_fmt_string, 
 						e->acornname,
 						e->load, e->exec, e->length,
 						permstring_l, permstring_r,
@@ -3300,15 +3365,23 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 				} break;
 				case 2: // 10 character filename format (short)
 				{
-					r.p.data[replylen++] = 0x0a;
-					sprintf((char *) &(r.p.data[replylen]), "%-10.10s", e->acornname);
-					replylen += 10;
+					unsigned char hr_fmt_string[20];
+
+					sprintf(hr_fmt_string, "%%-%d.%ds", ECONET_MAX_FILENAME_LENGTH, ECONET_MAX_FILENAME_LENGTH);
+
+					//r.p.data[replylen++] = 0x0a;
+					r.p.data[replylen++] = ECONET_MAX_FILENAME_LENGTH;
+					//sprintf((char *) &(r.p.data[replylen]), "%-10.10s", e->acornname);
+					sprintf((char *) &(r.p.data[replylen]), hr_fmt_string, e->acornname);
+					//replylen += 10;
+					replylen += ECONET_MAX_FILENAME_LENGTH;
 
 				} break;
 				case 3: // 10 character filename format (long)
 				{
 					char tmp[256];
 					char permstring_l[10], permstring_r[10];
+					unsigned char hr_fmt_string[20];
 
 					sprintf(permstring_l, "%s%s%s%s",
 						(e->ftype == FS_FTYPE_DIR ? "D" : e->ftype == FS_FTYPE_SPECIAL ? "S" : ""),
@@ -3320,7 +3393,9 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 						((e->perm & FS_PERM_OTH_W) ? "W" : ""),
 						((e->perm & FS_PERM_OTH_R) ? "R" : "") );
 
-					sprintf (tmp, "%-10s %4s/%-2s", e->acornname,
+					sprintf (hr_fmt_string, "%%-%ds %%4s/%%-2s", ECONET_MAX_FILENAME_LENGTH);
+					//sprintf (tmp, "%-10s %4s/%-2s", e->acornname,
+					sprintf (tmp, hr_fmt_string, e->acornname,
 						permstring_l, permstring_r
 					);
 					strcpy((char * ) &(r.p.data[replylen]), (const char * ) tmp);
@@ -3636,7 +3711,7 @@ short fs_get_acorn_entries(int server, int active_id, char *unixpath)
 	char regex[1024];
 	struct dirent **list;
 
-	sprintf(regex, "^(%s{1,10})", FSREGEX);
+	sprintf(regex, "^(%s{1,%d})", FSREGEX, ECONET_MAX_FILENAME_LENGTH);
 
 	if (regcomp(&r_wildcard, regex, REG_EXTENDED | REG_ICASE | REG_NOSUB) != 0) // We go extended expression, case insensitive and we aren't bothered about finding *where* the matches are in the string
 		return -1; // Regex failure!
@@ -3759,6 +3834,9 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 
 	if (command == 6)
 	{
+		
+		unsigned char hr_fmt_string[10];
+
 		if (p.ftype != FS_FTYPE_DIR)
 		{
 			fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
@@ -3766,15 +3844,26 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		}
 
 		r.p.data[replylen++] = 0; // Undefined on this command
-		r.p.data[replylen++] = 10; // Dir name length
+		//r.p.data[replylen++] = 10; // Dir name length
+		r.p.data[replylen++] = ECONET_MAX_FILENAME_LENGTH; // Dir name length
 
+		memset ((char *) &(r.p.data[replylen]), 32, ECONET_MAX_FILENAME_LENGTH); // Pre-fill with spaces in case this is the root dir
 	
 		if (p.npath == 0) // Root
-			strncpy((char * ) &(r.p.data[replylen]), (const char * ) "$         ", 11);
+		{
+			//strncpy((char * ) &(r.p.data[replylen]), (const char * ) "$         ", 11);
+			r.p.data[replylen] = '$';
+			r.p.data[replylen+ECONET_MAX_FILENAME_LENGTH+1] = '\0';
+		}
 		else
-			snprintf(&(r.p.data[replylen]), 11, "%-10s", (const char * ) p.acornname);
+		{
+			sprintf (hr_fmt_string, "%%-%ds", ECONET_MAX_FILENAME_LENGTH);
+			//snprintf(&(r.p.data[replylen]), 11, "%-10s", (const char * ) p.acornname);
+			snprintf(&(r.p.data[replylen]), ECONET_MAX_FILENAME_LENGTH+1, hr_fmt_string, (const char * ) p.acornname);
+		}
 
-		replylen += 10;
+		//replylen += 10;
+		replylen += ECONET_MAX_FILENAME_LENGTH;
 
 		r.p.data[replylen++] = (active[server][active_id].userid == p.owner) ? 0x00 : 0xff; 
 
@@ -4382,7 +4471,7 @@ void fs_copy(int server, unsigned short reply_port, int active_id, unsigned char
 		struct objattr a;
 		unsigned long length, sf_return;
 		off_t readpos;
-		char destfile[1048];
+		char destfile[2600];
 
 		handle = fs_open_interlock(server, e->unixpath, 1, active[server][active_id].userid);
 
@@ -5122,6 +5211,7 @@ void fs_info(int server, unsigned short reply_port, int active_id, unsigned char
 		else
 		{
 			unsigned char permstring[10];
+			unsigned char hr_fmt_string[100];
 
 			strcpy(permstring, "");
 		
@@ -5132,7 +5222,9 @@ void fs_info(int server, unsigned short reply_port, int active_id, unsigned char
 			if (p.perm & FS_PERM_OTH_W) strcat (permstring, "W");
 			if (p.perm & FS_PERM_OTH_R) strcat (permstring, "R");
 
-			sprintf(reply_string, "%-10s %08lX %08lX   %06lX    %-7s   %02d/%02d/%02d %06lX%c%c",	p.path[p.npath-1], p.load, p.exec, p.length, permstring, 
+			sprintf(hr_fmt_string, "%%-%ds %%08lX %%08lX   %%06lX    %%-7s   %%02d/%%02d/%%02d %%06lX%%c%%c", ECONET_MAX_FILENAME_LENGTH);
+			//sprintf(reply_string, "%-10s %08lX %08lX   %06lX    %-7s   %02d/%02d/%02d %06lX%c%c",	p.path[p.npath-1], p.load, p.exec, p.length, permstring, 
+			sprintf(reply_string, hr_fmt_string, p.path[p.npath-1], p.load, p.exec, p.length, permstring, 
 					fs_day_from_two_bytes(p.day, p.monthyear),
 					fs_month_from_two_bytes(p.day, p.monthyear),
 					fs_year_from_two_bytes(p.day, p.monthyear),
@@ -7112,8 +7204,21 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 				   in fact existing servers pad to 12 characters with spaces and terminate it with a negative byte "(plus 3 bytes of
 				   junk!)". So we'll try that. */
 
-				memset(&(r.p.data[5]), 0, 15);
-				snprintf(&(r.p.data[5]), 13, "%-12s", fs_bulk_ports[server][port].acornname);
+				//memset(&(r.p.data[5]), 0, 15); // 10 char filename code
+
+				memset(&(r.p.data[5]), 32, 15); 
+
+				//snprintf(&(r.p.data[5]), 13, "%-12s", fs_bulk_ports[server][port].acornname); // Commented out for long filenames
+				{
+					uint8_t counter = 0;
+
+					while (fs_bulk_ports[server][port].acornname[counter] != 0)
+					{
+						r.p.data[5+counter] = fs_bulk_ports[server][port].acornname[counter];
+						counter++;
+					}
+				}
+
 				r.p.data[17] = 0x80;
 				// And the 'junk'
 				r.p.data[18] = 0x20; r.p.data[19] = 0xA9; r.p.data[20] = 0x24;
@@ -7649,7 +7754,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, n_handle, l);
 								strncpy((char * ) active[server][active_id].lib_dir, (const char * ) p.path_from_root, 255);
 								if (p.npath == 0)	strcpy((char * ) active[server][active_id].lib_dir_tail, (const char * ) "$         ");
-								else			sprintf(active[server][active_id].lib_dir_tail, "%-10s", p.path[p.npath-1]);
+								else			sprintf(active[server][active_id].lib_dir_tail, "%-80s", p.path[p.npath-1]); // Was 10
 								
 								strcpy(active[server][active_id].fhandles[n_handle].acornfullpath, p.acornfullpath);
 								fs_store_tail_path(active[server][active_id].fhandles[n_handle].acorntailpath, p.acornfullpath);
@@ -7720,7 +7825,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, n_handle, l);
 								strncpy((char * ) active[server][active_id].current_dir, (const char * ) p.path_from_root, 255);
 								if (p.npath == 0)	strcpy((char * ) active[server][active_id].current_dir_tail, (const char * ) "$         ");
-								else			sprintf(active[server][active_id].current_dir_tail, "%-10s", p.path[p.npath-1]);
+								else			sprintf(active[server][active_id].current_dir_tail, "%-80s", p.path[p.npath-1]); // Was 10
 								
 								strcpy(active[server][active_id].fhandles[n_handle].acornfullpath, p.acornfullpath);
 								fs_store_tail_path(active[server][active_id].fhandles[n_handle].acorntailpath, p.acornfullpath);
@@ -7761,6 +7866,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 				// System commands here
 
+
+				// Wonder why this was commented out?
 /*
 				if (regexec(&fs_netconf_regex_one, command, 2, matches, 0) == 0) // Found a NETCONF
 */
@@ -7812,6 +7919,45 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					
 					fs_reply_ok(server, reply_port, net, stn);
 
+				}
+				else if (fs_parse_cmd(command, "FNLENGTH", 8, &param))
+				{
+					uint8_t new_length;
+					char params[256];
+					FILE *config;
+					char configfile[300];
+
+					fs_copy_to_cr(params, param, 2);
+				
+					if (sscanf(params, "%2d", (int *) &new_length) == 1)
+					{
+						if (new_length >= 10 && new_length <= 80)
+							ECONET_MAX_FILENAME_LENGTH = new_length;
+						else
+						{
+							fs_error (server, reply_port, net, stn, 0xFF, "Bad maximum filename length");
+							return;
+						}
+						sprintf(configfile, "%s/Configuration", fs_stations[server].directory);
+		
+						config = fopen(configfile, "w+");
+	
+						if (!config)
+							fs_debug (0, 1, "Unable to write config file!");
+						else
+						{
+							fwrite(&(fs_config[server]), 256, 1, config);
+							fclose(config);
+						}
+						
+						fs_reply_ok(server, reply_port, net, stn);
+
+					}
+					else
+					{
+						fs_error (server, reply_port, net, stn, 0xFF, "Bad parameter");
+						return;
+					}	
 				}
 				//else if (!strncasecmp("SETHOME ", (const char *) command, 8))
 				else if (fs_parse_cmd(command, "SETHOME", 4, &param))
@@ -7991,7 +8137,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 				}
 				//else if (!strncasecmp("PRIV ", (const char *) command, 5)) // Set user privilege
-				else if (fs_parse_cmd(command, "PRIV", 4, &param))
+				else if (fs_parse_cmd(command, "PRIV", 4, &param) || fs_parse_cmd(command, "REMUSER", 4, &param))
 				{
 					char username[11], priv, priv_byte;
 
@@ -8005,17 +8151,23 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						count++;
 					}
 
-					if (count == strlen((const char *) param)) // THere was no space after the username
+					if (count == 0) // There wasn't a username
+						fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
+
+					if ((command[0] == 'P') && count == strlen((const char *) param)) // THere was no space after the username and this was PRIV not REMUSER
 						fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
 					else
 					{
 						username[count] = '\0';
 						count++;
-						if (count == strlen((const char *) param)) // There was no priv character!
+						if (command[0] == 'P' && count == strlen((const char *) param)) // There was no priv character!
 							fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
 						else
 						{
-							priv = param[count];	
+							if (command[0] == 'P')
+								priv = param[count];	
+							else	priv = 'D'; // This was REMUSER not PRIV, so we pick 'D' for delete
+
 							switch (priv) {
 								case 's': case 'S': // System user
 									priv_byte = FS_PRIV_SYSTEM;			

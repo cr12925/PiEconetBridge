@@ -22,7 +22,7 @@
 #include <openssl/rand.h>
 
 // Server version number advertised
-#define EB_VERSION	0x30 // i.e. 2.0
+#define EB_VERSION	0x21 // i.e. 2.1
 #define EB_SERVERID	"Pi HP Bridge"
 
 #define EB_TRUNK 	0x01
