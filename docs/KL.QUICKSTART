@@ -1,0 +1,90 @@
+Installing the Original Bridge or High Performance Bridge
+
+Step 1 - Installing 32bit PiOS to SD Card
+
+Format MicroSD card to FAT32. I will typically use Rufus to do this from Windows - particularly for larger SD cards, where the default Windows formatting tool doesn't give the option to format to FAT32.
+
+Install Raspberry Pi OS Lite (32-bit) using the Raspberry Pi Imager utility.
+
+Click on the little 'Advanced Options' cog and set an appropriate Username and Password for logging into your Pi. Note: Previously the default Username would be ‘pi’, but this now considered a security risk, and it is recommended that you select an alternative Username.
+In the Advanced Options you can also configure SSH and WiFi settings, which will allow you to configure your bridge remotely (using PuTTY or equivalent), without ever having to connect a monitor or keyboard to your Pi.
+
+Add the following two entries to the 'uncomment to overclock the arm' section of the config.txt file on the root of the SD card:
+
+	arm_freq=1000
+	force_turbo=1
+
+Add the following additional entry to the [pi4] section of the config.txt file on the root of the SD card:
+
+	arm_64bit=0
+
+And finally add the following additional entry to the 'Additional overlays and parameters are documented /boot/overlays/README' section of the config.txt file on the root of the SD card. This will give you the ability to shutdown and restart the Pi from a pushbutton attached to later (v2r4 and above) versions of the bridge board:
+
+	dtoverlay=gpio-shutdown
+
+Insert MicroSD card into Pi, attach bridge board to Pi and power up the Pi.
+
+Connect to the Pi via SSH (using PuTTY) and run the following commands:
+
+	sudo apt update
+	sudo apt upgrade
+	sudo apt install raspberrypi-kernel-headers
+	sudo apt install libexplain51 libexplain-dev libexplain-doc libssl-dev
+	sudo apt install git
+	sudo reboot now
+
+
+Step 2 - Checking for and adding build folder for Kernel headers
+
+This is a new step, because the build folder is not always present in the correct location on some new PiOS installs!
+
+Re-connect to the Pi via SSH and check if the build folder exists in your install:
+
+pi@raspberrypi:~ $ ls -d /lib/modules/`uname -r`/build
+
+If you get a 'No such file or directory' message, you will need add a symlink to the build directory, otherwise skip this step and move onto the 'Step 3 - Installing and configuring the bridge software' step.
+
+To add a symlink, you firstly need to find the correct directory, so search as follows:
+
+pi@raspberrypi:~ $ ls -d /usr/src/*l+
+
+Note the character between the * and + is a lower case 'L', and not a numeric '1'! It should return something like this:
+
+	/usr/src/linux-headers-6.1.21-v7l+
+
+If it returns more than one directory, try and pick the latest one, and create a symlink similar to this (replacing '/usr/src/linux-headers-6.1.21-v7l+' with whatever you found above), and then reboot your Pi again:
+
+	cd /lib/modules/`uname -r`
+	sudo ln -s /usr/src/linux-headers-6.1.21-v7l+ build
+	sudo reboot now
+
+
+Step 3 - Installing and configuring the bridge software
+
+Once the basic PiOS is installed and configured, I will then go one of two routes, depending on whether I want to run the Original Bridge code, or the newer and more optimised High Performance Bridge (HPB) code. Note that development of the Original Bridge code will stop shortly, so it is recommended to install the HPB code:
+
+3A - New High Performance Bridge (HPB)
+
+Re-connect to the Pi via SSH and run the following commands:
+
+	git clone https://github.com/cr12925/PiEconetBridge
+	cd PiEconetBridge
+	make install-hp
+	sudo reboot now
+
+Re-connect to the Pi via SSH and run the following command to check that the bridge is running:
+
+	sudo systemctl status econet-hpbridge.service
+
+Note that on the latest v3 hardware, the green 'Read' LED will illuminate brightly on reboot, once the Kernel driver has loaded. At this point the Econet clock should also be running. On the High Performance Bridge the red 'Write' LED will illuminate several seconds later to indicate that the bridge software has also loaded.
+
+Finally, for either the Original Bridge or the High Performance Bridge:
+
+Connect a beeb to the bridge and power it up.
+Verify that Econet clock is running, by making sure the 'No Clock' message isn't being reported when selecting NFS as the file system.
+
+Log onto the PiFS from my beeb with the following command:
+
+	*I AM SYST
+
+
