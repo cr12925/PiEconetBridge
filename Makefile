@@ -1,5 +1,7 @@
 all:	install-hp
 
+install:	install-hp
+
 install-module:	install-mkgroup
 	cd module ; make clean ; make
 	[ -f /etc/udev/rules.d/90-econet.rules ] || sudo cp udev/90-econet.rules /etc/udev/rules.d/90-seconet.rules
