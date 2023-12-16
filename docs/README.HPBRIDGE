@@ -366,10 +366,9 @@ Defining a local IP gateway
 ---------------------------
 
 This bridge has integrated support for traffic on port &D2, for Phil Blundell's
-Eco/TCP ROM. You will need to look in the TCPIP guide for how to make all 
-that work, including setting up a tunnel interface before you start the bridge
-software, and giving it an IP adddress. However, the configuration line
-you need is this:
+Eco/TCP ROM. 
+
+The configuration line you need is this:
 
 IPSERVER ON net.station DEVICE tunX USING IP a.b.c.d/netmask
 
@@ -385,6 +384,159 @@ Same caveat as for file & print servers: If you want to put a local IP
 gateway in a network used for something else, define the network before you
 define the IP gateway.
 
+Setting up the tunnel interface
+-------------------------------
+
+First, decide on an IP subnet to be used on your Econet.
+
+e.g. 192.168.0.0/24
+
+Whilst it is not essential to do so, it makes sense to 
+use the station numbers as host numbers in that subnet.
+
+E.g. 192.168.0.1 is station 1 on the network, etc.
+
+You could use a bigger subnet if you have bridged nets.
+E.g. you could use 172.16.0.0/16 and your Econet
+machines could be numbered 172.16.n.s where n is the
+network number and s is the station number.
+
+You will first have to set up an IP tunnel interface on
+your Pi Bridge. This requires root privileges or 'sudo'.
+
+e.g.
+
+ip tuntap add dev tun0 mode tun
+
+(You can use a different tunX device if you want.)
+
+You must do that before starting the bridge. You can put the
+relevant commands in rc.local if you wish.
+
+Then give tun0 an IP address which will match the Econet
+station number you are going to run the IP gateway on.
+
+E.g. say:
+
+ - Your Econet is network number 1
+ - Your IP gateway will be station 1.251
+ - The IP network for your network 1 is going to be
+   192.168.1.0 (with station 1 at 192.168.1.1 and so on)
+ - Your tunnel interface is tun0
+
+the logical IP address for your tun0 interface is
+192.168.1.251
+
+The relevant command will therefore be (root also
+required):
+
+ip address add 192.168.1.251/24 dev tun0
+
+You should now find that an extra route has appeared
+in your bridge's IP routing table if you use 'ip route'.
+The new route will match the subnet you have just assigned
+to the tun0 interface.
+
+If you have multiple networks on your Econet (e.g. over 
+trunks or bridges) then you could use a wider network
+mask such as /16. Here at PiBridge Towers, I use
+172.17.0.0/16 and all Econet network numbers form the third
+octet - so for example:
+
+Host 1.1 is 172.17.1.1
+Host 6.240 is 172.17.6.240
+
+My IP gateway is at host 1.251 and so the IP address of
+tun0 on that bridge is 172.17.1.251/16
+
+Now configure your bridge. Add a line which looks like this
+to the config, based on the 192.168.1.251 example above:
+
+IPSERVER ON 1.251 DEVICE tun0 USING IP 192.168.1.251/24
+
+Then turn on IP routing.
+
+To do that permanently, uncomment the following line in 
+/etc/sysctl.conf and reboot:
+net.ipv4.ip_forward = 1
+
+To do it temporarily, do the following as root:
+sysctl -w net.ipv4.ip_forward=1
+
+Restart your bridge and the IP server should be enabled.
+
+Then configure a BBC station with Phil Blundell's ROM
+installed in SWRAM.
+
+Follow the instructions for the TCP/IP ROM and put a wired
+station on an IP address which is within the subnet above,
+but which is NOT the same as the one you've put on the bridge.
+
+A sensible first test is to try and telnet to your Bridge
+by telnet-ting to the IP address assigned to tun0.
+
+Next, set up some NAT so that your Econet IP network is hidden
+behind the bridge (if you want - otherwise you'll have to make
+sure you route the 192.168.1.0/24 subnet to the eth0 IP
+address on your bridge.
+
+You should find that something like this will do the trick if
+you want to 'hide nat' your Econet behind the bridge's primary
+IP address:
+
+sudo iptables -t nat -A POSTROUTING -s 192.168.1.0/24 -j MASQUERADE
+
+You should now find that if you follow PB's instructions, you
+can TELNET (or TELAPI) to hosts in the wider Internet-world.
+
+Briefly, say you are on station 1:
+
+*IPADDR 192.168.1.1
+*ROUTE * 192.168.1.251
+*TELNET <wherever>
+
+If you install telnetd on the PiBridge 
+
+	sudo apt install telnetd
+
+In the configuration example above, you should be able to do
+
+	*TELNET 192.168.1.251
+
+on the BBC and end up with an (UNENCRYPTED!!) login prompt
+out of your PiBridge. If you do instal telnetd, since it is
+unencrypted, you might want to take steps to stop traffic to 
+the telnet port (23) from anywhere except 192.168.1.0/24 so 
+that it cannot be used other than from your Econet.
+
+
+The port number problem
+-----------------------
+
+The EcoTCP ROM will only let you connect to port numbers of
+255 or under. This means you cannot connect to, say, a BBS
+running somewhere on port 6502.
+
+The kludgey fix is to use Linux's NAT to translate a port
+number less than 256 to the one you want, and then connect
+to the low numbered port.
+
+As root on your bridge, and assuming your tunnel interface for
+econet-ipgw is tun0, and your BBS machine (or whatever) is on
+IP address 192.168.0.1, you could do something like this:
+
+iptables -t nat -A PREROUTING -i tun0 -d 192.168.0.1 -p tcp --dport 24 -j DNAT --to-destination 192.168.0.1:6502
+
+Then on the BBC you could, for example, load the Prestel ROM
+and connect to the viewdata BBS on 192.168.0.1 port 6502
+as follows:
+
+>*TELAPI 192.168.0.1 24
+>*PRESTEL
+
+Enjoy!
+
+
 Defining a local pipe gateway
 -----------------------------
 
@@ -396,7 +548,7 @@ command line.
 To define the pipe server (and you can have more than one station of this
 nature defined), use the command syntax:
 
-PIPESERVER ON net.station PATH /tmp/<whatever> <NONE|DIRECT>
+PIPESERVER ON net.station PATH /tmp/<whatever> <NONE|PASSTHRU>
 
 The bridge will create two pipes each with the base name /tmp/<whatever>, 
 one for traffic to the bridge and one for traffic from the bridge. It will
@@ -410,10 +562,11 @@ NONE:	The bridge sends ACKs for traffic sent to the pipe client. It will
 	IMMEDIATE, IMMEDIATE REPLY, and BROADCAST. Makes it easier if your
 	client doesn't want to track its own acks / naks.
 
-DIRECT:	The bridge does the opposite of NONE. It will not spoof any ACKs,
+PASSTHRU:	The bridge does the opposite of NONE. It will not spoof any ACKs,
 	and your pipe client code must track its own ACKs and retransmissions.
 	All ACKs and NAKs will be forwarded to the pipe client, and 
 	the client is responsible for generating ACKs and NAKs of its own.
+
 
 Exposure of hosts and networks to AUN/IP
 ----------------------------------------
