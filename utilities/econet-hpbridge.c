@@ -7116,7 +7116,7 @@ static void * eb_statistics (void *nothing)
 
 						switch (divert->type)
 						{
-							case EB_DEF_AUN:	stn = divert->aun->stn; if (divert->aun->port == -1) sprintf (info, "Inactive"); else sprintf(info, "%08X:%d", divert->aun->addr, divert->aun->port); break;
+							case EB_DEF_AUN:	stn = divert->aun->stn; if (divert->aun->port == -1) sprintf (info, "Inactive"); else sprintf(info, "%d.%d.%d.%d:%d", (divert->aun->addr & 0xff000000) >> 24, (divert->aun->addr & 0x00ff0000) >> 16, (divert->aun->addr & 0x0000ff00) >> 8, (divert->aun->addr & 0x000000ff), divert->aun->port); break;
 							case EB_DEF_LOCAL:	stn = divert->local.stn; sprintf(info, "%c%c%c", ((divert->local.printers) ? 'P' : ' '),
 								((divert->local.fs.index >= 0) ? 'F' : ' '),
 								((divert->local.ip.tunif[0] != '\0') ? 'I' : ' ')); break;

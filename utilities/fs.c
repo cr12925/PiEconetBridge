@@ -6930,6 +6930,7 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 	unsigned short count, start;
 	short handle;
 	struct path p;
+	struct path_entry *e;
 	struct __econet_packet_udp reply;
 
 	count = 7;
@@ -6951,37 +6952,35 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 
 	fs_debug (0, 2, "%12sfrom %3d.%3d Open %s readonly %s, must exist? %s", "", net, stn, filename, (readonly ? "yes" : "no"), (existingfile ? "yes" : "no"));
 
-	result = fs_normalize_path(server, active_id, filename, active[server][active_id].current, &p);
+	//result = fs_normalize_path(server, active_id, filename, active[server][active_id].current, &p); // Old non-wildcard version
+	result = fs_normalize_path_wildcard(server, active_id, filename, active[server][active_id].current, &p, 1);
 
-	if (!result)
-		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
-	else if (existingfile && p.ftype == FS_FTYPE_NOTFOUND)
+	e = p.paths;
+
+	if (!result || !e) // The || !e was addded for wildcard version
 	{
+		fs_free_wildcard_list(&p);
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
-
-		//reply.p.ptype = ECONET_AUN_DATA;
-		//reply.p.port = reply_port;
-		//reply.p.ctrl = 0x80;
-		//reply.p.data[0] = reply.p.data[1] = reply.p.data[2] = 0;
-	
-		//fs_aun_send(&reply, server, 3, net, stn);
 	}
-	else if ((p.ftype == FS_FTYPE_FILE) && !readonly && ((p.my_perm & FS_PERM_OWN_W) == 0))
+	else if (existingfile && e->ftype == FS_FTYPE_NOTFOUND)
+	{
+		fs_free_wildcard_list(&p);
+		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
+	}
+	else if ((e->ftype == FS_FTYPE_FILE) && !readonly && ((e->my_perm & FS_PERM_OWN_W) == 0))
+	{
+		fs_free_wildcard_list(&p);
 		fs_error(server, reply_port, net, stn, 0xbd, "Insufficient access");
-	//else if (existingfile && p.ftype != FS_FTYPE_FILE) // Cope with weird FS3 behaviour where you can open a directory but not actually read or write from/to it
-		//fs_error(server, reply_port, net, stn, 0xBE, "Is not a file");
-/* This is wrong. Locked just stops you deleting a file.
-	else if (!readonly && (p.perm & FS_PERM_L)) // File locked
-	{
-		fs_error(server, reply_port, net, stn, 0xC3, "Locked");
 	}
-*/
-	else if (!readonly && (p.ftype == FS_FTYPE_NOTFOUND) && 
-		(	(p.parent_owner != active[server][active_id].userid && ((p.parent_perm & FS_PERM_OTH_W) == 0)) ||
-			(p.parent_owner == active[server][active_id].userid && ((p.perm & FS_PERM_OWN_W) == 0))
+	else if (!readonly && (e->ftype == FS_FTYPE_NOTFOUND) && 
+		(	(e->parent_owner != active[server][active_id].userid && ((e->parent_perm & FS_PERM_OTH_W) == 0)) ||
+			(e->parent_owner == active[server][active_id].userid && ((e->perm & FS_PERM_OWN_W) == 0))
 			) // FNF and we can't write to the directory
 		)
+	{
+		fs_free_wildcard_list(&p);
 		fs_error(server, reply_port, net, stn, 0xbd, "Insufficient access");
+	}
 	else
 	{
 
@@ -6995,7 +6994,8 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 	
 		if (userhandle)
 		{
-			handle = fs_open_interlock(server, p.unixpath, (readonly ? 1 : existingfile ? 2 : 3), active[server][active_id].userid);
+			handle = fs_open_interlock(server, e->unixpath, (readonly ? 1 : existingfile ? 2 : 3), active[server][active_id].userid);
+			fs_free_wildcard_list(&p);
 			
 			if (handle == -1)  // Couldn't open a file when we think we should be able to
 			{
@@ -7021,7 +7021,7 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 				active[server][active_id].fhandles[userhandle].cursor_old = 0;	
 				active[server][active_id].fhandles[userhandle].sequence = 2;	 // This is the 0-1-0-1 oscillator tracker. But sometimes a Beeb will start with &81 ctrl byte instead of &80, so we set to 2 so that the first one is guaranteed to be different
 				active[server][active_id].fhandles[userhandle].pasteof = 0; // Not past EOF yet
-				active[server][active_id].fhandles[userhandle].is_dir = (p.ftype == FS_FTYPE_DIR ? 1 : 0);
+				active[server][active_id].fhandles[userhandle].is_dir = (e->ftype == FS_FTYPE_DIR ? 1 : 0);
 
 				strcpy(active[server][active_id].fhandles[userhandle].acornfullpath, p.acornfullpath);
 				fs_store_tail_path(active[server][active_id].fhandles[userhandle].acorntailpath, p.acornfullpath);
@@ -7038,7 +7038,10 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 			}
 		}
 		else
+		{
+			fs_free_wildcard_list(&p);
 			fs_error(server, reply_port, net, stn, 0xC0, "Too many open files");
+		}
 	}
 
 }
