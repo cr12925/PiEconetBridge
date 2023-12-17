@@ -3114,7 +3114,7 @@ void fs_read_user_env(int server, unsigned short reply_port, unsigned char net, 
 {
 
 	struct __econet_packet_udp r;
-	int replylen = 0;
+	int replylen = 0, count;
 	unsigned short disclen;
 
 	fs_debug (0, 2, "%12sfrom %3d.%3d Read user environment - current user handle %d, current lib handle %d", "", net, stn, active[server][active_id].current, active[server][active_id].lib);
@@ -3146,11 +3146,17 @@ void fs_read_user_env(int server, unsigned short reply_port, unsigned char net, 
 	replylen += disclen;
 
 	memcpy(&(r.p.data[replylen]), &(active[server][active_id].fhandles[active[server][active_id].current].acorntailpath), 10);
+	for (count = 0; count < 10; count++)
+		if (r.p.data[replylen+count] == 0) r.p.data[replylen+count] = ' ';
+
 	//snprintf (&(r.p.data[replylen]), 10, "%-10s", active[server][active_id].fhandles[active[server][active_id].current].acorntailpath);
 	//sprintf (&(r.p.data[replylen]), "%-10s", active[server][active_id].current_dir_tail);
 	replylen += 10;
 
 	memcpy(&(r.p.data[replylen]), &(active[server][active_id].fhandles[active[server][active_id].lib].acorntailpath), 10);
+	for (count = 0; count < 10; count++)
+		if (r.p.data[replylen+count] == 0) r.p.data[replylen+count] = ' ';
+
 	//snprintf (&(r.p.data[replylen]), 10, "%-10s", active[server][active_id].fhandles[active[server][active_id].lib].acorntailpath);
 	//sprintf (&(r.p.data[replylen]), "%-10s", active[server][active_id].lib_dir_tail);
 	replylen += 10;
@@ -7039,6 +7045,15 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 			}
 			else
 			{	
+				unsigned char	realfullpath[1024];
+
+				// Wildcard system doesn't append final path element
+
+				strcpy (realfullpath, p.acornfullpath);
+				if (p.npath > 0)
+					strcat (realfullpath, ".");
+				strcat (realfullpath, p.acornname);
+
 				fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, userhandle, handle);
 				active[server][active_id].fhandles[userhandle].handle = handle;
 				active[server][active_id].fhandles[userhandle].mode = mode;
@@ -7048,20 +7063,11 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 				active[server][active_id].fhandles[userhandle].pasteof = 0; // Not past EOF yet
 				active[server][active_id].fhandles[userhandle].is_dir = (p.ftype == FS_FTYPE_DIR ? 1 : 0);
 
-				strcpy(active[server][active_id].fhandles[userhandle].acornfullpath, p.acornfullpath);
+				//strcpy(active[server][active_id].fhandles[userhandle].acornfullpath, p.acornfullpath);
+				strcpy(active[server][active_id].fhandles[userhandle].acornfullpath, realfullpath);
 				// XX HERE - WAS THIS, CHANGED
 				//fs_store_tail_path(active[server][active_id].fhandles[userhandle].acorntailpath, p.acornfullpath);
-				fs_store_tail_path(active[server][active_id].fhandles[userhandle].acorntailpath, p.acornname);
-
-				// If we used the wildcard system (existing == 1) then we need to add the tail path onto the acornfullpath 
-				// because the wildcard finder doesn't do it. See comments in fs_normalize_path_wildcard()
-				// but only if we didn't look for $
-
-				if (existingfile && (p.npath > 1))
-				{
-					strcat(active[server][active_id].fhandles[userhandle].acornfullpath, ".");
-					strcat(active[server][active_id].fhandles[userhandle].acornfullpath, p.acornname);
-				}
+				fs_store_tail_path(active[server][active_id].fhandles[userhandle].acorntailpath, realfullpath);
 
 				reply.p.ptype = ECONET_AUN_DATA;
 				reply.p.port = reply_port;
