@@ -6741,10 +6741,12 @@ int main (int argc, char **argv)
 	/* Start exposures here */
 
 	{
-		uint8_t			nets_done[8];
+		uint8_t			nets_done[32];
 
-#define NETMAP_SET(x, y)	{ (x)[(y)/8] |= (1 << ((y) % 8)); }
-#define NETMAP_ISSET(x, y)	((x)[(y)/8] & (1 << ((y) % 8)))
+//#define NETMAP_SET(x, y)	{ (x)[(y)/8] |= (1 << ((y) % 8)); }
+//#define NETMAP_ISSET(x, y)	((x)[(y)/8] & (1 << ((y) % 8)))
+#define NETMAP_SET(x, y)	{ (x)[(y)/32] |= (1 << ((y) & 0x07)); }
+#define NETMAP_ISSET(x, y)	((x)[(y)/32] & (1 << ((y) & 0x07)))
 #define NETMAP_RESET(x)		memset(&(x), 0, sizeof((x)))
 
 		NETMAP_RESET(nets_done);
