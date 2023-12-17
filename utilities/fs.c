@@ -154,7 +154,8 @@ struct {
 	uint8_t fs_bigchunks; // Whether we use 4k chunks on data bursts, or 1.25k (BeebEm compatibility - it appears to have a buffer overrun!)
 	uint8_t fs_pwtenchar; // Set to non-zero when the FS has run the 6 to 10 character password conversion, by moving the fullname field along by 5 chracters
 	uint8_t fs_fnamelen; // Live (modifiable!) max filename length. Must be less than ECONET_MAX_FILENAME_LENGTH. When changed, this has to recompile the fs regex
-	uint8_t pad[251]; // Spare spare in the config
+	uint8_t fs_infcolon; // Uses :inf for alternative to xattrs instead of .inf, and maps Acorn / to Unix . instead of Unix :
+	uint8_t pad[250]; // Spare spare in the config
 } fs_config[ECONET_MAX_FS_SERVERS];
 
 struct {
@@ -196,7 +197,7 @@ struct {
 		unsigned short pasteof; // Signals when there has already been one attempt to read past EOF and if there's another we need to generate an error
 		unsigned short is_dir; // Looks like Acorn systems can OPENIN() a directory so there has to be a single set of handles between dirs & files. So if this is non-zero, the handle element is a pointer into fs_dirs, not fs_files.
 		char acornfullpath[1024]; // Full Acorn path, used for calculating relative paths
-		char acorntailpath[FS_DEFAULT_NAMELEN+1];
+		char acorntailpath[81];
 	} fhandles[FS_MAX_OPEN_FILES];
 	unsigned char sequence; // Used to detect duplicate transmissions on putbyte - oscillates 0-1-0-1 - low bit of ctrl byte in packet. Gets re-set whenever there is an operation which is not a putbyte, so that successive putbytes get the tracker, but anything else in the way resets it
 } active[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_USERS];
@@ -1973,7 +1974,10 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			}
 			
 			strcpy((char * ) result->unixfname, (const char * ) unix_segment);
+
+			// This gets converted to acorn below
 			strncpy(result->acornname, unix_segment, ECONET_MAX_FILENAME_LENGTH);
+
 			result->acornname[ECONET_MAX_FILENAME_LENGTH] = '\0';
 			fs_unix_to_acorn(result->acornname);
 
@@ -6221,7 +6225,7 @@ void fs_getbyte(int server, unsigned char reply_port, unsigned char net, unsigne
 		h = fs_files[server][active[server][active_id].fhandles[handle].handle].handle;
 
 		fs_debug (0, 2, "%12sfrom %3d.%3d Get byte on channel %02x, cursor %04lX, ctrl seq is %s (stored: %02X, received: %02X)", "", net, stn, handle, active[server][active_id].fhandles[handle].cursor,
-			fs_check_seq(ctrl, active[server][active_id].fhandles[handle].sequence) ? "OK" : "WRONG", active[server][active_id].fhandles[handle].sequence, ctrl);
+			fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl) ? "OK" : "WRONG", active[server][active_id].fhandles[handle].sequence, ctrl);
 
 		if (active[server][active_id].fhandles[handle].is_dir) // Directory handle
 		{
@@ -6252,12 +6256,14 @@ void fs_getbyte(int server, unsigned char reply_port, unsigned char net, unsigne
 		// Put the pointer back where we were
 
 		clearerr(h);
-		if (!fs_check_seq(ctrl, active[server][active_id].fhandles[handle].sequence)) // Assume we want the previous cursor
+		if (!fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl)) // Assume we want the previous cursor
 			fseek(h, active[server][active_id].fhandles[handle].cursor_old, SEEK_SET);
 		else
 			fseek(h, active[server][active_id].fhandles[handle].cursor, SEEK_SET);
 
 		active[server][active_id].fhandles[handle].cursor_old = ftell(h);
+
+		fs_debug (0, 2, "%12sfrom %3d.%3d Get byte on channel %02x, cursor %04lX, file length = %04lX, seek to %04lX", "", net, stn, handle, active[server][active_id].fhandles[handle].cursor, ftell(h));
 
 		b = fgetc(h);
 
@@ -6566,7 +6572,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	offset = (((*(data+10))) + ((*(data+11)) << 8) + (*(data+12) << 16));
 
 	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX (%s) by user %04x on handle %02x, ctrl seq is %s (stored: %02X, received: %02X)", "", net, stn, bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), active[server][active_id].userid, handle,
-		fs_check_seq(ctrl, active[server][active_id].fhandles[handle].sequence) ? "OK" : "WRONG", active[server][active_id].fhandles[handle].sequence, ctrl);
+		fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl) ? "OK" : "WRONG", active[server][active_id].fhandles[handle].sequence, ctrl);
 
 	if (active[server][active_id].fhandles[handle].handle == -1) // Invalid handle
 	{
@@ -6585,7 +6591,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	if (offsetstatus) // Read from current position
 		offset = active[server][active_id].fhandles[handle].cursor;
 
-	if (!fs_check_seq(ctrl, active[server][active_id].fhandles[handle].sequence)) // Sequence number was wrong
+	if (!fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl)) // Sequence number was wrong
 		offset = active[server][active_id].fhandles[handle].cursor_old; // Use cursor old even if a cursor is provided, IF the sequence number was wrong
 
 	// Seek to end to detect end of file
@@ -6765,7 +6771,7 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	fs_debug (0, 2, "%12sfrom %3d.%3d fs_putbytes() %06lX at offset %06lX by user %04X on handle %02d, ctrl seq is %s (stored: %02X, received: %02X)",
 			"", net, stn,
 			bytes, offset, active[server][active_id].userid, handle,
-			fs_check_seq(ctrl, active[server][active_id].fhandles[handle].sequence) ? "OK" : "WRONG", 
+			fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl) ? "OK" : "WRONG", 
 			active[server][active_id].fhandles[handle].sequence, ctrl);
 
 	if (offset > length) // Beyond EOF
@@ -6777,7 +6783,7 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 			fputc('\0', fs_files[server][internal_handle].handle);
 	}
 
-	if (!fs_check_seq(ctrl, active[server][active_id].fhandles[handle].sequence)) // If ctrl seq wrong, seek to cursor old regardless
+	if (!fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl)) // If ctrl seq wrong, seek to cursor old regardless
 		offset = active[server][active_id].fhandles[handle].cursor_old;
 
 	fseek(fs_files[server][internal_handle].handle, offset, SEEK_SET);
@@ -6930,7 +6936,7 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 	unsigned short count, start;
 	short handle;
 	struct path p;
-	struct path_entry *e;
+	//struct path_entry *e;
 	struct __econet_packet_udp reply;
 
 	count = 7;
@@ -6952,29 +6958,35 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 
 	fs_debug (0, 2, "%12sfrom %3d.%3d Open %s readonly %s, must exist? %s", "", net, stn, filename, (readonly ? "yes" : "no"), (existingfile ? "yes" : "no"));
 
-	//result = fs_normalize_path(server, active_id, filename, active[server][active_id].current, &p); // Old non-wildcard version
-	result = fs_normalize_path_wildcard(server, active_id, filename, active[server][active_id].current, &p, 1);
+	// If the file has to exist, then we normalize with wildcards. Otherwise without so that the routine can create the file
+	// because the normalize wildcard routine gives us the parent directory name in p.unixpath if nothing matched the wildcard
+	//if (!existingfile)
+		//result = fs_normalize_path(server, active_id, filename, active[server][active_id].current, &p); // Old non-wildcard version
+	//else
+		result = fs_normalize_path_wildcard(server, active_id, filename, active[server][active_id].current, &p, existingfile ? 1 : 0);
 
-	e = p.paths;
+		// NB the wildcard normalize copies the first entry found into the &p structure itself for backward compatibility so this should be fine.
+		
+	//e = p.paths;
 
-	if (!result || !e) // The || !e was addded for wildcard version
+	if (!result) // The || !e was addded for wildcard version
 	{
 		fs_free_wildcard_list(&p);
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
 	}
-	else if (existingfile && e->ftype == FS_FTYPE_NOTFOUND)
+	else if (existingfile && p.ftype == FS_FTYPE_NOTFOUND)
 	{
 		fs_free_wildcard_list(&p);
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
 	}
-	else if ((e->ftype == FS_FTYPE_FILE) && !readonly && ((e->my_perm & FS_PERM_OWN_W) == 0))
+	else if ((p.ftype == FS_FTYPE_FILE) && !readonly && ((p.my_perm & FS_PERM_OWN_W) == 0))
 	{
 		fs_free_wildcard_list(&p);
 		fs_error(server, reply_port, net, stn, 0xbd, "Insufficient access");
 	}
-	else if (!readonly && (e->ftype == FS_FTYPE_NOTFOUND) && 
-		(	(e->parent_owner != active[server][active_id].userid && ((e->parent_perm & FS_PERM_OTH_W) == 0)) ||
-			(e->parent_owner == active[server][active_id].userid && ((e->perm & FS_PERM_OWN_W) == 0))
+	else if (!readonly && (p.ftype == FS_FTYPE_NOTFOUND) && 
+		(	(p.parent_owner != active[server][active_id].userid && ((p.parent_perm & FS_PERM_OTH_W) == 0)) ||
+			(p.parent_owner == active[server][active_id].userid && ((p.perm & FS_PERM_OWN_W) == 0))
 			) // FNF and we can't write to the directory
 		)
 	{
@@ -6992,9 +7004,13 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 
 		userhandle = fs_allocate_user_file_channel(server, active_id);
 	
+		//fprintf (stderr, "%s\n", p.unixpath);
+
 		if (userhandle)
 		{
-			handle = fs_open_interlock(server, e->unixpath, (readonly ? 1 : existingfile ? 2 : 3), active[server][active_id].userid);
+			handle = fs_open_interlock(server, p.unixpath, (readonly ? 1 : existingfile ? 2 : 3), active[server][active_id].userid);
+			//fs_debug(0, 2, "%12sfrom %3d.%3d fs_open_interlock() for %s with mode %d returned %s", "", net, stn, p.unixpath, (readonly ? 1 : existingfile ? 2: 3), handle);
+
 			fs_free_wildcard_list(&p);
 			
 			if (handle == -1)  // Couldn't open a file when we think we should be able to
@@ -7021,10 +7037,12 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 				active[server][active_id].fhandles[userhandle].cursor_old = 0;	
 				active[server][active_id].fhandles[userhandle].sequence = 2;	 // This is the 0-1-0-1 oscillator tracker. But sometimes a Beeb will start with &81 ctrl byte instead of &80, so we set to 2 so that the first one is guaranteed to be different
 				active[server][active_id].fhandles[userhandle].pasteof = 0; // Not past EOF yet
-				active[server][active_id].fhandles[userhandle].is_dir = (e->ftype == FS_FTYPE_DIR ? 1 : 0);
+				active[server][active_id].fhandles[userhandle].is_dir = (p.ftype == FS_FTYPE_DIR ? 1 : 0);
 
 				strcpy(active[server][active_id].fhandles[userhandle].acornfullpath, p.acornfullpath);
-				fs_store_tail_path(active[server][active_id].fhandles[userhandle].acorntailpath, p.acornfullpath);
+				// XX HERE - WAS THIS, CHANGED
+				//fs_store_tail_path(active[server][active_id].fhandles[userhandle].acorntailpath, p.acornfullpath);
+				fs_store_tail_path(active[server][active_id].fhandles[userhandle].acorntailpath, p.acornname);
 				reply.p.ptype = ECONET_AUN_DATA;
 				reply.p.port = reply_port;
 				reply.p.ctrl = 0x80;
@@ -7033,7 +7051,7 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 				reply.p.data[1] = 0;
 				reply.p.data[2] = (unsigned char) (userhandle & 0xff);
 	
-				fs_debug (0, 2, "%12sfrom %3d.%3d Opened handle %d (%s)", "", net, stn, userhandle, p.acornfullpath);
+				fs_debug (0, 2, "%12sfrom %3d.%3d Opened handle %d (%s.%s)", "", net, stn, userhandle, p.acornfullpath, p.acornname);
 				fs_aun_send(&reply, server, 3, net, stn);
 			}
 		}
@@ -7870,11 +7888,9 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				// System commands here
 
 
-				// Wonder why this was commented out?
-/*
+				// Wonder why the regexec was commented out?
+				//if (0)
 				if (regexec(&fs_netconf_regex_one, command, 2, matches, 0) == 0) // Found a NETCONF
-*/
-				if (0)
 				{
 					char configitem[100];
 					int length;
@@ -7899,6 +7915,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 					if (!strcasecmp("ACORNHOME", configitem))
 						fs_config[server].fs_acorn_home = (operator == '+' ? 1 : 0);
+					else if (!strcasecmp("COLONMAP", configitem))
+						fs_config[server].fs_infcolon = (operator == '+' ? 1 : 0);
 					else if (!strcasecmp("MDFS", configitem))
 						fs_config[server].fs_sjfunc = (operator == '+' ? 1 : 0);
 					else if (!strcasecmp("BIGCHUNKS", configitem))
@@ -7913,7 +7931,10 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					config = fopen(configfile, "w+");
 
 					if (!config)
+					{
+						fs_error(server, reply_port, net, stn, 0xFF, "Unable to write to FS Configuration"); return;
 						fs_debug (0, 1, "Unable to write config file!");
+					}
 					else
 					{
 						fwrite(&(fs_config[server]), 256, 1, config);
