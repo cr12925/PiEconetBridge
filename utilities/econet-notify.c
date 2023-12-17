@@ -152,6 +152,7 @@ void econet_pipeeg_run(void)
 			p.p.data[4] = text[c];
 
 			pipeeg_aun_send(&p, 5);
+			usleep(10000);
 
 		}
 	}
