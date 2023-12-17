@@ -125,7 +125,7 @@ uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 // can be incorporated before that (second) format string can be used... sort of a work in progress!
 #define ECONET_ABS_MAX_FILENAME_LENGTH 80
 #define ECONET_MAX_PATH_ENTRIES 30
-#define ECONET_MAX_PATH_LENGTH ((ECONET_MAX_PATH_ENTRIES * (ECONET_MAX_FILENAME_LENGTH + 1)) + 1)
+#define ECONET_MAX_PATH_LENGTH ((ECONET_MAX_PATH_ENTRIES * (ECONET_ABS_MAX_FILENAME_LENGTH + 1)) + 1)
 
 #define FS_PRIV_SYSTEM 0x80
 #define FS_PRIV_LOCKED 0x40
@@ -183,7 +183,7 @@ struct {
 	unsigned int userid; // Index into users[n][]
 	unsigned char root, current, lib; // Handles
 	char root_dir[1024], current_dir[1024], lib_dir[1024]; // Paths relative to root
-	char root_dir_tail[81], lib_dir_tail[81], current_dir_tail[81]; // Just the last element of path, or $ // these were 15
+	char root_dir_tail[ECONET_ABS_MAX_FILENAME_LENGTH+1], lib_dir_tail[ECONET_ABS_MAX_FILENAME_LENGTH+1], current_dir_tail[ECONET_ABS_MAX_FILENAME_LENGTH+1]; // Just the last element of path, or $ // these were 15
 	unsigned int home_disc, current_disc, lib_disc; // Currently selected disc for each of the three handles
 	unsigned char bootopt;
 	unsigned char priv;
@@ -197,7 +197,7 @@ struct {
 		unsigned short pasteof; // Signals when there has already been one attempt to read past EOF and if there's another we need to generate an error
 		unsigned short is_dir; // Looks like Acorn systems can OPENIN() a directory so there has to be a single set of handles between dirs & files. So if this is non-zero, the handle element is a pointer into fs_dirs, not fs_files.
 		char acornfullpath[1024]; // Full Acorn path, used for calculating relative paths
-		char acorntailpath[81];
+		char acorntailpath[ECONET_ABS_MAX_FILENAME_LENGTH+1];
 	} fhandles[FS_MAX_OPEN_FILES];
 	unsigned char sequence; // Used to detect duplicate transmissions on putbyte - oscillates 0-1-0-1 - low bit of ctrl byte in packet. Gets re-set whenever there is an operation which is not a putbyte, so that successive putbytes get the tracker, but anything else in the way resets it
 } active[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_USERS];
@@ -238,7 +238,7 @@ struct {
 	unsigned short active_id; // 0 = no user handle because we are doing a fs_save
 	unsigned short user_handle; // index into active[server][active_id].fhandles[] so that cursor can be updated
 	unsigned long long last_receive; // Time of last receipt so that we can garbage collect	
-	unsigned char acornname[83]; // Tail path segment - enables *SAVE to return it on final close // Was 12
+	unsigned char acornname[ECONET_ABS_MAX_FILENAME_LENGTH+2]; // Tail path segment - enables *SAVE to return it on final close // Was 12
 } fs_bulk_ports[ECONET_MAX_FS_SERVERS][256];
 
 struct objattr {
@@ -267,7 +267,7 @@ struct path_entry {
 	unsigned short perm, parent_perm, my_perm;
 	unsigned short homeof;
 	unsigned long load, exec, length, internal;
-	unsigned char unixpath[1024], unixfname[81], acornname[81]; // unixfname / acornname were 15, but now 81 to handle max 80 character filenames
+	unsigned char unixpath[1024], unixfname[ECONET_ABS_MAX_FILENAME_LENGTH+1], acornname[ECONET_ABS_MAX_FILENAME_LENGTH+1]; // unixfname / acornname were 15, but now 81 to handle max 80 character filenames
 	unsigned char day, monthyear, hour, min, sec; // Modified date / time
 	unsigned char c_day, c_monthyear, c_hour, c_min, c_sec;
 	void *next, *parent;
@@ -285,8 +285,8 @@ struct path {
 	// If ftype == NOTFOUND, the rest of the fields are invalid
 	unsigned char discname[30]; // Actually max 10 chars. This is just safety.
 	short disc; // Disc number
-	unsigned char path[12][81]; // Path elements in order, relative to root // Was 30, 11 - adjusted to 12 paths to keep within the typical 1024 byte path block in the code
-	unsigned char acornname[81]; // Acorn format filename - tail end - gets populated on not found for non-wildcard searches to enable *SAVE to return it
+	unsigned char path[12][ECONET_ABS_MAX_FILENAME_LENGTH+1]; // Path elements in order, relative to root // Was 30, 11 - adjusted to 12 paths to keep within the typical 1024 byte path block in the code
+	unsigned char acornname[ECONET_ABS_MAX_FILENAME_LENGTH+1]; // Acorn format filename - tail end - gets populated on not found for non-wildcard searches to enable *SAVE to return it
 	short npath; // Number of entries in path[]. 1 means last entry is [0]
 	unsigned char path_from_root[2560]; // Path from root directory in Econet format // Was 256 - extended for long fnames
 	int owner; // Owner user ID
@@ -301,7 +301,7 @@ struct path {
 	struct objattr attr; // Not yet in use generally
 	unsigned char unixpath[1024]; // Full unix path from / in the filesystem (done because Econet is case insensitive)
 	unsigned char acornfullpath[1024]; // Full acorn path within this server, including disc name
-	unsigned char unixfname[85]; // As stored on disc, in case different case to what was requested // Was 15 before long fnames
+	unsigned char unixfname[ECONET_ABS_MAX_FILENAME_LENGTH+5]; // As stored on disc, in case different case to what was requested // Was 15 before long fnames
 	unsigned char day; // day of month last written
 	unsigned char monthyear; // Top 4 bits years since 1981; bottom four are month (Not very y2k...)
 	unsigned char hour, min, sec; // Hours mins sec of modification time
@@ -809,7 +809,7 @@ int fs_check_dir(DIR *h, char *e,  char *r)
 unsigned char *pathname_to_dotfile(unsigned char *path)
 {
 	unsigned char *dotfile;
-	dotfile=malloc(strlen(path)+10);
+	dotfile=malloc(strlen(path)+ECONET_ABS_MAX_FILENAME_LENGTH);
 	strcpy(dotfile,path);
 	// If last character is a / then strip it off; we want the
 	// filename in the parent directory
@@ -1270,7 +1270,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	regmatch_t matches[20];
 	unsigned char adjusted[1048];
 	unsigned char path_internal[1024];
-	unsigned char unix_segment[20];
+	unsigned char unix_segment[ECONET_ABS_MAX_FILENAME_LENGTH+10];
 	struct objattr attr;
 	int parent_owner = 0;
 	short found;
@@ -1289,6 +1289,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 	strcpy(path, received_path);
 	
+	if (normalize_debug) fs_debug(0,1, "path=%s, received_path=%s, relative to %d, wildcard = %d, server %d, user %d, active user fhandle.handle = %d, acornfullpath = %s", path, received_path, relative_to, wildcard, server, user, active[server][user].fhandles[relative_to].handle, active[server][user].fhandles[relative_to].acornfullpath);
+
 	// If the handle we have for 'relative to' is invalid, then return directory error
 	if ((relative_to > FS_MAX_OPEN_FILES) || (active[server][user].fhandles[relative_to].handle == -1))
 	{
@@ -1581,7 +1583,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		int num_entries;
 		unsigned short count = 0;
 
-		char acorn_path[100];
+		char acorn_path[ECONET_ABS_MAX_FILENAME_LENGTH+10];
 		struct path_entry *p; // Pointer for debug
 
 		if (normalize_debug) fs_debug (0, 1, "Processing wildcard path with %d elements\n", result->npath);
@@ -1741,7 +1743,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 	while ((result->npath > 0) && count < result->npath)
 	{
-		char path_segment[20]; // used to store the converted name (/ -> :)
+		char path_segment[ECONET_ABS_MAX_FILENAME_LENGTH+10]; // used to store the converted name (/ -> :)
 		struct stat s;
 		// OLD char attrbuf[20];
 		unsigned short r_counter;
@@ -1824,7 +1826,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			{
 			
 				unsigned short r_counter = 0;
-				char unix_segment[12];
+				char unix_segment[ECONET_ABS_MAX_FILENAME_LENGTH+10];
 				while (result->path[count][r_counter] != '\0' && r_counter < ECONET_MAX_FILENAME_LENGTH)
 				{
 					if (result->path[count][r_counter] == '/')
@@ -3143,11 +3145,13 @@ void fs_read_user_env(int server, unsigned short reply_port, unsigned char net, 
 
 	replylen += disclen;
 
-	sprintf (&(r.p.data[replylen]), "%-10s", active[server][active_id].fhandles[active[server][active_id].current].acorntailpath);
+	memcpy(&(r.p.data[replylen]), &(active[server][active_id].fhandles[active[server][active_id].current].acorntailpath), 10);
+	//snprintf (&(r.p.data[replylen]), 10, "%-10s", active[server][active_id].fhandles[active[server][active_id].current].acorntailpath);
 	//sprintf (&(r.p.data[replylen]), "%-10s", active[server][active_id].current_dir_tail);
 	replylen += 10;
 
-	sprintf (&(r.p.data[replylen]), "%-10s", active[server][active_id].fhandles[active[server][active_id].lib].acorntailpath);
+	memcpy(&(r.p.data[replylen]), &(active[server][active_id].fhandles[active[server][active_id].lib].acorntailpath), 10);
+	//snprintf (&(r.p.data[replylen]), 10, "%-10s", active[server][active_id].fhandles[active[server][active_id].lib].acorntailpath);
 	//sprintf (&(r.p.data[replylen]), "%-10s", active[server][active_id].lib_dir_tail);
 	replylen += 10;
 
@@ -5186,7 +5190,7 @@ void fs_info(int server, unsigned short reply_port, int active_id, unsigned char
 
 	unsigned char path[1024];
 	unsigned char relative_to;
-	char reply_string[81];
+	char reply_string[ECONET_ABS_MAX_FILENAME_LENGTH+40];
 
 	r.p.port = reply_port;
 	r.p.ctrl = 0x80;
@@ -6958,14 +6962,13 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 
 	fs_debug (0, 2, "%12sfrom %3d.%3d Open %s readonly %s, must exist? %s", "", net, stn, filename, (readonly ? "yes" : "no"), (existingfile ? "yes" : "no"));
 
-	// If the file has to exist, then we normalize with wildcards. Otherwise without so that the routine can create the file
-	// because the normalize wildcard routine gives us the parent directory name in p.unixpath if nothing matched the wildcard
-	//if (!existingfile)
-		//result = fs_normalize_path(server, active_id, filename, active[server][active_id].current, &p); // Old non-wildcard version
-	//else
-		result = fs_normalize_path_wildcard(server, active_id, filename, active[server][active_id].current, &p, existingfile ? 1 : 0);
+	// If the file must exist, then we can use wildcards; else no wildcards
+	// BUT we should be able to open a file for writing with wildcards in the path except the tail end
+	// Then, below, if the file doesn't exist we barf if the tail has wildcards in it.
+	//
+	result = fs_normalize_path_wildcard(server, active_id, filename, active[server][active_id].current, &p, 1);
 
-		// NB the wildcard normalize copies the first entry found into the &p structure itself for backward compatibility so this should be fine.
+	// NB the wildcard normalize copies the first entry found into the &p structure itself for backward compatibility so this should be fine.
 		
 	//e = p.paths;
 
@@ -6978,6 +6981,11 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 	{
 		fs_free_wildcard_list(&p);
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
+	}
+	else if (p.ftype == FS_FTYPE_NOTFOUND && (strchr(p.acornname, '*') || strchr(p.acornname, '#'))) // Cannot hand wildcard characters in the last segment of a name we might need to create - by this point, if the file had to exist and wasn't found, we'd have exited above. So by here, the file is capable of being created, so we cannot have wildcards in its name.
+	{
+		fs_free_wildcard_list(&p);
+		fs_error(server, reply_port, net, stn, 0xcc, "Bad filename");
 	}
 	else if ((p.ftype == FS_FTYPE_FILE) && !readonly && ((p.my_perm & FS_PERM_OWN_W) == 0))
 	{
@@ -7008,6 +7016,7 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 
 		if (userhandle)
 		{
+
 			handle = fs_open_interlock(server, p.unixpath, (readonly ? 1 : existingfile ? 2 : 3), active[server][active_id].userid);
 			//fs_debug(0, 2, "%12sfrom %3d.%3d fs_open_interlock() for %s with mode %d returned %s", "", net, stn, p.unixpath, (readonly ? 1 : existingfile ? 2: 3), handle);
 
@@ -7043,6 +7052,17 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 				// XX HERE - WAS THIS, CHANGED
 				//fs_store_tail_path(active[server][active_id].fhandles[userhandle].acorntailpath, p.acornfullpath);
 				fs_store_tail_path(active[server][active_id].fhandles[userhandle].acorntailpath, p.acornname);
+
+				// If we used the wildcard system (existing == 1) then we need to add the tail path onto the acornfullpath 
+				// because the wildcard finder doesn't do it. See comments in fs_normalize_path_wildcard()
+				// but only if we didn't look for $
+
+				if (existingfile && (p.npath > 1))
+				{
+					strcat(active[server][active_id].fhandles[userhandle].acornfullpath, ".");
+					strcat(active[server][active_id].fhandles[userhandle].acornfullpath, p.acornname);
+				}
+
 				reply.p.ptype = ECONET_AUN_DATA;
 				reply.p.port = reply_port;
 				reply.p.ctrl = 0x80;
@@ -7051,7 +7071,7 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 				reply.p.data[1] = 0;
 				reply.p.data[2] = (unsigned char) (userhandle & 0xff);
 	
-				fs_debug (0, 2, "%12sfrom %3d.%3d Opened handle %d (%s.%s)", "", net, stn, userhandle, p.acornfullpath, p.acornname);
+				fs_debug (0, 2, "%12sfrom %3d.%3d Opened handle %d (%s)", "", net, stn, userhandle, active[server][active_id].fhandles[userhandle].acornfullpath);
 				fs_aun_send(&reply, server, 3, net, stn);
 			}
 		}
