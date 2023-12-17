@@ -675,7 +675,7 @@ unsigned short fs_allocate_user_file_channel(int server, unsigned int active_id)
 	while (active[server][active_id].fhandles[count].handle != -1 && count < FS_MAX_OPEN_FILES)
 		count++;
 
-	if (count == FS_MAX_OPEN_FILES) return 0; // No handle available
+	if (count >= FS_MAX_OPEN_FILES) return 0; // No handle available
 
 	active[server][active_id].fhandles[count].is_dir = 0;
 
@@ -1635,6 +1635,11 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			if (found == 0) // Didn't find anything
 			{
 				result->ftype = FS_FTYPE_NOTFOUND;
+				
+				// Copy to thing we didn't find to result->acornname so it can be reused in the caller
+				strcpy (result->unixfname, acorn_path);
+				strcpy (result->acornname, acorn_path);
+				fs_acorn_to_unix(result->unixfname);
 
 				// If we are on the last segment and the filename does not contain wildcards, we return 1 to indicate that what was 
 				// searched for wasn't there so that it can be written to. Obviously if it did contain wildcards then it can't be so we
@@ -1839,6 +1844,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 				unix_segment[r_counter] = '\0';
 				strcat(result->unixpath, "/");
 				strcat(result->unixpath, unix_segment); // Add these on a last leg not found so that the calling routine can open the file to write if it wants
+				strcpy(result->unixfname, unix_segment); // For use by caller if we didn't find it
 				// Populate the acorn name we were looking for so that things like fs_save() can easily return it
 				strcpy(result->acornname, path_segment);
 				result->parent_owner = parent_owner; // Otherwise this doesn't get properly updated
@@ -4324,6 +4330,8 @@ short fs_open_interlock(int server, unsigned char *path, unsigned short mode, un
 {
 
 	unsigned short count;
+
+	fs_debug (0, 2, "%12sInterlock on server %d attempting to open path %s, mode %d, userid %d", "", server, path, mode, userid);
 
 	count = 0;
 
@@ -7022,6 +7030,15 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 
 		if (userhandle)
 		{
+
+			char 	unix_segment[ECONET_MAX_FILENAME_LENGTH+3];
+
+			// Even on a not found, normalize puts the last acorn segment in acornname
+			strcpy(unix_segment, "/");
+			strcat(unix_segment, p.unixfname);
+
+			if (p.ftype == FS_FTYPE_NOTFOUND) // Opening non-existent file for write - add unix name to end of path
+				strcat(p.unixpath, unix_segment);
 
 			handle = fs_open_interlock(server, p.unixpath, (readonly ? 1 : existingfile ? 2 : 3), active[server][active_id].userid);
 			//fs_debug(0, 2, "%12sfrom %3d.%3d fs_open_interlock() for %s with mode %d returned %s", "", net, stn, p.unixpath, (readonly ? 1 : existingfile ? 2: 3), handle);
