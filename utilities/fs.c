@@ -6638,8 +6638,9 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	if (offsetstatus) // Read from current position
 		offset = active[server][active_id].fhandles[handle].cursor;
 
-	if (!fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl)) // Sequence number was wrong
-		offset = active[server][active_id].fhandles[handle].cursor_old; // Use cursor old even if a cursor is provided, IF the sequence number was wrong
+	// This appears to be wrong. ANFS and EcoLink always send the fs_getbytes & fs_putbytes commands with ctrl &80
+	//if (!fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl)) // Sequence number was wrong
+		//offset = active[server][active_id].fhandles[handle].cursor_old; // Use cursor old even if a cursor is provided, IF the sequence number was wrong
 
 	// Seek to end to detect end of file
 	fseek(fs_files[server][internal_handle].handle, 0, SEEK_END);
@@ -6818,7 +6819,7 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	fs_debug (0, 2, "%12sfrom %3d.%3d fs_putbytes() %06lX at offset %06lX by user %04X on handle %02d, ctrl seq is %s (stored: %02X, received: %02X)",
 			"", net, stn,
 			bytes, offset, active[server][active_id].userid, handle,
-			fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl) ? "OK" : "WRONG", 
+			fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl) ? "OK" : "WRONG (Ignored)", 
 			active[server][active_id].fhandles[handle].sequence, ctrl);
 
 	if (offset > length) // Beyond EOF
@@ -6830,8 +6831,9 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 			fputc('\0', fs_files[server][internal_handle].handle);
 	}
 
-	if (!fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl)) // If ctrl seq wrong, seek to cursor old regardless
-		offset = active[server][active_id].fhandles[handle].cursor_old;
+	// This appears to be wrong. fs_putbytes() calls always turn up with ctrl &80. Maybe not so for the singular versions
+	//if (!fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl)) // If ctrl seq wrong, seek to cursor old regardless
+		//offset = active[server][active_id].fhandles[handle].cursor_old;
 
 	fseek(fs_files[server][internal_handle].handle, offset, SEEK_SET);
 
