@@ -915,7 +915,7 @@ static void * eb_wire_immediate_reset (void * ebic)
 	) // Still the same thing waited for, so it didn't show up
 	{
 		//eb_debug (0, 3, "WIREIMM", "Wire     %3d     Resetting ADLC to read mode when immediate didn't show up", values->wire_device->net);
-		ioctl (values->wire_device->wire.socket, ECONETGPIO_IOC_READMODE);
+		ioctl (values->wire_device->wire.socket, ECONETGPIO_IOC_READGENTLE);
 
 		values->wire_device->p_net = values->wire_device->p_stn = values->wire_device->p_seq = 0; // Reset
 	}

@@ -170,6 +170,8 @@ struct __econet_packet_pipe {
 #define ECONETGPIO_IOC_GETAUNSTATE	_IOR(ECONETGPIO_MAGIC, 10, int) /* Read current AUN state */
 #define ECONETGPIO_IOC_LED		_IOW(ECONETGPIO_MAGIC, 11, char) /* Turn an activity LED on / off */
 #define ECONETGPIO_IOC_NETCLOCK		_IOW(ECONETGPIO_MAGIC, 12, uint32_t) /* Set network clock via hardware PWM on v2r3 boards */
+/* No function 13 - bad luck */
+#define ECONETGPIO_IOC_READGENTLE	_IO(ECONETGPIO_MAGIC, 14) /* Set module to read mode without a full cleardown */
 
 /* The following are for debugging and testing only, and only with interrupts off */
 #define ECONETGPIO_IOC_SETA		_IOW(ECONETGPIO_MAGIC, 100, int) /* bit0 is A0, bit1 is A1 */

@@ -66,6 +66,9 @@
 #define FSREGEX "[]\\*\\#A-Za-z0-9\\+_\x81-\xfe;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 #define FS_NETCONF_REGEX_ONE "^NETCONF\\s+([\\+\\-][A-Z]+)\\s*"
 
+#define FS_DIVHANDLE(x)	((fs_config[server].fs_manyhandle == 0) ? ((((x) == 128) ? 8 : ((x) == 64) ? 7 : ((x) == 32) ? 6 : ((x) == 16) ? 5 : ((x) == 8) ? 4 : ((x) == 4) ? 3 : ((x) == 3) ? 2 : 1)) : (x))
+#define FS_MULHANDLE(x) ((fs_config[server].fs_manyhandle != 0) ? (x) : (1 << ((x) - 1)))
+
 regex_t fs_netconf_regex_one;
 short fs_netconf_regex_initialized = 0;
 
@@ -97,6 +100,8 @@ short normalize_debug = 0; // Whether we spew out loads of debug about filename 
 
 short fs_open_interlock(int, unsigned char *, unsigned short, unsigned short);
 void fs_close_interlock(int, unsigned short, unsigned short);
+
+void fs_write_readable_config(int);
 
 // Parser
 //#define FS_PARSE_DEBUG 1
@@ -155,7 +160,8 @@ struct {
 	uint8_t fs_pwtenchar; // Set to non-zero when the FS has run the 6 to 10 character password conversion, by moving the fullname field along by 5 chracters
 	uint8_t fs_fnamelen; // Live (modifiable!) max filename length. Must be less than ECONET_MAX_FILENAME_LENGTH. When changed, this has to recompile the fs regex
 	uint8_t fs_infcolon; // Uses :inf for alternative to xattrs instead of .inf, and maps Acorn / to Unix . instead of Unix :
-	uint8_t pad[250]; // Spare spare in the config
+	uint8_t fs_manyhandle; // Enables user handles > 8, and presents them as 8-bit integers rather than handle n presented as 2^n (which is what FS 3 does with its limit of 8 handles)
+	uint8_t pad[249]; // Spare spare in the config
 } fs_config[ECONET_MAX_FS_SERVERS];
 
 struct {
@@ -675,7 +681,7 @@ unsigned short fs_allocate_user_file_channel(int server, unsigned int active_id)
 	while (active[server][active_id].fhandles[count].handle != -1 && count < FS_MAX_OPEN_FILES)
 		count++;
 
-	if (count >= FS_MAX_OPEN_FILES) return 0; // No handle available
+	if (count >= (fs_config[server].fs_manyhandle ? FS_MAX_OPEN_FILES : 9)) return 0; // No handle available - if not in manyhandle mode, >= 9 is what we need because we can allocate up to and including 8
 
 	active[server][active_id].fhandles[count].is_dir = 0;
 
@@ -705,7 +711,8 @@ unsigned short fs_allocate_user_dir_channel(int server, unsigned int active_id, 
 	while (active[server][active_id].fhandles[count].handle != -1 && count < FS_MAX_OPEN_FILES)
 		count++;
 
-	if (count == FS_MAX_OPEN_FILES) return 0; // No handle available
+	//if (count == FS_MAX_OPEN_FILES) return 0; // No handle available
+	if (count >= (fs_config[server].fs_manyhandle ? FS_MAX_OPEN_FILES : 9)) return 0; // No handle available - see comment in the user file allocator for why this is 9
 
 	active[server][active_id].fhandles[count].handle = d;
 	active[server][active_id].fhandles[count].cursor = 0;
@@ -2010,7 +2017,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 // path structure and then free all the path entries that have been found.
 int fs_normalize_path(int server, int user, unsigned char *path, short relative_to, struct path *result)
 {
-	if (!strcasecmp("%Passwords", path) && (users[server][active[server][user].userid].priv & FS_PRIV_SYSTEM)) // System priv user trying to normalize password file
+	if ((!strcasecmp("%Passwords", path) || !strcasecmp("%Config", path)) && (users[server][active[server][user].userid].priv & FS_PRIV_SYSTEM)) // System priv user trying to normalize password file
 	{
 		struct tm t;
 		struct stat s;
@@ -2019,17 +2026,31 @@ int fs_normalize_path(int server, int user, unsigned char *path, short relative_
 		result->ftype = FS_FTYPE_FILE;
 		strcpy(result->discname, fs_discs[server][users[server][active[server][user].userid].home_disc].name);
 		result->disc = users[server][active[server][user].userid].home_disc;
-		strcpy(result->path[0], "Passwords");
-		strcpy(result->acornname, "Passwords");
+		if (!strcasecmp("%Passwords", path))
+		{
+			strcpy(result->path[0], "Passwords");
+			strcpy(result->acornname, "Passwords");
+			strcpy(result->path_from_root, "Passwords");
+			sprintf (result->unixpath, "%s/Passwords", fs_stations[server].directory);
+			sprintf (result->acornfullpath, "$.Passwords");
+			sprintf (result->unixfname, "Passwords");
+		}
+		if (!strcasecmp("%Config", path))
+		{
+
+			strcpy(result->path[0], "Config");
+			strcpy(result->acornname, "Config");
+			strcpy(result->path_from_root, "Config");
+			sprintf (result->unixpath, "%s/Configuration.txt", fs_stations[server].directory);
+			sprintf (result->acornfullpath, "$.Config");
+			sprintf (result->unixfname, "Configuration.txt");
+		}
+
 		result->npath = 1;
-		strcpy(result->path_from_root, "Passwords");
 		result->owner = result->parent_owner = 0;
 		result->perm = result->my_perm = result->parent_perm = FS_PERM_OWN_W | FS_PERM_OWN_R;
 		result->load = result->exec = 0;
 		// Length & internal name here, and date fields
-		sprintf (result->unixpath, "%s/Passwords", fs_stations[server].directory);
-		sprintf (result->acornfullpath, "$.Passwords");
-		sprintf (result->unixfname, "Passwords");
 		result->paths = result->paths_tail = NULL;	
 
 		if (stat(result->unixpath, &s)) // Failed stat // this should *never* happen, but just in case it does...
@@ -2245,6 +2266,8 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 			if ((cfgfile = fopen(passwordfile, "w+")))
 				fwrite(&(fs_config[fs_count]), 256, 1, cfgfile);
 			else fs_debug (0, 1, "Unable to write configuration file at %s - not initializing", passwordfile);
+
+			fs_write_readable_config(fs_count);
 		}
 
 		if (cfgfile)
@@ -2262,6 +2285,8 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 				fread (&(fs_config[fs_count]), 256, 1, cfgfile);
 				fs_debug (0, 2, "Configuration file loaded");
 			}
+
+			fs_write_readable_config(fs_count);
 		}
 
 		if (fs_config[fs_count].fs_fnamelen < 10 || fs_config[fs_count].fs_fnamelen > ECONET_ABS_MAX_FILENAME_LENGTH)
@@ -2392,6 +2417,8 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 				
 				closedir(d);
 				
+				fs_stations[fs_count].total_discs = discs_found;
+
 				for (portcount = 0; portcount < 256; portcount++)
 					fs_bulk_ports[fs_count][portcount].handle = -1; 
 		
@@ -2505,6 +2532,8 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 #else
 		fs_debug (0, 1, "Server %d successfully initialized on station %d.%d", old_fs_count, net, stn);
 #endif
+
+		fs_write_readable_config(old_fs_count);
 
 		return old_fs_count; // The index of the newly initialized server
 	}
@@ -3098,9 +3127,9 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 				reply.p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
 				reply.p.data[0] = 0x05;
 				reply.p.data[1] = 0x00;
-				reply.p.data[2] = active[server][usercount].root;
-				reply.p.data[3] = active[server][usercount].current;
-				reply.p.data[4] = active[server][usercount].lib;
+				reply.p.data[2] = FS_MULHANDLE(active[server][usercount].root);
+				reply.p.data[3] = FS_MULHANDLE(active[server][usercount].current);
+				reply.p.data[4] = FS_MULHANDLE(active[server][usercount].lib);
 				reply.p.data[5] = active[server][usercount].bootopt;
 				
 				fs_aun_send(&reply, server, 6, net, stn);
@@ -4867,9 +4896,9 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	r.p.ctrl = 0x80;
 	r.p.data[0] = 0x06; // SDisc return, according to MDFS manual
 	r.p.data[1] = 0x00;
-	r.p.data[2] = root;
-	r.p.data[3] = cur;
-	r.p.data[4] = lib;
+	r.p.data[2] = FS_MULHANDLE(root);
+	r.p.data[3] = FS_MULHANDLE(cur);
+	r.p.data[4] = FS_MULHANDLE(lib);
 	r.p.data[5] = active[server][active_id].bootopt;
 
 	fs_aun_send(&r, server, 6, net, stn);
@@ -7092,7 +7121,7 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 				//reply.p.data[0] = 0x07; // *DIR command code. FS3 does this. Not sure why. When debugging PanOS, L3 was not doing this!
 				reply.p.data[0] = 0x00; 
 				reply.p.data[1] = 0;
-				reply.p.data[2] = (unsigned char) (userhandle & 0xff);
+				reply.p.data[2] = (unsigned char) (FS_MULHANDLE(userhandle) & 0xff);
 	
 				fs_debug (0, 2, "%12sfrom %3d.%3d Opened handle %d (%s)", "", net, stn, userhandle, active[server][active_id].fhandles[userhandle].acornfullpath);
 				fs_aun_send(&reply, server, 3, net, stn);
@@ -7456,6 +7485,42 @@ uint8_t fs_parse_cmd (char *parse, char *cmd, unsigned short min, char **param_i
 
 }
 
+void fs_write_readable_config(int server)
+{
+
+	unsigned char	configfile[1024];
+	FILE		*out;
+	uint8_t		count;
+
+	sprintf(configfile, "%s/Configuration.txt", fs_stations[server].directory);
+
+	out = fopen(configfile, "w");
+
+	if (out)
+	{
+		fprintf (out, "Fileserver configuration for station %d.%d\n\n", fs_stations[server].net, fs_stations[server].stn);
+		fprintf (out, "%-25s %s\n\n", "Root directory", fs_stations[server].directory);
+		fprintf (out, "%-25s %d\n", "Total no. of discs", fs_stations[server].total_discs);
+
+		for (count = 0; count < ECONET_MAX_FS_DISCS; count++)
+			if (fs_discs[server][count].name[0]) fprintf (out, "Disc %2d                   %s\n", count, fs_discs[server][count].name);
+
+		fprintf (out, "\n");
+
+		fprintf (out, "%-25s %-3s\n", "Acorn Home semantics", (fs_config[server].fs_acorn_home ? "On" : "Off"));
+		fprintf (out, "%-25s %-3s\n", "SJ Res'ch functions", (fs_config[server].fs_sjfunc ? "On" : "Off"));
+		fprintf (out, "%-25s %-3s\n", "Big Chunks", (fs_config[server].fs_bigchunks ? "On" : "Off"));
+		fprintf (out, "%-25s %-4s\n", "10 char pw conversion", (fs_config[server].fs_pwtenchar ? "Done" : "No"));
+		fprintf (out, "%-25s %-3s\n", "Max filename length", (fs_config[server].fs_fnamelen ? "On" : "Off"));
+		fprintf (out, "%-25s %-3s\n", "Inf files are :inf", (fs_config[server].fs_infcolon ? "On" : "Off"));
+		fprintf (out, "%-25s %-3s\n", "> 8 file handles", (fs_config[server].fs_manyhandle ? "On" : "Off"));
+
+		fclose(out);
+
+	}
+
+}
+
 /* Handle locally arriving fileserver traffic to server #server, from net.stn, ctrl, data, etc. - port will be &99 for FS Op */
 void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsigned char ctrl, unsigned char *data, unsigned int datalen)
 {
@@ -7497,14 +7562,28 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		}
 	}
 
-	if (active_id >= 0) // If logged in, update handles from the incoming packet
-	{
-		active[server][active_id].root = *(data+2);
-		if (datalen >= 4) active[server][active_id].current = *(data+3);
-		if (datalen >= 5) active[server][active_id].lib = *(data+4);
+	// Only do this if the FS Call actually presents file handles - some of them don't and we hadn't spotted that in earlier versions 
 	
-		if (fsop != 0x09) // Not a putbyte
-			active[server][active_id].sequence = 2; // Reset so that next putbyte will be taken to be in sequence.
+	if ((fsop != 8) && (fsop != 9)) // 8 & 9 are Getbyte / Putbyte which do not pass the usual three handles in the tx block
+	{
+		/* Modify the three handles that are in every packet - assuming the packet is long enough - if we are not in manyhandle mode */
+	
+		if (!fs_config[server].fs_manyhandle) // NFS 3 / BBC B compatible handles
+		{
+			if (!(fsop == 1 || fsop == 2 || (fsop >=8 && fsop <= 11))) if (datalen >= 3) *(data+2) = FS_DIVHANDLE(*(data+2)); // Don't modify for LOAD, SAVE, GETBYTE, PUTBYTE, GETBYTES, PUTBYTES - all of which either don't have the usual three handles in the tx block or use the URD for something else
+			if (datalen >= 4) *(data+3) = FS_DIVHANDLE(*(data+3));
+			if (datalen >= 5) *(data+4) = FS_DIVHANDLE(*(data+4));
+		}
+	
+		if (active_id >= 0) // If logged in, update handles from the incoming packet
+		{
+			if (!(fsop == 1 || fsop == 2 || (fsop >= 8 && fsop <= 11))) active[server][active_id].root = *(data+2);
+			if (datalen >= 4) active[server][active_id].current = *(data+3);
+			if (datalen >= 5) active[server][active_id].lib = *(data+4);
+		
+			if (fsop != 0x09) // Not a putbyte
+				active[server][active_id].sequence = 2; // Reset so that next putbyte will be taken to be in sequence.
+		}
 	}
 
 	switch (fsop)
@@ -7835,7 +7914,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								r.p.ctrl = 0x80;
 								r.p.data[0] = 0x09; // Changed directory;
 								r.p.data[1] = 0x00;
-								r.p.data[2] = n_handle;
+								r.p.data[2] = FS_MULHANDLE(n_handle);
 								fs_aun_send (&r, server, 3, net, stn);
 							
 							}
@@ -7909,7 +7988,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								r.p.ctrl = 0x80;
 								r.p.data[0] = 0x07; // Changed directory;
 								r.p.data[1] = 0x00;
-								r.p.data[2] = n_handle;
+								r.p.data[2] = FS_MULHANDLE(n_handle);
 								fs_aun_send (&r, server, 3, net, stn);
 	
 							
@@ -7964,6 +8043,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						fs_config[server].fs_sjfunc = (operator == '+' ? 1 : 0);
 					else if (!strcasecmp("BIGCHUNKS", configitem))
 						fs_config[server].fs_bigchunks = (operator == '+' ? 1 : 0);
+					else if (!strcasecmp("BIGHANDLES", configitem))
+						fs_config[server].fs_manyhandle = (operator == '+' ? 1 : 0);
 					else
 					{
 						fs_error(server, reply_port, net, stn, 0xFF, "Bad configuration entry name"); return;
@@ -7982,6 +8063,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					{
 						fwrite(&(fs_config[server]), 256, 1, config);
 						fclose(config);
+						fs_write_readable_config(server);
 					}
 					
 					fs_reply_ok(server, reply_port, net, stn);
@@ -8015,6 +8097,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						{
 							fwrite(&(fs_config[server]), 256, 1, config);
 							fclose(config);
+							fs_write_readable_config(server);
 						}
 						
 						fs_reply_ok(server, reply_port, net, stn);
@@ -8355,27 +8438,28 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_open(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x07: // Close file
-			if (fs_stn_logged_in(server, net, stn) >= 0) fs_close(server, reply_port, net, stn, active_id, *(data+5)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+			if (fs_stn_logged_in(server, net, stn) >= 0) fs_close(server, reply_port, net, stn, active_id, FS_DIVHANDLE(*(data+5))); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			// Experimentation with *Findlib reveals that the handle sought to be closed is actually at data+4 not data+5. Not sure what data+5 is then. Except that sometimes it IS in byte data+5. Maybe if it's a directory, it's in data+4 and a file is in data+5...
 			//if (fs_stn_logged_in(server, net, stn) >= 0) fs_close(server, reply_port, net, stn, active_id, *(data+4)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x08: // Get byte
-			if (fs_stn_logged_in(server, net, stn) >= 0) fs_getbyte(server, reply_port, net, stn, active_id, *(data+2), ctrl); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+			// Test harness
+			if (fs_stn_logged_in(server, net, stn) >= 0) fs_getbyte(server, reply_port, net, stn, active_id, FS_DIVHANDLE(*(data+2)), ctrl); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x09: // Put byte
-			if (fs_stn_logged_in(server, net, stn) >= 0) fs_putbyte(server, reply_port, net, stn, active_id, *(data+2), ctrl, *(data+3)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+			if (fs_stn_logged_in(server, net, stn) >= 0) fs_putbyte(server, reply_port, net, stn, active_id, FS_DIVHANDLE(*(data+2)), ctrl, *(data+3)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x0a: // Get bytes
-			if (fs_stn_logged_in(server, net, stn) >= 0) fs_getbytes(server, reply_port, net, stn, active_id, *(data+5), ctrl, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+			if (fs_stn_logged_in(server, net, stn) >= 0) fs_getbytes(server, reply_port, net, stn, active_id, FS_DIVHANDLE(*(data+5)), ctrl, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x0b: // Put bytes
-			if (fs_stn_logged_in(server, net, stn) >= 0) fs_putbytes(server, reply_port, net, stn, active_id, *(data+5), ctrl, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+			if (fs_stn_logged_in(server, net, stn) >= 0) fs_putbytes(server, reply_port, net, stn, active_id, FS_DIVHANDLE(*(data+5)), ctrl, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x0c: // Get Random Access Info
-			fs_get_random_access_info(server, reply_port, net, stn, active_id, *(data+5), *(data+6));
+			fs_get_random_access_info(server, reply_port, net, stn, active_id, FS_DIVHANDLE(*(data+5)), *(data+6));
 			break;
 		case 0x0d: // Set Random Access Info
-			fs_set_random_access_info(server, reply_port, net, stn, active_id, *(data+5), data, datalen);
+			fs_set_random_access_info(server, reply_port, net, stn, active_id, FS_DIVHANDLE(*(data+5)), data, datalen);
 			break;
 		case 0x0e: // Read disc names
 			fs_read_discs(server, reply_port, net, stn, active_id, data, datalen);
@@ -8387,7 +8471,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_time(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x11: // Read end of file status 
-			if (fs_stn_logged_in(server, net, stn) >= 0) fs_eof(server, reply_port, net, stn, active_id, *(data+2)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+			//if (fs_stn_logged_in(server, net, stn) >= 0) fs_eof(server, reply_port, net, stn, active_id, *(data+2)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
+			if (fs_stn_logged_in(server, net, stn) >= 0) fs_eof(server, reply_port, net, stn, active_id, FS_DIVHANDLE(*(data+5))); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?"); // this used to be data+2 for the handle, but I reckon it's really meant to be byte 5.
 			break;
 		case 0x12: // Read object info
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_get_object_info(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
