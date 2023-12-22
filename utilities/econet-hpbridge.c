@@ -4382,7 +4382,6 @@ static void * eb_device_despatcher (void * device)
 						else if (p->p->p.port == 0x00 && p->p->p.ctrl == 0x88 && p->p->p.aun_ttype == ECONET_AUN_IMM)
 						{
 							// Deal with machinetype queries here
-
 							ack.p.aun_ttype = ECONET_AUN_IMMREP;
 							ack.p.data[0] = ack.p.data[1] = 0xee;
 							ack.p.data[2] = 2;
@@ -5241,7 +5240,6 @@ int eb_readconfig(char *f)
 				struct __eb_device	*p;
 				char *			destination;
 				char *			colon;
-
 
 				if (!regexec(&r_trunk_plaintext, line, 3, matches, 0))
 					is_plaintext = 1; // Old non-keyed trunk - cannot do dynamic
@@ -6151,7 +6149,7 @@ int eb_readconfig(char *f)
 	regfree (&r_empty);
 	regfree (&r_wire);
 	regfree (&r_trunk);
-	regfree (&r_trunk_plaintext);
+	//regfree (&r_trunk_plaintext);
 	regfree (&r_dynamic);
 	regfree (&r_fileserver);
 	regfree (&r_printserver);
