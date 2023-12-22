@@ -8073,14 +8073,14 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				}
 				else if (fs_parse_cmd(command, "FNLENGTH", 8, &param))
 				{
-					uint8_t new_length;
+					int new_length;
 					char params[256];
 					FILE *config;
 					char configfile[300];
 
-					fs_copy_to_cr(params, param, 2);
+					fs_copy_to_cr(params, param, 20);
 				
-					if (sscanf(params, "%d", (int *) &new_length) == 1)
+					if (sscanf(params, "%d", &new_length) == 1)
 					{
 						if (new_length >= 10 && new_length <= 80)
 							ECONET_MAX_FILENAME_LENGTH = new_length;
