@@ -8080,7 +8080,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 					fs_copy_to_cr(params, param, 2);
 				
-					if (sscanf(params, "%2d", (int *) &new_length) == 1)
+					if (sscanf(params, "%d", (int *) &new_length) == 1)
 					{
 						if (new_length >= 10 && new_length <= 80)
 							ECONET_MAX_FILENAME_LENGTH = new_length;
