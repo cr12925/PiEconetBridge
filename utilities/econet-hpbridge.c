@@ -5565,7 +5565,7 @@ int eb_readconfig(char *f)
 
 				if (!existing)	eb_debug (1, 0, "CONFIG", "Unable to create Pipe server device on %d.%d", net, stn);
 
-				existing->pipe.base = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create pipe base string", strlen(eb_getstring(line, &matches[2])+1));
+				existing->pipe.base = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create pipe base string", strlen(eb_getstring(line, &matches[2]))+1);
 
 				if (!existing->pipe.base)
 					eb_debug (1, 0, "CONFIG", "Unable to malloc() for pipe filename for station %d.%d", net, stn);
@@ -6149,7 +6149,7 @@ int eb_readconfig(char *f)
 	regfree (&r_empty);
 	regfree (&r_wire);
 	regfree (&r_trunk);
-	//regfree (&r_trunk_plaintext);
+	regfree (&r_trunk_plaintext);
 	regfree (&r_dynamic);
 	regfree (&r_fileserver);
 	regfree (&r_printserver);
