@@ -7572,7 +7572,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 	
 		if (!fs_config[server].fs_manyhandle) // NFS 3 / BBC B compatible handles
 		{
-			if (!(fsop == 1 || fsop == 2 || (fsop >=8 && fsop <= 11))) if (datalen >= 3) *(data+2) = FS_DIVHANDLE(*(data+2)); // Don't modify for LOAD, SAVE, GETBYTE, PUTBYTE, GETBYTES, PUTBYTES - all of which either don't have the usual three handles in the tx block or use the URD for something else
+			if (!(fsop == 1 || fsop == 2 || (fsop == 5) || (fsop >=10 && fsop <= 11))) if (datalen >= 3) *(data+2) = FS_DIVHANDLE(*(data+2)); // Don't modify for LOAD, SAVE, RUNAS, (GETBYTE, PUTBYTE - not in this loop), GETBYTES, PUTBYTES - all of which either don't have the usual three handles in the tx block or use the URD for something else
 			if (datalen >= 4) *(data+3) = FS_DIVHANDLE(*(data+3));
 			if (datalen >= 5) *(data+4) = FS_DIVHANDLE(*(data+4));
 		}
