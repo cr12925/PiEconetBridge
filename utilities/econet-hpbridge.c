@@ -119,6 +119,9 @@ uint32_t	bridgewide_seq = 0x4000;
 
 uint8_t eb_enqueue_input (struct __eb_device *, struct __econet_packet_aun *, uint16_t);
 void eb_set_whole_wire_net (uint8_t, struct __eb_device *);
+void eb_set_single_wire_host (uint8_t, uint8_t);
+void eb_clr_single_wire_host (uint8_t, uint8_t);
+void eb_setclr_single_wire_host (uint8_t, uint8_t, uint8_t);
 uint8_t eb_firewall (struct __econet_packet_aun *);
 void eb_reset_tables(void);
 void eb_debug (uint8_t, uint8_t, char *, char *, ...);
@@ -2195,7 +2198,7 @@ static void * eb_device_listener (void * device)
 			close (d->pipe.skt_write);
 			d->pipe.skt_write = -1;
 
-			eb_debug (0, 1, "LISTEN", "%-8s %3d.%3d Pipe client went away - closing writer socket", "Pipe", d->net, d->pipe.stn);
+			eb_debug (0, 3, "LISTEN", "%-8s %3d.%3d Pipe client went away - closing writer socket", "Pipe", d->net, d->pipe.stn);
 
 			// Close & re-open the reader socket
 
@@ -2207,7 +2210,7 @@ static void * eb_device_listener (void * device)
                                 eb_debug (1, 0, "DESPATCH", "%-8s %3d.%3d Cannot re-open pipe reader socket %s", "", d->net, d->
 pipe.stn, readerfile);
                         else
-                                eb_debug (0, 2, "DESPATCH", "%-8s %3d.%3d Pipe reader device %s re-opened", "", d->net, d->pipe.
+                                eb_debug (0, 3, "DESPATCH", "%-8s %3d.%3d Pipe reader device %s re-opened", "", d->net, d->pipe.
 stn, readerfile);
 			d->p_reset.fd = d->pipe.skt_read;
 
@@ -2231,6 +2234,12 @@ stn, readerfile);
 
 			eb_debug (0, 3, "LISTEN", "Pipe     %3d.%3d Cleared device input queue", d->net, d->pipe.stn);
 
+			// Take the host out of the kernel stations map
+			
+			eb_clr_single_wire_host (d->net, d->pipe.stn);
+
+			eb_debug (0, 3, "LISTEN", "Pipe     %3d.%3d Removed from kernel station map", d->net, d->pipe.stn);
+
 		}
 
 		if (p.revents & POLLIN && (!(p.revents & POLLHUP))) // Traffic has arrived from the device
@@ -2240,7 +2249,7 @@ stn, readerfile);
 			{
 				char	pipewriter[128];
 
-				eb_debug (0, 1, "LISTEN", "Pipe     %3d.%3d Pipe client connected - opening writer socket", d->net, d->pipe.stn);
+				eb_debug (0, 3, "LISTEN", "Pipe     %3d.%3d Pipe client connected - opening writer socket", d->net, d->pipe.stn);
 
 				snprintf (pipewriter, 127, "%s.frombridge", d->pipe.base);
 
@@ -2248,6 +2257,12 @@ stn, readerfile);
 
 				if (d->pipe.skt_write == -1)
 					eb_debug (0, 1, "LISTEN", "Pipe     %3d.%3d Failed to open writer socket %s: %s", d->net, d->pipe.stn, pipewriter, strerror(errno));
+				else /* Successfully opened when the pipe client arrived - put it in the listen map on the wire */
+				{
+					eb_set_single_wire_host (d->net, d->pipe.stn);
+					eb_debug (0, 3, "LISTEN", "Pipe     %3d.%3d Added to kernel station map", d->net, d->pipe.stn);
+				}
+
 			}
 
 			pthread_cond_signal(&d->qwake);
@@ -5005,9 +5020,7 @@ void eb_set_whole_wire_net (uint8_t net, struct __eb_device *src)
 
 }
 
-/* Put a single host in all the station[] values on all wired networks */
-
-void eb_set_single_wire_host (uint8_t net, uint8_t stn)
+void eb_setclr_single_wire_host (uint8_t net, uint8_t stn, uint8_t set)
 {
 
 	struct __eb_device *other;
@@ -5018,14 +5031,47 @@ void eb_set_single_wire_host (uint8_t net, uint8_t stn)
 	{
 		if (other->type == EB_DEF_WIRE)
 		{
-			ECONET_SET_STATION((other->wire.stations), (net == other->net) ? 0 : net, stn);	 // Listen for native net so stations can talk to it as (e.g.) 1.254 as well as 0.254 if it's on the local network (see below)
+			uint8_t		real_net;
 
-			ioctl(other->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(other->wire.stations));
+			real_net = (net == other->net) ? 0 : net;
+
+			if (set)
+			{
+				// Listen for native net so stations can talk to it as (e.g.) 1.254 as well as 0.254 if it's on the local network (see below)
+				ECONET_SET_STATION(other->wire.stations, real_net, stn);	 
+			}
+			else
+			{
+				// or take it out of the map.
+				// 
+				ECONET_CLR_STATION(other->wire.stations, real_net, stn);	 
+				//other->wire.stations[(real_net * 32) + (stn/8)] &= ~(1 << (stn % 8));
+			}
+
+			ioctl(other->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(other->wire.stations)); // Poke to kernel
 		}
 	
 		other = other->next;
 	}
 
+
+}
+
+/* Put a single host in all the station[] values on all wired networks */
+
+void eb_set_single_wire_host (uint8_t net, uint8_t stn)
+{
+
+	eb_setclr_single_wire_host (net, stn, 1); // 1 == set
+
+}
+
+/* Clear a single station out of the station[] values on all wired networks */
+
+void eb_clr_single_wire_host (uint8_t net, uint8_t stn)
+{
+
+	eb_setclr_single_wire_host (net, stn, 0); // 0 == Clear from map
 
 }
 
@@ -5578,7 +5624,8 @@ int eb_readconfig(char *f)
 
 				/* Put this in all wire station[] maps */
 
-				eb_set_single_wire_host (net, stn);
+				/* Don't do this until it's live - stops the kernel listening for traffic for a host that's not there */
+				// eb_set_single_wire_host (net, stn);
 
 			}
 			else if (!regexec(&r_aunmap, line, 6, matches, 0))
