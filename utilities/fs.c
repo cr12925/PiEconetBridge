@@ -6493,8 +6493,8 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	if (offsetstatus) // Read from current position
 		offset = active[server][active_id].fhandles[handle].cursor;
 
-	if (!fs_check_seq(ctrl, active[server][active_id].fhandles[handle].sequence)) // Sequence number was wrong
-		offset = active[server][active_id].fhandles[handle].cursor_old; // Use cursor old even if a cursor is provided, IF the sequence number was wrong
+	//if (!fs_check_seq(ctrl, active[server][active_id].fhandles[handle].sequence)) // Sequence number was wrong
+		//offset = active[server][active_id].fhandles[handle].cursor_old; // Use cursor old even if a cursor is provided, IF the sequence number was wrong
 
 	// Seek to end to detect end of file
 	fseek(fs_files[server][internal_handle].handle, 0, SEEK_END);
@@ -6685,8 +6685,8 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 			fputc('\0', fs_files[server][internal_handle].handle);
 	}
 
-	if (!fs_check_seq(ctrl, active[server][active_id].fhandles[handle].sequence)) // If ctrl seq wrong, seek to cursor old regardless
-		offset = active[server][active_id].fhandles[handle].cursor_old;
+	//if (!fs_check_seq(ctrl, active[server][active_id].fhandles[handle].sequence)) // If ctrl seq wrong, seek to cursor old regardless
+		//offset = active[server][active_id].fhandles[handle].cursor_old;
 
 	fseek(fs_files[server][internal_handle].handle, offset, SEEK_SET);
 
