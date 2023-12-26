@@ -1254,7 +1254,7 @@ void econet_irq_read(void)
 					{
 unexpected_scout:
 						// Is it an immediate?
-						if (econet_pkt_rx.d.p.port == 0 && econet_pkt_rx.d.p.ctrl != 0x85) // Ctrl 0x85 appears, from all the traffic sniffing, to in fact be done as a 4-way handshake even though it's port 0. It's used for notify, remote, view, etc.
+						if (econet_pkt_rx.d.p.port == 0 && !(econet_pkt_rx.d.p.ctrl >= 0x82 && econet_pkt_rx.d.p.ctrl <= 0x85)) // Ctrl 0x85 appears, from all the traffic sniffing, to in fact be done as a 4-way handshake even though it's port 0. It's used for notify, remote, view, etc.; ctrl &82 works similarly, but 8 bytes of data (being start and end addresses for the poked data); indeed, 0x82 to 0x85 are all 4-ways with various sorts of data on them
 						{
 #ifdef ECONET_GPIO_DEBUG_AUN
 							printk (KERN_INFO "ECONET-GPIO: Immediate received from %d.%d, Ctrl 0x%02x\n", econet_pkt_rx.d.p.srcnet, econet_pkt_rx.d.p.srcstn, econet_pkt_rx.d.p.ctrl);
@@ -1402,7 +1402,7 @@ unexpected_scout:
 						{
 
 							// Should be 6 bytes long. If not, drop it and go back to IDLE - we are obviously out of sequence.
-							if (econet_pkt_rx.ptr != 6 && !(econet_pkt_rx.d.p.port == 0 && econet_pkt_rx.d.p.ctrl == 0x85)) // Immediate ctrl 0x85 packets are done as 4-way handshakes, BUT there are 4 data bytes on the opening scout
+							if (econet_pkt_rx.ptr != 6 && !(econet_pkt_rx.d.p.port == 0 && (econet_pkt_rx.d.p.ctrl >= 0x82 && econet_pkt_rx.d.p.ctrl <= 0x85))) // Immediate ctrl 0x85 packets are done as 4-way handshakes, BUT there are 4 data bytes on the opening scout
 							{
 								econet_set_aunstate(EA_IDLE);
 								printk (KERN_ERR "ECONET-GPIO: econet_irq_read(): AUN: Valid frame received, length %04x, but was expecting Scout and this wasn't\n", econet_pkt_rx.ptr);
@@ -1424,8 +1424,12 @@ unexpected_scout:
 								aun_rx.d.p.port = econet_pkt_rx.d.p.port;
 								aun_rx.d.p.ctrl = econet_pkt_rx.d.p.ctrl;
 
-								// Is it immediate ctrl &85, which is done as a 4-way with 4 data bytes on the first Scout?
-								if (aun_rx.d.p.port == 0 && aun_rx.d.p.ctrl == 0x85) // Copy the four data bytes onto the start of the aun_rx data buffer
+								// Immediate Poke - has data on the scout
+								if (aun_rx.d.p.port == 0 && aun_rx.d.p.ctrl == 0x82) // Copy the four data bytes onto the start of the aun_rx data buffer
+									memcpy(&(aun_rx.d.p.data), &(econet_pkt_rx.d.p.data), 8);
+
+								// Is it immediate ctrl &85, which is done as a 4-way with 4 data bytes on the first Scout? ; 0x83 (JSR) also has 4 bytes on it, so does 0x84, USRPROC
+								if (aun_rx.d.p.port == 0 && (aun_rx.d.p.ctrl >= 0x83 && aun_rx.d.p.ctrl <= 0x85)) // Copy the four data bytes onto the start of the aun_rx data buffer
 									memcpy(&(aun_rx.d.p.data), &(econet_pkt_rx.d.p.data), 4);
 
 								econet_pkt_tx.ptr = 0;
@@ -1471,15 +1475,26 @@ unexpected_scout:
 						else // It was an ACK from where we expected, so line up the data packet	
 						{
 							econet_flagfill();
-							if (aun_tx.d.p.port != 0x00 || aun_tx.d.p.ctrl != 0x85) // Not one of those 0x85 immediate specials that in fact does a 4-way handshake
+							if (aun_tx.d.p.port != 0x00 || !(aun_tx.d.p.ctrl >= 0x82 && aun_tx.d.p.ctrl <= 0x85)) // Not one of those 0x85 immediate specials that in fact does a 4-way handshake
 							{
 								memcpy (&(econet_pkt_tx.d.p.ctrl), &(aun_tx.d.p.data), aun_tx.length-12); // Strip off the header - note, ctrl byte is first on the econet wire, and is where the data portion of a data packet starts
 								econet_pkt_tx.length = 4 + (aun_tx.length - 12); // Data starts at byte 4 in a data packet to econet
 							} 
-							else // Else it WAS one of those Immediate 0x85 specials which had 4 data bytes on the "Scout", so we only copy n-4 data bytes into the data packet
+							else // Else it WAS one of those funky i4-way immediates Immediate 0x85 specials which had 4 data bytes on the "Scout", so we only copy n-4 data bytes into the data packet
 							{
-								memcpy (&(econet_pkt_tx.d.p.ctrl), &(aun_tx.d.p.data[4]), aun_tx.length-16); // Strip off the header - note, ctrl byte is first on the econet wire, and is where the data portion of a data packet starts
-								econet_pkt_tx.length = 4 + (aun_tx.length - 16); // Data starts at byte 4 in a data packet to econet
+
+								if (aun_tx.d.p.ctrl >= 0x83 && aun_tx.d.p.ctrl <= 0x85) // JSR or OSPROC, or USRPROC
+								{
+									memcpy (&(econet_pkt_tx.d.p.ctrl), &(aun_tx.d.p.data[4]), aun_tx.length-16); // Strip off the header - note, ctrl byte is first on the econet wire, and is where the data portion of a data packet starts
+									econet_pkt_tx.length = 4 + (aun_tx.length - 16); // Data starts at byte 4 in a data packet to econet
+								}
+								else if (aun_tx.d.p.ctrl == 0x82) // POKE	
+								{
+									memcpy (&(econet_pkt_tx.d.p.ctrl), &(aun_tx.d.p.data[8]), aun_tx.length-24); // Strip off the header - note, ctrl byte is first on the econet wire, and is where the data portion of a data packet starts
+									econet_pkt_tx.length = 4 + (aun_tx.length - 24); // Data starts at byte 8 in a data packet to econet
+								}
+
+
 							}
 
 							econet_pkt_tx.ptr = 0;
@@ -1544,13 +1559,19 @@ unexpected_scout:
 #ifdef ECONET_GPIO_DEBUG_AUN
 							printk (KERN_INFO "ECONET-GPIO: econet_irq_read(): AUN: Data received from %d.%d, length wire %d - Sending final ack.\n", aun_rx.d.p.srcnet, aun_rx.d.p.srcstn, econet_pkt_rx.ptr);
 #endif
-							if (aun_rx.d.p.port == 0 && aun_rx.d.p.ctrl == 0x85) // Immediate 0x85 special four way. There will have been four important bytes on the Quasi-'Scout' which will have been put into the aun_rx data area already, so we copy to byte 5 onward
+							if (aun_rx.d.p.port == 0 && (aun_rx.d.p.ctrl >= 0x83 && aun_rx.d.p.ctrl <= 0x85)) // Immediate 0x85 special four way. There will have been four important bytes on the Quasi-'Scout' which will have been put into the aun_rx data area already, so we copy to byte 5 onward; 0x83 (JSR) works the same way, as does USRPROC 0x84
 								memcpy(&(aun_rx.d.p.data[4]), &(econet_pkt_rx.d.data[4]), econet_pkt_rx.ptr - 4);
+							else if (aun_rx.d.p.port == 0 && aun_rx.d.p.ctrl == 0x82) // POKE - there are 8 bytes on the scout
+								memcpy(&(aun_rx.d.p.data[8]), &(econet_pkt_rx.d.data[4]), econet_pkt_rx.ptr - 4);
 							else
 								memcpy(&aun_rx.d.p.data, &(econet_pkt_rx.d.data[4]), econet_pkt_rx.ptr - 4); // We copy from the raw data in the rx packet because at [4] is where the reply data actually is, but we copy to the ACTUAL data area in the AUN packet
 							aun_rx.d.p.seq = (econet_data->aun_seq += 4);
 							aun_rx.d.p.aun_ttype = ECONET_AUN_DATA;
-							aun_rx.length = (econet_pkt_rx.ptr - 4 + 12) + ((aun_rx.d.p.port == 0 && aun_rx.d.p.ctrl == 0x85) ? 4 : 0);
+							aun_rx.length = (econet_pkt_rx.ptr - 4 + 12) + 
+								(aun_rx.d.p.port != 0 ? 0 :
+								 	(aun_rx.d.p.ctrl == 0x82 ? 8 :
+									((aun_rx.d.p.ctrl >= 0x83 && aun_rx.d.p.ctrl <= 0x85) ? 4 :
+									 0 )));
 
 							econet_flagfill();
 
@@ -2009,14 +2030,18 @@ void econet_aun_tx_statemachine(void)
 				econet_pkt_tx_prepare.d.p.port = aun_tx.d.p.port;
 				econet_pkt_tx_prepare.d.p.ctrl = aun_tx.d.p.ctrl; // IMMEDIATE MOD | 0x80; // Set high bit. It is apparently always clear in UDP space	
 
-				if (!(aun_tx.d.p.port == 0x00 && aun_tx.d.p.ctrl == 0x85)) // Not one of the 0x85 Immediate "specials"
-					econet_pkt_tx_prepare.length = 6;
-
-				else // "Scout" on an 0x85 immediate special has 4 data bytes on the end of it
+				if (aun_tx.d.p.port == 0x00 && aun_tx.d.p.ctrl == 0x82)
+				{
+					econet_pkt_tx_prepare.length = 14;
+					memcpy(&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data), 8);
+				}
+				else if (aun_tx.d.p.port == 0x00 && (aun_tx.d.p.ctrl >= 0x83 && aun_tx.d.p.ctrl <= 0x85))
 				{
 					econet_pkt_tx_prepare.length = 10;
 					memcpy(&(econet_pkt_tx_prepare.d.p.data), &(aun_tx.d.p.data), 4);
 				}
+				else
+					econet_pkt_tx_prepare.length = 6;
 
 				// Set up to transmit
 

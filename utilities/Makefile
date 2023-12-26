@@ -1,4 +1,4 @@
-all:	econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers
+all:	econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers econet-poke
 
 econet-hpbridge:	econet-hpbridge.o fsv2.o 
 	if [ -f .noexplain ]; then cc -g -o econet-hpbridge econet-hpbridge.o fsv2.o -lpthread -lssl -lcrypto; else cc -g -o econet-hpbridge econet-hpbridge.o fsv2.o -lpthread -lssl -lcrypto -lexplain; fi
@@ -34,6 +34,8 @@ pipe-eg: pipe-eg.o econet-pipe.o
 
 econet-clock: econet-clock.o
 
+econet-poke: econet-poke.o econet-pipe.o
+
 econet-monitor.o: econet-monitor.c ../include/econet-gpio-consumer.h
 
 econet-imm.o: econet-imm.c ../include/econet-gpio-consumer.h
@@ -59,6 +61,8 @@ econet-ipgw.o: econet-ipgw.c econet-pipe.c ../include/econet-gpio-consumer.h
 econet-clock.o: econet-clock.c ../include/econet-gpio-consumer.h
 
 econet-trace.o: econet-trace.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
+
+econet-poke.o: econet-poke.c econet-pipe.c ../include/econet-gpio-consumer.h
 
 clean:
 	rm -f *.o econet-imm econet-test econet-bridge econet-monitor pipe-eg econet-notify econet-remote eb2 econet-hpbridge econet-ledtest econet-clock econet-trace
