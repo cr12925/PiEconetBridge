@@ -32,6 +32,7 @@ install-utilities:	install-mkgroup utilities
 	utilities/config-mangle systemd/econet-hpbridge.service
 	[ -f /etc/econet-gpio/econet-hpbridge.cfg ] || sudo cp config/econet-hpbridge.cfg-EconetPlusFileserver.local /etc/econet-gpio/econet-hpbridge.cfg
 	[ -f /etc/systemd/system/econet-hpbridge.service ] || sudo cp systemd/econet-hpbridge.service.local /etc/systemd/system/econet-hpbridge.service
+	sudo cp BEEBMEM /etc/econet-gpio
 
 install-hp-utilities:	install-utilities
 	-sudo systemctl daemon-reload

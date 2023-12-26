@@ -8877,4 +8877,23 @@ void eb_handle_fs_traffic (uint8_t server, struct __econet_packet_aun *p, uint16
 
 }
 
+uint8_t fs_writedisclist (uint8_t server, char *addr)
+{
+
+	uint8_t	found = 0, count = 0;
+
+	while (count < ECONET_MAX_FS_DISCS)
+	{
+		if (fs_discs[server][count].name[0]) // Found one
+		{
+
+			memcpy (addr+(found * 20), fs_discs[server][count].name, strlen(fs_discs[server][count].name));
+			found++;
+		}
+
+		count++;
+	}
+
+	return ((found/2) + ((found%2 == 0) ? 0 : 1));
+}
 #endif

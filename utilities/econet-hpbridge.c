@@ -30,6 +30,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 #include <poll.h>
 #include <netinet/in.h>
@@ -67,6 +68,7 @@ extern void fs_eject_station(unsigned char, unsigned char); // Used to get rid o
 extern short fs_dequeuable(int);
 extern void fs_dequeue(int);
 extern void fs_garbage_collect(int);
+extern uint8_t fs_writedisclist (uint8_t, char *);
 
 extern short fs_sevenbitbodge;
 extern short normalize_debug;
@@ -127,6 +129,8 @@ void eb_reset_tables(void);
 void eb_debug (uint8_t, uint8_t, char *, char *, ...);
 uint32_t get_local_seq (unsigned char, unsigned char);
 static void * eb_statistics (void *);
+
+unsigned char beebmem[65536];
 
 void eb_exit_cleanup(void)
 {
@@ -2851,6 +2855,12 @@ static void * eb_trunk_keepalive (void * device)
 	return NULL;
 }
 
+void beeb_print (uint8_t y, uint8_t x, char *s) /* Display string in beebmem at x,y */
+{
+	memcpy(&(beebmem[0x7c00 + (40 * y) + x]), s, strlen(s));
+
+}
+
 /* Generic inter-device transmission loop
  */
 
@@ -4390,7 +4400,123 @@ static void * eb_device_despatcher (void * device)
 */
 						
 						
-						if (p->p->p.aun_ttype == ECONET_AUN_NAK || p->p->p.aun_ttype == ECONET_AUN_ACK) // Don't pass these to local devices
+						if (p->p->p.aun_ttype == ECONET_AUN_IMM && p->p->p.port == 0x00 && p->p->p.ctrl == 0x81) // Immediate Peek to local emulator
+						{
+							struct __eb_printer *printer;
+							struct __eb_device *l;
+							struct __econet_packet_aun *reply;
+							struct utsname u;
+
+							uint8_t counter;
+							uint8_t yline = 8;
+							uint8_t found = 0;
+							uint32_t replydatalen = 0;
+							uint32_t startaddr, endaddr;
+
+							memset (&(beebmem[0x7c00]), ' ', 1024);
+
+							startaddr = (p->p->p.data[0] + (p->p->p.data[1] << 8) + (p->p->p.data[2] << 16) + (p->p->p.data[3] << 24));
+							endaddr = (p->p->p.data[4] + (p->p->p.data[5] << 8) + (p->p->p.data[6] << 16) + (p->p->p.data[7] << 24));
+
+							startaddr &= 0xffff;
+							endaddr &= 0xffff;
+							replydatalen = endaddr - startaddr;
+
+							if (!uname(&u))
+							{
+
+								char os_string[40];
+								uint8_t counter;
+
+								snprintf (os_string, 40, "%s %s %s", u.sysname, u.nodename, u.release);
+								beeb_print(0, 0, os_string);
+								snprintf (os_string, 40, "Pi Econet Bridge %x.%x on%c%d.%d", ((EB_VERSION & 0xf0) >> 4), (EB_VERSION & 0x0f), 134, d->net, d->local.stn);
+								beeb_print(2, 0, os_string);
+
+								snprintf (os_string, 40, "%c%c%c%cStatus  %c", 141, 132, 157, 135, 156);
+								beeb_print(4, 11, os_string);
+								beeb_print(5, 11, os_string);
+	
+								/* Announce known nets */
+
+								beeb_print(6, 0, "Known nets:");
+								for (counter = 1; counter < 255; counter++)
+								{
+									if (networks[counter])
+									{
+										char	net[5];
+
+										snprintf(net, 4, "%3d", counter);
+										beeb_print (yline+(found/10), (found % 10) * 4, net);
+										found++;
+									}
+								}
+
+								yline += (2 + (found / 10));
+
+								if (d->local.fs.index >= 0)
+								{
+									beeb_print (yline++, 0, "FS Discs:");
+									yline += 1 + fs_writedisclist (d->local.fs.index, &(beebmem[0x7c00 + (yline * 40)]));
+								}
+
+								if ((printer = d->local.printers)) // Is a print server
+								{
+									uint8_t printer_count = 0;
+									char p[10];
+
+									// Put print server text here
+									
+
+									beeb_print(yline++, 0, "Known printers:");
+
+									found = 0;
+
+									while (printer)
+									{
+										snprintf (p, 9, "%s", printer->acorn_name);
+										beeb_print(yline+(found/4), (found % 4) * 10, p);
+										printer = printer->next;	
+										found++;
+									}
+									
+									yline += 2 + (found / 4);	
+								}
+	
+								if (d->local.ip.tunif[0]) // Is an IP gateway
+								{
+									char addr_string[40];
+
+									snprintf(addr_string, 39, "IP Gateway at%c%s", 129, d->local.ip.addr);
+									beeb_print (yline, 0, addr_string);
+									yline += 2;
+
+								}
+							}
+
+							reply = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Allocate PEEK reply packet", ECONET_MAX_PACKET_SIZE);
+
+							if (!reply)
+								eb_debug (1, 0, "BRIDGE", "Unable to malloc() new PEEK reply packet");
+
+							reply->p.srcnet = d->net;
+							reply->p.srcstn = d->local.stn;
+							reply->p.dstnet = p->p->p.srcnet;
+							reply->p.dststn = p->p->p.srcstn;
+							reply->p.aun_ttype = ECONET_AUN_IMMREP;
+							reply->p.port = 0x00;
+							reply->p.ctrl = 0x81;
+							reply->p.seq = p->p->p.seq;
+							
+							memcpy (&(reply->p.data), &(beebmem[startaddr]), replydatalen);
+
+							eb_enqueue_output (d, reply, replydatalen);
+							new_output = 1;
+							
+							eb_free (__FILE__, __LINE__, "BRIDGE", "Freeing PEEK reply packet", reply);
+							
+						}
+						else if (p->p->p.aun_ttype == ECONET_AUN_NAK || p->p->p.aun_ttype == ECONET_AUN_ACK) // Don't pass these to local devices
 						{
 			
 						}
@@ -4400,7 +4526,7 @@ static void * eb_device_despatcher (void * device)
 							ack.p.aun_ttype = ECONET_AUN_IMMREP;
 							ack.p.data[0] = ack.p.data[1] = 0xee;
 							ack.p.data[2] = 2;
-							ack.p.data[3] = 0;
+							ack.p.data[3] = 1;
 
 							eb_enqueue_output (d, &ack, 4);
 							new_output = 1;
@@ -6323,7 +6449,7 @@ int main (int argc, char **argv)
 	gettimeofday (&(config.start), 0);
 	EB_DEBUG_OUTPUT = stderr;
 	EB_DEBUG_MALLOC = 0;
-	EB_CONFIG_WIRE_RETX = 50;
+	EB_CONFIG_WIRE_RETX = 10; // Reduced 20231226 to see if !Machines performance improves
 	EB_CONFIG_AUN_RETX = 1000;  // BeebEm Seems to need quite a while - and does not like another packet turning up before it's ACKd the last one. Long timeout. If the ACK turns up, the inbound AUN listener wakes the queue anyway, so it should be fine.
 	EB_CONFIG_WIRE_RETRIES = 10;
 	EB_CONFIG_WIRE_IMM_WAIT = 1000; // Wait 1s before resetting ADLC from flag fill - assume immediate reply not turning up for transmission on to wire
@@ -6445,6 +6571,23 @@ int main (int argc, char **argv)
 	max_fds.rlim_cur = max_fds.rlim_max = RLIM_INFINITY;
 
 	setrlimit (RLIMIT_CORE, &max_fds);
+
+
+	/* Clear BeebMem - used for *VIEW */
+
+	memset (&beebmem, 0, 65536);
+
+	/* Now set up some parameters for *VIEW */
+
+	{
+		FILE *b;
+
+		if ((b = fopen("/etc/econet-gpio/BEEBMEM", "r")))
+		{
+			fread (beebmem, 32768, 1, b);
+			fclose (b);
+		}
+	}
 
 	/* Read config */
 
