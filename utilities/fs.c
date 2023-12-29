@@ -63,7 +63,8 @@
 
 // the ] as second character is a special location for that character - it loses its
 // special meaning as 'end of character class' so you can match on it.
-#define FSREGEX "[]\\*\\#A-Za-z0-9\\+_\x81-\xfe;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
+#define FSACORNREGEX    "[]\\*\\#A-Za-z0-9\\+_\x81-\xfe;[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
+#define FSREGEX    "[]\\*\\#A-Za-z0-9\\+_\x81-\xfe;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 #define FSDOTREGEX "[]\\*\\#A-Za-z0-9\\+_\x81-\xfe;\\.[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 #define FS_NETCONF_REGEX_ONE "^NETCONF\\s+([\\+\\-][A-Z]+)\\s*"
 
@@ -171,8 +172,10 @@ struct {
 	unsigned char fullname[25];
 	unsigned char priv;
 	unsigned char bootopt;
-	unsigned char home[96];
-	unsigned char lib[96];
+	unsigned char home[80];
+	uint8_t		unused1[16];
+	unsigned char lib[80];
+	uint8_t		unused2[16];
 	unsigned char home_disc;
 	unsigned char year, month, day, hour, min, sec; // Last login time
 	unsigned char groupmap[8]; // 1 bit for each of 256 groups
@@ -336,6 +339,27 @@ struct load_queue {
 };
 
 struct load_queue *fs_load_queue = NULL; // Pointer to first load_queue entry. If NULL, there are no load queues to execute. The load queue entries are enqueued so as to be sorted in server, net, stn order. 
+
+/* MDFS Password file user format */
+
+struct mdfs_user {
+	unsigned char 	username[10]; // 0x0D terminated if less than 10 chars
+	unsigned char 	password[10]; // Ditto
+	uint8_t 	opt; 
+	uint8_t		flag; /* bit 0:Pw unlocked; 1:syst priv; 2: No short saves; 3: Permanent *ENABLE; 4: No lib; 5: RUn only */
+	uint8_t		offset_root[4]; /* File offset to URD, or 0 if "normal", whatever that may be */
+	uint8_t		offset_lib[4]; /* File offset to LIB, or 0 if "normal" */
+	uint8_t		uid[2];
+	uint8_t		reserved[3]; /* Assume not supposed to use this! */
+	uint8_t		owner_map[32]; /* Bitmap of account ownership */	
+};
+
+#define MDFS_PW_UNLOCKED	0x01
+#define MDFS_PW_SYST		0x02
+#define MDFS_PW_NSSAVE		0x04
+#define MDFS_PW_ENABLE		0x08
+#define MDFS_PW_NOLIB		0x10
+#define MDFS_PW_RUNONLY		0x20
 
 regex_t r_pathname, r_discname, r_wildcard;
 
@@ -1131,7 +1155,7 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 
 	fs_wildcard_to_regex(needle, needle_wildcard, fs_config[server].fs_infcolon);
 
-	//fs_debug (0, 2, "fs_get_wildcard_entries() - needle = '%s', needle_wildcard = '%s'", needle, needle_wildcard);
+	fs_debug (0, 2, "fs_get_wildcard_entries() - needle = '%s', needle_wildcard = '%s'", needle, needle_wildcard);
 
 	if (fs_compile_wildcard_regex(needle_wildcard) != 0) // Error
 		return -1;
@@ -1484,7 +1508,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 	strcpy ((char * ) result->path_from_root, (const char * ) adjusted);
 
-	if (normalize_debug) fs_debug (0, 1, "Adjusted = %s\n", adjusted);
+	// if (normalize_debug) fs_debug (0, 1, "Adjusted = %s\n", adjusted);
 
 	ptr = 0;
 
@@ -2314,10 +2338,14 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 		// the normalize routine sifts out maximum length for each individual server and there is only one regex compiled
 		// because the scandir filter uses it, and that routine cannot take a server number as a parameter.
 
+		/* 20231229 OLD 
 		if (fs_config[fs_count].fs_infcolon)
 			sprintf(regex, "^(%s{1,%d})", FSDOTREGEX, ECONET_ABS_MAX_FILENAME_LENGTH);
 		else
 			sprintf(regex, "^(%s{1,%d})", FSREGEX, ECONET_ABS_MAX_FILENAME_LENGTH);
+		*/
+
+		sprintf(regex, "^(%s{1,%d})", FSACORNREGEX, ECONET_ABS_MAX_FILENAME_LENGTH);
 
 		if (regcomp(&r_pathname, regex, REG_EXTENDED) != 0)
 			fs_debug (1, 0, "Unable to compile regex for file and directory names.");
@@ -3736,6 +3764,7 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 				{
 					// There should be, in *(data+6, 7) a two byte date.
 					// We'll implement this later
+					// No - Linux has no means of changing the creation date - we might need to look at putting this in xattrs / dotfiles!
 				}
 				break;
 			case 0x40: // MDFS set update, create date & time
@@ -3784,7 +3813,10 @@ short fs_get_acorn_entries(int server, int active_id, char *unixpath)
 	char regex[1024];
 	struct dirent **list;
 
-	sprintf(regex, "^(%s{1,%d})", FSREGEX, ECONET_MAX_FILENAME_LENGTH);
+	if (fs_config[server].fs_infcolon)
+		sprintf(regex, "^(%s{1,%d})", FSDOTREGEX, ECONET_MAX_FILENAME_LENGTH);
+	else
+		sprintf(regex, "^(%s{1,%d})", FSREGEX, ECONET_MAX_FILENAME_LENGTH);
 
 	if (regcomp(&r_wildcard, regex, REG_EXTENDED | REG_ICASE | REG_NOSUB) != 0) // We go extended expression, case insensitive and we aren't bothered about finding *where* the matches are in the string
 		return -1; // Regex failure!
@@ -7802,7 +7834,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					//fs_copy_to_cr(params, param, 255); // There's no CR at the end of param...
 					strncpy(params, param, 255);
 
-					if ((active[server][active_id].priv & FS_PRIV_SYSTEM) && (sscanf(params, "%10s %96s", username, libdir) == 2)) // System user with optional username
+					if ((active[server][active_id].priv & FS_PRIV_SYSTEM) && (sscanf(params, "%10s %80s", username, libdir) == 2)) // System user with optional username
 					{
 						if ((uid = fs_get_uid(server, username)) < 0)
 						{
@@ -7846,7 +7878,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					}
 					else if (libdir[0] == '%') // Blank off the library
 					{
-						strncpy((char *) users[server][uid].lib, "", 95);
+						strncpy((char *) users[server][uid].lib, "", 79);
 						fs_write_user(server, uid, (unsigned char *) &(users[server][uid]));
 						fs_reply_ok(server, reply_port, net, stn);
 					}
@@ -8069,6 +8101,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						char 	regex[1024];
 
 						fs_config[server].fs_infcolon = (operator == '+' ? 1 : 0);
+						/* This is wrong - r_pathname is the Acorn regex 
 						regfree(&r_pathname);
 						if (fs_config[fs_count].fs_infcolon)
 							sprintf(regex, "^(%s{1,%d})", FSDOTREGEX, ECONET_ABS_MAX_FILENAME_LENGTH);
@@ -8077,6 +8110,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		
 						if (regcomp(&r_pathname, regex, REG_EXTENDED) != 0)
 						fs_debug (1, 0, "Unable to compile regex for file and directory names.");
+						*/
 					}
 
 					else if (!strcasecmp("MDFS", configitem))
@@ -8162,7 +8196,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 						fs_copy_to_cr(params, param, 255);
 
-						if (sscanf(params, "%10s %96s", username, dir) == 2)
+						if (sscanf(params, "%10s %80s", username, dir) == 2)
 						{
 							fs_debug (0, 1, "%12sfrom %3d.%3d Set Home dir for user %s to %s", "", net, stn, username, dir);
 							uid = fs_get_uid(server, username);
@@ -8172,7 +8206,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								return;
 							}
 						}
-						else if (sscanf(params, "%96s", (unsigned char *) dir) != 1)
+						else if (sscanf(params, "%80s", (unsigned char *) dir) != 1)
 						{
 							fs_debug (0, 1, "%12sfrom %3d.%3d Set Home dir - bad parameters %s", "", net, stn, params);
 							fs_error(server, reply_port, net, stn, 0xFF, "Bad parameters");
@@ -8231,10 +8265,13 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				else if (fs_parse_cmd(command, "UNLINK", 3, &param))
 					fs_unlink(server, reply_port, active_id, net, stn, param);
 				//else if (!strncasecmp("FLOG ", (const char *) command, 5)) // Force log user off
-				else if (fs_parse_cmd(command, "FLOG", 2, &param))
+				else if (fs_parse_cmd(command, "FLOG", 3, &param))
 				{
 					char parameter[20];
 					unsigned short l_net, l_stn;
+					uint32_t	count;
+
+					l_net = l_stn = 0;
 
 					fs_copy_to_cr(parameter, param, 19);
 
@@ -8243,18 +8280,72 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						if (sscanf(parameter, "%hd.%hd", &l_net, &l_stn) != 2)
 						{
 							if (sscanf(parameter, "%hd", &l_stn) != 1)
+							{
 								fs_error(server, reply_port, net, stn, 0xFF, "Bad station specification");
+								return;
+							}
 							else	l_net = 0;
 						}
 
 						fs_debug (0, 1, "%12sfrom %3d.%3d Force log off station %d.%d", "", net, stn, l_net, l_stn);
 
+						count = 0;
+
+						while (count < ECONET_MAX_FS_USERS)
+						{
+							if (active[server][count].net == l_net && active[server][count].stn == l_stn)
+								fs_bye(server, 0, l_net, l_stn, 0); // Silent bye
+							count++;
+						}
+						
 					}
 					else // Username
 					{
-						fs_debug (0, 1, "%12sfrom %3d.%3d Force log off user %s", "", net, stn, parameter);
+						uint8_t 	found = 0;
+						unsigned char	paddeduser[10];
+
+						paddeduser[10] = '\0';
+
+						memcpy (paddeduser, parameter, strlen(parameter) > 10 ? 10 : strlen(parameter));
+
+						count = strlen(parameter); // Pad the balance
+
+						while (count < 10)
+							paddeduser[count++] = 32;
+
+						paddeduser[10] = '\0'; // Truncate
+
+						fs_debug (0, 1, "%12sfrom %3d.%3d Force log off user '%s'", "", net, stn, paddeduser);
 			
-						// TODO - Implement this!!
+						// Find UserID
+						
+						count = 0;
+
+						while (!found && count < fs_stations[server].total_users)
+						{
+							if (!memcmp(paddeduser, users[server][count].username, 10))
+								found = count;
+							else
+								count++;
+						}	
+
+						if (!found)
+							fs_error(server, reply_port, net, stn, 0xFF, "Unknown user");
+						else
+						{
+							count = 0;
+							// Look for user ID in active
+
+							while (count < ECONET_MAX_FS_USERS)
+							{
+								if (active[server][count].userid == found)
+									fs_bye(server, 0, active[server][count].net,
+											active[server][count].stn, 0); // Silent bye
+								count++;
+							}
+									
+
+						}
 					}
 
 					fs_reply_ok(server, reply_port, net, stn);
