@@ -360,14 +360,14 @@ struct load_queue *fs_load_queue = NULL; // Pointer to first load_queue entry. I
 /* MDFS Password file user format */
 
 struct mdfs_user {
-	unsigned char 	username[9]; // 0x0D terminated if less than 10 chars - MDFS manual seems to have only 9 bytes for a 10 character username
+	unsigned char 	username[10]; // 0x0D terminated if less than 10 chars - MDFS manual seems to have only 9 bytes for a 10 character username. Looks like a misprint
 	unsigned char 	password[10]; // Ditto
 	uint8_t 	opt; 
 	uint8_t		flag; /* bit 0:Pw unlocked; 1:syst priv; 2: No short saves; 3: Permanent *ENABLE; 4: No lib; 5: RUn only */
 	uint8_t		offset_root[3]; /* File offset to URD, or 0 if "normal", whatever that may be */
 	uint8_t		offset_lib[3]; /* File offset to LIB, or 0 if "normal" */
 	uint8_t		uid[2];
-	uint8_t		reserved[3]; /* Assume not supposed to use this! */
+	uint8_t		reserved[2]; /* Assume not supposed to use this! */
 	uint8_t		owner_map[32]; /* Bitmap of account ownership */	
 };
 
@@ -414,16 +414,6 @@ void fs_debug (uint8_t death, uint8_t level, char *fmt, ...)
 #endif
 
 	va_end(ap);
-}
-
-int fs_mdfs_pw_compare(const void *a, const void *b)
-{
-	struct mdfs_user *first, *second;
-
-	first = (struct mdfs_user *) a;
-	second = (struct mdfs_user *) b;
-
-	return (memcmp(first->username, second->username, 10));
 }
 
 // Copy src to dest length len, where src is space padded
@@ -539,7 +529,7 @@ uint32_t fs_get_mdfs_dir_pointer(char *dir, uint8_t urdorlib, char *username)
 
 int fs_mdfs_username_compare (const void *a, const void *b)
 {
-	return memcmp(a, b, 9);
+	return memcmp(a, b, 10);
 }
 
 // Take fs_users[server] and write an MDFS-format password file in the server root directory
