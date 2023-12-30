@@ -9398,9 +9398,9 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 									count, pname, banner, &control, &status, &account))
 								{
 									numret++;
-									snprintf(&(reply.p.data[reply_length]), 7, "%6.6s", pname);
+									snprintf(&(reply.p.data[reply_length]), 7, "%-6.6s", pname);
 									reply_length += 6;
-									reply.p.data[reply_length] = 0;
+									//reply.p.data[reply_length] = 0; // This appears to be an error
 									if ((control & 0x01) == 0) reply.p.data[reply_length] = 0; // Off - the enable bit
 									else reply.p.data[reply_length] = 1;
 									reply_length++;
@@ -9419,10 +9419,12 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							}
 					
 							reply.p.data[2] = numret;
+							
 							if (numret == 0) 
 							{
 								reply_length--; // Don't send the count. See if that sorts it out?
 							}
+							
 
 						} break;
 						default:

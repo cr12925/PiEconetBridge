@@ -4428,7 +4428,7 @@ static void * eb_device_despatcher (void * device)
 								char os_string[80];
 								uint8_t counter;
 
-								snprintf (os_string, 80, "%s %s %s", u.sysname, u.nodename, u.release);
+								snprintf (os_string, 40, "%-10.10s %-15.15s %-10.10s", u.sysname, u.nodename, u.release);
 								beeb_print(0, 0, os_string);
 								snprintf (os_string, 40, "Pi Econet Bridge %x.%x on%c%d.%d", ((EB_VERSION & 0xf0) >> 4), (EB_VERSION & 0x0f), 134, d->net, d->local.stn);
 								beeb_print(2, 0, os_string);
