@@ -8471,7 +8471,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			}
 			//else if (!strncasecmp("DIR ", (const char *) command, 4) || (!strncasecmp("DIR", (const char *) command, 3) && (*(command + 3) == 0x0d))) // Change working directory
 			//else if (!strncasecmp("DIR", (const char *) command, 3) && (*(command + 3) == '\0' || *(command + 3) == ' ')) // The code above has already null terminated the command
-			else if (fs_parse_cmd(command, "DIR", 3, &param))
+			else if (fs_parse_cmd(command, "DIR", 3, &param) || fs_parse_cmd(command, "DIR^", 4, &param))
 			{
 				int found;
 				struct path p;
@@ -8492,6 +8492,9 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 
 				}
+
+				if (!strncasecmp(command, "DIR^", 4))
+					strcpy (dirname, "^");
 
 				fs_debug (0, 1, "%12sfrom %3d.%3d DIR %s", "", net, stn, dirname);
 			
