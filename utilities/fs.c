@@ -1501,7 +1501,7 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 
 	fs_wildcard_to_regex(needle, needle_wildcard, fs_config[server].fs_infcolon);
 
-	fs_debug (0, 2, "fs_get_wildcard_entries() - needle = '%s', needle_wildcard = '%s'", needle, needle_wildcard);
+	if (normalize_debug) fs_debug (0, 2, "fs_get_wildcard_entries() - needle = '%s', needle_wildcard = '%s'", needle, needle_wildcard);
 
 	if (fs_compile_wildcard_regex(needle_wildcard) != 0) // Error
 		return -1;
@@ -2827,7 +2827,7 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 			else	
 			{
 				int discs_found = 0;
-	
+
 				fs_debug (0, 2, "Password file read - %d user(s)", (length / 256));
 				fread (&(users[fs_count]), 256, (length / 256), passwd);
 				fs_stations[fs_count].total_users = (length / 256);
@@ -2887,7 +2887,18 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 				// Now load up the discs. These are named 0XXX, 1XXX ... FXXXX for discs 0-15
 				while ((entry = readdir(d)) && discs_found < ECONET_MAX_FS_DISCS)
 				{
-					if (((entry->d_name[0] >= '0' && entry->d_name[0] <= '9') || (entry->d_name[0] >= 'A' && entry->d_name[0] <= 'F')) && (entry->d_type == DT_DIR) && (strlen((const char *) entry->d_name) <= 17)) // Found a disc. Length 17 = index character + 16 name; we ignore directories which are longer than that because the disc name will be too long
+
+					struct 	stat statbuf;
+					char	fullname[1024];
+					//int	l;
+
+					sprintf(fullname, "%s/%s", serverparam, entry->d_name);
+
+					//fprintf (stderr, "lstat(%s) = %d\n", fullname, (l = lstat(fullname, &statbuf)));
+					//fprintf (stderr, "lstat(%s) st_mode & S_IFMT = %02X, d_type = %02X\n", fullname, statbuf.st_mode, entry->d_type);
+
+
+					if (((entry->d_name[0] >= '0' && entry->d_name[0] <= '9') || (entry->d_name[0] >= 'A' && entry->d_name[0] <= 'F')) && (entry->d_type == DT_DIR || (entry->d_type == DT_LNK && (stat(fullname, &statbuf) == 0) && (S_ISDIR(statbuf.st_mode)))) && (strlen((const char *) entry->d_name) <= 17)) // Found a disc. Length 17 = index character + 16 name; we ignore directories which are longer than that because the disc name will be too long
 					{
 						int index;
 						short count;
@@ -3443,12 +3454,12 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 				strncpy((char * ) home, (const char * ) users[server][counter].home, 96);
 				home[96] = '\0';
 
-				for (count = 0; count < 96; count++) if (home[count] == 0x20) home[count] = '\0'; // Remove spaces and null terminate
+				for (count = 0; count < 80; count++) if (home[count] == 0x20) home[count] = '\0'; // Remove spaces and null terminate
 
 				if (home[0] == '\0')
 				{
 					sprintf(home, "$.%s", users[server][counter].username);
-					home[96] = '\0';
+					home[80] = '\0';
 					if (strchr(home, ' ')) *(strchr(home, ' ')) = '\0';
 				}
 				
@@ -3560,7 +3571,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 				else	strcpy((char *) lib, "$.Library");
 
 				lib[96] = '\0';
-				for (count = 0; count < 96; count++) if (lib[count] == 0x20) lib[count] = '\0'; // Remove spaces and null terminate
+				for (count = 0; count < 80; count++) if (lib[count] == 0x20) lib[count] = '\0'; // Remove spaces and null terminate
 
 				if (!fs_normalize_path(server, usercount, lib, -1, &p) || p.ftype != FS_FTYPE_DIR) // NOTE: because fs_normalize might look up current or home directory, home must be a complete path from $
 				{
@@ -4379,13 +4390,13 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		r.p.data[replylen++] = p.monthyear;
 	}
 
-	if (command == 4 || command == 5)
+	if (/* command == 4 || */ command == 5) // arg 4 doesn't request owner
 		r.p.data[replylen++] = (active[server][active_id].userid == p.owner) ? 0x00 : 0xff; 
 
 	if (command == 6)
 	{
 		
-		unsigned char hr_fmt_string[10];
+		// unsigned char hr_fmt_string[10];
 
 		if (p.ftype != FS_FTYPE_DIR)
 		{
@@ -4395,7 +4406,8 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 
 		r.p.data[replylen++] = 0; // Undefined on this command
 		//r.p.data[replylen++] = 10; // Dir name length
-		r.p.data[replylen++] = ECONET_MAX_FILENAME_LENGTH; // Dir name length
+		//r.p.data[replylen++] = ECONET_MAX_FILENAME_LENGTH; // Dir name length - 20231230 This is meant to be 0!
+		r.p.data[replylen++] = 0; // Undefined on this command
 
 		memset ((char *) &(r.p.data[replylen]), 32, ECONET_MAX_FILENAME_LENGTH); // Pre-fill with spaces in case this is the root dir
 	
@@ -4407,13 +4419,23 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		}
 		else
 		{
-			sprintf (hr_fmt_string, "%%-%ds", ECONET_MAX_FILENAME_LENGTH);
+			// sprintf (hr_fmt_string, "%%-%ds", ECONET_MAX_FILENAME_LENGTH); // This format can only take a maximum of 10 chars (FS Op 18 arg 6)
 			//snprintf(&(r.p.data[replylen]), 11, "%-10s", (const char * ) p.acornname);
-			snprintf(&(r.p.data[replylen]), ECONET_MAX_FILENAME_LENGTH+1, hr_fmt_string, (const char * ) p.acornname);
+			memcpy(&(r.p.data[replylen]), p.acornname, 10);
+			{
+				uint8_t c;
+
+				for (c = 0; c < 10; c++)
+					if (p.acornname[c] == '\0') break;
+
+				for (; c < 10; c++)
+					p.acornname[c] = ' '; // Pad with spaces
+			}
+			//snprintf(&(r.p.data[replylen]), ECONET_MAX_FILENAME_LENGTH+1, hr_fmt_string, (const char * ) p.acornname);
 		}
 
-		//replylen += 10;
-		replylen += ECONET_MAX_FILENAME_LENGTH;
+		replylen += 10;
+		//replylen += ECONET_MAX_FILENAME_LENGTH;
 
 		r.p.data[replylen++] = (active[server][active_id].userid == p.owner) ? 0x00 : 0xff; 
 
@@ -7601,8 +7623,10 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 
 				strcpy (realfullpath, p.acornfullpath);
 				if (p.npath > 0)
+				{
 					strcat (realfullpath, ".");
-				strcat (realfullpath, p.acornname);
+					strcat (realfullpath, p.acornname); // 20231230 This line was outside the if() and it was probably adding an extra $ to a root path
+				}
 
 				fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, userhandle, handle);
 				active[server][active_id].fhandles[userhandle].handle = handle;
