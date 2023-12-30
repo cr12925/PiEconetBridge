@@ -4419,18 +4419,13 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		}
 		else
 		{
+			unsigned char	shortname[11];
+
+			memcpy(shortname, p.acornname, 10);
+			shortname[10] = '\0';
+
 			// sprintf (hr_fmt_string, "%%-%ds", ECONET_MAX_FILENAME_LENGTH); // This format can only take a maximum of 10 chars (FS Op 18 arg 6)
-			//snprintf(&(r.p.data[replylen]), 11, "%-10s", (const char * ) p.acornname);
-			memcpy(&(r.p.data[replylen]), p.acornname, 10);
-			{
-				uint8_t c;
-
-				for (c = 0; c < 10; c++)
-					if (p.acornname[c] == '\0') break;
-
-				for (; c < 10; c++)
-					p.acornname[c] = ' '; // Pad with spaces
-			}
+			snprintf(&(r.p.data[replylen]), 11, "%-10s", (const char * ) shortname);
 			//snprintf(&(r.p.data[replylen]), ECONET_MAX_FILENAME_LENGTH+1, hr_fmt_string, (const char * ) p.acornname);
 		}
 
