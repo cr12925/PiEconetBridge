@@ -481,6 +481,7 @@ uint32_t fs_get_mdfs_dir_pointer(char *dir, uint8_t urdorlib, char *username)
 	uint32_t	cumulative, counter;
 	unsigned char	idir[82];
 	unsigned char	username_null[12]; // NULL terminated username - it will come in either as 10 characters with no termination at all, or terminated 0x0D
+	unsigned char	username_null_dollar[15];
 
 	counter = 0;
 
@@ -492,11 +493,13 @@ uint32_t fs_get_mdfs_dir_pointer(char *dir, uint8_t urdorlib, char *username)
 
 	username_null[counter++] = 0x00; // Terminate without 0x0D so we can compare with directory
 
+	sprintf(username_null_dollar, "$.%s", username_null);
+
 	idir[81] = 0x00; // In case it's an 80-character directory with no null on it
 	strcpy(idir, dir);
 	strcat(idir, "\x0D");
 
-	if ((urdorlib && !strcasecmp(dir, "LIBRARY")) || (!strcasecmp(dir, username_null)))
+	if ((urdorlib && (!strcasecmp(dir, "LIBRARY") || !strcasecmp(dir, "$.LIBRARY"))) || (!strcasecmp(dir, username_null) || !strcasecmp(dir, username_null_dollar)))
 		return 0xFFFFFFFF;
 
 	cumulative = 0;
@@ -577,7 +580,7 @@ void fs_make_mdfs_pw_file(int server)
 	{
 		if (users[server][picounter].priv) // Active user
 		{
-			uint16_t	fileptr;
+			uint32_t	fileptr;
 
 			// Empty the destination struct
 			memset(&(mu[mucounter]), 0, sizeof(struct mdfs_user));
@@ -641,7 +644,7 @@ void fs_make_mdfs_pw_file(int server)
 			(mu[dircounter].offset_root[1] == 0xFF) &&
 			((mu[dircounter].offset_root[0] & 0xFE) == 0xFE)
 		   )
-			memset(&(mu[dircounter].offset_root), 0, 4);
+			memset(&(mu[dircounter].offset_root), 0, 3);
 		else
 		{
 			uint16_t	total;
@@ -664,7 +667,7 @@ void fs_make_mdfs_pw_file(int server)
 			(mu[dircounter].offset_lib[1] == 0xFF) &&
 			((mu[dircounter].offset_lib[0] & 0xFE) == 0xFE)
 		   )
-			memset(&(mu[dircounter].offset_lib), 0, 4);
+			memset(&(mu[dircounter].offset_lib), 0, 3);
 		else
 		{
 			uint16_t	total;
