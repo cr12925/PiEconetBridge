@@ -6040,12 +6040,16 @@ void fs_read_discs(int server, unsigned short reply_port, unsigned char net, uns
 	
 	fs_debug (0, 2, "%12sfrom %3d.%3d Read Discs from %d (up to %d)", "", net, stn, start, number);
 
+	/* This appears to be wrong. 'start' as delivered by NFS is not, for example, 3 for the 3rd existent disc, it's 3 for disc number 3. 
 	while (disc_ptr < ECONET_MAX_FS_DISCS && found < start)
 	{
 		if (fs_discs[server][disc_ptr].name[0] != '\0') // Found an active disc
 			found++;
 		disc_ptr++;
 	}
+	*/
+
+	disc_ptr = start;
 
 	if (disc_ptr < ECONET_MAX_FS_DISCS) // See if there are any to insert
 	{
