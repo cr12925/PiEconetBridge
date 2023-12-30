@@ -134,11 +134,26 @@ uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 #define ECONET_MAX_PATH_ENTRIES 30
 #define ECONET_MAX_PATH_LENGTH ((ECONET_MAX_PATH_ENTRIES * (ECONET_ABS_MAX_FILENAME_LENGTH + 1)) + 1)
 
+// PiFS privilege bytes
+// MDFS-related privs in our native format
+#define FS_PRIV_PERMENABLE 0x80
+#define FS_PRIV_NOSHORTSAVE 0x40
+#define FS_PRIV_RUNONLY 0x20
+#define FS_PRIV_NOLIB 0x10
+// Our native privs
 #define FS_PRIV_SYSTEM 0x80
 #define FS_PRIV_LOCKED 0x40
 #define FS_PRIV_NOPASSWORDCHANGE 0x20
 #define FS_PRIV_USER 0x01
 #define FS_PRIV_INVALID 0x00
+
+// MDFS privilege bits in MDFS format
+#define MDFS_PRIV_PWUNLOCKED 0x01
+#define MDFS_PRIV_SYST 0x02
+#define MDFS_PRIV_NOSHORTSAVE 0x04
+#define MDFS_PRIV_PERMENABLE 0x08
+#define MDFS_PRIV_NOLIB 0x10
+#define MDFS_PRIV_RUNONLY 0x20
 
 #define FS_BOOTOPT_OFF 0x00
 #define FS_BOOTOPT_LOAD 0x01
@@ -166,7 +181,7 @@ struct {
 	uint8_t pad[249]; // Spare spare in the config
 } fs_config[ECONET_MAX_FS_SERVERS];
 
-struct {
+struct fs_user {
 	unsigned char username[10];
 	unsigned char password[11];
 	unsigned char fullname[25];
@@ -180,7 +195,9 @@ struct {
 	unsigned char year, month, day, hour, min, sec; // Last login time
 	unsigned char groupmap[8]; // 1 bit for each of 256 groups
 	char unused[1];
-} users[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_USERS];
+} users[ECONET_MAX_FS_SERVERS+1][ECONET_MAX_FS_USERS];
+// MAX_FS_SERVERS+1 is because we use the last entry to sort a real server entry to produce an MDFS format password file.
+// We don't use it for live data
 
 struct {
 	unsigned char groupname[10]; // First character null means unused.
@@ -343,23 +360,16 @@ struct load_queue *fs_load_queue = NULL; // Pointer to first load_queue entry. I
 /* MDFS Password file user format */
 
 struct mdfs_user {
-	unsigned char 	username[10]; // 0x0D terminated if less than 10 chars
+	unsigned char 	username[9]; // 0x0D terminated if less than 10 chars - MDFS manual seems to have only 9 bytes for a 10 character username
 	unsigned char 	password[10]; // Ditto
 	uint8_t 	opt; 
 	uint8_t		flag; /* bit 0:Pw unlocked; 1:syst priv; 2: No short saves; 3: Permanent *ENABLE; 4: No lib; 5: RUn only */
-	uint8_t		offset_root[4]; /* File offset to URD, or 0 if "normal", whatever that may be */
-	uint8_t		offset_lib[4]; /* File offset to LIB, or 0 if "normal" */
+	uint8_t		offset_root[3]; /* File offset to URD, or 0 if "normal", whatever that may be */
+	uint8_t		offset_lib[3]; /* File offset to LIB, or 0 if "normal" */
 	uint8_t		uid[2];
 	uint8_t		reserved[3]; /* Assume not supposed to use this! */
 	uint8_t		owner_map[32]; /* Bitmap of account ownership */	
 };
-
-#define MDFS_PW_UNLOCKED	0x01
-#define MDFS_PW_SYST		0x02
-#define MDFS_PW_NSSAVE		0x04
-#define MDFS_PW_ENABLE		0x08
-#define MDFS_PW_NOLIB		0x10
-#define MDFS_PW_RUNONLY		0x20
 
 regex_t r_pathname, r_discname, r_wildcard;
 
@@ -404,6 +414,349 @@ void fs_debug (uint8_t death, uint8_t level, char *fmt, ...)
 #endif
 
 	va_end(ap);
+}
+
+int fs_mdfs_pw_compare(const void *a, const void *b)
+{
+	struct mdfs_user *first, *second;
+
+	first = (struct mdfs_user *) a;
+	second = (struct mdfs_user *) b;
+
+	return (memcmp(first->username, second->username, 10));
+}
+
+// Copy src to dest length len, where src is space padded
+// Reterminate dest with &0D instead of padding.
+// Used for generating MDFS password file
+
+void fs_mdfs_copy_terminate(unsigned char *dest, unsigned char *src, uint8_t len)
+{
+	int	c; // Generic counter
+
+	memcpy(dest, src, len);
+
+	c = len-1;
+
+	while ((*(dest+c) == ' ') && (c > 0))
+		c--;
+
+	if ((c == 0) && *(dest+c) == ' ')
+		*(dest+c) = 0x0D; // Empty password
+	else if ((c != (len - 1)) && (*(dest+c+1)) == ' ')
+		*(dest+c+1) = 0x0D;
+
+}
+
+
+uint8_t fs_pifs_to_mdfs_priv (uint8_t input)
+{
+	uint8_t 	output = 0;
+
+	output |= (input & FS_PRIV_SYSTEM) ? MDFS_PRIV_SYST : 0;
+	output |= (input & FS_PRIV_NOPASSWORDCHANGE) ? 0 : MDFS_PRIV_PWUNLOCKED;
+	output |= (input & FS_PRIV_PERMENABLE) ? MDFS_PRIV_PERMENABLE : 0;
+	output |= (input & FS_PRIV_NOSHORTSAVE) ? MDFS_PRIV_NOSHORTSAVE : 0;
+	output |= (input & FS_PRIV_NOLIB) ? MDFS_PRIV_NOLIB : 0;
+	output |= (input & FS_PRIV_RUNONLY) ? MDFS_PRIV_RUNONLY : 0;
+
+	return output;
+
+}
+
+struct mdfs_dir {
+	unsigned char	dirname[82]; // 80 characters max + CR - see MDFS manual - and one for a NULL terminator internaly to fs.c
+	uint32_t	fileptr; // 0-based pointer in to the directory part of the file
+} mdfs_dirs[ECONET_MAX_FS_USERS]; // UNlikely to be more than that
+
+// Return a 0-based file pointer to the dirname specified in the mdfs_dirs struct above
+// dir is an ordinary NULL-terminated string. The MDFS ones are 0x0D terminated 
+// (and so the actual string in the MDFS password file can be 81 characters, being
+// a maximum of 80 characters + 0x0D.
+// So terminate dir with 0x0D and do a case-insensitive search for it in mdfs_dirs.
+// If not found, add it, calculate the 0-based file ptr and return it. If found,
+// return the file ptr.
+// urdorlib is 0 if we are looking for a URD. If the directory is a URD and
+// is $.<USERNAME> then return &FFFF ("normal" URD, converted to 0 when finalized)
+// urdorlib is 1 means looking for a library. If the directory is $.LIBRARY
+// then return &FFFF ("normal" LIB, set to 0 when finalized).
+// If we run off the end of the list of directories and haven't found the one we're
+// looking for, and it wasn't a "normal" directory, 0xFFFE is a rogue for "cannot
+// allocate"
+// The username field must already have the 0x0D terminator on it or be 10 characters
+// The directory doesn't. It's just a null-terminated string
+
+uint32_t fs_get_mdfs_dir_pointer(char *dir, uint8_t urdorlib, char *username)
+{
+	uint32_t	cumulative, counter;
+	unsigned char	idir[82];
+	unsigned char	username_null[12]; // NULL terminated username - it will come in either as 10 characters with no termination at all, or terminated 0x0D
+
+	counter = 0;
+
+	while (counter < 10 && (*(username+counter) != 0x0D))
+	{
+		username_null[counter] = *(username+counter);
+		counter++;
+	}
+
+	username_null[counter++] = 0x00; // Terminate without 0x0D so we can compare with directory
+
+	idir[81] = 0x00; // In case it's an 80-character directory with no null on it
+	strcpy(idir, dir);
+	strcat(idir, "\x0D");
+
+	if ((urdorlib && !strcasecmp(dir, "LIBRARY")) || (!strcasecmp(dir, username_null)))
+		return 0xFFFFFFFF;
+
+	cumulative = 0;
+	counter = 0;
+
+	while ((counter < ECONET_MAX_FS_USERS) && (mdfs_dirs[counter].dirname[0])) // Cycle through mdfs_dirs; stop if we find an empty entry
+	{
+		if (!strcasecmp(mdfs_dirs[counter].dirname, idir)) // Found it
+			return mdfs_dirs[counter].fileptr;
+
+		cumulative = mdfs_dirs[counter].fileptr + strlen(mdfs_dirs[counter].dirname);
+		counter++;
+
+	}
+
+	if (counter == ECONET_MAX_FS_USERS)
+		return 0xFFFFFFFE; // Cannot allocate - generates a log, but will then simply flag the directory as "normal" without a crash
+
+	// By here, we haven't found the dir we're looking for, so add it at the current location and return the file ptr
+	
+	strcpy(mdfs_dirs[counter].dirname, idir);
+	mdfs_dirs[counter].fileptr = cumulative;
+
+	return cumulative;
+}
+
+// QSORT comparator function for usernames within mdfs_user struct
+// Since they are all max 10 characters, terminated 0x0D if less than 10,
+// we can just use memcmp.
+
+int fs_mdfs_username_compare (const void *a, const void *b)
+{
+	return memcmp(a, b, 9);
+}
+
+// Take fs_users[server] and write an MDFS-format password file in the server root directory
+void fs_make_mdfs_pw_file(int server)
+{
+
+	/*
+	 *
+	 * SLIGHT PROBLEM!
+	 *
+	 * According to the MDFS manual, the username field is only 9 bytes long, despite
+	 * it saying that the field is terminated 0x0D if "less than 10 characters".
+	 * Might be a typo in the byte numbering in the manual, but since I don't have an
+	 * MDFS password file to look at, I can't tell. I could look at an MDFS password
+	 * utility, but they are compressed and hard to read...
+	 *
+	 */
+
+	uint32_t 	 	picounter, mucounter, dircounter;
+	struct mdfs_user	mu[ECONET_MAX_FS_USERS];
+	uint32_t 		diroffset;
+	uint8_t			do_bytes[4];
+	uint8_t			pointers[32][2]; // Entry numbers for users starting less than 'A' ([0]), first 'A' or 'B' ([1]) ... see MDFS manual v1.00 para 10.22. Only first 16 entries used. We have the rest to make it easy to write 64 bytes to the file with zeros at the end.
+	unsigned char		mdfs_pwfile[1024];
+	FILE			*pw; // Output MDFS Passwords file
+
+	// users[ECONET_MAX_FS_SERVERS] is last entry in array (we define as that+1) and used as scratch space
+	
+	// Copy our native userbase into mdfs_user one by one, then sort mdfs_user,
+	// Then build our directory list. Put a pointer into each user record which is based at 0
+	// as being the start of the directory list when it will be in the file.
+	// Then write a blank first 64 bytes (into which we put the index later), then write out the qsorted
+	// records, then 64 &FFs, then write out the directory names.
+	// Then update each valid user record's two directory indicies by adding the relevant actual file pointer
+	// to the 0-based one which we wrote before.
+	
+	picounter = mucounter = 0;
+
+	// Empty the directory list so that first character of each dir entry is null signifying unused
+	memset (&mdfs_dirs, 0, sizeof(mdfs_dirs));
+
+	// Cycle through out native password file and move the active users (and their IDs) into mu[]
+	
+	while (picounter < fs_stations[server].total_users)
+	{
+		if (users[server][picounter].priv) // Active user
+		{
+			uint16_t	fileptr;
+
+			// Empty the destination struct
+			memset(&(mu[mucounter]), 0, sizeof(struct mdfs_user));
+
+			fs_mdfs_copy_terminate((unsigned char *) &(mu[mucounter].username), (unsigned char *) &(users[server][picounter].username), 10);
+			fs_mdfs_copy_terminate((unsigned char *) &(mu[mucounter].password), (unsigned char *) &(users[server][picounter].password), 10);
+
+			// Boot option
+			mu[mucounter].opt = users[server][picounter].bootopt;
+
+			// Privilege
+			mu[mucounter].flag = fs_pifs_to_mdfs_priv(users[server][picounter].priv);
+
+			// UID
+			mu[mucounter].uid[0] = (picounter & 0xff);
+			mu[mucounter].uid[1] = (picounter & 0xff00) >> 8;
+
+			// Set pointers for URD & LIB
+			
+			fileptr = fs_get_mdfs_dir_pointer (users[server][picounter].home, 0, mu[mucounter].username);
+			mu[mucounter].offset_root[0] = (fileptr & 0x000000FF);
+			mu[mucounter].offset_root[1] = (fileptr & 0x0000FF00) >> 8;
+			mu[mucounter].offset_root[2] = (fileptr & 0x00FF0000) >> 16;
+
+			fileptr = fs_get_mdfs_dir_pointer (users[server][picounter].lib, 1, mu[mucounter].username);
+			mu[mucounter].offset_lib[0] = (fileptr & 0x000000FF);
+			mu[mucounter].offset_lib[1] = (fileptr & 0x0000FF00) >> 8;
+			mu[mucounter].offset_lib[2] = (fileptr & 0x00FF0000) >> 16;
+
+			mucounter++;
+		}
+
+		picounter++;
+	}
+
+	// Now add the user terminating block - 64 &FFs
+	memset(&(mu[mucounter++]), 0xFF, 64);
+
+	// When we get here, mucounter will contain the number of entries in mu[]. When written to the MDFS
+	// password file, they are 64 bytes long each and will start from byte 64. After that follows a
+	// So if there's (e.g.) 2 entries in mu[], including the 0xFF terminator,
+	// the start of the directory information will be at byte 192.
+	// So diroffset, which is to be added to the offset_root and offset_lib values needs to be increased
+	// by (64 * (mucounter+1))
+	// And we need to fixup 0xFFFFFFFF to be 0 (for "normal"), and 0xFFFFFFFE to be 0 (not found)
+	//
+	
+	diroffset = (64 * (mucounter + 1));
+
+	do_bytes[0] = (diroffset & 0x000000FF);
+	do_bytes[1] = (diroffset & 0x0000FF00) >> 8;
+	do_bytes[2] = (diroffset & 0x00FF0000) >> 16;
+	do_bytes[3] = (diroffset & 0xFF000000) >> 24;
+
+	dircounter = 0;
+
+	while (dircounter < (mucounter-1)) // -1 so we don't try and change the 0xFF terminator block
+	{
+		if (
+			(mu[dircounter].offset_root[2] == 0xFF) &&
+			(mu[dircounter].offset_root[1] == 0xFF) &&
+			((mu[dircounter].offset_root[0] & 0xFE) == 0xFE)
+		   )
+			memset(&(mu[dircounter].offset_root), 0, 4);
+		else
+		{
+			uint16_t	total;
+			uint8_t		bytecount;
+
+			bytecount = 0;
+
+			while (bytecount < 4)
+			{
+				total = mu[dircounter].offset_root[bytecount] + do_bytes[bytecount];
+				mu[dircounter].offset_root[bytecount] = (total & 0xFF);
+				if ((total > 0xFF) & (bytecount != 2))
+					mu[dircounter].offset_root[bytecount]++; // Carry
+				bytecount++;
+			}
+		}
+
+		if (
+			(mu[dircounter].offset_lib[2] == 0xFF) &&
+			(mu[dircounter].offset_lib[1] == 0xFF) &&
+			((mu[dircounter].offset_lib[0] & 0xFE) == 0xFE)
+		   )
+			memset(&(mu[dircounter].offset_lib), 0, 4);
+		else
+		{
+			uint16_t	total;
+			uint8_t		bytecount;
+
+			bytecount = 0;
+
+			while (bytecount < 4)
+			{
+				total = mu[dircounter].offset_lib[bytecount] + do_bytes[bytecount];
+				mu[dircounter].offset_lib[bytecount] = (total & 0xFF);
+				if ((total > 0xFF) & (bytecount != 2))
+					mu[dircounter].offset_lib[bytecount]++; // Carry
+				bytecount++;
+			}
+		}
+
+		dircounter++;
+
+	}
+
+	// Now sort the entries
+	
+	qsort (&(mu[0]), mucounter-1, sizeof (struct mdfs_user), fs_mdfs_username_compare); // mucounter-1 so we don't sort the 0xFF block, though it would always end up at the end on the sort anyway I think
+
+	// Now set up the pointer block for usernames... re-user dircounter since we've finished with it
+	
+	memset(&pointers, 0, sizeof(pointers));
+
+	dircounter = 0;
+
+	while (dircounter < (mucounter-1))
+	{
+		uint8_t		firstchar;
+		uint8_t		pointer_index;
+
+		firstchar = mu[dircounter].username[0];
+
+		if ((firstchar >= 'A') && (firstchar <= 'Z'))
+			pointer_index = ((firstchar - 'A') / 2) + 1;
+		else if (firstchar < 'A')
+			pointer_index = 0;
+		else firstchar = 14;
+
+		if (pointers[pointer_index][0] == 0 && pointers[pointer_index][1] == 0)
+		{
+			pointers[pointer_index][0] = (dircounter+1) & 0xFF;
+			pointers[pointer_index][1] = ((dircounter+1) & 0xFF00) >> 8;
+		}
+
+		dircounter++;
+
+	}	
+	
+	// Now write out the file, creating the pointer block (to users < 'A', first 'A' or 'B', etc. ...) as we go
+
+	strcpy(mdfs_pwfile, fs_stations[server].directory);
+	strcat(mdfs_pwfile, "/");
+	strcat(mdfs_pwfile, "MDFSPasswords");
+
+	pw = fopen(mdfs_pwfile, "w"); 
+
+	if (!pw)
+		fs_debug (0, 1, "Failed to open %s for writing", mdfs_pwfile);
+	{
+		uint16_t	counter;
+
+		fwrite(pointers, 64, 1, pw);
+		fwrite(mu, mucounter, 64, pw);
+
+		counter = 0;
+
+		while (counter < ECONET_MAX_FS_USERS)
+		{
+			if (mdfs_dirs[counter].dirname[0])
+				fwrite(mdfs_dirs[counter].dirname, strlen(mdfs_dirs[counter].dirname), 1, pw);
+			counter++;
+		}
+
+		fclose(pw);
+	}
+
 }
 
 // Find username if it exists in server's userbase
@@ -1330,6 +1683,98 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 	result->disc = -1; // Rogue so that we can tell if there was a discspec in the path
 
+	/* Fudge the special files here if we have SYST privs */
+
+	if (active[server][user].priv & FS_PRIV_SYSTEM)
+	{
+		unsigned char	final_path[30];
+		unsigned char 	*acorn_start_ptr;
+
+		final_path[0] = '\0';
+
+		if ((strlen(received_path) >= 10) && !strcasecmp(received_path + strlen(received_path)-10, "%PASSWORDS"))
+		{
+			if (normalize_debug) fs_debug (0, 1, "Found request for special file %PASSWORDS");
+			strcpy(final_path, "MDFSPasswords");
+			acorn_start_ptr = received_path + strlen(received_path) - 10 + 1;
+		}
+		else if ((strlen(received_path) >= 9) && !strcasecmp(received_path + strlen(received_path)-9, "%PIPASSWD"))
+		{
+			if (normalize_debug) fs_debug (0, 1, "Found request for special file %PIPASSWD");
+			strcpy(final_path, "Passwords");
+			acorn_start_ptr = received_path + strlen(received_path) - 9 + 1;
+		}
+		else if ((strlen(received_path) >= 7) && !strcasecmp(received_path + strlen(received_path)-7, "%CONFIG"))
+		{
+			if (normalize_debug) fs_debug (0, 1, "Found request for special file %%CONFIG");
+			strcpy(final_path, "Configuration.txt");
+			acorn_start_ptr = received_path + strlen(received_path) - 7 + 1;
+		}
+
+		if (final_path[0] != '\0')
+		{
+			// Fudge our structures here and return
+			struct tm t;
+			struct stat s;
+	
+			result->error = 0;
+			result->ftype = FS_FTYPE_FILE;
+			strcpy(result->discname, fs_discs[server][users[server][active[server][user].userid].home_disc].name);
+			result->disc = users[server][active[server][user].userid].home_disc;
+
+			strcpy(result->path[0], acorn_start_ptr);
+			strcpy(result->acornname, acorn_start_ptr);
+			strcpy(result->path_from_root, acorn_start_ptr);
+			sprintf(result->unixpath, "%s/%s", fs_stations[server].directory, final_path);
+			sprintf(result->acornfullpath, "$.%s", acorn_start_ptr);
+			strcpy(result->unixfname, final_path);
+					
+			if (normalize_debug) fs_debug (0, 1, "Special file data: result->path[0] = %s, result->acornname = %s, result->path_from_root = %s, result->unixpath = %s, result->acornfullpath = %s, result->unixfname = %s",
+					result->path[0],
+					result->acornname,
+					result->path_from_root,
+					result->unixpath,
+					result->acornfullpath,
+					result->unixfname
+					);
+			result->npath = 1;
+			result->owner = result->parent_owner = 0;
+			result->perm = result->my_perm = result->parent_perm = FS_PERM_OWN_W | FS_PERM_OWN_R;
+			result->load = result->exec = 0;
+			// Length & internal name here, and date fields
+			result->paths = result->paths_tail = NULL;	
+	
+			if (stat(result->unixpath, &s)) // Failed stat // this should *never* happen, but just in case it does...
+			{
+				result->error = FS_PATH_ERR_NODIR;
+				result->ftype = FS_FTYPE_NOTFOUND;
+				return -1;
+			}
+	
+			result->internal = s.st_ino;
+			result->length = s.st_size;
+	
+			localtime_r(&(s.st_mtime), &t);
+	
+			fs_date_to_two_bytes (t.tm_mday, t.tm_mon+1, t.tm_year, &(result->monthyear), &(result->day));
+			result->hour = t.tm_hour;
+			result->min = t.tm_min;
+			result->sec = t.tm_sec;
+	
+			// Create time
+			localtime_r(&(s.st_ctime), &t);
+			fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->c_day), &(result->c_monthyear));
+			result->c_hour = t.tm_hour;
+			result->c_min = t.tm_min;
+			result->c_sec = t.tm_sec;
+			
+			return 1;
+
+		}
+
+		// Otherwise fall through to the normal routine
+	}
+
 	strcpy(path, received_path);
 	
 	if (normalize_debug) fs_debug(0,1, "path=%s, received_path=%s, relative to %d, wildcard = %d, server %d, user %d, active user fhandle.handle = %d, acornfullpath = %s", path, received_path, relative_to, wildcard, server, user, active[server][user].fhandles[relative_to].handle, active[server][user].fhandles[relative_to].acornfullpath);
@@ -1780,7 +2225,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			count++;
 		}
 
-		if (normalize_debug) fs_debug (0, 1, "Returning full acorn path (wildcard - last path element to be added by caller) %s with my_perm = %02X\n", result->acornfullpath, result->my_perm);
+		if (normalize_debug) fs_debug (0, 1, "Returning full acorn path (wildcard - last path element to be added by caller) %s with my_perm = %02X, unix_path = %s", result->acornfullpath, result->my_perm, result->unixpath);
 
 		return 1;
 	}
@@ -1814,7 +2259,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		while (result->path[count][r_counter] != '\0' && r_counter < ECONET_MAX_FILENAME_LENGTH)
 		{
 			if (result->path[count][r_counter] == '/')
-				path_segment[r_counter] = ':';
+				path_segment[r_counter] = (fs_config[server].fs_infcolon ? '.' : ':');
 			else if (result->path[count][r_counter] == 0xA0)
 				path_segment[r_counter] = '#'; // Hard space equivalent
 			else	path_segment[r_counter] = result->path[count][r_counter];
@@ -1875,35 +2320,38 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	
 		if (!found) // Didn't find any dir entry
 		{
-			result->ftype = FS_FTYPE_NOTFOUND;
-			if (count == (result->npath - 1)) // Not found on last leg - return 1 so that we know it's safe to save there if we have permission
 			{
-			
-				unsigned short r_counter = 0;
-				char unix_segment[ECONET_ABS_MAX_FILENAME_LENGTH+10];
-				while (result->path[count][r_counter] != '\0' && r_counter < ECONET_MAX_FILENAME_LENGTH)
+
+				result->ftype = FS_FTYPE_NOTFOUND;
+				if (count == (result->npath - 1)) // Not found on last leg - return 1 so that we know it's safe to save there if we have permission
 				{
-					if (result->path[count][r_counter] == '/')
-						unix_segment[r_counter] = ':';
-					else if (result->path[count][r_counter] == 0xA0) // Hard space
-						unix_segment[r_counter] = '#';
-					else	unix_segment[r_counter] = result->path[count][r_counter];
-					r_counter++;
+				
+					unsigned short r_counter = 0;
+					char unix_segment[ECONET_ABS_MAX_FILENAME_LENGTH+10];
+					while (result->path[count][r_counter] != '\0' && r_counter < ECONET_MAX_FILENAME_LENGTH)
+					{
+						if (result->path[count][r_counter] == '/')
+							unix_segment[r_counter] = (fs_config[server].fs_infcolon ? '.' : ':');
+						else if (result->path[count][r_counter] == 0xA0) // Hard space
+							unix_segment[r_counter] = '#';
+						else	unix_segment[r_counter] = result->path[count][r_counter];
+						r_counter++;
+					}
+					unix_segment[r_counter] = '\0';
+					strcat(result->unixpath, "/");
+					strcat(result->unixpath, unix_segment); // Add these on a last leg not found so that the calling routine can open the file to write if it wants
+					strcpy(result->unixfname, unix_segment); // For use by caller if we didn't find it
+					// Populate the acorn name we were looking for so that things like fs_save() can easily return it
+					strcpy(result->acornname, path_segment);
+					result->parent_owner = parent_owner; // Otherwise this doesn't get properly updated
+					if (normalize_debug) fs_debug (0, 1, "Non-Wildcard file (%s, unix %s) not found in dir %s - returning unixpath %s, acornname %s, parent_owner %04X\n", path_segment, unix_segment, result->unixpath, result->unixpath, result->acornname, result->parent_owner);
+					return 1;
 				}
-				unix_segment[r_counter] = '\0';
-				strcat(result->unixpath, "/");
-				strcat(result->unixpath, unix_segment); // Add these on a last leg not found so that the calling routine can open the file to write if it wants
-				strcpy(result->unixfname, unix_segment); // For use by caller if we didn't find it
-				// Populate the acorn name we were looking for so that things like fs_save() can easily return it
-				strcpy(result->acornname, path_segment);
-				result->parent_owner = parent_owner; // Otherwise this doesn't get properly updated
-				if (normalize_debug) fs_debug (0, 1, "Non-Wildcard file (%s, unix %s) not found in dir %s - returning unixpath %s, acornname %s, parent_owner %04X\n", path_segment, unix_segment, result->unixpath, result->unixpath, result->acornname, result->parent_owner);
-				return 1;
-			}
-			else	
-			{
-				result->error = FS_PATH_ERR_NODIR;
-				return 0; // Fatal not found
+				else	
+				{
+					result->error = FS_PATH_ERR_NODIR;
+					return 0; // Fatal not found
+				}
 			}
 		}
 
@@ -2045,7 +2493,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 	}
 	
-	if (normalize_debug) fs_debug (0, 1, "Returning full acorn path (non-wildcard) %s with permissions %02X\n", result->acornfullpath, result->my_perm);
+	if (normalize_debug) fs_debug (0, 1, "Returning full acorn path (non-wildcard) %s with permissions %02X, unix path %s", result->acornfullpath, result->my_perm, result->unixpath);
 
 	strncpy((char * ) result->ownername, (const char * ) users[server][result->owner].username, 10); // Populate readable owner name
 	result->ownername[10] = '\0';
@@ -2059,7 +2507,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 // path structure and then free all the path entries that have been found.
 int fs_normalize_path(int server, int user, unsigned char *path, short relative_to, struct path *result)
 {
-	if ((!strcasecmp("%Passwords", path) || !strcasecmp("%Config", path)) && (users[server][active[server][user].userid].priv & FS_PRIV_SYSTEM)) // System priv user trying to normalize password file
+	if (0 && (!strcasecmp("%Passwords", path) || !strcasecmp("%Config", path)) && (users[server][active[server][user].userid].priv & FS_PRIV_SYSTEM)) // System priv user trying to normalize password file // Disabled - now done in the wildcard function instead
 	{
 		struct tm t;
 		struct stat s;
@@ -2438,6 +2886,10 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 				}
 
 				fclose (cfgfile);
+
+				// Make MDFS password file
+
+				fs_make_mdfs_pw_file(fs_count);
 
 				// Now load up the discs. These are named 0XXX, 1XXX ... FXXXX for discs 0-15
 				while ((entry = readdir(d)) && discs_found < ECONET_MAX_FS_DISCS)
@@ -8098,7 +8550,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						fs_config[server].fs_acorn_home = (operator == '+' ? 1 : 0);
 					else if (!strcasecmp("COLONMAP", configitem))
 					{
-						char 	regex[1024];
+						//char 	regex[1024];
 
 						fs_config[server].fs_infcolon = (operator == '+' ? 1 : 0);
 						/* This is wrong - r_pathname is the Acorn regex 

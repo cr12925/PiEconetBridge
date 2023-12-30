@@ -781,6 +781,22 @@ Privileged commands:
 			(Previously this was global across all fileservers
 			 running on a particular bridge.)
 	
+		*NETCONF +COLONMAP / *NETCONF -COLONMAP
+			Maps '/' in Acorn filenames to '.' in Unix instead
+			of the default ':'. Inf files (which are used in
+			place of xattrs if they are unavailable) will be
+			:inf instead of .inf . If enabling COLONMAP, 
+			it will be necessary to rename any .inf files which
+			already exist. It is better to enable this
+			persistent option before any files are created.
+
+			One way of doing that is this:
+
+			cd <path to fileserver root directory>
+			find . -type f -name \*.inf -exec <path to repo/utilities/dot_to_colon {} \;
+
+
+
 *NEWUSER <username>
 	- Create new user.
 	- This now DOES create a home directory $.Username on the first disc
@@ -821,6 +837,20 @@ Privileged commands:
 
 *UNLINK <link>
 	- Removes a symlink created with *LINK
+
+SPECIAL FILES
+-------------
+
+There are three special files which exist in every directory on every FS,
+but only for users with SYST privileges. They are as follows:
+
+%PIPASSWD	The FS password file, in PiFS format, for this FS
+
+%PASSWORDS	The FS password file, in MDFS format, for this FS
+
+%CONFIG		Readable FS config for this FS (e.g. will show you
+		the current settings of each of the NETCONFIG
+		variables)
 
 THE END
 -------
