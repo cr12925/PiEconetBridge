@@ -8396,9 +8396,25 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				int found;
 				struct path p;
 				unsigned short l, n_handle;
+				unsigned char	dirname[1024];
 
 				fs_debug (0, 1, "%12sfrom %3d.%3d LIB %s", "", net, stn, param);
-				if ((found = fs_normalize_path(server, active_id, param, *(data+3), &p)) && (p.ftype != FS_FTYPE_NOTFOUND)) // Successful path traverse
+
+				if (*param == '\0')	strcpy(dirname, "");
+				else	
+				{
+					if (*param != '"') // Start quote
+						strcpy(dirname, param);
+					else
+					{
+						strcpy (dirname, param+1); // Skip opening quote
+						if (dirname[strlen(dirname)-1] == '"')
+							dirname[strlen(dirname)-1] = 0; // Strip closing quote
+					}
+
+				}
+
+				if ((found = fs_normalize_path(server, active_id, dirname, *(data+3), &p)) && (p.ftype != FS_FTYPE_NOTFOUND)) // Successful path traverse
 				{
 					if (p.ftype != FS_FTYPE_DIR)
 						fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
@@ -8463,7 +8479,19 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				unsigned char dirname[1024];
 
 				if (*param == '\0')	strcpy(dirname, "");
-				else	strcpy (dirname, param);
+				else	
+				{
+					if (*param != '"') // Start quote
+						strcpy(dirname, param);
+					else
+					{
+						strcpy (dirname, param+1); // Skip opening quote
+						if (dirname[strlen(dirname)-1] == '"')
+							dirname[strlen(dirname)-1] = 0; // Strip closing quote
+					}
+
+
+				}
 
 				fs_debug (0, 1, "%12sfrom %3d.%3d DIR %s", "", net, stn, dirname);
 			
