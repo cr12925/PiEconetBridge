@@ -68,7 +68,7 @@ extern void fs_eject_station(unsigned char, unsigned char); // Used to get rid o
 extern short fs_dequeuable(int);
 extern void fs_dequeue(int);
 extern void fs_garbage_collect(int);
-extern uint8_t fs_writedisclist (uint8_t, char *);
+extern uint8_t fs_writedisclist (uint8_t, unsigned char *);
 
 extern short fs_sevenbitbodge;
 extern short normalize_debug;
@@ -4403,11 +4403,11 @@ static void * eb_device_despatcher (void * device)
 						if (p->p->p.aun_ttype == ECONET_AUN_IMM && p->p->p.port == 0x00 && p->p->p.ctrl == 0x81) // Immediate Peek to local emulator
 						{
 							struct __eb_printer *printer;
-							struct __eb_device *l;
+							//struct __eb_device *l;
 							struct __econet_packet_aun *reply;
 							struct utsname u;
 
-							uint8_t counter;
+							//uint8_t counter;
 							uint8_t yline = 8;
 							uint8_t found = 0;
 							uint32_t replydatalen = 0;
@@ -4425,10 +4425,10 @@ static void * eb_device_despatcher (void * device)
 							if (!uname(&u))
 							{
 
-								char os_string[40];
+								char os_string[80];
 								uint8_t counter;
 
-								snprintf (os_string, 40, "%s %s %s", u.sysname, u.nodename, u.release);
+								snprintf (os_string, 80, "%s %s %s", u.sysname, u.nodename, u.release);
 								beeb_print(0, 0, os_string);
 								snprintf (os_string, 40, "Pi Econet Bridge %x.%x on%c%d.%d", ((EB_VERSION & 0xf0) >> 4), (EB_VERSION & 0x0f), 134, d->net, d->local.stn);
 								beeb_print(2, 0, os_string);
@@ -4462,7 +4462,7 @@ static void * eb_device_despatcher (void * device)
 
 								if ((printer = d->local.printers)) // Is a print server
 								{
-									uint8_t printer_count = 0;
+									//uint8_t printer_count = 0;
 									char p[10];
 
 									// Put print server text here
@@ -4525,8 +4525,8 @@ static void * eb_device_despatcher (void * device)
 							// Deal with machinetype queries here
 							ack.p.aun_ttype = ECONET_AUN_IMMREP;
 							ack.p.data[0] = ack.p.data[1] = 0xee;
-							ack.p.data[2] = 2;
-							ack.p.data[3] = 1;
+							ack.p.data[2] = (EB_VERSION & 0x0f);
+							ack.p.data[3] = (EB_VERSION & 0xf0) >> 4;
 
 							eb_enqueue_output (d, &ack, 4);
 							new_output = 1;

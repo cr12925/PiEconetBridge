@@ -9188,9 +9188,9 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 					struct __econet_packet_udp reply;
 
-					start = *(data+7) + (*(data + 8) << 8);
-					count = *(data + 9) + (*(data + 10) << 8);
-					disc = *(data + 11);
+					start = *(data+8) + (*(data + 9) << 8);
+					count = *(data + 10) + (*(data + 11) << 8);
+					disc = *(data + 12);
 
 					reply.p.port = reply_port;
 					reply.p.ctrl = 0x80;
@@ -9203,9 +9203,13 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			
 					reply.p.data[0] = reply.p.data[1] = 0x00; // Normal OK result
 					reply.p.data[2] = reply.p.data[3] = 0xff; // Next account to try
-					reply.p.data[4] = reply.p.data[5] = 0x00; // Number of accounts returned
+					reply.p.data[4] = 0x01; // 1 account returned
+					reply.p.data[5] = 0x00; // Number of accounts returned high byte
+					reply.p.data[6] = active[server][active_id].userid & 0xff;
+					reply.p.data[7] = (active[server][active_id].userid & 0xff00) >> 8;
+					reply.p.data[8] = reply.p.data[9] = 0xff; // Free space
 			
-					fs_aun_send (&reply, server, 6, net, stn);
+					fs_aun_send (&reply, server, 10, net, stn);
 
 				}
 				else
@@ -9474,7 +9478,7 @@ void eb_handle_fs_traffic (uint8_t server, struct __econet_packet_aun *p, uint16
 
 }
 
-uint8_t fs_writedisclist (uint8_t server, char *addr)
+uint8_t fs_writedisclist (uint8_t server, unsigned char *addr)
 {
 
 	uint8_t	found = 0, count = 0;
