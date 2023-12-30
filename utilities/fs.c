@@ -2882,7 +2882,7 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 
 				// Make MDFS password file
 
-				fs_make_mdfs_pw_file(fs_count);
+				// fs_make_mdfs_pw_file(fs_count); // Causing problems in the directory build
 
 				// Now load up the discs. These are named 0XXX, 1XXX ... FXXXX for discs 0-15
 				while ((entry = readdir(d)) && discs_found < ECONET_MAX_FS_DISCS)
