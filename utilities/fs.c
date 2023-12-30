@@ -8494,7 +8494,9 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				}
 
 				if (!strncasecmp(command, "DIR^", 4))
+				{
 					strcpy (dirname, "^");
+				}
 
 				fs_debug (0, 1, "%12sfrom %3d.%3d DIR %s", "", net, stn, dirname);
 			
