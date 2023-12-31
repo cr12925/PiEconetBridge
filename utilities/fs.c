@@ -2800,6 +2800,8 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 		if (!passwd)
 		{
 			fs_debug (0, 1, "No password file - initializing %s with SYST", passwordfile);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-overflow="
 			sprintf (users[fs_count][0].username, "%-10.10s", "SYST");
 			sprintf (users[fs_count][0].password, "%-10.10s", "");
 			sprintf (users[fs_count][0].fullname, "%-24.24s", "System User"); 
@@ -2807,6 +2809,7 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 			users[fs_count][0].bootopt = 0;
 			sprintf (users[fs_count][0].home, "%-80.80s", "$");
 			sprintf (users[fs_count][0].lib, "%-80.80s", "$.Library");
+#pragma GCC diagnostic pop
 			users[fs_count][0].home_disc = 0;
 			users[fs_count][0].year = users[fs_count][0].month = users[fs_count][0].day = users[fs_count][0].hour = users[fs_count][0].min = users[fs_count][0].sec = 0; // Last login time
 			if ((passwd = fopen(passwordfile, "w+")))
@@ -6548,7 +6551,7 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn)
 		free(p);
 
 #pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wuninitialized"
+#pragma GCC diagnostic ignored "-Wuse-after-free"
 		fs_debug (0, 4, "Packet queue entry freed at %p", p);
 #pragma GCC diagnostic pop
 
