@@ -7276,7 +7276,7 @@ static void * eb_statistics (void *nothing)
 						
 			pthread_mutex_lock (&(device->statsmutex));
 
-			fprintf (output, "%03d|000|%s|%s|%llu|%llu||\n",	device->net, eb_type_str(device->type), 
+			fprintf (output, "%03d|000|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	device->net, eb_type_str(device->type), 
 				trunkdest,
 				device->b_in, device->b_out);
 		
@@ -7316,7 +7316,7 @@ static void * eb_statistics (void *nothing)
 	
 						pthread_mutex_lock (&(divert->statsmutex));
 
-						fprintf (output, "%03d|%03d|%s|%s|%llu|%llu||\n",	divert->net, stn, eb_type_str(divert->type), info, divert->b_in, divert->b_out);
+						fprintf (output, "%03d|%03d|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	divert->net, stn, eb_type_str(divert->type), info, divert->b_in, divert->b_out);
 		
 						pthread_mutex_unlock (&(divert->statsmutex));
 					}
@@ -7334,7 +7334,7 @@ static void * eb_statistics (void *nothing)
 
 			pthread_mutex_lock (&(device->statsmutex));
 
-			fprintf (output, "999|000|Trunk|Local %d to %s:%d|%llu|%llu|%.0f|\n",	(device->trunk.local_port), (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), (device->trunk.hostname ? device->trunk.remote_port : 0), device->b_in, device->b_out, difftime(time(NULL), device->last_rx));
+			fprintf (output, "999|000|Trunk|Local %d to %s:%d|%" PRIu64 "|%" PRIu64 "|%.0f|\n",	(device->trunk.local_port), (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), (device->trunk.hostname ? device->trunk.remote_port : 0), device->b_in, device->b_out, difftime(time(NULL), device->last_rx));
 		
 			pthread_mutex_unlock (&(device->statsmutex));
 
@@ -7373,7 +7373,7 @@ static void * eb_statistics (void *nothing)
 							
 				pthread_mutex_lock (&(device->statsmutex));
 	
-				fprintf (output, "%03d|%03d|%s|%s|%llu|%llu||\n",	net, (device->type == EB_DEF_TRUNK && (device->trunk.xlate_out[net])) ? device->trunk.xlate_out[net] : net, eb_type_str(device->type), 
+				fprintf (output, "%03d|%03d|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	net, (device->type == EB_DEF_TRUNK && (device->trunk.xlate_out[net])) ? device->trunk.xlate_out[net] : net, eb_type_str(device->type), 
 					trunkdest,
 					device->b_in, device->b_out);
 			
