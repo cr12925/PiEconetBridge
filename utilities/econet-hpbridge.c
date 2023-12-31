@@ -5272,7 +5272,10 @@ int eb_readconfig(char *f)
 		r_bridge_net_filter,
 		r_bridge_traffic_filter,
 		r_netclock,
-		r_bindto;
+		r_bindto,
+		r_pool_new,
+		r_pool_static,
+		r_pool_net;
 
 	/* Build Regex
 	*/
@@ -5340,6 +5343,15 @@ int eb_readconfig(char *f)
 	if (regcomp(&r_bindto, EB_CFG_BINDTO, REG_EXTENDED | REG_ICASE) != 0)
 		eb_debug(1, 0, "CONFIG", "Cannot compile interface bind regex");
 	
+	if (regcomp(&r_pool_new, EB_CFG_NEW_POOL, REG_EXTENDED | REG_ICASE) != 0)
+		eb_debug(1, 0, "CONFIG", "Cannot compile new pool regex");
+
+	if (regcomp(&r_pool_static, EB_CFG_STATIC_POOL, REG_EXTENDED | REG_ICASE) != 0)
+		eb_debug(1, 0, "CONFIG", "Cannot compile static pool regex");
+
+	if (regcomp(&r_pool_net, EB_CFG_NET_POOL, REG_EXTENDED | REG_ICASE) != 0)
+		eb_debug(1, 0, "CONFIG", "Cannot compile net pool regex");
+
 	/* Open config
 	*/
 
@@ -6309,6 +6321,27 @@ int eb_readconfig(char *f)
 					bindhost = ntohl(*((in_addr_t *)h->h_addr));
 				}
 				else	eb_debug (1, 0, "CONFIG", "Cannot resolve IP address for host to bind to (%s) in line: %s", host, line);
+			}
+			else if (!regexec(&r_pool_new, line, 3, matches, 0))
+			{
+				eb_debug(0, 1, "CONFIG", "Found new pool definition: name %s, nets %s", eb_getstring(line, &matches[1]), 
+					eb_getstring(line, &matches[2])
+					);
+			}
+			else if (!regexec(&r_pool_static, line, 5, matches, 0))
+			{
+				eb_debug(0, 1, "CONFIG", "Found static pool definition: name %s, trunk %s, station %s, pool address %s", eb_getstring(line, &matches[1]), 
+					eb_getstring(line, &matches[2]),
+					eb_getstring(line, &matches[3]),
+					eb_getstring(line, &matches[4])
+					);
+			}
+			else if (!regexec(&r_pool_net, line, 4, matches, 0))
+			{
+				eb_debug(0, 1, "CONFIG", "Found new pool deployment: trunk %s, pool %s for nets %s", eb_getstring(line, &matches[1]), 
+					eb_getstring(line, &matches[2]),
+					eb_getstring(line, &matches[3])
+					);
 			}
 			else
 				eb_debug (1, 0, "CONFIG", "Unrecognized configuration line: %s", line);

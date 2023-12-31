@@ -32,11 +32,12 @@
 #define EB_AUN		0x10
 #define EB_NULL		0x20
 //#define EB_EXPOSURE	0x40
+#define EB_POOL		0x80
 
 #define EB_ADV_SHIFT	0
 #define EB_TYPE_SHIFT	8
-#define EB_ADV_MASK	((EB_TRUNK | EB_WIRE | EB_PIPE | EB_LOCAL | EB_AUN) << EB_ADV_SHIFT)
-#define EB_ADV_ALL	((EB_TRUNK | EB_WIRE | EB_PIPE | EB_LOCAL) << EB_ADV_SHIFT) // We never do bridging with AUN stations. They should know where things are.
+#define EB_ADV_MASK	((EB_TRUNK | EB_WIRE | EB_PIPE | EB_LOCAL | EB_AUN | EB_POOL) << EB_ADV_SHIFT)
+#define EB_ADV_ALL	((EB_TRUNK | EB_WIRE | EB_PIPE | EB_LOCAL | EB_POOL) << EB_ADV_SHIFT) // We never do bridging with AUN stations. They should know where things are.
 #define EB_ADV_NONE	0x00
 
 #define EB_DEF_TRUNK	((EB_TRUNK << EB_TYPE_SHIFT) | EB_ADV_ALL)
@@ -45,6 +46,7 @@
 #define EB_DEF_LOCAL	((EB_LOCAL << EB_TYPE_SHIFT) | EB_ADV_NONE) // Ditto Pipe
 #define EB_DEF_AUN	((EB_AUN << EB_TYPE_SHIFT) | EB_ADV_ALL) // Ditto Pipe
 #define EB_DEF_NULL	((EB_NULL << EB_TYPE_SHIFT) | EB_ADV_ALL)
+#define EB_DEF_POOL	((EB_POOL << EB_TYPE_SHIFT) | EB_ADV_ALL)
 //#define EB_DEF_EXPOSURE	((EB_EXPOSURE << EB_TYPE_SHIFT) | EB_ADV_NONE) // Only the parent driver gets advertised
 
 #define EB_DEV_CONF_DIRECT	0x01	// Passes all traffic, unqueued, unmolested (including ACK, NAK) to the destination. Otherwise deals with ACK, NAK itself.
@@ -463,6 +465,10 @@ struct __eb_config {
 #define EB_CFG_BRIDGE_TRAFFIC_FILTER "^\\s*BRIDGE\\s+(DROP|ALLOW)\\s+TRAFFIC\\s+BETWEEN\\s+(\\*|[[:digit:]]{1,3})\\.(\\*|[[:digit:]]{1,3})\\s+AND\\s+(\\*|[[:digit:]]{1,3})\\.(\\*|[[:digit:]]{1,3})\\s*$"
 #define EB_CFG_CLOCK "^\\s*SET\\s+NETWORK\\s+CLOCK\\s+ON\\s+NET\\s+([[:digit:]]{1,3})\\s+PERIOD\\s+([345](\\.[5])?)\\s+MARK\\s+([123])\\s*$"
 #define EB_CFG_BINDTO "^\\s*TRUNK\\s+BIND\\s+TO\\s+(.+)\\s*$"
+// Pool system
+#define EB_CFG_NEW_POOL "^\\s*POOL\\s+([A-Za-z0-9]+)\\s+NETS\\s+([0-9\\,]+)\\s*$"
+#define EB_CFG_STATIC_POOL "^\\s*POOL\\s+STATIC\\s+([a-zA-Z0-9]+)\\s+FROM\\s+(TRUNK\\s+PORT\\s+[[:digit:]]{2,5}|WIRE\\s+NET\\s+[[:digit:]]{1,3})\\s+STATION\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+TO\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s*$"
+#define EB_CFG_NET_POOL "^\\s*(TRUNK\\s+PORT\\s+[[:digit:]]{2,5}|WIRE\\s+NET\\s+[[:digit:]]{1,3})\\s+USE\\s+POOL\\s+([a-zA-Z0-9]+)\\s+FOR\\s+NETS\\s+([0-9\\,]+)\\s*$"
 
 // IP/Econet structs
 
