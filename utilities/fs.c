@@ -6539,16 +6539,18 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn)
 	}
 	else // Tx success - just update the packet queue
 	{
-		struct __pq *p, *p_debug;
+		struct __pq *p;
 
 		p = l->pq_head;
-		p_debug = p; // Done to avoid a compiler warning
 
 		l->pq_head = l->pq_head->next;
 		free(p->packet);
 		free(p);
 
-		fs_debug (0, 4, "Packet queue entry freed at %p", p_debug);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
+		fs_debug (0, 4, "Packet queue entry freed at %p", p);
+#pragma GCC diagnostic pop
 
 		if (!(l->pq_head)) // Ran out of packets
 		{
