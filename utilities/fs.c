@@ -2800,13 +2800,13 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 		if (!passwd)
 		{
 			fs_debug (0, 1, "No password file - initializing %s with SYST", passwordfile);
-			sprintf (users[fs_count][0].username, "%-10s", "SYST");
-			sprintf (users[fs_count][0].password, "%-10s", "");
-			sprintf (users[fs_count][0].fullname, "%-24s", "System User"); 
+			sprintf (users[fs_count][0].username, "%-10.10s", "SYST");
+			sprintf (users[fs_count][0].password, "%-10.10s", "");
+			sprintf (users[fs_count][0].fullname, "%-24.24s", "System User"); 
 			users[fs_count][0].priv = FS_PRIV_SYSTEM;
 			users[fs_count][0].bootopt = 0;
-			sprintf (users[fs_count][0].home, "%-96s", "$");
-			sprintf (users[fs_count][0].lib, "%-96s", "$.Library");
+			sprintf (users[fs_count][0].home, "%-80.80s", "$");
+			sprintf (users[fs_count][0].lib, "%-80.80s", "$.Library");
 			users[fs_count][0].home_disc = 0;
 			users[fs_count][0].year = users[fs_count][0].month = users[fs_count][0].day = users[fs_count][0].hour = users[fs_count][0].min = users[fs_count][0].sec = 0; // Last login time
 			if ((passwd = fopen(passwordfile, "w+")))
@@ -6539,14 +6539,16 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn)
 	}
 	else // Tx success - just update the packet queue
 	{
-		struct __pq *p;
+		struct __pq *p, *p_debug;
 
 		p = l->pq_head;
+		p_debug = p; // Done to avoid a compiler warning
+
 		l->pq_head = l->pq_head->next;
 		free(p->packet);
 		free(p);
 
-		fs_debug (0, 4, "Packet queue entry freed at %p", p);
+		fs_debug (0, 4, "Packet queue entry freed at %p", p_debug);
 
 		if (!(l->pq_head)) // Ran out of packets
 		{
@@ -8340,7 +8342,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						}
 						else	strcpy(users[server][uid].lib, "");
 
-						strncat((char * ) users[server][uid].lib, (const char * ) p.path_from_root, 94);
+						strncat((char * ) users[server][uid].lib, (const char * ) p.path_from_root, 79);
 						fs_write_user(server, uid, (unsigned char *) &(users[server][uid]));
 						fs_reply_ok(server, reply_port, net, stn);
 					}
@@ -8743,7 +8745,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							}
 							else	strcpy(users[server][uid].home, "");
 	
-							strncat((char * ) users[server][uid].home, (const char * ) p.path_from_root, 94);
+							strncat((char * ) users[server][uid].home, (const char * ) p.path_from_root, 79);
 							users[server][uid].home_disc = p.disc;
 							fs_write_user(server, uid, (unsigned char *) &(users[server][uid]));
 
