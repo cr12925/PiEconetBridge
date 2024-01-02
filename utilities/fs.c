@@ -7766,7 +7766,7 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 			(fs_bulk_ports[server][port].stn == stn) 
 	)
 	{
-		int writeable, remaining;
+		int writeable, remaining, old_cursor, new_cursor, new_cursor_read;
 
 		// We can deal with this data
 	
@@ -7775,7 +7775,7 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 		writeable = (remaining > datalen ? datalen : remaining);
  
 		if (fs_bulk_ports[server][port].user_handle != 0) // This is a putbytes transfer not a fs_save; in the latter there is no user handle. Seek to correct point in file
-			fseek(fs_files[server][fs_bulk_ports[server][port].handle].handle, SEEK_SET, active[server][fs_bulk_ports[server][port].active_id].fhandles[fs_bulk_ports[server][port].user_handle].cursor);
+			fseek(fs_files[server][fs_bulk_ports[server][port].handle].handle, SEEK_SET, (old_cursor = active[server][fs_bulk_ports[server][port].active_id].fhandles[fs_bulk_ports[server][port].user_handle].cursor));
 
 		fwrite(data, writeable, 1, fs_files[server][fs_bulk_ports[server][port].handle].handle);
 
@@ -7784,10 +7784,16 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 		fs_bulk_ports[server][port].received += datalen;
 
 		if (fs_bulk_ports[server][port].user_handle != 0) // This is a putbytes transfer not a fs_save; in the latter there is no user handle
+		{
 			active[server][fs_bulk_ports[server][port].active_id].fhandles[fs_bulk_ports[server][port].user_handle].cursor += writeable;
+			new_cursor = active[server][fs_bulk_ports[server][port].active_id].fhandles[fs_bulk_ports[server][port].user_handle].cursor;
+			new_cursor_read = ftell(fs_files[server][fs_bulk_ports[server][port].handle].handle);
+		}
 	
 		fs_debug (0, 2, "%12sfrom %3d.%3d Bulk transfer in on port %02X data length &%04X, expected total length &%04lX, writeable &%04X", "", net, stn, port, datalen, fs_bulk_ports[server][port].length, writeable
 				);
+		if (fs_bulk_ports[server][port].user_handle != 0) // Produce additional debug
+			fs_debug (0, 2, "%12sfrom %3d.%3d Bulk trasfer on port %02X old cursor = %06X, new cursor in FS = %06X, new cursor from OS = %06X - %s", "", net, stn, port, old_cursor, new_cursor, new_cursor_read, (new_cursor == new_cursor_read) ? "CORRECT" : " *** ERROR ***");
 
 		fs_bulk_ports[server][port].last_receive = (unsigned long long) time(NULL);
 
