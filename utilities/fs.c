@@ -7434,6 +7434,7 @@ void fs_eof(int server, unsigned char reply_port, unsigned char net, unsigned ch
 {
 
 	unsigned char result = 0;
+	struct stat	sb;
 
 	if (handle < 1 || handle >= FS_MAX_OPEN_FILES || active[server][active_id].fhandles[handle].handle == -1) // Invalid handle
 		fs_error(server, reply_port, net, stn, 0xDE, "Channel ?");
@@ -7441,10 +7442,20 @@ void fs_eof(int server, unsigned char reply_port, unsigned char net, unsigned ch
 	{
 		FILE *h;
 		struct __econet_packet_udp r;
+		long	filesize;
 
 		h = fs_files[server][active[server][active_id].fhandles[handle].handle].handle;
 
-		if (active[server][active_id].fhandles[handle].cursor == ftell(h))
+		if (fstat(fileno(h), &sb))
+		{
+			fs_error(server, reply_port, net, stn, 0xFF, "FS Error");
+			return;
+		}
+			
+		filesize = sb.st_size;
+
+		// if (active[server][active_id].fhandles[handle].cursor == ftell(h))
+		if (active[server][active_id].fhandles[handle].cursor == filesize)
 			result = 1;
 
 		r.p.ptype = ECONET_AUN_DATA;
