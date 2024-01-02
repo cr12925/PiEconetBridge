@@ -7355,6 +7355,9 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	if (offset > length) // Beyond EOF
 	{
 		unsigned long count;
+
+		fs_debug (0, 2, "%12s %3d.%3d fs_putbytes() Attempt to write at offset %06X beyond file end (length %06X) - padding with nulls", "", net, stn, offset, length);
+
 		fseek(fs_files[server][internal_handle].handle, 0, SEEK_END);
 
 		while (count++ < (offset-length))
@@ -7368,10 +7371,16 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	fseek(fs_files[server][internal_handle].handle, offset, SEEK_SET);
 
 	// Update cursor_old
-	active[server][active_id].fhandles[handle].cursor_old = ftell(fs_files[server][internal_handle].handle);
+	// 20240102 Test update
+	if (active[server][active_id].fhandles[handle].cursor != active[server][active_id].fhandles[handle].cursor_old)
+		active[server][active_id].fhandles[handle].cursor_old = active[server][active_id].fhandles[handle].cursor;
+		// OLD version active[server][active_id].fhandles[handle].cursor_old = ftell(fs_files[server][internal_handle].handle);
 
 	// Update sequence
         active[server][active_id].fhandles[handle].sequence = (ctrl & 0x01);
+
+	// 20240102 Update cursor to offset. If it's moved because we picked a particular start position for write, we don't seem to update it(!)
+	active[server][active_id].fhandles[handle].cursor = offset;
 
 	// We should be the only writer, so doing the seek here should be fine
 	
