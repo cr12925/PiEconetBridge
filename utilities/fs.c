@@ -6962,7 +6962,7 @@ void fs_get_random_access_info(int server, unsigned char reply_port, unsigned ch
 			r.p.data[2] = (active[server][active_id].fhandles[handle].cursor & 0xff);
 			r.p.data[3] = (active[server][active_id].fhandles[handle].cursor & 0xff00) >> 8;
 			r.p.data[4] = (active[server][active_id].fhandles[handle].cursor & 0xff0000) >> 16;
-			fs_debug (0, 2, "%12sfrom %3d.%3d Get random access info on handle %02X, function %02X - cursor %06lX", "", net, stn, handle, function, active[server][active_id].fhandles[handle].cursor);
+			fs_debug (0, 2, "%12sfrom %3d.%3d Get random access info on handle %02X, function %02X - cursor %06lX - data returned %02X %02X %02X", "", net, stn, handle, function, active[server][active_id].fhandles[handle].cursor, r.p.data[2], r.p.data[3], r.p.data[4]);
 			break;
 		case 1: // Fall through extent / allocation - going to assume this is file size but might be wrong
 		case 2:
