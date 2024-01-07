@@ -795,7 +795,20 @@ Privileged commands:
 			cd <path to fileserver root directory>
 			find . -type f -name \*.inf -exec <path to repo/utilities/dot_to_colon {} \;
 
+		*NETCONF +BIGHANDLES / *NETCONF -BIGHANDLES
+			Turns on client handles other than the 8 which 
+			only a single bit set in the byte. The default 
+			(off) is compatible with NFS3 on BBC Bs, whereas
+			arbitrary numbered handles are not and will cause
+			problems. Only turn this on if you have NO NFS 3
+			systems talking to the bridge. ADFS (on any 
+			platform) should be fine with BIGHANDLES enabled.
 
+		*NETCONF +MDFSINFO / *NETCONF -MDFSINFO
+			Turns on longer *INFO output - essentially includes
+			the date of last status change (there being no
+			create date in the statbuf, in addition to modification 
+			date and time.
 
 *NEWUSER <username>
 	- Create new user.

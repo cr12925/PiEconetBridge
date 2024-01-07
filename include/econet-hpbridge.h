@@ -180,6 +180,38 @@ struct __eb_aun_remote {
 	struct __eb_aun_remote	*next;
 };
 
+/* __eb_pool_host
+ *
+ * Used to store information about a single host translation in the pool
+ */
+
+struct __eb_pool_host {
+	pthread_mutex_t		statsmutex; // Lock on stats
+	uint64_t		b_in, b_out; // Save for traffic to unallocated stations in the pool, these should always match
+	pthread_mutex_t		updatemutex; // Lock when reading or updating this struct.
+	uint8_t			is_static; // Don't time it out if static
+	struct timeval		last_traffic; // Last time we saw traffic. Used to reallocate non-static entries if stale.
+	struct __eb_device	*source; // Source device - e.g. a trunk, a wire. NULL means this is an inactive entry.
+	uint8_t			s_net, s_stn; // Net & station as seen at the distant end (i.e. via *source).
+	uint8_t			net, stn; // Station number within the pool net.
+	struct __eb_pool_host	*next_net, *next_source; // Linked list. next_net points to next structure in the pool net, next_source points to the next entry pertaining to a given source device
+	struct __eb_pool_host	*prev_net, *prev_source; // Linked list, upward pointers - so we can splice things out more easily when they time out
+};
+
+/* __eb_pool
+ *
+ * Used to implement many to few nat down trunks and econets so as to allow large-scale joining of networks together
+ *
+ * POOL is a type of device, and its entry in the __eb_device union is simply a pointer to one of these. 
+ * The point is that pool nets will go in networks[] but all of the entries which pertain to the same pool
+ * will end up sharing data in this struct.
+ */
+
+struct __eb_pool {
+	uint8_t			networks[255]; // Which nets are in this pool. Net 0 can never be in here - always a real number
+	struct __eb_pool_host	*hosts_net[255]; // Done by network number. Ditto net 0. (Linked list per device is in the device struct)
+};
+
 /* __eb_device
 
    Holds common and per-driver information about devices on which we might send/receive packets.
@@ -243,6 +275,10 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			int		encrypted_length;	
 			AES_KEY		aes_key; // Key converted to AES-usable format
 
+			// Pool nat config
+			uint8_t			use_pool[255];
+			struct __eb_pool	*pool;
+			struct __eb_pool_host	*pool_hosts;
 
 			// Links
 			struct __eb_fw *head, *tail;
@@ -265,6 +301,12 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			struct __eb_device	*divert[255]; // Pointers to diverted stations. E.g. if station 1.254 on the wire is actually a local station, this will point to its __eb_device
 			uint8_t		filter_in[256], filter_out[256]; // Networks we ignore (i.e. we ditch traffic, and we ignore/don't send adverts)
 			uint8_t		period, mark; // clock speed. 0 = not set by user.
+
+			// Pool nat config
+			uint8_t			use_pool[255];
+			struct __eb_pool	*pool;
+			struct __eb_pool_host	*pool_hosts;
+
 		} wire;
 
 		struct { // A local emulation connected by named pipe
@@ -292,6 +334,10 @@ struct __eb_device { // Structure holding information about a "physical" device 
 		struct { // Null driver - has diverts only. Exists so that the network gets advertized
 			struct __eb_device	*divert[255]; // Pointers to diverted stations. E.g. if station 1.254 on the wire is actually a local station, this will point to its __eb_device. On the NULL device, this means we have a virtual network that we might advertise to trunks etc., but there is no real device - just some (not necessarily all) stations which exist as diverts.
 		} null;
+
+		struct { // Pool
+			struct __eb_pool	*data;
+		} pool;
 	};
 	
 	struct __eb_device	*next; // Linked list. Used to maintain the chain in *devices, except trunks, where it's a pointer to the next trunk in 'trunks' because whilst a trunk will appear in networks[], it doesn't have a network number of its own.
@@ -365,6 +411,7 @@ struct __eb_config {
 	uint8_t		trunk_keepalive_interval; // Seconds between trunk keepalive packets
 	uint8_t		trunk_dead_interval; // Seconds after which trunk considered dead (bridge reset) if no traffic received
 	uint8_t		trunk_keepalive_ctrl; // Ctrl byte used for trunk keepalive packets
+	uint16_t	pool_dead_interval; // Seconds before a pool host will be treated as stale
 };
 
 /* Global debug vars */
@@ -405,6 +452,7 @@ struct __eb_config {
 #define EB_CONFIG_TRUNK_KEEPALIVE_INTERVAL	(config.trunk_keepalive_interval)
 #define EB_CONFIG_TRUNK_DEAD_INTERVAL		(config.trunk_dead_interval)
 #define EB_CONFIG_TRUNK_KEEPALIVE_CTRL		(config.trunk_keepalive_ctrl)
+#define EB_CONFIG_POOL_DEAD_INTERVAL	(config.pool_dead_interval)
 
 // Printer status
 
@@ -466,9 +514,11 @@ struct __eb_config {
 #define EB_CFG_CLOCK "^\\s*SET\\s+NETWORK\\s+CLOCK\\s+ON\\s+NET\\s+([[:digit:]]{1,3})\\s+PERIOD\\s+([345](\\.[5])?)\\s+MARK\\s+([123])\\s*$"
 #define EB_CFG_BINDTO "^\\s*TRUNK\\s+BIND\\s+TO\\s+(.+)\\s*$"
 // Pool system
-#define EB_CFG_NEW_POOL "^\\s*POOL\\s+([A-Za-z0-9]+)\\s+NETS\\s+([0-9\\,]+)\\s*$"
-#define EB_CFG_STATIC_POOL "^\\s*POOL\\s+STATIC\\s+([a-zA-Z0-9]+)\\s+FROM\\s+(TRUNK\\s+PORT\\s+[[:digit:]]{2,5}|WIRE\\s+NET\\s+[[:digit:]]{1,3})\\s+STATION\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+TO\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s*$"
-#define EB_CFG_NET_POOL "^\\s*(TRUNK\\s+PORT\\s+[[:digit:]]{2,5}|WIRE\\s+NET\\s+[[:digit:]]{1,3})\\s+USE\\s+POOL\\s+([a-zA-Z0-9]+)\\s+FOR\\s+NETS\\s+([0-9\\,]+)\\s*$"
+#define EB_CFG_NEW_POOL "^\\s*POOL\\s+([A-Z0-9]+)\\s+NETS\\s+([0-9\\,]+)\\s*$"
+#define EB_CFG_STATIC_POOL_TRUNK "^\\s*POOL\\s+STATIC\\s+([a-zA-Z0-9]+)\\s+FROM\\s+(TRUNK)\\s+PORT\\s+([[:digit:]]{2,5})\\s+STATION\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+TO\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s*$"
+#define EB_CFG_STATIC_POOL_WIRE "^\\s*POOL\\s+STATIC\\s+([a-zA-Z0-9]+)\\s+FROM\\s+(WIRE)\\s+NET\\s+([[:digit:]]{1,3})\\s+STATION\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+TO\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s*$"
+#define EB_CFG_NET_POOL_TRUNK "^\\s*(TRUNK)\\s+PORT\\s+([[:digit:]]{2,5})\\s+USE\\s+POOL\\s+([A-Z0-9]+)\\s+FOR\\s+NETS\\s+([0-9\\,]+)\\s*$"
+#define EB_CFG_NET_POOL_WIRE "^\\s*(WIRE)\\s+NET\\s+([[:digit:]]{1,3})\\s+USE\\s+POOL\\s+([A-Z0-9]+)\\s+FOR\\s+NETS\\s+([0-9\\,]+)\\s*$"
 
 // IP/Econet structs
 

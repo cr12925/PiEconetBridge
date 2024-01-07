@@ -178,7 +178,8 @@ struct {
 	uint8_t fs_fnamelen; // Live (modifiable!) max filename length. Must be less than ECONET_MAX_FILENAME_LENGTH. When changed, this has to recompile the fs regex
 	uint8_t fs_infcolon; // Uses :inf for alternative to xattrs instead of .inf, and maps Acorn / to Unix . instead of Unix :
 	uint8_t fs_manyhandle; // Enables user handles > 8, and presents them as 8-bit integers rather than handle n presented as 2^n (which is what FS 3 does with its limit of 8 handles)
-	uint8_t pad[249]; // Spare spare in the config
+	uint8_t fs_mdfsinfo; // Enables longer output from *INFO akin to MDFS
+	uint8_t pad[248]; // Spare spare in the config
 } fs_config[ECONET_MAX_FS_SERVERS];
 
 struct fs_user {
@@ -496,6 +497,10 @@ uint32_t fs_get_mdfs_dir_pointer(char *dir, uint8_t urdorlib, char *username)
 	sprintf(username_null_dollar, "$.%s", username_null);
 
 	idir[81] = 0x00; // In case it's an 80-character directory with no null on it
+
+	if (strlen(dir) > 81)
+		return 0xFFFFFFFE; // Can't allocate - in this case because the dir is too long
+
 	strcpy(idir, dir);
 	strcat(idir, "\x0D");
 
@@ -1612,7 +1617,6 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 				p->load = p->exec = 0;
 		
 			localtime_r(&(statbuf.st_mtime), &ct);
-	
 			fs_date_to_two_bytes (ct.tm_mday, ct.tm_mon+1, ct.tm_year, &(p->monthyear), &(p->day));	
 			p->hour = ct.tm_hour;
 			p->min = ct.tm_min;
@@ -1620,7 +1624,7 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 	
 			// Create time
 			localtime_r(&(statbuf.st_ctime), &ct);
-			fs_date_to_two_bytes(ct.tm_mday, ct.tm_mon+1, ct.tm_year, &(p->c_day), &(p->c_monthyear));
+			fs_date_to_two_bytes(ct.tm_mday, ct.tm_mon+1, ct.tm_year, &(p->c_monthyear), &(p->c_day));
 			p->c_hour = ct.tm_hour;
 			p->c_min = ct.tm_min;
 			p->c_sec = ct.tm_sec;
@@ -1748,7 +1752,6 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			result->length = s.st_size;
 	
 			localtime_r(&(s.st_mtime), &t);
-	
 			fs_date_to_two_bytes (t.tm_mday, t.tm_mon+1, t.tm_year, &(result->monthyear), &(result->day));
 			result->hour = t.tm_hour;
 			result->min = t.tm_min;
@@ -1756,7 +1759,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	
 			// Create time
 			localtime_r(&(s.st_ctime), &t);
-			fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->c_day), &(result->c_monthyear));
+			fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->c_monthyear), &(result->c_day));
 			result->c_hour = t.tm_hour;
 			result->c_min = t.tm_min;
 			result->c_sec = t.tm_sec;
@@ -2045,9 +2048,9 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		fs_write_xattr(result->unixpath, result->owner, result->perm, result->load, result->exec, result->homeof, server);
 
 		stat(result->unixpath, &s);
-		localtime_r(&(s.st_mtime), &t);
 
-		fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->day), &(result->monthyear));
+		localtime_r(&(s.st_mtime), &t);
+		fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->monthyear), &(result->day));
 
 		result->hour = t.tm_hour;
 		result->min = t.tm_min;
@@ -2055,7 +2058,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 		// Create time
 		localtime_r(&(s.st_ctime), &t);
-		fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->c_day), &(result->c_monthyear));
+		fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->c_monthyear), &(result->c_day));
 		result->c_hour = t.tm_hour;
 		result->c_min = t.tm_min;
 		result->c_sec = t.tm_sec;
@@ -2211,6 +2214,15 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 			result->day = result->paths->day;
 			result->monthyear = result->paths->monthyear;
+			result->hour = result->paths->hour;
+			result->min = result->paths->min;
+			result->sec = result->paths->sec;
+
+			result->c_day = result->paths->c_day;
+			result->c_monthyear = result->paths->c_monthyear;
+			result->c_hour = result->paths->c_hour;
+			result->c_min = result->paths->c_min;
+			result->c_sec = result->paths->c_sec;
 
 			if (count != result->npath-1) // Not last segment - free up all the path_entries because we'll be junking them.
 				fs_free_wildcard_list(result);
@@ -5755,7 +5767,7 @@ void fs_info(int server, unsigned short reply_port, int active_id, unsigned char
 
 	unsigned char path[1024];
 	unsigned char relative_to;
-	char reply_string[ECONET_ABS_MAX_FILENAME_LENGTH+40];
+	char reply_string[ECONET_ABS_MAX_FILENAME_LENGTH+80];
 
 	r.p.port = reply_port;
 	r.p.ctrl = 0x80;
@@ -5771,10 +5783,14 @@ void fs_info(int server, unsigned short reply_port, int active_id, unsigned char
 
 	fs_debug (0, 2, "%12sfrom %3d.%3d *INFO %s", "", net, stn, path);
 
-	if (!fs_normalize_path(server, active_id, path, relative_to, &p))
+	// 20240107 Commented if (!fs_normalize_path(server, active_id, path, relative_to, &p))
+	if (!fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1))
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
 	else
 	{
+		// 20240107 Added - we only want the first one
+		fs_free_wildcard_list(&p);
+
 		if (p.ftype == FS_FTYPE_NOTFOUND)
 			fs_error(server, reply_port, net, stn, 0xD6, "Not found");
 		else if (p.ftype != FS_FTYPE_FILE)
@@ -5792,16 +5808,33 @@ void fs_info(int server, unsigned short reply_port, int active_id, unsigned char
 			if (p.perm & FS_PERM_OWN_W) strcat (permstring, "W");
 			if (p.perm & FS_PERM_OWN_R) strcat (permstring, "R");
 			strcat (permstring, "/");
-			if (p.perm & FS_PERM_OTH_W) strcat (permstring, "W");
-			if (p.perm & FS_PERM_OTH_R) strcat (permstring, "R");
+			if (p.perm & FS_PERM_OTH_W) strcat (permstring, fs_config[server].fs_mdfsinfo ? "w" : "W");
+			if (p.perm & FS_PERM_OTH_R) strcat (permstring, fs_config[server].fs_mdfsinfo ? "r" : "R");
 
-			sprintf(hr_fmt_string, "%%-%ds %%08lX %%08lX   %%06lX    %%-7s   %%02d/%%02d/%%02d %%06lX%%c%%c", ECONET_MAX_FILENAME_LENGTH);
-			//sprintf(reply_string, "%-10s %08lX %08lX   %06lX    %-7s   %02d/%02d/%02d %06lX%c%c",	p.path[p.npath-1], p.load, p.exec, p.length, permstring, 
-			sprintf(reply_string, hr_fmt_string, p.path[p.npath-1], p.load, p.exec, p.length, permstring, 
-					fs_day_from_two_bytes(p.day, p.monthyear),
-					fs_month_from_two_bytes(p.day, p.monthyear),
-					fs_year_from_two_bytes(p.day, p.monthyear),
-					p.internal, 0x0d, 0x80);
+			if (fs_config[server].fs_mdfsinfo)
+			{
+				// Longer output
+				sprintf(hr_fmt_string, "%%-%ds %%08lX %%08lX   %%06lX    %%-7s   %%02d/%%02d/%%02d %%02d/%%02d/%%02d %%02d:%%02d:%%02d %%06lX%%c%%c", ECONET_MAX_FILENAME_LENGTH);
+				sprintf(reply_string, hr_fmt_string, p.acornname, p.load, p.exec, p.length, permstring, 
+						fs_day_from_two_bytes(p.c_day, p.c_monthyear),
+						fs_month_from_two_bytes(p.c_day, p.c_monthyear),
+						fs_year_from_two_bytes(p.c_day, p.c_monthyear),
+						fs_day_from_two_bytes(p.day, p.monthyear),
+						fs_month_from_two_bytes(p.day, p.monthyear),
+						fs_year_from_two_bytes(p.day, p.monthyear),
+						p.hour, p.min, p.sec,
+						p.internal, 0x0d, 0x80);
+			}
+			else
+			{
+				sprintf(hr_fmt_string, "%%-%ds %%08lX %%08lX   %%06lX    %%-7s   %%02d/%%02d/%%02d %%06lX%%c%%c", ECONET_MAX_FILENAME_LENGTH);
+				//sprintf(reply_string, "%-10s %08lX %08lX   %06lX    %-7s   %02d/%02d/%02d %06lX%c%c",	p.path[p.npath-1], p.load, p.exec, p.length, permstring, 
+				sprintf(reply_string, hr_fmt_string, p.acornname, p.load, p.exec, p.length, permstring, 
+						fs_day_from_two_bytes(p.day, p.monthyear),
+						fs_month_from_two_bytes(p.day, p.monthyear),
+						fs_year_from_two_bytes(p.day, p.monthyear),
+						p.internal, 0x0d, 0x80);
+			}
 
 			strcpy(&(r.p.data[2]), reply_string);
 	
@@ -8075,6 +8108,7 @@ void fs_write_readable_config(int server)
 		fprintf (out, "%-25s %-3s\n", "Max filename length", (fs_config[server].fs_fnamelen ? "On" : "Off"));
 		fprintf (out, "%-25s %-3s\n", "Inf files are :inf", (fs_config[server].fs_infcolon ? "On" : "Off"));
 		fprintf (out, "%-25s %-3s\n", "> 8 file handles", (fs_config[server].fs_manyhandle ? "On" : "Off"));
+		fprintf (out, "%-25s %-3s\n", "MDFS-style *INFO", (fs_config[server].fs_mdfsinfo ? "On" : "Off"));
 
 		fclose(out);
 
@@ -8405,8 +8439,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			//else if (!strncasecmp("INFO ", (const char *) command, 5))
 			else if (fs_parse_cmd(command, "INFO", 1, &param)) // For some reason *I. is an abbreviation for *INFO...
 				fs_info(server, reply_port, active_id, net, stn, param);
-			//else if (!strncasecmp("I.", (const char *) command, 2))
-				//fs_info(server, reply_port, active_id, net, stn, command+2);
 			//else if (!strncasecmp("CDIR ", (const char *) command, 5))
 			else if (fs_parse_cmd(command, "CDIR", 2, &param))
 				fs_cdir(server, reply_port, active_id, net, stn, active[server][active_id].current, param);
@@ -8654,6 +8686,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						fs_config[server].fs_bigchunks = (operator == '+' ? 1 : 0);
 					else if (!strcasecmp("BIGHANDLES", configitem))
 						fs_config[server].fs_manyhandle = (operator == '+' ? 1 : 0);
+					else if (!strcasecmp("MDFSINFO", configitem))
+						fs_config[server].fs_mdfsinfo = (operator == '+' ? 1 : 0);
 					else
 					{
 						fs_error(server, reply_port, net, stn, 0xFF, "Bad configuration entry name"); return;
