@@ -5613,6 +5613,7 @@ void fs_rename(int server, unsigned short reply_port, int active_id, unsigned ch
 
 	if (syscall(SYS_renameat2, 0, p_from.unixpath, 0, p_to.unixpath, RENAME_NOREPLACE)) // non-zero - failure
 	{
+		fs_debug (0, 1, "%12sfrom %3d.%3d Rename from %s to %s failed (%s)", "", net, stn, p_from.unixpath, p_to.unixpath, strerror(errno));	
 		fs_error(server, reply_port, net, stn, 0xFF, "FS Error");
 		return;
 	}

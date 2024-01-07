@@ -192,6 +192,7 @@ struct __eb_pool_host {
 	uint8_t			is_static; // Don't time it out if static
 	struct timeval		last_traffic; // Last time we saw traffic. Used to reallocate non-static entries if stale.
 	struct __eb_device	*source; // Source device - e.g. a trunk, a wire. NULL means this is an inactive entry.
+	struct __eb_pool	*pool; // The pool this is a member of
 	uint8_t			s_net, s_stn; // Net & station as seen at the distant end (i.e. via *source).
 	uint8_t			net, stn; // Station number within the pool net.
 	struct __eb_pool_host	*next_net, *next_source; // Linked list. next_net points to next structure in the pool net, next_source points to the next entry pertaining to a given source device
@@ -208,9 +209,13 @@ struct __eb_pool_host {
  */
 
 struct __eb_pool {
+	unsigned char		name[11]; // Text name of pool
 	uint8_t			networks[255]; // Which nets are in this pool. Net 0 can never be in here - always a real number
 	struct __eb_pool_host	*hosts_net[255]; // Done by network number. Ditto net 0. (Linked list per device is in the device struct)
+	struct __eb_pool	*next; // In master pools list, below
 };
+
+struct __eb_pool	*pools;
 
 /* __eb_device
 
@@ -514,11 +519,11 @@ struct __eb_config {
 #define EB_CFG_CLOCK "^\\s*SET\\s+NETWORK\\s+CLOCK\\s+ON\\s+NET\\s+([[:digit:]]{1,3})\\s+PERIOD\\s+([345](\\.[5])?)\\s+MARK\\s+([123])\\s*$"
 #define EB_CFG_BINDTO "^\\s*TRUNK\\s+BIND\\s+TO\\s+(.+)\\s*$"
 // Pool system
-#define EB_CFG_NEW_POOL "^\\s*POOL\\s+([A-Z0-9]+)\\s+NETS\\s+([0-9\\,]+)\\s*$"
-#define EB_CFG_STATIC_POOL_TRUNK "^\\s*POOL\\s+STATIC\\s+([a-zA-Z0-9]+)\\s+FROM\\s+(TRUNK)\\s+PORT\\s+([[:digit:]]{2,5})\\s+STATION\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+TO\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s*$"
-#define EB_CFG_STATIC_POOL_WIRE "^\\s*POOL\\s+STATIC\\s+([a-zA-Z0-9]+)\\s+FROM\\s+(WIRE)\\s+NET\\s+([[:digit:]]{1,3})\\s+STATION\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+TO\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s*$"
-#define EB_CFG_NET_POOL_TRUNK "^\\s*(TRUNK)\\s+PORT\\s+([[:digit:]]{2,5})\\s+USE\\s+POOL\\s+([A-Z0-9]+)\\s+FOR\\s+NETS\\s+([0-9\\,]+)\\s*$"
-#define EB_CFG_NET_POOL_WIRE "^\\s*(WIRE)\\s+NET\\s+([[:digit:]]{1,3})\\s+USE\\s+POOL\\s+([A-Z0-9]+)\\s+FOR\\s+NETS\\s+([0-9\\,]+)\\s*$"
+#define EB_CFG_NEW_POOL "^\\s*POOL\\s+([A-Z0-9]{1,10})\\s+NETS\\s+([0-9\\,]+)\\s*$"
+#define EB_CFG_STATIC_POOL_TRUNK "^\\s*POOL\\s+STATIC\\s+([A-Z0-9]{1,10})\\s+FROM\\s+(TRUNK)\\s+PORT\\s+([[:digit:]]{2,5})\\s+STATION\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+TO\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s*$"
+#define EB_CFG_STATIC_POOL_WIRE "^\\s*POOL\\s+STATIC\\s+([A-Z0-9]{1,10})\\s+FROM\\s+(WIRE)\\s+NET\\s+([[:digit:]]{1,3})\\s+STATION\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+TO\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s*$"
+#define EB_CFG_NET_POOL_TRUNK "^\\s*(TRUNK)\\s+PORT\\s+([[:digit:]]{2,5})\\s+USE\\s+POOL\\s+([A-Z0-9]{1,10})\\s+FOR\\s+NETS\\s+([0-9\\,]+)\\s*$"
+#define EB_CFG_NET_POOL_WIRE "^\\s*(WIRE)\\s+NET\\s+([[:digit:]]{1,3})\\s+USE\\s+POOL\\s+([A-Z0-9]{1,10})\\s+FOR\\s+NETS\\s+([0-9\\,]+)\\s*$"
 
 // IP/Econet structs
 

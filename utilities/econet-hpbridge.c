@@ -912,6 +912,97 @@ struct __eb_device * eb_find_station (uint8_t dir, struct __econet_packet_aun *p
 	return eb_find_station_internal(net, stn);
 }
 
+/* Apply pool nat, if applicable, to the source address specified */
+
+void eb_pool_nat (struct __eb_device *d, uint8_t *net, uint8_t *stn)
+{
+
+	struct __eb_pool_host	*h;
+	struct __eb_pool	*p;
+	struct timeval		t;
+
+	gettimeofday(&t, 0);
+
+	// no pool nat for broadcasts or 0 stations
+	if (*net == 255 || *stn == 0)
+		return;
+
+	if (d->type != EB_DEF_WIRE && d->type != EB_DEF_TRUNK)
+		return; // No pool nat on these
+
+	// See if pool nat applies to this device
+	
+	p = (d->type == EB_DEF_WIRE ? d->wire.pool : d->trunk.pool);
+
+	if (!p) return; // No pool nat on this device
+
+	// See if this net is one we apply pool nat to
+	
+	if ((d->type == EB_DEF_WIRE && !(d->wire.use_pool[*net])) || (d->type == EB_DEF_TRUNK && !(d->trunk.use_pool[*net])))
+		return; // This network is not subject to pool nat
+
+	// Pick up list of pool hosts on this device
+	
+	h = (d->type == EB_DEF_WIRE ? d->wire.pool_hosts : d->trunk.pool_hosts);
+
+	while (h)
+	{
+		// TODO - LOCK THE DEVICE WHILE WE'RE LOOKING AT IT IN CASE WE CHANGE POOL_HOSTS
+		// AND THE POOL IN CASE WE CHANGE HOSTS_NET[n]
+
+		if (!(h->is_static) && (timediffmsec(&(h->last_traffic), &t) >= (EB_CONFIG_POOL_DEAD_INTERVAL * 1000)))
+		{
+			struct __eb_pool_host	*old;
+
+			// TO DO - NEED A MUTEX ON THE POOL HOST HERE
+			// AND ANY PARENT ENTRY IN THE QUEUES IN CASE WE CHANGE THEM
+
+			// Splice and move to next
+			if (h->prev_net)
+				h->prev_net->next_net = h->next_net; // Splice out from queue
+			else
+				h->pool->hosts_net[h->net] = h->next_net; // Beginning of queue on this network
+
+			if (h->prev_source)
+				h->prev_source->next_source = h->next_source; // Splice out per trunk/wire
+			else
+			{
+				if (h->source->type == EB_DEF_WIRE)
+					h->source->wire.pool_hosts = h->next_source;
+				else
+					h->source->trunk.pool_hosts = h->next_source;
+			}
+
+			old = h;
+			h = h->next_source;
+
+			// DON'T FORGET TO UNLOCK DEVICE, POOL, ETC ETC.
+			//
+			eb_free(__FILE__, __LINE__, "POOL", "Freeing host entry", old); 
+			continue; // Start the loop again in case this is NULL
+		}
+
+		if ((h->s_net == *net) && (h->s_stn == *stn))
+			break;
+
+		h = h->next_source; // Move to next in our list
+	}
+
+	if (h) // Found
+	{
+		*net = h->net;
+		*stn = h->stn;
+		gettimeofday (&(h->last_traffic), 0);
+	}
+	else // Make new
+	{
+		h = eb_malloc(__FILE__, __LINE__, "POOL", "Make new host struct for pool", sizeof(struct __eb_pool_host));
+
+	}
+
+	// UNLOCK EVERYTHING
+}
+
 /* Wire reset to read mode function
  */
 
@@ -1493,6 +1584,10 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 						eb_debug (0, 2, "BRIDGE", "%-8s         Ignored incoming bridge update for net %d: filtered inbound", eb_type_str(source->type), in_adv);
 
 					strcat (net_string, "F");
+				}
+				else if ((source->type == EB_DEF_WIRE && source->wire.use_pool[in_adv]) || (source->type == EB_DEF_TRUNK && source->trunk.use_pool[in_adv])) // Don't process networks which are subject to pool nat - we won't advertise them further because all source traffic will have its address altered
+				{
+					strcat (net_string, "P"); // Flag in the debug
 				}
 				else
 				{
@@ -5054,12 +5149,23 @@ static void * eb_device_despatcher (void * device)
 						{
 							struct __eb_pool_host	*h;
 
+							// TODO - Need to lock the pool here while we search in case something updates it.
 							h = d->pool.data->hosts_net[dstnet];
 
 							while  (!found && h)
 							{
+								// TODO LOCK HOST
 								if (h->stn == p->p->p.dststn)
 									found = 1;
+								else
+								{
+									struct __eb_pool_host	*old;
+
+									old = h;
+									h=h->next_net; // Next in the pool host list
+									// UNLOCK old
+								}
+								// The above leaves h locked if found
 							}
 
 							if (found)
@@ -5071,7 +5177,11 @@ static void * eb_device_despatcher (void * device)
 									// Idle too long
 
 									// Splice out of lists
-									//
+
+									// Lock the source if h->prev_source is NULL
+									// Lock h->prev_source otherwise
+									// Pool is already locked, so no need to lock pool->hosts[n] if h->prev_net is NULL
+									// Lock h->prev_net otherwise
 
 									if (h->prev_net)
 										h->prev_net->next_net = h->next_net;
@@ -5086,6 +5196,8 @@ static void * eb_device_despatcher (void * device)
 										h->source->trunk.pool_hosts = h->next_source;
 									
 									eb_clr_single_wire_host(dstnet, p->p->p.dststn);
+
+									//Unlock everything including h here (we're about to destroy it)
 
 									eb_free (__FILE__, __LINE__, "POOL", "Freeing pool host entry on idle timeout", h);
 
@@ -5110,11 +5222,12 @@ static void * eb_device_despatcher (void * device)
 									eb_add_stats(&(h->statsmutex), &(h->b_in), p->length);
 									eb_add_stats(&(h->statsmutex), &(h->b_out), p->length);
 
+									// Unlock h here
 									new_output = 1;
 								}
 
 							}
-
+							// Unlock pool here
 						}
 						
 
@@ -5606,6 +5719,10 @@ int eb_readconfig(char *f)
 				memset (&(p->wire.filter_out), 0, 256);
 
 				p->wire.period = p->wire.mark = 0;
+
+				p->wire.pool = NULL;
+				p->wire.pool_hosts = NULL;
+				memset(&(p->wire.use_pool), 0, sizeof(p->wire.use_pool));
 				
 			}
 			else if (!regexec(&r_trunk, line, 4, matches, 0) ||
@@ -5634,6 +5751,10 @@ int eb_readconfig(char *f)
 				memset (&(p->trunk.xlate_in), 0, 256);
 				memset (&(p->trunk.filter_in), 0, 256);
 				memset (&(p->trunk.filter_out), 0, 256);
+
+				p->trunk.pool = NULL;
+				p->trunk.pool_hosts = NULL;
+				memset(&(p->trunk.use_pool), 0, sizeof(p->trunk.use_pool));
 
 				// Initialize shared key to NULL so we can tell if it is unset
 				p->trunk.sharedkey = NULL;
@@ -6519,10 +6640,10 @@ int eb_readconfig(char *f)
 				uint8_t		nets[255], first_net = 0, net;
 				struct __eb_device	*p;
 				
-				eb_debug(0, 1, "CONFIG", "Found new pool definition: name %s, nets '%s'", eb_getstring(line, &matches[1]), 
+				/* eb_debug(0, 1, "CONFIG", "Found new pool definition: name %s, nets '%s'", eb_getstring(line, &matches[1]), 
 					eb_getstring(line, &matches[2])
 					);
-				
+				*/	
 
 				if (strlen(eb_getstring(line, &matches[1])) > 9)
 					eb_debug (1, 0, "CONFIG", "Pool name %s is more than the maximum 9 characters", eb_getstring(line, &matches[1]));
@@ -6534,53 +6655,6 @@ int eb_readconfig(char *f)
 				memset (&nets, 0, sizeof(nets));
 
 				strcpy (netlist, eb_getstring(line, &matches[2]));
-
-				/* OLD CODE BEFORE FUNCTIONIZED
-				strcpy (netread, "");
-
-				while (netptr < strlen(netlist))
-				{
-					if (netlist[netptr] >= '0' && netlist[netptr] <= '9' && strlen(netread) < 3)
-					{
-						if (strlen(netread) < 3)
-						{
-							netread[strlen(netread)+1] = 0;
-							netread[strlen(netread)] = netlist[netptr];
-						}
-						else
-							eb_debug (1, 0, "CONFIG", "Bad network number in definition of pool %s", poolname);
-					}
-					else
-					{
-						if (strlen(netread) > 0)
-						{
-							net = atoi(netread);
-							nets[net] = 0xff;
-	
-							if (!first_net)
-								first_net = net;
-	
-							strcpy (netread, "");
-						}
-						else
-							eb_debug (1, 0, "CONFIG", "Bad network number specification in definition of pool %s", poolname);
-					}
-
-					netptr++;
-
-
-				}
-
-				if (strlen(netread) > 0)
-				{
-					net = atoi(netread);
-					nets[net] = 0xff;
-
-					if (!first_net)
-						first_net = net;
-
-				}
-				*/
 
 				first_net = eb_parse_nets(netlist, nets);
 
@@ -6598,11 +6672,15 @@ int eb_readconfig(char *f)
 
 				p->pool.data = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create pool data structure", sizeof(struct __eb_pool));
 
+				strcpy((char *) p->pool.data->name, poolname);
+
 				memcpy(p->pool.data->networks, nets, sizeof(nets));
 
 				for (net = 0; net < 255; net++) // Using net instead of stn, this is really a stn index
 					p->pool.data->hosts_net[net] = NULL;
 
+				p->pool.data->next = pools;
+				pools = p->pool.data;
 			}
 			else if (!regexec(&r_pool_static_wire, line, 6, matches, 0) || !regexec(&r_pool_static_trunk, line, 6, matches, 0))
 			{
@@ -6634,11 +6712,87 @@ int eb_readconfig(char *f)
 			}
 			else if (!regexec(&r_pool_net_wire, line, 5, matches, 0) || !regexec(&r_pool_net_trunk, line, 5, matches, 0))
 			{
-				eb_debug(0, 1, "CONFIG", "Found new pool deployment: %s %s, pool %s for nets %s", eb_getstring(line, &matches[1]), eb_getstring(line, &matches[2]), 
-					eb_getstring(line, &matches[3]),
+
+				struct __eb_pool	*pool; // Pool being deployed
+				struct __eb_device	*source; // Device we are deploying to
+				uint8_t			nets[255], first_net; // List of nets and first network number found in the reployment
+				uint16_t		trunkportorwirenet; // Trunk port, or wire net number we are deploying to
+				char			poolname[128]; // Name of pool
+				char			dtype[6];
+				enum			{ TRUNK, WIRE } variant;
+
+				trunkportorwirenet = atoi(eb_getstring(line, &matches[2]));
+				strcpy(poolname, eb_getstring(line, &matches[3]));
+				strcpy(dtype, eb_getstring(line, &matches[1]));
+
+				variant = WIRE;
+
+				if (!strcasecmp("TRUNK", dtype))
+					variant = TRUNK;
+
+				/*
+				 * eb_debug(0, 1, "CONFIG", "Found new pool deployment: %s %d, pool %s for nets %s", 
+					dtype,
+					trunkportorwirenet,
+					poolname,
 					eb_getstring(line, &matches[4])
 					);
+					*/
+
+				// See if we can find the pool
+				
+				pool = pools;
+
+				while (pool)
+				{
+					fprintf (stderr, "Comparing %s with %s\n", pool->name, poolname);
+					if (!strcasecmp((const char *)pool->name, poolname))
+						break;
+					else	pool = pool->next;
+				}
+
+				if (!pool)
+					eb_debug (1, 0, "CONFIG", "Cannot find pool %s to deploy to %s %d", poolname, dtype, trunkportorwirenet);
+
+				source = NULL;
+
+				if (variant == TRUNK)
+				{
+					source = trunks;
+
+					while (source)
+					{
+						if (source->type == EB_DEF_TRUNK && source->trunk.local_port == trunkportorwirenet)
+							break;
+						else	source = source->next;
+					}
+				}
+				else
+				{
+					if (networks[trunkportorwirenet] && (networks[trunkportorwirenet]->type == EB_DEF_WIRE))
+						source = networks[trunkportorwirenet];
+				}
+
+				if (!source)
+					eb_debug (1, 0, "Cannot assign pool %s to %s %s %d because it target device does not exist", poolname, dtype, (variant == TRUNK ? "on port" : "on net"), trunkportorwirenet);
+
+				first_net = eb_parse_nets(eb_getstring(line, &matches[4]), nets);
+
+				if (!first_net)
+					eb_debug (1, 0, "Bad net list in pool deployment %s", eb_getstring(line, &matches[0]));
+
+				if (variant == TRUNK)
+				{
+					source->trunk.pool = pool;
+					memcpy(&(source->trunk.use_pool), &nets, sizeof(nets));
+				}
+				else
+				{
+					source->wire.pool = pool;
+					memcpy(&(source->wire.use_pool), &nets, sizeof(nets));
+				}
 			}
+
 			else
 				eb_debug (1, 0, "CONFIG", "Unrecognized configuration line: %s", line);
 		}
@@ -6817,6 +6971,7 @@ int main (int argc, char **argv)
 	aun_remotes = NULL;
 	bridge_fw = NULL;
 	trunks = NULL;
+	pools = NULL;
 	exposures = NULL;
 	port99_list = NULL;
 
