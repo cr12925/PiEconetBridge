@@ -92,6 +92,8 @@ extern int8_t get_printer(unsigned char, unsigned char, char*);
 extern uint8_t get_printer_info (unsigned char, unsigned char, uint8_t, char *, char *, uint8_t *, uint8_t *, short *);
 extern uint8_t set_printer_info (unsigned char, unsigned char, uint8_t, char *, char *, uint8_t, short);
 extern uint8_t get_printer_total (unsigned char, unsigned char);
+extern void send_printjob (char *, uint8_t, uint8_t, uint8_t, uint8_t, char *, char *, char *, char *);
+extern char * get_user_print_handler (uint8_t, uint8_t, uint8_t, char *, char *);
 
 // Server timing
 extern float timediffstart(void);
@@ -7747,6 +7749,98 @@ int8_t fs_get_user_printer(int server, unsigned char net, unsigned char stn)
 	return active[server][active_id].printer;
 }
 
+void fs_printout(int server, uint8_t reply_port, unsigned int active_id, uint8_t net, uint8_t stn, char *file, uint8_t relative_to)
+{
+
+	uint8_t				printer;
+	char *				handler;
+	char				unixprinter[128], acornprinter[7];
+	struct path			p;
+	unsigned short			result;
+
+
+	//fs_debug (0, 1, "%12sfrom %3d.%3d *PRINTOUT %s", "", net, stn, file);
+
+	result = fs_normalize_path_wildcard(server, active_id, file, relative_to, &p, 1);
+	fs_free_wildcard_list(&p); // Don't need anything but the first
+
+	if (!result)
+	{
+		fs_error (server, reply_port, net, stn, 0xCC, "Bad filename");
+		return;
+	}
+	else if (p.ftype == FS_FTYPE_NOTFOUND)
+	{
+		fs_error (server, reply_port, net, stn, 0xD6, "Not found");
+		return;
+	}
+	else if (p.ftype != FS_FTYPE_FILE)
+	{
+		fs_error (server, reply_port, net, stn, 0xFF, "Type mismatch");
+		return;
+	}
+
+	printer = fs_get_user_printer(server, net, stn);
+	handler = get_user_print_handler (fs_stations[server].net, fs_stations[server].stn, printer = 0xff ? 1 : printer, unixprinter, acornprinter);
+
+	fs_debug (0, 2, "%12sfrom %3d.%3d *PRINTOUT %s (destination %s)", "", net, stn, file, acornprinter);
+
+	if (!handler)
+		fs_error (server, reply_port, net, stn, 0xFF, "Cannot print");
+	else
+	{
+		// Copy file to temp (full unix path in p.unixpath)
+		
+		int	infile, tmpfile;
+		char	template[80];
+		uint8_t	buffer[1024];
+		int	len;
+
+		strcpy(template, "/tmp/econet.printout.XXXXXX");
+
+		tmpfile = mkstemp(template);
+		infile = open(p.unixpath, O_RDONLY);
+
+		if (tmpfile == -1 || infile == -1)
+		{
+			if (tmpfile != -1) close(tmpfile);
+			if (infile != -1) close(infile);
+
+			fs_error(server, reply_port, net, stn, 0xFF, "Cannot spool file");
+			return;
+		}
+
+		// Now copy the file
+		
+		while ((len = read(infile, buffer, 1024)) && (len != -1))
+			write(tmpfile, (const void *) buffer, len);
+
+		close(tmpfile);
+		close(infile);
+
+		if (len == -1)
+		{
+			unlink(template);
+			fs_error(server, reply_port, net, stn, 0xFF, "Error while spooling");
+		}
+		else
+		{
+			char 	username[11];
+			uint8_t	count;
+
+			memcpy(username, &(users[server][active_id].username), 10);
+
+			for (count = 0; count < 11; count++)
+				if (username[count] == ' ' || count == 10) username[count] = '\0';
+
+			send_printjob (handler, fs_stations[server].net, fs_stations[server].stn, net, stn, username, acornprinter, unixprinter, template);
+			//fs_debug (0, 1, "%12sfrom %3d.%3d %s at %d.%d sent print job to printer %s/%s (%s)", "", fs_stations[server].net, fs_stations[server].stn, username, net, stn, acornprinter, unixprinter, template);
+			fs_reply_ok(server, reply_port, net, stn);
+		}
+
+	}
+
+}
 
 // Handle *PRINTER from authenticated users
 void fs_select_printer(int server, unsigned char reply_port, unsigned int active_id, unsigned char net, unsigned char stn, char *pname)
@@ -8434,6 +8528,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			//else if (!strncasecmp("PRINTER ", (const char *) command, 8))
 			else if (fs_parse_cmd(command, "PRINTER", 6, &param))
 				fs_select_printer(server, reply_port, active_id, net, stn, param);
+			else if (fs_parse_cmd(command, "PRINTOUT", 6, &param))
+				fs_printout(server, reply_port, active_id, net, stn, param, active[server][active_id].current);
 			//else if (!strncasecmp("PASS ", (const char *) command, 5))
 			else if (fs_parse_cmd(command, "PASS", 4, &param))
 				fs_change_pw(server, reply_port, userid, net, stn, param);

@@ -841,29 +841,16 @@ struct __eb_aun_exposure * eb_is_exposed (uint8_t net, uint8_t stn, uint8_t is_a
 
 }
 
-/* Locate the device struct for a packet's source or destination
+/* Locate the device struct for a net.stn destination
  * Returns pointer to struct if found; else NULL
- * dir = 1 means source, dir = 2 means destination (to be found)
  */
 
-struct __eb_device * eb_find_station (uint8_t dir, struct __econet_packet_aun *p)
+struct __eb_device * eb_find_station_internal (uint8_t net, uint8_t stn)
 {
 
 	struct __eb_device 	*result;
-	uint8_t			net, stn;
 
 	result = NULL;
-
-	if (dir == 1)
-	{
-		net = p->p.srcnet;
-		stn = p->p.srcstn;
-	}
-	else
-	{
-		net = p->p.dstnet;
-		stn = p->p.dststn;
-	}
 
 	eb_debug (0, 4, "BRIDGE", "%-8s %3d.%3d Looking for station struct... eb_get_network() returns %p", "", net, stn, (result = eb_get_network(net)));
 
@@ -898,6 +885,31 @@ struct __eb_device * eb_find_station (uint8_t dir, struct __econet_packet_aun *p
 
 	return result;
 
+}
+
+/* Packet version of find_station */
+/* Locate the device struct for a packet's source/destination
+ * Returns pointer to struct if found; else NULL
+ * dir = 1 means source, dir = 2 means destination (to be found)
+ */
+
+struct __eb_device * eb_find_station (uint8_t dir, struct __econet_packet_aun *p)
+{
+
+	uint8_t			net, stn;
+
+	if (dir == 1)
+	{
+		net = p->p.srcnet;
+		stn = p->p.srcstn;
+	}
+	else
+	{
+		net = p->p.dstnet;
+		stn = p->p.dststn;
+	}
+
+	return eb_find_station_internal(net, stn);
 }
 
 /* Wire reset to read mode function
@@ -2856,6 +2868,62 @@ static void * eb_trunk_keepalive (void * device)
 	return NULL;
 }
 
+void send_printjob (char *handler, uint8_t fs_net, uint8_t fs_stn, uint8_t clt_net, uint8_t clt_stn, char *username, char *acorn_printer, char *unix_printer, char *file)
+{
+
+	char	command_string[1024];
+
+	snprintf (command_string, 1023, "%s %d %d %d %d %s %s %s %s",
+		handler == NULL ? PRN_DEFAULT_HANDLER : handler,
+		fs_net, fs_stn,
+		clt_net, clt_stn,
+		username,
+		unix_printer,
+		acorn_printer,
+		file);
+
+	if (!fork())
+		execl("/bin/sh", "sh", "-c", command_string, (char *) 0);
+
+}
+
+char * get_user_print_handler (uint8_t net, uint8_t stn, uint8_t printer_index, char *unixprinter, char *acornprinter)
+{
+
+	struct __eb_device	*d;
+	struct __eb_printer	*printer;
+	uint8_t			index;
+
+	d = eb_find_station_internal (net, stn);
+
+	if (!d)
+		return NULL;
+
+	if (d->type != EB_DEF_LOCAL)
+		return NULL; // Not a local device
+
+	printer = d->local.printers;
+
+	index = printer_index;
+
+	if (index != 0xff)
+		while ((index-- > 0) && printer)
+			printer = printer->next;	
+
+	if (!printer)
+		return NULL;
+	else
+	{
+		strcpy(unixprinter, printer->unix_name);
+		strcpy(acornprinter, printer->acorn_name);
+		if (printer->handler[0] == '\0')
+			return PRN_DEFAULT_HANDLER;
+		else
+			return printer->handler;
+	}
+
+}
+
 void beeb_print (uint8_t y, uint8_t x, char *s) /* Display string in beebmem at x,y */
 {
 	memcpy(&(beebmem[0x7c00 + (40 * y) + x]), s, strlen(s));
@@ -4715,7 +4783,7 @@ static void * eb_device_despatcher (void * device)
 									{
 	
 										char 	handler[128];
-										char	command[512];
+										//char	command[512];
 
 										if (printer->handler[0] == -'\0')
 											strncpy (handler, PRN_DEFAULT_HANDLER, 126);
@@ -4723,7 +4791,7 @@ static void * eb_device_despatcher (void * device)
 
 	
 										fclose (job->spoolfile);
-		
+	/*	
 										// Send to handler
 	
 										sprintf(command, "%s %d %d %d %d %s %s %s %s",
@@ -4739,6 +4807,14 @@ static void * eb_device_despatcher (void * device)
 										
 										if (!fork())
 											execl ("/bin/sh", "sh", "-c", command, (char *) 0);
+*/
+
+										send_printjob (handler, reply->p.srcnet, reply->p.srcstn, 
+												reply->p.dstnet, reply->p.dststn,
+												job->username,
+												printer->acorn_name,
+												printer->unix_name,
+												job->spoolfilename);
 
 										eb_debug (0, 1, "PRINTER", "Local    %3d.%3d %s at %d.%d sent print job to printer %s/%s (%s)", reply->p.srcnet, reply->p.srcstn, job->username, reply->p.dstnet, reply->p.dststn, printer->acorn_name, printer->unix_name, job->spoolfilename);
 
