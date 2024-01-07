@@ -3669,7 +3669,7 @@ void fs_read_user_env(int server, unsigned short reply_port, unsigned char net, 
 {
 
 	struct __econet_packet_udp r;
-	int replylen = 0, count;
+	int replylen = 0, count, termfound;
 	unsigned short disclen;
 
 	fs_debug (0, 2, "%12sfrom %3d.%3d Read user environment - current user handle %d, current lib handle %d", "", net, stn, active[server][active_id].current, active[server][active_id].lib);
@@ -3701,16 +3701,26 @@ void fs_read_user_env(int server, unsigned short reply_port, unsigned char net, 
 	replylen += disclen;
 
 	memcpy(&(r.p.data[replylen]), &(active[server][active_id].fhandles[active[server][active_id].current].acorntailpath), 10);
+	termfound = 0;
 	for (count = 0; count < 10; count++)
-		if (r.p.data[replylen+count] == 0) r.p.data[replylen+count] = ' ';
+		if (termfound || r.p.data[replylen+count] == 0) 
+		{
+			r.p.data[replylen+count] = ' ';
+			termfound = 1;
+		}
 
 	//snprintf (&(r.p.data[replylen]), 10, "%-10s", active[server][active_id].fhandles[active[server][active_id].current].acorntailpath);
 	//sprintf (&(r.p.data[replylen]), "%-10s", active[server][active_id].current_dir_tail);
 	replylen += 10;
 
 	memcpy(&(r.p.data[replylen]), &(active[server][active_id].fhandles[active[server][active_id].lib].acorntailpath), 10);
+	termfound = 0;
 	for (count = 0; count < 10; count++)
-		if (r.p.data[replylen+count] == 0) r.p.data[replylen+count] = ' ';
+		if (termfound || r.p.data[replylen+count] == 0)
+		{
+			r.p.data[replylen+count] = ' ';
+			termfound = 1;
+		}
 
 	//snprintf (&(r.p.data[replylen]), 10, "%-10s", active[server][active_id].fhandles[active[server][active_id].lib].acorntailpath);
 	//sprintf (&(r.p.data[replylen]), "%-10s", active[server][active_id].lib_dir_tail);
