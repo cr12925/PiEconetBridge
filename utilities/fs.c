@@ -5611,7 +5611,8 @@ void fs_rename(int server, unsigned short reply_port, int active_id, unsigned ch
 #define RENAME_NOREPLACE (1 << 0)
 #endif
 
-	if (syscall(SYS_renameat2, 0, p_from.unixpath, 0, p_to.unixpath, RENAME_NOREPLACE)) // non-zero - failure
+	//if (syscall(SYS_renameat2, 0, p_from.unixpath, 0, p_to.unixpath, RENAME_NOREPLACE)) // non-zero - failure
+	if (syscall(SYS_renameat2, 0, p_from.unixpath, 0, p_to.unixpath, 0)) // non-zero - failure - 0 instead of NOREPLACE is fine because we catch existent destination files above - only risk is someone mucking with the filesystem within Linux, which frankly makes them their own worst enemy
 	{
 		fs_debug (0, 1, "%12sfrom %3d.%3d Rename from %s to %s failed (%s)", "", net, stn, p_from.unixpath, p_to.unixpath, strerror(errno));	
 		fs_error(server, reply_port, net, stn, 0xFF, "FS Error");
@@ -5650,6 +5651,14 @@ void fs_delete(int server, unsigned short reply_port, int active_id, unsigned ch
 	{
 		if (*(command+count) != ' ') found = 1;
 		else count++;
+	}
+
+	fs_debug (0, 1, "%12sfrom %3d.%3d Delete %s", "", net, stn, (command + count));	
+
+	if (!found)
+	{
+		fs_error(server, reply_port, net, stn, 0xff, "Bad command");
+		return;
 	}
 
 	fs_copy_to_cr(path, command + count, 1023);
