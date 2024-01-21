@@ -5558,7 +5558,7 @@ void fs_rename(int server, unsigned short reply_port, int active_id, unsigned ch
 		// Note, we *can* move a file into a filename inside a directory (FS_FTYPE_NOTFOUND), likewise a directory, but if the destination exists it MUST be a directory
 	}
 
-	if ((p_to.ftype == FS_FTYPE_NOTFOUND) && p_to.parent_owner != active[server][active_id].userid && ((p_to.parent_perm & FS_PERM_OTH_W) == 0)) // Attempt to move to a directory we don't own and don't have write access to
+	if ((p_to.ftype == FS_FTYPE_NOTFOUND) && p_to.parent_owner != active[server][active_id].userid && ((p_to.parent_perm & FS_PERM_OTH_W) == 0) && ((active[server][active_id].priv & FS_PRIV_SYSTEM) == 0)) // Attempt to move to a directory we don't own and don't have write access to
 	{
 		fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 		return;
@@ -7634,7 +7634,7 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 		fs_error(server, reply_port, net, stn, 0xbd, "Insufficient access");
 	}
 	else if (!readonly && (p.ftype == FS_FTYPE_NOTFOUND) && 
-		(	(p.parent_owner != active[server][active_id].userid && ((p.parent_perm & FS_PERM_OTH_W) == 0)) ||
+		(	(p.parent_owner != active[server][active_id].userid && ((p.parent_perm & FS_PERM_OTH_W) == 0)) &&
 			(p.parent_owner == active[server][active_id].userid && ((p.perm & FS_PERM_OWN_W) == 0))
 			) // FNF and we can't write to the directory
 		)
