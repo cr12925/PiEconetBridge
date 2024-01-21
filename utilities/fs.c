@@ -5653,17 +5653,13 @@ void fs_delete(int server, unsigned short reply_port, int active_id, unsigned ch
 		else count++;
 	}
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d Delete %s", "", net, stn, (command + count));	
-
-	if (!found)
-	{
-		fs_error(server, reply_port, net, stn, 0xff, "Bad command");
-		return;
-	}
-
 	fs_copy_to_cr(path, command + count, 1023);
 
-	if (!fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1))
+	fs_debug (0, 1, "%12sfrom %3d.%3d Delete %s", "", net, stn, path);	
+
+	if (strlen(path) == 0)
+		fs_error(server, reply_port, net, stn, 0xfe, "Bad command");
+	else if (!fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1))
 		fs_error(server, reply_port, net, stn, 0xd6, "Not found");
 	else
 	{
