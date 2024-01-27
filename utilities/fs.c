@@ -7606,6 +7606,12 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 
 	fs_copy_to_cr(filename, data+start, 1023);
 
+	if (strlen(filename) == 0)
+	{
+		fs_error(server, reply_port, net, stn, 0xFF, "Bad filename");
+		return;
+	}
+
 	fs_debug (0, 2, "%12sfrom %3d.%3d Open %s readonly %s, must exist? %s", "", net, stn, filename, (readonly ? "yes" : "no"), (existingfile ? "yes" : "no"));
 
 	// If the file must exist, then we can use wildcards; else no wildcards
