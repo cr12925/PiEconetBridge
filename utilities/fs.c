@@ -9031,6 +9031,89 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 					fs_reply_ok(server, reply_port, net, stn);
 				}
+				else if (fs_parse_cmd(command, "SETPASS", 4, &param))
+				{
+					unsigned char	username[11], password[11];
+					unsigned char 	parameters[255];
+					uint8_t		count, s_ptr;
+
+					fs_copy_to_cr (parameters, param, 21);
+
+					s_ptr = count = 0;
+
+					while (parameters[count] == ' ' && count < strlen(parameters))
+						count++;
+
+					if (count == strlen(parameters)) // No parameters
+						fs_error(server, reply_port, net, stn, 0xFF, "Bad parameter");
+					else
+					{
+						while (s_ptr < 10 && parameters[count] != ' ' && (count < strlen(parameters)))
+						{
+							username[s_ptr] = parameters[count];
+							s_ptr++; count++;
+						}
+
+						while (s_ptr < 10)
+							username[s_ptr++] = ' ';
+
+						username[s_ptr] = 0;
+
+						if (count == strlen(parameters) || parameters[count] != ' ')
+							fs_error(server, reply_port, net, stn, 0xFF, "Bad parameter");
+						else
+						{
+							while (parameters[count] == ' ' && count < strlen(parameters))
+								count++;	
+
+							if (count == strlen(parameters))
+								fs_error(server, reply_port, net, stn, 0xFF, "Bad parameter");
+							else
+							{
+								s_ptr = 0;
+
+								while (s_ptr < 10 && parameters[count] != ' ' && (count < strlen(parameters)))
+								{
+									password[s_ptr] = parameters[count];
+									s_ptr++;
+									count++;
+								}
+
+								while (s_ptr < 10)
+									password[s_ptr++] = ' ';
+
+								password[s_ptr] = 0;
+
+								if (parameters[count] != ' ' && count != strlen(parameters))
+									fs_error(server, reply_port, net, stn, 0xFF, "Bad parameter");
+								else
+								{
+									count = 0;
+
+									while (count < ECONET_MAX_FS_USERS && strncasecmp(users[server][count].username, username, 10))
+										count++;
+
+									if (count == ECONET_MAX_FS_USERS)
+										fs_error(server, reply_port, net, stn, 0xFF, "Unknown user");
+									else
+									{
+
+										memcpy(&(users[server][count].password), password, 10);
+										fs_write_user(server, count, (unsigned char *) &(users[server][count]));
+										fs_reply_ok(server, reply_port, net, stn);
+										fs_debug (0, 1, "%12sfrom %3d.%3d *SETPASS %s %s (user ID %d)", "", net, stn, username, password, count);
+
+									}
+
+								}
+
+							}
+
+						}
+
+					}
+
+				}
 				//else if (!strncasecmp("NEWUSER ", (const char *) command, 8)) // Create new user
 				else if (fs_parse_cmd(command, "NEWUSER", 4, &param))
 				{
@@ -9077,13 +9160,14 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							snprintf((char * ) users[server][id].home, 97, "$.%s", username);
 							snprintf((char * ) users[server][id].lib, 97, "$.%s", "Library");
 							users[server][id].home_disc = 0;
-							users[server][id].priv = FS_PRIV_USER;
+							users[server][id].priv = 0;
 							
 							sprintf(homepath, "%s/%1x%s/%s", fs_stations[server].directory, 0, fs_discs[server][0].name, username);
 							if (mkdir((const char *) homepath, 0770) != 0)
 								fs_error(server, reply_port, net, stn, 0xff, "Unable to create home directory");
 							else
 							{
+								users[server][id].priv = FS_PRIV_USER;
 								fs_write_xattr(homepath, id, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0, id, server); // Set home ownership. Is there a mortgage?
 							
 								fs_write_user(server, id, (unsigned char *) &(users[server][id]));
