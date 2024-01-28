@@ -1402,6 +1402,8 @@ void fs_wildcard_to_regex(char *input, char *output, uint8_t infcolon)
 				strcat(internal, "*");
 				break;
 			case '-': // Fall through
+			case '(': // Fall through
+			case ')': // Fall through
 			case '+': // Escape these
 			{
 				unsigned char t[3];
@@ -5663,6 +5665,8 @@ void fs_delete(int server, unsigned short reply_port, int active_id, unsigned ch
 		fs_error(server, reply_port, net, stn, 0xfe, "Bad command");
 	else if (!fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1))
 		fs_error(server, reply_port, net, stn, 0xd6, "Not found");
+	else if (!(p.paths))
+		fs_error(server, reply_port, net, stn, 0xd6, "Not found");
 	else
 	{
 
@@ -7763,6 +7767,10 @@ int8_t fs_get_user_printer(int server, unsigned char net, unsigned char stn)
 	return active[server][active_id].printer;
 }
 
+#ifdef EB_VERSION
+
+	#if EB_VERSION >= 0x21
+
 void fs_printout(int server, uint8_t reply_port, unsigned int active_id, uint8_t net, uint8_t stn, char *file, uint8_t relative_to)
 {
 
@@ -7855,6 +7863,9 @@ void fs_printout(int server, uint8_t reply_port, unsigned int active_id, uint8_t
 	}
 
 }
+	#endif
+
+#endif /* EB_VERSION */
 
 // Handle *PRINTER from authenticated users
 void fs_select_printer(int server, unsigned char reply_port, unsigned int active_id, unsigned char net, unsigned char stn, char *pname)
@@ -8542,8 +8553,12 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			//else if (!strncasecmp("PRINTER ", (const char *) command, 8))
 			else if (fs_parse_cmd(command, "PRINTER", 6, &param))
 				fs_select_printer(server, reply_port, active_id, net, stn, param);
+#ifdef EB_VERSION
+	#if EB_VERSION >= 0x21
 			else if (fs_parse_cmd(command, "PRINTOUT", 6, &param))
 				fs_printout(server, reply_port, active_id, net, stn, param, active[server][active_id].current);
+	#endif
+#endif
 			//else if (!strncasecmp("PASS ", (const char *) command, 5))
 			else if (fs_parse_cmd(command, "PASS", 4, &param))
 				fs_change_pw(server, reply_port, userid, net, stn, param);
