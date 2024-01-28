@@ -4971,6 +4971,8 @@ void fs_delete(int server, unsigned short reply_port, int active_id, unsigned ch
 
 	if (!fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1))
 		fs_error(server, reply_port, net, stn, 0xd6, "Not found");
+	else if (!(p.paths))
+		fs_error(server, reply_port, net, stn, 0xd6, "Not found");
 	else
 	{
 
