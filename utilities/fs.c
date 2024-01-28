@@ -63,7 +63,7 @@
 
 // the ] as second character is a special location for that character - it loses its
 // special meaning as 'end of character class' so you can match on it.
-#define FSREGEX "[]\\*\\#A-Za-z0-9\\+_\x81-\xfe;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
+#define FSREGEX "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 #define FS_NETCONF_REGEX_ONE "^NETCONF\\s+([\\+\\-][A-Z]+)\\s*"
 
 regex_t fs_netconf_regex_one;
