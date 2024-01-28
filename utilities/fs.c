@@ -850,6 +850,8 @@ unsigned char fs_perm_from_acorn(int server, unsigned char acorn_perm)
 
 	r = 0;
 
+	if (acorn_perm == 0) r = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R; // Acorn clients seem to use &00 to mean WR/r
+
 	if (fs_config[server].fs_sjfunc) r |= (acorn_perm & 0x40) ? FS_PERM_H : 0; // Hidden / Private. This is MDFS only really
 	r |= (acorn_perm & 0x10) ? FS_PERM_L : 0; // Locked
 	r |= (acorn_perm & 0x08) ? FS_PERM_OWN_W : 0; // Owner write
