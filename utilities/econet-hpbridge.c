@@ -94,6 +94,8 @@ struct __eb_device      *networks[255]; // One entry per network, contains point
 struct __eb_device      *networks_initial[255]; // Used to rebuild networks[] on a bridge reset
 struct __eb_device      *devices; // All devices. Used to rebuild networks[] on a bridge re-set
 struct __eb_device      *trunks; // List of trunks.
+struct __eb_pool	*pools; // List of pool definitions
+
 uint16_t		threads_started, threads_ready;
 
 pthread_mutex_t		threadcount_mutex; // Locks the thread counter

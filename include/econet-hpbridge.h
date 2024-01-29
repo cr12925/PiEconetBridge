@@ -215,8 +215,6 @@ struct __eb_pool {
 	struct __eb_pool	*next; // In master pools list, below
 };
 
-struct __eb_pool	*pools;
-
 /* __eb_device
 
    Holds common and per-driver information about devices on which we might send/receive packets.
