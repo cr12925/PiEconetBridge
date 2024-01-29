@@ -6841,6 +6841,7 @@ This program comes with ABSOLUTELY NO WARRANTY; for details see\n\
 the GPL v3.0 licence at https://www.gnu.org/licences/ \n\
 \n\
 Usage: %s [options] \n\
+Version: %d.%d\n\
 Options:\n\
 \n\
 \t-h\t\tThis help text\n\
@@ -6884,6 +6885,8 @@ Deep-level debugging options:\n\
 \n\
 \
 ", name,
+	(EB_VERSION & 0xf0) >> 4,
+	(EB_VERSION & 0x0f),
 	EB_CONFIG_WIRE_RETRIES,
 	EB_CONFIG_WIRE_RETX,
 	EB_CONFIG_WIRE_IMM_WAIT,
