@@ -188,15 +188,16 @@ struct __eb_aun_remote {
 struct __eb_pool_host {
 	pthread_mutex_t		statsmutex; // Lock on stats
 	uint64_t		b_in, b_out; // Save for traffic to unallocated stations in the pool, these should always match
-	pthread_mutex_t		updatemutex; // Lock when reading or updating this struct.
+	// No updatemutex - if the pool is locked, so are all the hosts within it
+	// Hence why all the search / create functions require the mutex on the pool
 	uint8_t			is_static; // Don't time it out if static
 	struct timeval		last_traffic; // Last time we saw traffic. Used to reallocate non-static entries if stale.
 	struct __eb_device	*source; // Source device - e.g. a trunk, a wire. NULL means this is an inactive entry.
 	struct __eb_pool	*pool; // The pool this is a member of
 	uint8_t			s_net, s_stn; // Net & station as seen at the distant end (i.e. via *source).
 	uint8_t			net, stn; // Station number within the pool net.
-	struct __eb_pool_host	*next_net, *next_source; // Linked list. next_net points to next structure in the pool net, next_source points to the next entry pertaining to a given source device
-	struct __eb_pool_host	*prev_net, *prev_source; // Linked list, upward pointers - so we can splice things out more easily when they time out
+	struct __eb_pool_host	*next_net; // Linked list. next_net points to next structure in the pool net
+	struct __eb_pool_host	*prev_net; // Linked list, upward pointers - so we can splice things out 
 };
 
 /* __eb_pool
@@ -209,6 +210,7 @@ struct __eb_pool_host {
  */
 
 struct __eb_pool {
+	pthread_mutex_t		updatemutex; // Lock when reading or updating this struct.
 	unsigned char		name[11]; // Text name of pool
 	uint8_t			networks[255]; // Which nets are in this pool. Net 0 can never be in here - always a real number
 	struct __eb_pool_host	*hosts_net[255]; // Done by network number. Ditto net 0. (Linked list per device is in the device struct)
@@ -251,6 +253,8 @@ struct __eb_device { // Structure holding information about a "physical" device 
 	struct __eb_device	*self; // Pointer to own struct in case of need
 	struct pollfd		p_reset; // The fresh pollfd structure used by device listeners. Saves recreating it every time
 	
+	pthread_mutex_t		updatemutex; // Only really used to lock pool information, but probably ought to be used for other things as well, like the station maps on a wire (but then they might only be changed in one thread...)
+
 	// Timeouts
 	time_t			last_rx; // Last reception on this device - used to time out dead trunks and dynamic AUN stations (when I've written that bit!)
 
@@ -281,7 +285,6 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			// Pool nat config
 			uint8_t			use_pool[255];
 			struct __eb_pool	*pool;
-			struct __eb_pool_host	*pool_hosts;
 
 			// Links
 			struct __eb_fw *head, *tail;
@@ -308,7 +311,6 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			// Pool nat config
 			uint8_t			use_pool[255];
 			struct __eb_pool	*pool;
-			struct __eb_pool_host	*pool_hosts;
 
 		} wire;
 

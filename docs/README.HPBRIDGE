@@ -1092,6 +1092,74 @@ to allow or prevent traffic to:
     one end of the traffic is the other side of the Pi Bridge from the 
     other end (which is reachable via an Acorn/SJ bridge).
 
+POOL NETWORK ADDRESS TRANSLATION
+--------------------------------
+
+If many networks are trunked together, even with translation of the
+network numbers, it may be that there are insufficient network numbers
+for every site to be connected. Pool NAT offers a solution in that regard.
+A 'pool' consists of a number of network numbers (e.g. 125, 126). The station
+numbers in the pool are dynamically allocated to machines which connect
+through either a trunk or an Econet wire. The bridge translates the 
+local address of such machines to an address in the pool. The allocation
+of addresses times out after 30 minutes by default, but that can be
+altered using the --pool-timeout command line setting.
+
+Furthermore, static mappings can be put into the pools so that a particular
+station on a particular trunk or Econet will always have the same address.
+
+Where any network attached to a bridge is subject to pool NAT, the bridge
+is configured with the set of network numbers on that connection which 
+are subject to pool NAT. Thus it is possible for an Econet which has
+network number 1, and is bridged over traditional bridges to networks
+2, 3, and 4, to be subject to pool NAT for only (say) networks 3 & 4.
+Traffic from stations on networks 1 & 2 will not have its source address
+changed, but traffic from networks 3 & 4 will be changed to dynamic 
+addresses from the pool.
+
+The configuration file commands are as follows:
+
+- To establish a new pool containing network nos. nnn and mmm:
+
+  POOL <name> NETS nnn,mmm
+
+e.g. POOL GLOBAL NETS 125,126
+
+- To apply a pool to traffic arriving on a TRUNK for traffic arrivin
+  from networks aaa and bbb:
+
+  TRUNK PORT <port> USE POOL <poolname> FOR NETS aaa,bbb
+
+e.g. to apply GLOBAL pool on trunk port 35001 for networks 4 and 5:
+
+  TRUNK PORT 35001 USE POOL GLOBAL FOR NETS 4,5
+
+- To apply pool nat in the same way on an Econet wire with native
+  network number 1:
+
+  WIRE NET 1 USE POOL GLOBAL FOR NETS 4,5
+
+- To establish a static mapping in a pool on a particular network:
+
+  POOL STATIC <poolname> FROM (WIRE NET n|TRUNK PORT n) STATION a.b TO c.d
+
+  (where n is either the native network number for the Econet wire in 
+   question, or the trunk port, a.b is the real station number (inc.
+   its proper network number, i.e. not zero), and c.d is the address
+   within the pool to which it is to be translated)
+
+  Such entries do not time out.
+
+e.g. to apply address 126.1 from pool GLOBAL to address 1.3 on a 
+     local Econet wire with native network number 1:
+
+  POOL STATIC GLOBAL FROM WIRE NET 1 STATION 1.3 TO 126.1
+
+  ... and if it were for traffic on a trunk on port 35000:
+
+  POOL STATIC GLOBAL FROM TRUNK PORT 35000 STATION 1.3 TO 126.1
+
+
 SAMPLE CONFIGURATIONS
 ---------------------
 
