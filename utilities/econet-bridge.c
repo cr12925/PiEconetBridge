@@ -2859,7 +2859,7 @@ void econet_handle_local_aun (struct __econet_packet_aun *a, int packlen, int so
 						if (((fserver = fs_get_server_id(a->p.dstnet, a->p.dststn)) != -1) && ((active_id = fs_stn_logged_in(fserver, a->p.srcnet, a->p.srcstn)) != -1))
 						{
 							fs_get_username(fserver, active_id, printjobs[found].username);
-							if (printjobs[found].username == 0) strcpy(printjobs[found].username, "ANONYMOUS");
+							if (printjobs[found].username[0]=='\0') strcpy(printjobs[found].username, "ANONYMOUS");
 							
 						}
 						else	strcpy(printjobs[found].username, "ANONYMOUS");
@@ -4106,7 +4106,7 @@ Options:\n\
 								struct __econet_packet_aun bye;
 								int netcount;
 	
-								memcpy(&(network[stn_count].s_addr), &(s->sin_addr), sizeof(struct sockaddr_in));
+								memcpy(&(network[stn_count].s_addr), s, sizeof(struct sockaddr_in));
 	
 								network[stn_count].port = ntohs(src_address.sin_port);
 								from_found = stn_count;

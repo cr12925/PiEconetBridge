@@ -2251,13 +2251,13 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 		if (!passwd)
 		{
 			fs_debug (0, 1, "No password file - initializing %s with SYST", passwordfile);
-			sprintf (users[fs_count][0].username, "%-10s", "SYST");
+			sprintf (users[fs_count][0].username, "%-9s", "SYST");
 			sprintf (users[fs_count][0].password, "%-10s", "");
 			sprintf (users[fs_count][0].fullname, "%-24s", "System User"); 
 			users[fs_count][0].priv = FS_PRIV_SYSTEM;
 			users[fs_count][0].bootopt = 0;
-			sprintf (users[fs_count][0].home, "%-96s", "$");
-			sprintf (users[fs_count][0].lib, "%-96s", "$.Library");
+			sprintf (users[fs_count][0].home, "%-95s", "$");
+			sprintf (users[fs_count][0].lib, "%-95s", "$.Library");
 			users[fs_count][0].home_disc = 0;
 			users[fs_count][0].year = users[fs_count][0].month = users[fs_count][0].day = users[fs_count][0].hour = users[fs_count][0].min = users[fs_count][0].sec = 0; // Last login time
 			if ((passwd = fopen(passwordfile, "w+")))
@@ -5883,9 +5883,9 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn)
 		p = l->pq_head;
 		l->pq_head = l->pq_head->next;
 		free(p->packet);
-		free(p);
 
 		fs_debug (0, 4, "Packet queue entry freed at %p", p);
+		free(p);
 
 		if (!(l->pq_head)) // Ran out of packets
 		{

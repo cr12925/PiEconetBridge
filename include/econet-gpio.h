@@ -70,7 +70,7 @@
 
 /* Function declarations */
 
-static int econet_probe(struct platform_device *);
+//static int econet_probe(struct platform_device *);
 int econet_remove(struct platform_device *);
 int econet_open(struct inode *, struct file *);
 int econet_release(struct inode *, struct file *);
