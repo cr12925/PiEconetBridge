@@ -1,3 +1,4 @@
+*.local
 *.o
 *.ko
 module/modules.order
@@ -17,3 +18,5 @@ utilities/econet-fslist
 utilities/econet-ledtest
 utilities/econet-remote
 utilities/econet-trace
+utilities/econet-hpbridge
+utilities/econet-hpservice
