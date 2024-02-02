@@ -4190,9 +4190,11 @@ static void * eb_device_despatcher (void * device)
 
 				// Apply pool nat to wire & trunk devices
 
-				if (
+				if (packet.p.srcstn != 0 && // Don't translate bridge updates from bridges, which come from .0
+					(
 					(d->type == EB_DEF_TRUNK && d->trunk.use_pool[packet.p.srcnet])
 				||	(d->type == EB_DEF_WIRE && d->wire.use_pool[packet.p.srcnet])
+					)
 				)
 				{
 					// We are on a device which can use pool nat, and has it enabled for this source network
