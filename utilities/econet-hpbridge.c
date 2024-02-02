@@ -3690,7 +3690,7 @@ static void * eb_device_despatcher (void * device)
 				eb_debug (1, 0, "DESPATCH", "%-8s         Unable to create trunk keepalive thread");
 			else
 			{
-				eb_debug (0, 1, "DESPATCH", "%-8s         Trunk keepalive thread started");
+				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk keepalive thread started");
 				pthread_detach (d->trunk.keepalive_thread);
 				eb_thread_started();
 			}
