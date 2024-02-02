@@ -2097,10 +2097,16 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 /* Take a packet received from a device, put it on the device output queue, and wake up the 
    Device's transmission routine
 
+   forcedest is a device we are forcing the traffic toward - used where we are sending 
+   traffic to a host which is subject to pool nat, because its source network address
+   won't be in networks[] so we can't find it. (It's basically hidden from the core
+   bridge down a pooled trunk.) This parameter is NULL if the routine is to look the
+   destination device up as normal.
+
    returns 1 for success, 0 for failure (e.g. can't find source station)
 */
 
-uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_aun *packet, uint16_t length)
+uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_aun *packet, uint16_t length, struct __eb_device *forcedest)
 {
 
 	uint16_t 		destcombo;
@@ -2207,7 +2213,10 @@ uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_au
 			outq->destcombo = destcombo;
 			outq->destdevice = NULL;
 
-			outq->destdevice = eb_find_station (2, packet);
+			if (forcedest)
+				outq->destdevice = forcedest;
+			else
+				outq->destdevice = eb_find_station (2, packet);
 			
 			if (!outq->destdevice) // Can't work out where we are going!
 			{
@@ -2597,7 +2606,7 @@ uint8_t eb_ipgw_transmit (struct __eb_device *d, uint32_t addr)
 			q->p->p.dstnet = (arp_dest & 0xff00) >> 8;
 			q->p->p.dststn = (arp_dest & 0xff);
 
-			eb_enqueue_output (d, q->p, q->length);
+			eb_enqueue_output (d, q->p, q->length, NULL);
 			sent = 1;
 			result = 1;
 
@@ -4082,7 +4091,7 @@ static void * eb_device_despatcher (void * device)
 							outgoing->p.dstnet = (arp_dest & 0xff00) >> 8;
 							outgoing->p.dststn = (arp_dest & 0xff);
 
-							eb_enqueue_output (d, outgoing, length);
+							eb_enqueue_output (d, outgoing, length, NULL);
 							new_output = 1;
 
 							eb_free(__FILE__, __LINE__, "IPGW", "Freeing incoming IP/AUN packet after transmission on out queue", outgoing);
@@ -4108,7 +4117,7 @@ static void * eb_device_despatcher (void * device)
 							*((uint32_t *)&(arp->p.data[4])) = incoming.destination;
 							*((uint32_t *)&(arp->p.data[0])) = htonl(d->local.ip.addresses->ip);
 
-							eb_enqueue_output (d, arp, 8);
+							eb_enqueue_output (d, arp, 8, NULL);
 							new_output = 1;
 
 							eb_free(__FILE__, __LINE__, "IPGW", "Freeing outgoing Econet ARP packet", arp);
@@ -4235,7 +4244,7 @@ static void * eb_device_despatcher (void * device)
 					else
 					{
 						if (((packet.p.port == ECONET_TRACE_PORT) && eb_trace_handler (d, &packet, length - 12)) || (packet.p.port != ECONET_TRACE_PORT))
-							eb_enqueue_output (d, &packet, length - 12);
+							eb_enqueue_output (d, &packet, length - 12, NULL);
 					}
 	
 					// new_output = 1; // Added when output processing moved above
@@ -4902,7 +4911,7 @@ static void * eb_device_despatcher (void * device)
 
 										if (tx.p.aun_ttype == ECONET_AUN_DATA)
 										{
-											eb_enqueue_output (d, &ack, 0);			
+											eb_enqueue_output (d, &ack, 0, NULL);			
 											new_output = 1;
 										}
 		
@@ -4947,7 +4956,7 @@ static void * eb_device_despatcher (void * device)
 								ack.p.aun_ttype = ECONET_AUN_NAK;
 								if (tx.p.aun_ttype == ECONET_AUN_DATA)
 								{
-									eb_enqueue_output (d, &ack, 0);
+									eb_enqueue_output (d, &ack, 0, NULL);
 									new_output = 1;
 									if (p->n)	wire_output_pending++; // There's a packet after this one
 								}
@@ -4975,7 +4984,7 @@ static void * eb_device_despatcher (void * device)
 						if (p->p->p.aun_ttype == ECONET_AUN_DATA)
 						{
 							eb_debug (0, 4, "LOCAL", "%-8s %3d.%3d from %3d.%3d attempting to send ACK from local amulator, P: &%02X, C: &%02X, Seq: 0x%08X", "Local", ack.p.dstnet, ack.p.dststn, ack.p.srcnet, ack.p.srcstn, ack.p.port, ack.p.ctrl, ack.p.seq);
-							eb_enqueue_output (d, &ack, 0); // No data on this packet
+							eb_enqueue_output (d, &ack, 0, NULL); // No data on this packet
 							new_output = 1;
 						}
 
@@ -5098,7 +5107,7 @@ static void * eb_device_despatcher (void * device)
 							
 							memcpy (&(reply->p.data), &(beebmem[startaddr]), replydatalen);
 
-							eb_enqueue_output (d, reply, replydatalen);
+							eb_enqueue_output (d, reply, replydatalen, NULL);
 							new_output = 1;
 							
 							eb_free (__FILE__, __LINE__, "BRIDGE", "Freeing PEEK reply packet", reply);
@@ -5116,7 +5125,7 @@ static void * eb_device_despatcher (void * device)
 							ack.p.data[2] = (EB_VERSION & 0x0f);
 							ack.p.data[3] = (EB_VERSION & 0xf0) >> 4;
 
-							eb_enqueue_output (d, &ack, 4);
+							eb_enqueue_output (d, &ack, 4, NULL);
 							new_output = 1;
 
 						}
@@ -5178,7 +5187,7 @@ static void * eb_device_despatcher (void * device)
 										(querytype == PRN_QUERY_STATUS) ? "status" : "name",
 										pname, printer);
 
-									eb_enqueue_output (d, reply, 3);	
+									eb_enqueue_output (d, reply, 3, NULL);	
 									new_output = 1;
 								}
 								else eb_debug (0, 2, "PRINTER", "Local    %3d.%3d from %3d.%3d Printer %s query for printer %s NOT FOUND",
@@ -5195,7 +5204,7 @@ static void * eb_device_despatcher (void * device)
 								while (printer)
 								{
 									snprintf ((char * restrict) &(reply->p.data[0]), 7, "%6s", printer->acorn_name);
-									eb_enqueue_output (d, reply, 6);
+									eb_enqueue_output (d, reply, 6, NULL);
 									new_output = 1;
 									printer = printer->next;
 									reply->p.seq = get_local_seq(d->net, d->local.stn);
@@ -5389,7 +5398,7 @@ static void * eb_device_despatcher (void * device)
 									}
 								}
 
-								eb_enqueue_output (d, reply, 1);
+								eb_enqueue_output (d, reply, 1, NULL);
 								new_output = 1;
 
 							}
@@ -5440,7 +5449,7 @@ static void * eb_device_despatcher (void * device)
 								if (!strcasecmp(findserver_type, "FILE    ") || !strcasecmp(findserver_type, "        "))
 								{
 									memcpy (&(reply->p.data[3]), server_type, 8);
-									eb_enqueue_output (d, reply, my_length);
+									eb_enqueue_output (d, reply, my_length, NULL);
 									new_output = 1;
 								}
 							}
@@ -5453,7 +5462,7 @@ static void * eb_device_despatcher (void * device)
 								if (!strcasecmp(findserver_type, "IPGW    ") || !strcasecmp(findserver_type, "        "))
 								{
 									memcpy (&(reply->p.data[3]), server_type, 8);
-									eb_enqueue_output (d, reply, my_length);
+									eb_enqueue_output (d, reply, my_length, NULL);
 									new_output = 1;
 								}
 							}
@@ -5466,7 +5475,7 @@ static void * eb_device_despatcher (void * device)
 								if (!strcasecmp(findserver_type, "PRINT   ") || !strcasecmp(findserver_type, "        "))
 								{
 									memcpy (&(reply->p.data[3]), server_type, 8);
-									eb_enqueue_output (d, reply, my_length);
+									eb_enqueue_output (d, reply, my_length, NULL);
 									new_output = 1;
 
 								}
@@ -5514,7 +5523,7 @@ static void * eb_device_despatcher (void * device)
 										eb_debug (0, 3, "IPGW", "%-8s %3d.%3d Attempting to send ARP reply to %3d.%3d for our address",
 											eb_type_str(d->type), d->net, d->local.stn, arp_reply->p.dstnet, arp_reply->p.dststn);
 
-										eb_enqueue_output(d, arp_reply, 8);
+										eb_enqueue_output(d, arp_reply, 8, NULL);
 										new_output = 1;
 
 										eb_free(__FILE__, __LINE__, "IPGW", "Freeing ARP reply after transmission", arp_reply);
@@ -5563,7 +5572,7 @@ static void * eb_device_despatcher (void * device)
 						if (p->p->p.dstnet == d->net)	p->p->p.dstnet = 0;
 
 						if (p->p->p.aun_ttype == ECONET_AUN_DATA)
-							eb_enqueue_output (d, &ack, 0);
+							eb_enqueue_output (d, &ack, 0, NULL);
 
 						if (d->pipe.skt_write != -1) // Live writer
 						{
@@ -5586,7 +5595,7 @@ static void * eb_device_despatcher (void * device)
 						
 						if ((!(d->config & EB_DEV_CONF_DIRECT)) && (p->p->p.aun_ttype == ECONET_AUN_DATA))
 						{
-							eb_enqueue_output (d, &ack, 0); // No data on this packet
+							eb_enqueue_output (d, &ack, 0, NULL); // No data on this packet
 							new_output = 1;
 						}
 					} break;
@@ -5619,7 +5628,8 @@ static void * eb_device_despatcher (void * device)
 							p->p->p.dstnet = h->s_net;
 							p->p->p.dststn = h->s_stn;
 
-							eb_enqueue_output(h->source, p->p, p->length);
+							// TODO - This should be enqueing on the pool output, not the source device output, but enqueue_output doesn't know where the destination device is if we are giving it a network number the other end of a trunk, because if that network is pooled, then it doesn't make it into networks[]. We need to give eb_enqueue_output a hint if we want to point toward a particular device (and we can use NULL for the normal circumstance where eb_enqueue_output works it out for itself.
+							eb_enqueue_output(d, p->p, p->length, h->source);
 
 							eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
 							eb_add_stats(&(h->statsmutex), &(h->b_in), p->length);
@@ -5640,7 +5650,7 @@ static void * eb_device_despatcher (void * device)
 						if (p->p->p.aun_ttype == ECONET_AUN_DATA)
 						{
 							ack.p.aun_ttype = ECONET_AUN_NAK;
-							eb_enqueue_output (d, &ack, 0);
+							eb_enqueue_output (d, &ack, 0, NULL);
 							new_output = 1;
 						}
 

@@ -1167,6 +1167,28 @@ e.g. to apply address 126.1 from pool GLOBAL to address 1.3 on a
 
   POOL STATIC GLOBAL FROM TRUNK PORT 35000 STATION 1.3 TO 126.1
 
+Trunk and wire bridge announcement debug
+----------------------------------------
+
+When sufficient debugging is turned on to show you trunk announcements
+sent and received, sometimes the network numbers which are shown in
+the debug will have a suffix. This indicates what the bridge has done
+with the announcement.
+
+On received announcements:
+
+Suffix       Meaning
+F            Network no. announcement has been filtered (ignored)
+             (This arises from the firewall config.)
+I            Ignored because the bridge already knows of this net
+             number from somewhere else.
+->n          Network no. has been translated to n for onward
+             announcement or use. E.g. 1->2 means that so far as
+             machines attached to or trunked to this bridge will
+             need to address network 1 hosts on this trunk as
+             network 2.
+P            This network is subject to pool nat on this trunk
+
 
 SAMPLE CONFIGURATIONS
 ---------------------
