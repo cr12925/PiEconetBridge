@@ -3345,7 +3345,7 @@ static void * eb_trunk_keepalive (void * device)
 			{
 				pthread_mutex_lock (&(d->qmutex_in));
 
-				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk local port %d dead - clearing dynamic host data", eb_type_str(d->type), d->trunk.local_port);
+				eb_debug (0, 3, "DESPATCH", "%-8s         Trunk local port %d dead - clearing dynamic host data", eb_type_str(d->type), d->trunk.local_port);
 
 				if (d->trunk.remote_host && d->trunk.remote_host->ai_addr) eb_free(__FILE__, __LINE__, "TRUNK", "Freeing trunk.remote_host.ai_addr structure", d->trunk.remote_host->ai_addr);
 				if (d->trunk.remote_host) eb_free(__FILE__, __LINE__, "TRUNK", "Freeing trunk.remote_host structure", d->trunk.remote_host);
@@ -4812,7 +4812,7 @@ static void * eb_device_despatcher (void * device)
 						}
 
 						if (ap && !(d->trunk.remote_host))
-							eb_debug (0, 1, "DESPATCH", "Trunk            Packet transmission on trunk port %d failed - dynamic remote endpoint not established", d->trunk.local_port); 
+							eb_debug (0, 3, "DESPATCH", "Trunk            Packet transmission on trunk port %d failed - dynamic remote endpoint not established", d->trunk.local_port); 
 
 						remove = 1;
 					} break;
@@ -5870,11 +5870,19 @@ void eb_reset_tables (void)
 }
 
 /* Return list of nets which are comma separated into an array, and return first one found, or 0 if none found */
+/* If there's an asterisk anywhere in the string, it'll take it as a wildcard for "all nets" */
 uint8_t	eb_parse_nets(char *netlist, uint8_t nets[])
 {
 	uint8_t	netptr = 0;
 	char	netread[5];
 	uint8_t	first_net = 0, net;
+
+	if (strchr(netlist, '*')) // Wildcard
+	{
+		memset (nets, 0xff, 255);
+		nets[0] = nets[255] = 0;
+		return 1;
+	}
 
 	strcpy (netread, "");
 

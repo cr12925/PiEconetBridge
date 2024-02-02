@@ -522,8 +522,8 @@ struct __eb_config {
 #define EB_CFG_NEW_POOL "^\\s*POOL\\s+([A-Z0-9]{1,10})\\s+NETS\\s+([0-9\\,]+)\\s*$"
 #define EB_CFG_STATIC_POOL_TRUNK "^\\s*POOL\\s+STATIC\\s+([A-Z0-9]{1,10})\\s+FROM\\s+(TRUNK)\\s+PORT\\s+([[:digit:]]{2,5})\\s+STATION\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+TO\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s*$"
 #define EB_CFG_STATIC_POOL_WIRE "^\\s*POOL\\s+STATIC\\s+([A-Z0-9]{1,10})\\s+FROM\\s+(WIRE)\\s+NET\\s+([[:digit:]]{1,3})\\s+STATION\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s+TO\\s+([[:digit:]]{1,3}\\.[[:digit:]]{1,3})\\s*$"
-#define EB_CFG_NET_POOL_TRUNK "^\\s*(TRUNK)\\s+PORT\\s+([[:digit:]]{2,5})\\s+USE\\s+POOL\\s+([A-Z0-9]{1,10})\\s+FOR\\s+NETS\\s+([0-9\\,]+)\\s*$"
-#define EB_CFG_NET_POOL_WIRE "^\\s*(WIRE)\\s+NET\\s+([[:digit:]]{1,3})\\s+USE\\s+POOL\\s+([A-Z0-9]{1,10})\\s+FOR\\s+NETS\\s+([0-9\\,]+)\\s*$"
+#define EB_CFG_NET_POOL_TRUNK "^\\s*(TRUNK)\\s+PORT\\s+([[:digit:]]{2,5})\\s+USE\\s+POOL\\s+([A-Z0-9]{1,10})\\s+FOR\\s+NETS\\s+([0-9\\,]+|\\*)\\s*$"
+#define EB_CFG_NET_POOL_WIRE "^\\s*(WIRE)\\s+NET\\s+([[:digit:]]{1,3})\\s+USE\\s+POOL\\s+([A-Z0-9]{1,10})\\s+FOR\\s+NETS\\s+([0-9\\,]+|\\*)\\s*$"
 
 // IP/Econet structs
 

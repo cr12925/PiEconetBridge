@@ -1134,10 +1134,18 @@ e.g. to apply GLOBAL pool on trunk port 35001 for networks 4 and 5:
 
   TRUNK PORT 35001 USE POOL GLOBAL FOR NETS 4,5
 
+  The wildcard '*' can be used to mean 'all nets' on a trunk or wire:
+
+  TRUNK PORT 35001 USE POOL GLOBAL FOR NETS *
+
 - To apply pool nat in the same way on an Econet wire with native
   network number 1:
 
   WIRE NET 1 USE POOL GLOBAL FOR NETS 4,5
+
+  The wildcard '*' can be used to mean 'all nets' on a trunk or wire:
+
+  WIRE NET 1 USE POOL GLOBAL FOR NETS *
 
 - To establish a static mapping in a pool on a particular network:
 
