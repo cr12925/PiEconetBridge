@@ -1948,7 +1948,7 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 				
 				if (source->type == EB_DEF_WIRE && source->wire.pool)
 				{
-					h = eb_pool_find_addr_lock (source->wire.pool, reply->p.dstnet, reply->p.dststn, source);
+					h = eb_pool_find_addr_lock (source->wire.pool, reply->p.dstnet, reply->p.dststn, NULL);
 					if (h)
 					{
 						reply->p.dstnet = h->s_net;
@@ -1957,7 +1957,7 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 				}
 				else if (source->type == EB_DEF_TRUNK && source->trunk.pool)
 				{
-					h = eb_pool_find_addr_lock (source->trunk.pool, reply->p.dstnet, reply->p.dststn, source);
+					h = eb_pool_find_addr_lock (source->trunk.pool, reply->p.dstnet, reply->p.dststn, NULL);
 					if (h)
 					{
 						reply->p.dstnet = h->s_net;
