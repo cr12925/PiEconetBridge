@@ -384,18 +384,23 @@ void eb_set_network (uint8_t net, struct __eb_device *dev)
 uint8_t eb_pool_get_dynamic (struct __eb_pool *pool, uint8_t *net, uint8_t *stn)
 {
 
-	uint8_t	net_search;
+	uint8_t	net_search, net_start;
 
 	*net = *stn = 0; // Rogue. We fill these in on success
 
 	if (!pool) return 0; // Bad pool
 
-	for (net_search = 1; net_search < 255; net_search++)
+	net_start = pool->last_net + 1; // Works because initial rogue is 0
+
+	for (net_search = net_start; ((net_search + 1) & 0xff) != net_start; (net_search = ((net_search+1) & 0xff)))
 	{
 		uint8_t	stations[32]; // Bitmap, 1 bit per host
 		uint8_t	stn_count;
 
 		struct __eb_pool_host *host;
+
+		if (net_search == 0 || net_search == 255)
+			continue;
 
 		memset(&stations, 0, sizeof(stations));
 
@@ -416,6 +421,7 @@ uint8_t eb_pool_get_dynamic (struct __eb_pool *pool, uint8_t *net, uint8_t *stn)
 			{
 				*net = net_search;
 				*stn = stn_count;
+				pool->last_net = net_search;
 				return 1;
 			}
 		}
@@ -575,7 +581,6 @@ struct __eb_pool_host *eb_find_make_pool_host (struct __eb_device *source,
 	}
 	else // Find a vacant station number
 	{
-		// If exists return the match!
 		if (!eb_pool_get_dynamic(pool, &new_net, &new_stn))
 		{
 			pthread_mutex_unlock(&(pool->updatemutex));
@@ -623,9 +628,26 @@ struct __eb_pool_host *eb_find_make_pool_host (struct __eb_device *source,
 	// Splice into the various structs...
 
 	// Head of the list in the pool
+	//fprintf (stderr, "host->next_net = %p, pool->hosts_net[%d]=%p\n", host->next_net, new_net, pool->hosts_net[new_net]);
 	host->next_net = pool->hosts_net[new_net];
-	pool->hosts_net[new_net] = host;
+	if (host->next_net) host->next_net->prev_net = host;
 	host->prev_net = NULL; // This is top of list
+	pool->hosts_net[new_net] = host;
+	//fprintf (stderr, "host->next_net = %p, pool->hosts_net[%d]=%p\n", host->next_net, new_net, pool->hosts_net[new_net]);
+	if (0) {
+		struct __eb_pool_host *dummy;
+
+		dummy = pool->hosts_net[new_net];
+
+		while (dummy)
+		{
+			fprintf (stderr, "%d.%d map to %d.%d on device at %p\n", 
+					dummy->net, dummy->stn,
+					dummy->s_net, dummy->s_stn,
+					dummy->source);
+			dummy = dummy->next_net;
+		}
+	}
 
 	// Advertise on the wires, Unlock and return
 
@@ -2220,7 +2242,7 @@ uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_au
 			
 			if (!outq->destdevice) // Can't work out where we are going!
 			{
-				eb_debug (0, 1, "QUEUE", "%-8s %3d.%3d from %3d.%3d Seq 0x%08X Attempting to queue traffic when destination device cannot be found", eb_type_str(source->type), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, p->p.seq);
+				eb_debug (0, 2, "QUEUE", "%-8s %3d.%3d from %3d.%3d Seq 0x%08X Attempting to queue traffic when destination device cannot be found", eb_type_str(source->type), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, p->p.seq);
 
 				eb_free (__FILE__, __LINE__, "Q-OUT", "Free packet after dest device unknown", p);
 				eb_free (__FILE__, __LINE__, "Q-OUT", "Free packetq after dest device unknown", packetq);
@@ -7094,6 +7116,8 @@ int eb_readconfig(char *f)
 
 				for (net = 0; net < 255; net++) // Using net instead of stn, this is really a stn index
 					p->pool.data->hosts_net[net] = NULL;
+
+				p->pool.data->last_net = 0; // Rogue
 
 				memcpy (&(p->pool.data->networks), &nets, sizeof(nets));
 

@@ -213,6 +213,7 @@ struct __eb_pool {
 	pthread_mutex_t		updatemutex; // Lock when reading or updating this struct.
 	unsigned char		name[11]; // Text name of pool
 	uint8_t			networks[255]; // Which nets are in this pool. Net 0 can never be in here - always a real number
+	uint8_t			last_net; // Last network number from which we allocated a dynamic host - we round-robin them so that the __eb_pool_host lists stay somewhere near balanced
 	struct __eb_pool_host	*hosts_net[255]; // Done by network number. Ditto net 0. (Linked list per device is in the device struct)
 	struct __eb_pool	*next; // In master pools list, below
 };

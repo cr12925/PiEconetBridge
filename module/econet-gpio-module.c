@@ -1,5 +1,5 @@
 /*
-  (c) 2021 Chris Royle
+  (c) 2024 Chris Royle
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
@@ -77,12 +77,13 @@ unsigned GPIO_PWM_RANGE = 0x28;
 
 #define econet_get_tx_status() atomic_read(&(econet_data->tx_status))
 
-short sr1, sr2;
-long gpioset_value;
+u8 sr1, sr2;
+//long gpioset_value;
+u32 gpioset_value;
 
-unsigned short econet_gpio_reg_obtained[19];
+u8 econet_gpio_reg_obtained[19];
 
-unsigned short econet_gpio_pins[19];
+u8 econet_gpio_pins[19];
 	
 struct file_operations econet_fops = {
 	.open = econet_open,
@@ -164,7 +165,8 @@ void econet_set_dir(short d)
  */
 void econet_write_cr(unsigned short r, unsigned char d)
 {
-	unsigned long gpioval, gpiomask;
+	//unsigned long gpioval, gpiomask;
+	u32 gpioval, gpiomask;
 
 	if (r > 4)
 	{
@@ -236,7 +238,8 @@ void econet_write_cr(unsigned short r, unsigned char d)
 unsigned char econet_read_sr(unsigned short r)
 {
 	unsigned char d;
-	unsigned long gpioval, gpiomask;
+	//unsigned long gpioval, gpiomask;
+	u32 gpioval, gpiomask;
 
 	if (r > 4)
 	{
@@ -386,7 +389,8 @@ int econet_probe_adapter(void)
 short econet_gpio_init(void)
 {
 
-	unsigned long t; /* Variable to read / write GPIO registers in this function */
+	//unsigned long t; /* Variable to read / write GPIO registers in this function */
+	u32 t; /* Variable to read / write GPIO registers in this function */
 	unsigned short counter;
 	int err;
 
@@ -472,6 +476,13 @@ short econet_gpio_init(void)
 	INP_GPIO(ECONET_GPIO_PIN_ADDR + 1);
 	OUT_GPIO(ECONET_GPIO_PIN_ADDR);
 	OUT_GPIO(ECONET_GPIO_PIN_ADDR + 1);
+
+	/* THIS STOP EVERYTHING WORKING!
+	INP_GPIO(ECONET_GPIO_PIN_BOARDSEL);
+	INP_GPIO(ECONET_GPIO_PIN_BOARDSEL + 1);
+	OUT_GPIO(ECONET_GPIO_PIN_BOARDSEL);
+	OUT_GPIO(ECONET_GPIO_PIN_BOARDSEL + 1);
+	*/
 
 	INP_GPIO(ECONET_GPIO_PIN_RST);
 	OUT_GPIO(ECONET_GPIO_PIN_RST);
@@ -2417,7 +2428,7 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 			printk (KERN_INFO "ECONET-GPIO: ioctl(set stations) called\n");
 #endif
 			/* Copy station bitmap from user memory */
-			if ((!access_ok(arg, 8192)) || copy_from_user(econet_stations, (void *) arg, 8192))
+			if ((!access_ok((void __user *) arg, 8192)) || copy_from_user(econet_stations, (void *) arg, 8192))
 			{
 				printk (KERN_INFO "ECONET-GPIO: Unable to update station set.\n");
 				return -EFAULT;

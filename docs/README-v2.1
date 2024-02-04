@@ -3,7 +3,7 @@ AUN to Econet Bridge
 
 
 /*
-  (c) 2023 Chris Royle
+  (c) 2024 Chris Royle
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
@@ -34,6 +34,45 @@ The fileserver code in this repository would not have been possible to
 develop without sight of the code at github.com/stardot/ArduinoFilestore.
 I am told it is stardot.org.uk user @gazzaD - well, @gazzaD, thank you -
 I could not have done it without you.
+
+RELEASE NOTES FOR V2.1
+----------------------
+
+- Fileserver updates
+  - supports long filenames - but will cause display problems
+    for certain client machines depending on which FSOps the
+    client uses
+  - defaults to file handles with only 1 bit set for
+    compatibility with NFS 3. Previous behaviour can be re-enabled
+    if you are not using NFS 3 with *NETCONF (see below).
+  - Changing a password to something in quotes now works properly
+  - Allows a system user to change another user's password
+    with *SETPASS (see below)
+  - *RENAME now works if the fileserver storage area is mounted on an
+    NFS share.
+  - Translates '/' in Acorn filenames to '.' in the underlying
+    filesystem
+- Kernel module and the bridge supports all the immediate operations
+  which in fact use a 4-way handshake (e.g. OSPROC, USRPROC, JSR).
+- Bridge now has pool address translation enabled to facilitate
+  trunking of a significantly larger number of networks together
+  where most stations are clients rather than servers
+
+Roadmap to v2.2
+---------------
+
+- Possible kernel change so that 4-way handshakes do not complete
+with a final ACK from the bridge until it has had an ACK from the
+distant machine. This will generate 'Net error' at the local site
+if the distant machine is not there, rather than 'Not listening',
+but the latter cannot be generated without collecting the data
+phase of the 4-way handshake, which is needed to build the AUN
+type packets used for AUN stations / trunks.
+
+- Possible support for more than one bridge board on a single Pi
+by using two spare GPIOs for chip select. All of them will have
+to run the same network clock unless additional circuitry is added
+or an external clock is used.
 
 Introduction
 ------------

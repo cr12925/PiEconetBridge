@@ -52,6 +52,11 @@ void econet_flagfill(void);
 				writel(((~gpioset_value) & ECONET_GPIO_CLRMASK_ADDR), GPIO_PORT + GPCLR0); \
 				barrier()
 
+#define econet_set_board(x)	gpioset_value = (((y) << (ECONET_GPIO_PIN_BOARDSEL))); \
+				writel(gpioset_value, GPIO_PORT + GPSET0); \
+				writel(((~gpioset_value) & ECONET_GPIO_CLRMASK_BOARDSEL), GPIO_PORT + GPCLR0); \
+				barrier()
+
 #define econet_set_rw(x)	if (x)	writel(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPSET0)); \
 				else	writel(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPCLR0))
 

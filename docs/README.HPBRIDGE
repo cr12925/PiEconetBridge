@@ -1045,6 +1045,11 @@ Note this occurs on a specific trunk only. Your bridge will then announce
 network 7, rather than 6, to any other bridges it knows about except the one
 from which the original advert came.
 
+If you use pool address translation, translation occurs *before* the pool
+system when traffic arrives on the trunk, and vice versa when it leaves.
+However, it should be unnecessary to use both since the translation under
+this system will in reality never be seen by other hosts.
+
 Bridge firewalling
 ------------------
 
