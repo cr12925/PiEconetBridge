@@ -1924,6 +1924,9 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 
 			if (reply)
 			{
+
+				struct __eb_pool_host *h;
+
 				eb_debug (0, 2, "TRACE", "%-8s %3d.%3d Received trace request for known net %d, hop %d - %s (%s)", eb_type_str(source->type), p->p.srcnet, p->p.srcstn, net, hop + 1, reply_diags, final ? "last hop" : "intermediate hop");
 
 				reply->p.port = ECONET_TRACE_PORT;
@@ -1940,6 +1943,29 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 				reply->p.data[2] = net;
 				reply->p.data[3] = stn;
 				memcpy (&(reply->p.data[4]), reply_diags, strlen(reply_diags));
+				
+				// Undo pool nat if there is any...
+				
+				if (source->type == EB_DEF_WIRE && source->wire.pool)
+				{
+					h = eb_pool_find_addr_lock (source->wire.pool, reply->p.dstnet, reply->p.dststn, source);
+					if (h)
+					{
+						reply->p.dstnet = h->s_net;
+						reply->p.dststn = h->s_stn;
+					}
+				}
+				else if (source->type == EB_DEF_TRUNK && source->trunk.pool)
+				{
+					h = eb_pool_find_addr_lock (source->trunk.pool, reply->p.dstnet, reply->p.dststn, source);
+					if (h)
+					{
+						reply->p.dstnet = h->s_net;
+						reply->p.dststn = h->s_stn;
+					}
+
+				}
+
 				
 				eb_enqueue_input (source, reply, strlen(reply_diags) + 4);
 	
