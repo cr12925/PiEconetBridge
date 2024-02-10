@@ -659,6 +659,19 @@ void fs_make_mdfs_pw_file(int server)
 
 			bytecount = 0;
 
+			total = 0;
+
+			while (bytecount < 3)
+			{
+				total += ((mu[dircounter].offset_root[bytecount] << (8 * bytecount)) + (do_bytes[bytecount] << (8 * bytecount)));
+				bytecount++;
+			}
+
+			mu[dircounter].offset_root[0] = (total & 0xFF);
+			mu[dircounter].offset_root[1] = (total & 0xFF00) >> 8;
+			mu[dircounter].offset_root[2] = (total & 0xFF0000) >> 16;
+
+			/* OLD CODE 
 			while (bytecount < 4)
 			{
 				total = mu[dircounter].offset_root[bytecount] + do_bytes[bytecount];
@@ -667,6 +680,7 @@ void fs_make_mdfs_pw_file(int server)
 					mu[dircounter].offset_root[bytecount]++; // Carry
 				bytecount++;
 			}
+			*/
 		}
 
 		if (
@@ -682,6 +696,19 @@ void fs_make_mdfs_pw_file(int server)
 
 			bytecount = 0;
 
+			total = 0;
+
+			while (bytecount < 3)
+			{
+				total += ((mu[dircounter].offset_lib[bytecount] << (8 * bytecount)) + (do_bytes[bytecount] << (8 * bytecount)));
+				bytecount++;
+			}
+
+			mu[dircounter].offset_lib[0] = (total & 0xFF);
+			mu[dircounter].offset_lib[1] = (total & 0xFF00) >> 8;
+			mu[dircounter].offset_lib[2] = (total & 0xFF0000) >> 16;
+
+			/* OLD CODE 
 			while (bytecount < 4)
 			{
 				total = mu[dircounter].offset_lib[bytecount] + do_bytes[bytecount];
@@ -690,6 +717,7 @@ void fs_make_mdfs_pw_file(int server)
 					mu[dircounter].offset_lib[bytecount]++; // Carry
 				bytecount++;
 			}
+			*/
 		}
 
 		dircounter++;
@@ -2903,7 +2931,7 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 
 				// Make MDFS password file
 
-				// fs_make_mdfs_pw_file(fs_count); // Causing problems in the directory build
+				fs_make_mdfs_pw_file(fs_count); // Causing problems in the directory build
 
 				// Now load up the discs. These are named 0XXX, 1XXX ... FXXXX for discs 0-15
 				while ((entry = readdir(d)) && discs_found < ECONET_MAX_FS_DISCS)
