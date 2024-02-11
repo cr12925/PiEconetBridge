@@ -76,7 +76,7 @@ short fs_netconf_regex_initialized = 0;
 
 #ifdef BRIDGE_V2
 	extern struct __eb_device * eb_find_station (uint8_t, struct __econet_packet_aun *);
-	extern uint8_t eb_enqueue_output (struct __eb_device *, struct __econet_packet_aun *, uint16_t);
+	extern uint8_t eb_enqueue_output (struct __eb_device *, struct __econet_packet_aun *, uint16_t, struct __eb_device *);
 	extern void eb_add_stats (pthread_mutex_t *, uint64_t *, uint16_t);
 #else
 	extern int aun_send (struct __econet_packet_aun *, int);
@@ -1004,7 +1004,7 @@ int fs_aun_send(struct __econet_packet_udp *p, int server, int len, unsigned sho
 	// Put the enqueue call here
 	
 	if (a.p.dstnet == 0)	a.p.dstnet = a.p.srcnet;
-	eb_enqueue_output (fs_devices[server], &a, len);
+	eb_enqueue_output (fs_devices[server], &a, len, NULL);
 	pthread_cond_signal(&(fs_devices[server]->qwake));
 	eb_add_stats (&(fs_devices[server]->statsmutex), &(fs_devices[server]->b_out), len);
 

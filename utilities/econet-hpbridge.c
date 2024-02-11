@@ -1257,7 +1257,7 @@ struct __eb_device * eb_find_station_internal (uint8_t net, uint8_t stn)
 
 		if (result->net != net) // This is a secondary network on the same device - don't look for diverts
 		{
-			eb_debug (0, 4, "BRIDGE" "%-8s %3d.%3d eb_find_station() not searching diverts - net %d is different to device net %d", "", net, stn, net, result->net);
+			eb_debug (0, 4, "BRIDGE", "%-8s %3d.%3d eb_find_station() not searching diverts - net %d is different to device net %d", "", net, stn, net, result->net);
 			return result;
 		}
 
@@ -3494,6 +3494,140 @@ void beeb_print (uint8_t y, uint8_t x, char *s) /* Display string in beebmem at 
 
 }
 
+// Make a fast_text structure with the given string. Cut off at 32 chars if too long - caller should not do that
+struct __eb_fast_text *eb_fast_make_text(char *s)
+{
+	struct __eb_fast_text	*t;
+	t = eb_malloc(__FILE__, __LINE__, "FAST", "Allocate fast output text structure", sizeof(struct __eb_fast_text));
+	if (!t)
+		eb_debug (1, 0, "FAST", "Failed to malloc FAST text structure in eb_fast_do_output()");
+	t->next = NULL;
+
+	if (strlen(s) > 32)
+		strncpy(t->text, s, 32);
+	else	strcpy(t->text, s);
+
+	return t;
+}
+
+// Put an eb_fast_text structure on the end of the fast output queue for device d
+void eb_fast_enqueue(struct __eb_device *d, struct __eb_fast_text *f)
+{
+	struct __eb_fast_text	*p;
+
+	p = d->local.fast_output;
+
+	if (!p)
+		d->local.fast_output = f;
+	else
+	{
+		while (p)
+		{
+			if (p->next)
+				p = p->next;
+			else
+			{
+				p->next = f;
+				p = NULL;
+			}
+		}
+
+	}
+}
+
+// Put output on the queue. Don't need the mutex because
+// it will have been locked on return from cond_wait in the handler.
+
+void eb_fast_do_output (struct __eb_device *d, char *s)
+{
+
+	struct __eb_fast_text	*t;
+	char 			*ptr;
+
+	ptr = s;
+
+	if (strlen(s) == 0) // Signal "Ready for input"
+	{
+		t = eb_fast_make_text(s);
+		eb_fast_enqueue(d, t);
+	}
+	else
+	{
+		while (strlen(ptr) > 0)
+		{
+			char	text[33];
+
+			if (strlen(ptr) > 32)
+			{
+				memcpy(text, ptr, 32);
+				text[32] = 0;
+				ptr += 32;
+			}
+			else
+			{
+				strcpy(text, ptr);
+				ptr += strlen(text);
+			}
+
+			t = eb_fast_make_text(text);
+			eb_fast_enqueue(d, t);
+		}
+	}
+
+
+
+}
+
+static void * eb_fast_handler (void *device)
+{
+	struct __eb_device		*d = device;
+
+	eb_debug (0, 2, "FAST", "FAST                  %3d.%3d Initializing", d->net, d->local.stn);
+
+	pthread_mutex_lock (&(d->local.fast_io_mutex));
+	eb_debug (0, 3, "FAST", "FAST                  %3d.%3d IO Mutex obtained", d->net, d->local.stn);
+
+	d->local.fast_thread_alive = 1;
+	// Don't release mutex - we're about to wait on it as part of the cond wait
+
+	eb_debug (0, 3, "FAST", "FAST                  %3d.%3d Condition wait", d->net, d->local.stn);
+	pthread_cond_wait(&(d->local.fast_wake), &(d->local.fast_io_mutex));
+
+	eb_debug (0, 3, "FAST", "FAST                  %3d.%3d Woken", d->net, d->local.stn);
+fast_handler_reset:
+	eb_fast_do_output (d, "\x0C*** Pi Econet Bridge Console\r\n\nMain Menu\r\n---------\r\n\n");
+	eb_fast_do_output (d, "  A: Alter fileserver parameters\r\n");
+	eb_fast_do_output (d, "  S: Shut down file server\r\n");
+	eb_fast_do_output (d, "  B: Boot/Restart file server\r\n");
+	eb_fast_do_output (d, "  R: Rename disc (whilst shut down)\r\n");
+	eb_fast_do_output (d, "  C: Format new disc (whilst shut down)\r\n");
+	eb_fast_do_output (d, "  P: Clear SYST pw (requires re-start)\r\n");
+	eb_fast_do_output (d, "  X: Shut down the Pi Bridge\r\n"); // Only display if has BRIDGE priv
+
+	eb_fast_do_output (d, "\r\n"); // Only display if has BRIDGE priv
+
+	eb_debug (0, 3, "FAST", "FAST                  %3d.%3d Output pointer = %p", d->net, d->local.stn, d->local.fast_output);
+
+	eb_debug (0, 3, "FAST", "FAST                  %3d.%3d Initial banner sent", d->net, d->local.stn);
+	// Mutex still locked here prior to first cond_wait in the while()
+
+	while (1) { 
+       
+		eb_debug (0, 3, "FAST", "FAST                  %3d.%3d Condition wait", d->net, d->local.stn);
+		pthread_cond_wait(&(d->local.fast_wake), &(d->local.fast_io_mutex));
+
+		eb_debug (0, 3, "FAST", "FAST                  %3d.%3d Woken", d->net, d->local.stn);
+		
+		if (d->local.fast_reset) 
+			goto fast_handler_reset; // Kludgy but ok.
+
+		// Mutex will be grabbed, so don't need to grab it again prior to waiting
+	} 
+
+	return NULL;
+
+}
+
 /* Generic inter-device transmission loop
  */
 
@@ -3652,9 +3786,24 @@ static void * eb_device_despatcher (void * device)
 				eb_debug (0, 2, "IPGW", "%-8s %3d.%3d Tunnel %s opened for IPGW", eb_type_str(d->type), d->net, d->local.stn, d->local.ip.tunif);
 
 				d->local.ip.socket = handle;
-	
 				
 			}
+
+			// Initialize *FAST handler
+
+			d->local.fastbit = 0;
+			if (pthread_mutex_init(&(d->local.fast_io_mutex), NULL) == -1)
+				eb_debug (1, 0, "FAST", "Cannot initialize IO mutex");
+
+			d->local.fast_output = d->local.fast_input = NULL; 
+			d->local.fast_thread_alive = 0;
+			d->local.fast_reset = 0;
+			if (pthread_cond_init (&(d->local.fast_wake), NULL) == -1)
+				eb_debug (1, 0, "FAST", "Failed to initialize fast_wake pthread_cond");
+
+			if (pthread_create(&(d->local.fast_thread), NULL, eb_fast_handler, d))
+				eb_debug(1, 0, "DESPATCH", "Cannot start *FAST handler thread for station %d.%d", d->net, d->local.stn);
+			pthread_detach(d->local.fast_thread);
 			
 		} break;
 
@@ -4503,6 +4652,7 @@ static void * eb_device_despatcher (void * device)
 
 							// First, plonk in on the input queue, but only if it's not AUN (because AUN traffic goes directly from here via an exposure if there is on)
 
+							// This next line sometimes coredumps...?
 							eb_debug (0, 4, "DESPATCH", "%-8s %3d     Output queue - examining packetqueue at %p; destination device %p (%s)", eb_type_str(d->type), d->net, p, o->destdevice, eb_type_str(o->destdevice->type));
 
 							if (p->p->p.port == 0x99 && p->p->p.aun_ttype == ECONET_AUN_DATA) // Track fileservers
@@ -5164,6 +5314,143 @@ static void * eb_device_despatcher (void * device)
 						else if (p->p->p.aun_ttype == ECONET_AUN_NAK || p->p->p.aun_ttype == ECONET_AUN_ACK) // Don't pass these to local devices
 						{
 			
+						}
+						else if (p->p->p.aun_ttype == ECONET_AUN_DATA && p->p->p.port == 0x00 && p->p->p.ctrl == 0x84) // USRPROC Immediate to a local emulator
+						{
+							struct __econet_packet_aun *reply;
+
+							// Test
+							//
+
+							reply = eb_malloc (__FILE__, __LINE__, "FAST", "Allocate FAST reply packet", ECONET_MAX_PACKET_SIZE);
+
+							if (!reply)
+								eb_debug (1, 0, "BRIDGE", "Unable to malloc() new USRPROC reply packet");
+
+							reply->p.srcnet = d->net;
+							reply->p.srcstn = d->local.stn;
+							reply->p.dstnet = p->p->p.srcnet;
+							reply->p.dststn = p->p->p.srcstn;
+							reply->p.aun_ttype = ECONET_AUN_DATA;
+							reply->p.port = 0xA0;
+							reply->p.ctrl = 0x80 | d->local.fastbit;
+							reply->p.seq = get_local_seq(d->net, d->local.stn);
+							
+							// Check user logged on and has the BRIDGE priv - TODO!
+
+							if (p->p->p.data[4] == 0x00) // *FAST New Connection
+							{
+								eb_debug (0, 2, "LOCAL", "Local    %3d.%3d from %3d.%3d New *FAST connection",
+									p->p->p.dstnet, p->p->p.dststn,
+									p->p->p.srcnet, p->p->p.srcstn);
+
+								pthread_mutex_lock (&(d->local.fast_io_mutex));
+								d->local.fastbit = 0x00;
+								d->local.fast_reset = 0x01; // Please re-set
+
+								// Clear all the output and input
+								
+								if (d->local.fast_output)
+								{
+									struct __eb_fast_text *p, *q;
+
+									p = d->local.fast_output;
+
+									while (p)
+									{
+										q = p->next;
+
+										eb_free (__FILE__, __LINE__, "FAST", "Freeing unused output text entry", p);
+
+										p = q;
+
+									}
+
+									d->local.fast_output = NULL;
+								}
+
+								if (d->local.fast_input)
+								{
+									struct __eb_fast_text *p, *q;
+
+									p = d->local.fast_input;
+
+									while (p)
+									{
+										q = p->next;
+
+										eb_free (__FILE__, __LINE__, "FAST", "Freeing unused input text entry", p);
+
+										p = q;
+									}
+
+									d->local.fast_input = NULL;
+								}
+
+								pthread_mutex_unlock (&(d->local.fast_io_mutex));
+
+								pthread_cond_signal (&(d->local.fast_wake)); // Wake up the FAST handler - it should find its reset and ... well, reset.
+
+
+							}
+							if (p->p->p.data[4] == 0x01) // *FAST Second packet - We think this is "Ready for output"
+							{
+
+								// If there's an active thread, see if it has any output queued. If so, send it
+								// in not more than 32 byte chunks.
+								
+								eb_debug (0, 3, "LOCAL", "Local    %3d.%3d from %3d.%3d *FAST display acknowledge",
+									p->p->p.dstnet, p->p->p.dststn,
+									p->p->p.srcnet, p->p->p.srcstn);
+
+								// Since we've received an ACK (or we think that's what this is), 
+								// Take the last string entry off the front off the queue and
+								// Send the next one.
+								// If the next one is flagged as "Wait for input", send USRPROC to 
+								// client.
+								// If empty, go to sleep.
+
+								pthread_mutex_lock (&(d->local.fast_io_mutex));
+
+								if (d->local.fast_output) // Output to send
+								{
+									if (strlen(d->local.fast_output->text)) // Not 0-length, which signals "Tell other end to wait for input" - at least we think that's how it might work	
+									{
+										struct __eb_fast_text	*old;
+
+										strcpy((char *) reply->p.data, (char *) d->local.fast_output->text);
+										eb_enqueue_output (d, reply, strlen((char *) reply->p.data), NULL);
+										new_output = 1;
+										d->local.fastbit ^= 0x01; // Toggle bit
+										// Not sure about this. Maybe we should wait for an ack... But then maybe the USRPROC 0x01 is "Send more output" ?
+
+										old = d->local.fast_output;
+										d->local.fast_output = d->local.fast_output->next;
+										eb_free(__FILE__, __LINE__, "FAST", "Freeing *FAST output text structure", old);
+
+									}
+									else // Send a USRPROC to wake up text input (but what value??)
+									{
+										reply->p.port = 0x00;
+										reply->p.ctrl = 0x84;
+										reply->p.data[0] = 0xFF;
+										reply->p.data[1] = 0xFF;
+										reply->p.data[2] = 0xFF;
+										reply->p.data[3] = 0xFF;
+										reply->p.data[4] = d->local.stn; // We may have to de-pool these / convert to zero etc. I think it embeds net/stn numbers in the protocol?
+										reply->p.data[5] = d->net;
+										reply->p.data[6] = 0x80;
+										eb_enqueue_output (d, reply, 7, NULL);
+										new_output = 1;
+									}
+								}
+
+								pthread_mutex_unlock (&(d->local.fast_io_mutex));
+							}
+							// And we'll need something here when we receive input... Lock the io Mutex and put it on the input queue, then wake up the thread
+
+							eb_free (__FILE__, __LINE__, "FAST", "Freeing *FAST reply packet", reply);
+
 						}
 						else if (p->p->p.port == 0x00 && p->p->p.ctrl == 0x88 && p->p->p.aun_ttype == ECONET_AUN_IMM)
 						{

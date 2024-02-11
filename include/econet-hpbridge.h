@@ -330,6 +330,18 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			struct __eb_fileserver	fs; // Not a pointer, this one
 			struct __eb_ipgw	ip; // Not a pointer, this one
 			uint32_t		seq; // AUN sequence number
+			// Stuff to handle *FAST to a local host
+			uint8_t			fastbit; // Oscillates 0, 1 on transmissions from the *FAST handler
+			pthread_t		fast_thread; // Thread that is operating the *FAST handler
+			pthread_mutex_t		fast_io_mutex; // Governs access to the input/output variables below
+			struct __eb_fast_text {
+				struct __eb_fast_text	*next;
+				char			text[33]; // Null terminated text - Max is 32
+			} 			 *fast_output; // From the *FAST thread
+			struct __eb_fast_text	*fast_input;
+			uint8_t			fast_thread_alive; // despatcher sets to 0; *FAST thread sets to 1 - so we can tell it's ready
+			uint8_t			fast_reset; // Set to 1 when we get a new connection
+			pthread_cond_t		fast_wake;
 		} local;
 
 		// OLD DISUSED struct __eb_aun_local	exposure; // Info where this is an exposed AUN connection
@@ -338,7 +350,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 		struct __eb_aun_remote *aun; // Address of struct in the list of remote AUN stations, kept in order of s_addr
 
 		struct { // Null driver - has diverts only. Exists so that the network gets advertized
-			struct __eb_device	*divert[255]; // Pointers to diverted stations. E.g. if station 1.254 on the wire is actually a local station, this will point to its __eb_device. On the NULL device, this means we have a virtual network that we might advertise to trunks etc., but there is no real device - just some (not necessarily all) stations which exist as diverts.
+			struct __eb_device	*divert[255]; // Pointers to diverted stations. E.g. if station 1.254 on the wire is actually a local station, this will point to its __eb_device. On the NULL device, this means we have a virtual network that we might advertise to trunks etc., but there is no real device - just some (not necessarily all stations which exist as diverts.
 		} null;
 
 		struct { // Pool
