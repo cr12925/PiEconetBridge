@@ -1910,6 +1910,8 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 					snprintf(reply_diags, 383, "%s %03d.%03d via Local Emulation", hostname, net, stn); break;
 				case EB_DEF_PIPE:
 					snprintf(reply_diags, 383, "%s %03d.%03d via Local Pipe %s", hostname, net, stn, route->pipe.base); break;
+				case EB_DEF_POOL:
+					snprintf(reply_diags, 383, "%s %03d.%03d via Pool", hostname, net, stn); break;
 				case EB_DEF_AUN:
 				{
 					if (route->aun->port == -1)
@@ -1917,7 +1919,7 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 					else
 						snprintf(reply_diags, 383, "%s %03d.%03d via AUN at %08X:%d", hostname, net, stn, route->aun->addr, route->aun->port); 
 				} break;
-				default:	snprintf(reply_diags, 383, "%s %03d Unkonwn destination type", hostname, net); break;
+				default:	snprintf(reply_diags, 383, "%s %03d Unknnwn destination type", hostname, net); break;
 			}
 
 			reply = eb_malloc (__FILE__, __LINE__, "TRACE", "Allocating reply packet for a trace query", 12 + strlen(reply_diags) + 4);
