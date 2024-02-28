@@ -106,6 +106,7 @@ short fs_open_interlock(int, unsigned char *, unsigned short, unsigned short);
 void fs_close_interlock(int, unsigned short, unsigned short);
 
 void fs_write_readable_config(int);
+void fs_bye(int, unsigned char, unsigned char, unsigned char, unsigned short);
 
 // Parser
 //#define FS_PARSE_DEBUG 1
@@ -149,6 +150,9 @@ uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 #define FS_PRIV_USER 0x01
 #define FS_PRIV_INVALID 0x00
 
+// priv2 bits
+#define FS_PRIV2_BRIDGE 0x01 /* Can access *FAST */
+
 // MDFS privilege bits in MDFS format
 #define MDFS_PRIV_PWUNLOCKED 0x01
 #define MDFS_PRIV_SYST 0x02
@@ -171,6 +175,9 @@ uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 
 	struct __eb_device 	*fs_devices[ECONET_MAX_FS_SERVERS];
 #endif
+
+uint8_t	fs_enabled[ECONET_MAX_FS_SERVERS+1];
+uint8_t fs_enablement = 0; // Set to 1 when fs_enabled has been initialized
 
 struct {
 	uint8_t	fs_acorn_home; // != 0 means implement acorn home directory ownership semantics
@@ -196,8 +203,8 @@ struct fs_user {
 	uint8_t		unused2[16];
 	unsigned char home_disc;
 	unsigned char year, month, day, hour, min, sec; // Last login time
-	unsigned char groupmap[8]; // 1 bit for each of 256 groups
-	char unused[1];
+	uint8_t		priv2;
+	char unused[8];
 } users[ECONET_MAX_FS_SERVERS+1][ECONET_MAX_FS_USERS];
 // MAX_FS_SERVERS+1 is because we use the last entry to sort a real server entry to produce an MDFS format password file.
 // We don't use it for live data
@@ -2634,10 +2641,43 @@ void fs_write_user(int server, int user, unsigned char *d) // Writes the 256 byt
 
 }
 
+// Clear the SYST password on a given FS (used from the *FAST handler in the bridge)
+uint8_t fs_clear_syst_pw(int fs)
+{
+
+	int	count;
+	uint8_t	ret = 0;
+
+	for (count = 0; count < ECONET_MAX_FS_USERS; count++)
+	{
+		if (!strncmp(users[fs][count].username, "SYST      ", 10))
+		{
+			memset(users[fs][count].password, 32, 10);
+			fs_write_user(fs, count, (char *) &(users[fs][count]));
+			ret = 1;
+		}
+	}
+
+	return ret;
+}
+
+// Tell the bridge if a particular FS is active
+
+uint8_t fs_is_active(int fs)
+{
+	if (!fs_enablement) // Theoreticaly since all FSs get started when the bridge starts, this should never evaluate to true, but just in case...
+		return 0;
+	else
+		return fs_enabled[fs];
+}
+
+// Initialize a fileserver. Return its index into fs_config etc.
+// unless fs_number is >=0, in which case initialize it with that fs number.
+
 #ifndef BRIDGE_V2
 int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
 #else
-int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char stn, char *serverparam)
+int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char stn, char *serverparam, int fs_number)
 #endif
 {
 	
@@ -2716,7 +2756,23 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 	
 // END OF WILDCARD TEST HARNESS
 
+	if ((fs_number >= 0)&& fs_enablement && fs_enabled[fs_number]) // If we are being asked to enable a specific fileserver (which will have been initialized once already), and fileservers have been initialized at all (fs_enablement, which means fs_enabled[] has been zerod-out), and the selected FS is already enabled, return a fail
+		return -1;
+
+	if (fs_number >= 0)
+		fs_count = fs_number;
+
+	fs_enabled[fs_count] = 0; // Flag disabled in case initialization fails
+
 	fs_debug (0, 2, "Attempting to initialize server %d on %d.%d at directory %s", fs_count, net, stn, serverparam);
+
+	// First see if we need to zero-out fs_enabled
+	
+	if (!fs_enablement)
+	{
+		memset(fs_enabled, 0, sizeof(fs_enabled));
+		fs_enablement = 1;
+	}
 
 	// If there is a file in this directory called "auto_inf" then we
 	// automatically turn on "-x" mode.  This should work transparently
@@ -2747,6 +2803,7 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 	if (serverparam[0] != '/')
 	{
 		fs_debug (0, 1, "Bad directory name %s", serverparam);
+		fs_count = old_fs_count;
 		return -1;
 	}
 
@@ -3011,7 +3068,9 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 							// Load it and complete initialization
 							fread (&(groups[fs_count]), 2560, 1, group);
 
-							fs_count++; // Only now do we increment the counter, when everything's worked
+							fs_enabled[fs_count] = 1; // Flag as active
+
+							if (fs_number < 0) fs_count++; // Only now do we increment the counter, when everything's worked // And we do it if we haven't got a specific FS number to allocate
 						}
 					}
 					else fs_debug (0, 1, "Server %d - failed to initialize - cannot initialize or find Groups file!", fs_count);
@@ -3028,8 +3087,16 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 		
 	}
 	
-	if (fs_count == old_fs_count) // We didn't initialize
+	/* if (fs_count == old_fs_count) // We didn't initialize
 		return -1;
+		*/
+
+	if (!fs_enabled[((fs_number >= 0) ? fs_number : old_fs_count)]) // We didn't initialize
+	{
+		if (fs_number >= 0)
+			fs_count = old_fs_count;
+		return -1;
+	}
 	else	
 	{
 
@@ -3079,18 +3146,52 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 		/* Prime fs_devices */
 		
 		fs_devices[old_fs_count] = device;
-#endif
 
-#ifdef BRIDGE_V2
-		fs_debug (0, 2, "Server %d successfully initialized on station %d.%d", old_fs_count, device->net, stn);
+		fs_debug (0, 2, "Server %d successfully initialized on station %d.%d", (fs_number >= 0) ? fs_number : old_fs_count, device->net, stn);
 #else
 		fs_debug (0, 1, "Server %d successfully initialized on station %d.%d", old_fs_count, net, stn);
 #endif
 
 		fs_write_readable_config(old_fs_count);
 
-		return old_fs_count; // The index of the newly initialized server
+		if (fs_number >= 0)
+		{
+			fs_count = old_fs_count;
+			return fs_number;
+		}
+		else
+		{
+			return old_fs_count; // The index of the newly initialized server
+		}
 	}
+}
+
+// Shut down a particular fileserver and flag as inactive.
+// When implemeted, we can use fs_initialize to bring it back to life
+
+void fs_shutdown (int fs)
+{
+
+	int		count;
+
+	// Flag server inactive
+	
+	fs_enabled[fs] = 0;
+
+	// Forcibly log everyone off
+	
+	for (count = 0; count < ECONET_MAX_FS_USERS; count++)
+	{
+		if (active[fs][count].stn) // In use
+		{
+			//fs_debug (0, 2, "Logging off user index entry %d", count);
+			fs_bye (fs, 0, active[fs][count].net, active[fs][count].stn, 0);
+		}
+	}
+
+	fs_debug (0, 1, "Server %d has shut down", fs);
+	return;
+
 }
 
 // Used when we must be able to specify a ctrl byte
@@ -3237,6 +3338,7 @@ void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned ch
 
 		fs_aun_send(&reply, server, 2, net, stn);
 	}
+
 }
 
 void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, unsigned short net, unsigned short stn, unsigned char *params)
@@ -7969,6 +8071,11 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 
 	struct __econet_packet_udp r;
 
+	// If the server is not enabled, return and ignore the packet
+	
+	if (!fs_enabled[server])
+		return;
+
 	// Do you know this man?
 
 	if (		(fs_bulk_ports[server][port].handle != -1) && 
@@ -8280,6 +8387,11 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 	unsigned char fsop, reply_port; 
 	unsigned int userid;
 	int active_id;
+
+	// If server disabled, return without doing anything
+	
+	if (!fs_enabled[server])
+		return;
 
 	if (datalen < 1) 
 	{
@@ -9828,6 +9940,49 @@ void eb_handle_fs_traffic (uint8_t server, struct __econet_packet_aun *p, uint16
 
 }
 
+// Used for *FAST - NB, doesn't rename the directory: the *FAST handler has to do that.
+
+void fs_set_disc_name (uint8_t server, uint8_t disc, unsigned char *discname)
+{
+
+	char	old_dirname[1024], new_dirname[1024];
+
+	if (disc <= ECONET_MAX_FS_DISCS)
+	{
+		sprintf (new_dirname, "%s/%1d%s", fs_stations[server].directory, disc, discname);
+		sprintf (old_dirname, "%s/%1d%s", fs_stations[server].directory, disc, fs_discs[server][disc].name);
+
+		if (fs_discs[server][disc].name[0]) // Exists - rename it
+			rename (old_dirname, new_dirname);
+		else // Create it
+			mkdir (new_dirname, 0660);
+
+		memcpy(&(fs_discs[server][disc].name), discname, 17);
+	}
+
+
+	return;
+}
+
+// Used for *FAST
+uint8_t	fs_get_maxdiscs()
+{
+	return ECONET_MAX_FS_DISCS;
+}
+
+// Used for *FAST
+void fs_get_disc_name (uint8_t server, uint8_t disc, unsigned char *discname)
+{
+	if (disc <= ECONET_MAX_FS_DISCS)
+		memcpy(discname, &(fs_discs[server][disc].name), 17);
+	else
+		*discname = 0;
+
+	return;
+
+}
+
+// used for *VIEW
 uint8_t fs_writedisclist (uint8_t server, unsigned char *addr)
 {
 
