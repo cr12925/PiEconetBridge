@@ -9955,7 +9955,7 @@ void fs_set_disc_name (uint8_t server, uint8_t disc, unsigned char *discname)
 		if (fs_discs[server][disc].name[0]) // Exists - rename it
 			rename (old_dirname, new_dirname);
 		else // Create it
-			mkdir (new_dirname, 0660);
+			mkdir (new_dirname, 0755);
 
 		memcpy(&(fs_discs[server][disc].name), discname, 17);
 	}
