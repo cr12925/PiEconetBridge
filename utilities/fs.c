@@ -4610,17 +4610,17 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		}
 
 		r.p.data[replylen++] = 0; // Undefined on this command
-		//r.p.data[replylen++] = 10; // Dir name length
-		//r.p.data[replylen++] = ECONET_MAX_FILENAME_LENGTH; // Dir name length - 20231230 This is meant to be 0!
-		r.p.data[replylen++] = 0; // Undefined on this command
+		r.p.data[replylen++] = 10; // Dir name length - Sounds like FSOp 18cmd6 can only take 10 characters
+		//r.p.data[replylen++] = ECONET_MAX_FILENAME_LENGTH; // Dir name length - 20231230 This is meant to be 0! // Seems to break things though....
+		//r.p.data[replylen++] = 0; // Undefined on this command
 
 		memset ((char *) &(r.p.data[replylen]), 32, ECONET_MAX_FILENAME_LENGTH); // Pre-fill with spaces in case this is the root dir
 	
 		if (p.npath == 0) // Root
 		{
-			//strncpy((char * ) &(r.p.data[replylen]), (const char * ) "$         ", 11);
-			r.p.data[replylen] = '$';
-			r.p.data[replylen+ECONET_MAX_FILENAME_LENGTH+1] = '\0';
+			strncpy((char * ) &(r.p.data[replylen]), (const char * ) "$         ", 11);
+			//r.p.data[replylen] = '$';
+			//r.p.data[replylen+ECONET_MAX_FILENAME_LENGTH+1] = '\0';
 		}
 		else
 		{
