@@ -8026,6 +8026,7 @@ Queuing management options (usually need not be adjusted):\n\
 --trunk-keepalive-interval n\tSeconds between trunk keepalive packets\n\
 --trunk-dead-interval n\tSeconds without reception before trunk considered dead\n\
 --pool-dead-interval n\tSeconds before a dynamic pool entry times out as idle (Current %d)\n\
+--enable-syst-fast\tEnable bridge control privilege for SYST on all fileservers (Once only)\n\
 \n\
 Statistics port control:\n\
 \n\
