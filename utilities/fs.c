@@ -73,11 +73,13 @@
 
 regex_t fs_netconf_regex_one;
 short fs_netconf_regex_initialized = 0;
+uint8_t fs_set_syst_bridgepriv = 0; // If set to 1 by the HP Bridge, then on initialization, each FS will enable the bridge priv on its SYST user
 
 #ifdef BRIDGE_V2
 	extern struct __eb_device * eb_find_station (uint8_t, struct __econet_packet_aun *);
 	extern uint8_t eb_enqueue_output (struct __eb_device *, struct __econet_packet_aun *, uint16_t, struct __eb_device *);
 	extern void eb_add_stats (pthread_mutex_t *, uint64_t *, uint16_t);
+	extern void eb_fast_priv_notify (struct __eb_device *, uint8_t, uint8_t, uint8_t);
 #else
 	extern int aun_send (struct __econet_packet_aun *, int);
 	unsigned short fs_quiet = 0, fs_noisy = 0;
@@ -137,7 +139,11 @@ uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 #define ECONET_MAX_PATH_ENTRIES 30
 #define ECONET_MAX_PATH_LENGTH ((ECONET_MAX_PATH_ENTRIES * (ECONET_ABS_MAX_FILENAME_LENGTH + 1)) + 1)
 
+// Definitions common to HP Bridge and FS
+#include "../include/econet-fs-hpbridge-common.h"
+
 // PiFS privilege bytes
+
 // MDFS-related privs in our native format
 #define FS_PRIV_PERMENABLE 0x80
 #define FS_PRIV_NOSHORTSAVE 0x40
@@ -424,6 +430,18 @@ void fs_debug (uint8_t death, uint8_t level, char *fmt, ...)
 #endif
 
 	va_end(ap);
+}
+
+void fs_get_parameters (uint8_t server, uint32_t *params, uint8_t *fnlength)
+{
+
+}
+
+void fs_set_parameters (uint8_t server, uint32_t params, uint8_t fnlength)
+{
+
+
+
 }
 
 // Copy src to dest length len, where src is space padded
@@ -3143,6 +3161,19 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 */
 
 #ifdef BRIDGE_V2
+		/* If told to, set bridge priv on SYST user */
+
+		if (fs_set_syst_bridgepriv)
+		{
+			int	userid;
+
+			if ((userid = fs_get_uid(old_fs_count, "SYST")) >= 0)
+			{
+				users[old_fs_count][userid].priv2 |= FS_PRIV2_BRIDGE;
+				fs_write_user(old_fs_count, userid, (char *) &(users[old_fs_count][userid]));	
+			}
+		}
+
 		/* Prime fs_devices */
 		
 		fs_devices[old_fs_count] = device;
@@ -3301,16 +3332,6 @@ void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned ch
 	// Close active files / handles
 
 	
-/*
-	count = 1;
-	while (count < FS_MAX_OPEN_FILES)
-	{
-		if (active[server][active_id].fhandles[count].handle != -1 && active[server][active_id].fhandles[count].is_dir)
-			fs_deallocate_user_dir_channel(server, active_id, count);
-		count++;
-	}
-*/
-
 	count = 1;
 	while (count < FS_MAX_OPEN_FILES)
 	{
@@ -3327,6 +3348,13 @@ void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned ch
 	//memset(&(active[fs_stn_logged_in(server, net, stn)]), 0, sizeof(active) / ECONET_MAX_FS_SERVERS);
 	active[server][active_id].stn = active[server][active_id].net = 0; // Flag unused
 	
+#ifdef BRIDGE_V2
+	// Notify bridge definitely no longer bridge priv user, if it ever was one
+
+	if (do_reply) // If this was an active log out, clear the FAST priv bit. Otherwise don't in case the user has shut the FS down and needs to get back in to restart it!
+		eb_fast_priv_notify(fs_devices[server], net, stn, 0);
+			
+#endif
 
 	if (do_reply) // != 0 if we need to send a reply (i.e. user initiated bye) as opposed to 0 if this is an internal cleardown of a user
 	{
@@ -3483,6 +3511,11 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 
 	unsigned short counter, stringptr;
 	unsigned short found = 0;
+
+#ifdef BRIDGE_V2
+	// Notify not privileged on any login attempt, successful or otherwise. It'll get set to 1 below if need be
+	eb_fast_priv_notify(fs_devices[server], net, stn, 0);
+#endif
 
 	fs_toupper(command);
 	memset (username, ' ', 10);
@@ -3771,6 +3804,16 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 				else
 					sprintf(active[server][usercount].lib_dir_tail, "%-80s", p.path[p.npath-1]); // WAS 10
 
+#ifdef BRIDGE_V2
+				// Notify bridge if we have a Bridge priv user
+
+				if (users[server][counter].priv2 & FS_PRIV2_BRIDGE) // Bridge priv user
+				{
+					eb_fast_priv_notify(fs_devices[server], net, stn, 1);
+					fs_debug (0, 1, "%12sfrom %3d.%3d User %s has bridge privileges", "", net, stn, username);
+				}
+			
+#endif
 				fs_debug (0, 1, "            from %3d.%3d Login as %s, index %d, id %d, disc %d, URD %s, CWD %s, LIB %s, priv 0x%02x", net, stn, username, usercount, active[server][usercount].userid, active[server][usercount].current_disc, home, home, lib, active[server][usercount].priv);
 
 				// Tell the station
@@ -9277,7 +9320,61 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					}
 
 				}
-				//else if (!strncasecmp("NEWUSER ", (const char *) command, 8)) // Create new user
+#ifdef BRIDGE_V2
+				else if (fs_parse_cmd(command, "BRIDGEUSER", 7, &param))
+				{
+					char 		parameters[255];
+					uint8_t		count, setmode;
+					int		userid;
+
+					fs_debug (0, 1, "%12sfrom %3d.%3d *BRIDGEUSER %s", "", net, stn, param);
+
+					if (!(users[server][active[server][active_id].userid].priv2 & FS_PRIV2_BRIDGE))
+						fs_error(server, reply_port, net, stn, 0xFF, "Insufficient privilege");
+					else
+					{
+					
+						fs_copy_to_cr (parameters, param, 21);
+
+						count = 0;
+
+						while (parameters[count] == ' ' && count < strlen(parameters))
+							count++;
+	
+						if (count >= (strlen(parameters)-1)) // No parameters or all we have is a single character (possibly +/-) after the spaces so there cannot be any username
+							fs_error(server, reply_port, net, stn, 0xFF, "Bad parameter");
+						else if (parameters[count] != '+' && parameters[count] != '-') // First character must be a + or -
+							fs_error(server, reply_port, net, stn, 0xFF, "Bad parameter");
+						else
+						{
+							setmode = 1;
+							if (parameters[count] == '-') // Unset mode
+								setmode = 0;
+
+							count++;
+							if ((userid = fs_get_uid(server, (char *) (&parameters[count]))) >= 0) // Found
+							{
+								if (userid == active[server][active_id].userid) // Cannot modify ourselves!	
+									fs_error (server, reply_port, net, stn, 0xFF, "Cannot modify own bridge privilege");
+								else
+								{
+									if (setmode)
+										users[server][userid].priv2 |= FS_PRIV2_BRIDGE;
+									else
+										users[server][userid].priv2 &= ~(FS_PRIV2_BRIDGE);
+									// Write out
+
+									fs_write_user(server, userid, (unsigned char *) &(users[server][userid]));
+									fs_reply_ok(server, reply_port, net, stn);
+								}
+							}
+							else
+								fs_error (server, reply_port, net, stn, 0xFF, "User not found");
+						}
+					}
+
+				}
+#endif
 				else if (fs_parse_cmd(command, "NEWUSER", 4, &param))
 				{
 					unsigned char username[11];

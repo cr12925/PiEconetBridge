@@ -265,6 +265,76 @@ appropriate). If you want the kernel module to spoof Immediate replies like
 it used to, you must now turn on the -i command line switch to the Econet
 bridge. There should be no need to do so and use is discouraged.
 
+*FAST
+-----
+
+The MDFS *FAST utility was used to access an administrative menu inside an
+MDFS server when it was in a particular mode by a keyswitch. The HP Bridge
+will respond to *FAST when it is running, and will present a menu of
+options to control both the local fileserver on a particular virtual
+station, and to be able to shut down the Pi itself if the binary is
+setuid root.
+
+However, access to this functionality is only available:
+
+- On virtual servers which are running a fileserver
+- To users who are logged into the fileserver AND who have a special
+  'bridge' privilege.
+
+By default, no users (including SYST) have the bridge privilege.
+To cause all local fileservers to grant the bridge privilege to
+SYST on startup (permanently), run the bridge from the command line
+with the --enable-syst-fast command line option. This is only
+required once.
+
+To grant the bridge privilege to another user, use the privileged
+command *BRIDGEUSER (see below). You cannot modify the bridge
+privilege of the user who executes that command - you can only
+modify the privilege for other users. It is possible to grant
+the bridge privilege to a non-system user, but such a user will
+not be able to grant or revoke the privilege for anyone else
+because *BRIDGEUSER requires SYST and BRIDGE privileges to
+function.
+
+On login as a user with the bridge privilege, the FS will notify
+the bridge that *for that virtual station only*, the user's 
+station has bridge privileges. Thereafter the bridge will respond
+to the *FAST utility from that particular user's station and only
+in respect of the virtual fileserver station that they logged
+into. 
+
+On logout, that flag will be cleared.
+
+Since the *FAST handler in the bridge allows the shutting down of
+the fileserver, the notification above allows a bridge privileged
+user to log in, use *FAST to shut the fileserver down, change
+its parameters (e.g. rename a disc or format a new disc) and
+then, even if they quit *FAST, providing no other programme
+has been loaded, they can re-execute the *FAST code by using
+
+CALL &2800
+
+from BASIC. The bridge will, because of the notification system
+above, still know that the station has bridge privileges even
+though the fileserver has been shut down. The fileserver can,
+for example, then be re-started.
+
+It is therefore important that users with bridge privileges 
+log out properly with *BYE so that the relevant notification
+bit is cleared and a subsequent user cannot log in. The bit
+is NOT cleared on a logout caused by, for example, *FLOG.
+
+Shutting down the Pi with *FAST:
+- This will only work if the econet-hpbridge binary is setuid root.
+- The binary does not attempt to assume root privileges until the
+  moment before it calls the 'shutdown' binary if this option is
+  used.
+- If the binary is not setuid root, the shutdown option will do
+  nothing.
+- To install the binary setuid root, use the following instead
+  of make install each time you build / install
+
+  make setuid
 
 ON BOARD CLOCK / TERMINATION
 ----------------------------
@@ -778,6 +848,15 @@ Non-privileged commands:
   	  the system default library.
 
 Privileged commands:
+
+*BRIDGEUSER <+/-><USERNAME>
+	- Set (+) or clear (-) bridge privilege for a given username
+	- Cannot be done on own username
+	- Only available to users who already have the bridge privilege
+	- The bridge privilege allows access to *FAST on a given
+	  virtual server in the bridge, which enables various
+	  special fileserver functions and, if the bridge is setuid 
+	  root, enables an administrator to shut down the Pi.
 
 *FLOG <station>
 	- Force log a station off

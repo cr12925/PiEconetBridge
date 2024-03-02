@@ -332,27 +332,18 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			uint32_t		seq; // AUN sequence number
 			// Stuff to handle *FAST to a local host
 			uint8_t			fastbit; // Oscillates 0, 1 on transmissions from the *FAST handler
+			uint8_t			fast_priv_stns[8192]; // Bitmap of stations who have logged into this FS with the Bridge privilege bit (cleared on *BYE by the FS - means that if the FS gets shut down, we can still tell this was a privileged station)
 			uint8_t			fast_input_ctrl; // Ditto on receiption
 			uint8_t			fast_client_net, fast_client_stn; // Current client
 			pthread_t		fast_handler; // Thread that is operating the *FAST handler
 			pthread_t		fast_io_handler; // Thread that mediates IO between despatcher and the fast handler
 			pthread_mutex_t		fast_io_mutex; // Governs access to the input/output variables below
 			int			fast_to_despatch[2], fast_to_handler[2]; // Socketpairs
-			/*
-			struct __eb_fast_text {
-				struct __eb_fast_text	*next;
-				char			text[33]; // Null terminated text - Max is 32
-			} 			 *fast_output; // From the *FAST thread
-			struct __eb_fast_text	*fast_input;
-			*/
 			uint8_t			fast_thread_alive; // despatcher sets to 0; *FAST thread sets to 1 - so we can tell it's ready
 			uint8_t			fast_reset; // Set to 1 when we get a new connection
 			uint8_t			fast_client_ready; // Set to 1 when client indicates it will receive more output to display - happens when we get the USRPROC call. If there is output, we send it. If not, this will get set to 1 so that the fast handler knows it can send it instead
 			pthread_cond_t		fast_wake;
 		} local;
-
-		// OLD DISUSED struct __eb_aun_local	exposure; // Info where this is an exposed AUN connection
-			// Where a station on this device tries to write to a distant AUN device, we send traffic to the exposure device, not to the AUN driver, that way the exposure device can do its own ACK/NAK tracking & retransmits. When it gets an ACK/NAK, it passes it back to the driver it's a proxy for so that it too can deal with the packet accordingly
 
 		struct __eb_aun_remote *aun; // Address of struct in the list of remote AUN stations, kept in order of s_addr
 

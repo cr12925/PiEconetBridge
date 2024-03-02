@@ -42,6 +42,10 @@ install-hp-utilities:	install-utilities
 
 install-hp:	install-module install-hp-utilities
 
+setuid:		install-module install-hp-utilities
+	-sudo chown root /usr/sbin/econet-hpbridge
+	-sudo chmod u+s /usr/sbin/econet-hpbridge
+
 clean:
 	cd module ; make clean
 	cd utilities ; make clean

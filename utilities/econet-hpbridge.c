@@ -52,7 +52,7 @@
 #include "../include/econet-gpio-consumer.h"
 #include "../include/econet-pserv.h"
 #include "../include/econet-hpbridge.h"
-
+#include "../include/econet-fs-hpbridge-common.h"
 
 extern int h_errno;
 
@@ -75,9 +75,12 @@ extern uint8_t fs_is_active(int);
 extern uint8_t fs_clear_syst_pw(int);
 extern uint8_t fs_writedisclist (uint8_t, unsigned char *);
 extern uint8_t fs_get_maxdiscs();
+extern void fs_get_parameters(uint8_t, uint32_t *, uint8_t *);
+extern void fs_set_parameters(uint8_t, uint32_t, uint8_t);
 
 extern short fs_sevenbitbodge;
 extern short normalize_debug;
+extern uint8_t fs_set_syst_bridgepriv;
 
 // Some globals
 
@@ -369,8 +372,6 @@ void eb_set_network (uint8_t net, struct __eb_device *dev)
 	pthread_mutex_unlock (&networks_update);
 
 }
-
-
 
 /*
  *
@@ -3506,6 +3507,20 @@ void beeb_print (uint8_t y, uint8_t x, char *s) /* Display string in beebmem at 
 
 }
 
+// Used by the FS to notify when a bridge privileged user logs in or out
+void eb_fast_priv_notify(struct __eb_device *d, uint8_t net, uint8_t stn, uint8_t mode)
+{
+	if (mode)
+	{
+		ECONET_SET_STATION(d->local.fast_priv_stns, net, stn);
+	}
+	else
+	{
+		ECONET_CLR_STATION(d->local.fast_priv_stns, net, stn);
+	}
+}
+
+// printf() equivalent but puts the stuff on our pipe to the IO handler
 void fastprintf (struct __eb_device *d, char *fmt, ...)
 {
 
@@ -3567,9 +3582,13 @@ static void * eb_fast_io_handler (void *device)
 
 	while (1)
 	{
+
+		eb_debug (0, 4, "FAST", "Fast Handler Loop - client ready = %d, about to sleep", d->local.fast_client_ready);
+
 		// the cond wait will release the mutex, wait on the signal, and re-acquire the mutex on wake - so we don't need to tinker with it
 		pthread_cond_wait(&(d->local.fast_wake), &(d->local.fast_io_mutex));
 
+		eb_debug (0, 4, "FAST", "Fast Handler Loop - client ready = %d, just woken", d->local.fast_client_ready);
 		// Look for reset here and if so, sink everything coming from the handler
 		// How shall we sink the input from both handler and despatcher?
 
@@ -3586,6 +3605,7 @@ static void * eb_fast_io_handler (void *device)
 			unsigned char	t[33];
 			uint8_t		s;
 
+
 			s = read(d->local.fast_to_handler[1], t, 32);
 
 			if (s)
@@ -3593,6 +3613,8 @@ static void * eb_fast_io_handler (void *device)
 				struct __econet_packet_aun 	*p;
 
 				// Now indicate not ready and wait for it to reset
+
+				//eb_debug (0, 4, "FAST", "Fast Handler Read from Handler - s = %d", s);
 
 				d->local.fast_client_ready = 0;
 
@@ -3611,11 +3633,14 @@ static void * eb_fast_io_handler (void *device)
 				p->p.seq = get_local_seq(d->net, d->local.stn);
 				memcpy(&(p->p.data), t, s);
 
+				eb_debug (0, 4, "FAST", "Fast Handler Loop - if(ready) succeeded - transmitting output to device %p, packet at %p, length %d to %d.%d", d, p, s, p->p.dstnet, p->p.dststn);
 				eb_enqueue_output(d, p, s, NULL);
 
 				eb_free(__FILE__, __LINE__, "FAST", "Free fast output packet", p);
 			}
 		}
+		else
+			eb_debug (0, 4, "FAST", "Fast Handler Loop - if(ready) failed: client ready = %d, revents is %s", d->local.fast_client_ready, (fds.revents & POLLIN) ? "set" : "unset");
 	}
 
 	return NULL;
@@ -3687,6 +3712,7 @@ static void * eb_fast_handler (void *device)
 	pthread_mutex_lock (&(d->local.fast_io_mutex));
 	d->local.fast_thread_alive = 1;
 
+	/* Think this is superfluous now
 	// Wait for client to say it wants stuff to display
 	
 	while (!(d->local.fast_client_ready))
@@ -3695,6 +3721,7 @@ static void * eb_fast_handler (void *device)
 		sleep(1);
 		pthread_mutex_lock(&(d->local.fast_io_mutex));
 	}
+	*/
 
 	pthread_mutex_unlock(&(d->local.fast_io_mutex));
 
@@ -3713,10 +3740,10 @@ fast_handler_reset:
 	
 		uname (&u);
 
-		fastprintf(d, "%c*** Pi Econet Bridge Console\r\n*** Station: %d.%d\r\n*** Hostname: %s\r\n*** OS: %s %s\r\n\n", 
-				0x0C, d->net, d->local.stn, u.nodename, u.sysname, u.release);
+		fastprintf(d, "%c*** Pi Econet Bridge Console\r\n*** Station: %d.%d\r\n\n",
+				0x0C, d->net, d->local.stn);
 
-		fastprintf (d, "  A: Alter fileserver parameters\r\n");
+		//fastprintf (d, "  A: Alter fileserver parameters\r\n");
 		fastprintf (d, "  F: Display fileserver info\r\n");
 		if (fs_is_active(d->local.fs.index))
 			fastprintf (d, "  S: Shut down file server\r\n");
@@ -3746,6 +3773,10 @@ fast_handler_reset:
 		if (poll(&fds, 1, 100000) == 1 && (fds.revents & POLLIN) && read(s, &key, 1))
 		{
 
+			fastprintf (d, "%c", key);
+
+			key &= 0xDF;
+
 			switch (key) {
 				case 'A':
 					{
@@ -3767,11 +3798,51 @@ fast_handler_reset:
 						}
 					} break;
 				case 'F':
-					fastprintf (d, "%c*** FS info on server %d.%d\r\n\n",
+					{
+						uint8_t 	count;
+						uint8_t		max_discs;
+
+						fastprintf (d, "%c*** FS info on server %d.%d\r\n",
 							0x0C, d->net, d->local.stn);
+						fastprintf (d, "*** Hostname: %s\r\n*** OS: %s %s\r\n*** Architecture: %s\r\n", 
+							u.nodename, u.sysname, u.release, u.machine);
 	
-					read(s, &key, 1);
-					break;
+						if (d->local.ip.tunif[0])
+							fastprintf (d, "*** Eco IP Address: %s\r\n", d->local.ip.addr);
+
+						fastprintf (d, "\n*** Discs:\r\n");
+						max_discs = fs_get_maxdiscs();
+
+						for (count = 0; count < max_discs; count++)
+						{
+							char	discname[128];
+
+							fs_get_disc_name (d->local.fs.index, count, discname);
+							if (discname[0]) fastprintf (d, "%02d:%-16s ", count, discname);
+						}
+
+						fastprintf (d, "\r\n");
+
+						if (d->local.printers)
+						{
+							struct __eb_printer	*p;
+
+							p = d->local.printers;
+
+							fastprintf (d, "\n*** Printers:\r\n");
+
+							while (p)
+							{
+								fastprintf (d, "%-20s", p->acorn_name);
+								p = p->next;
+							}
+
+						}
+						else	fastprintf (d, "\n*** No printers configured\r\n");
+
+						fastprintf (d, "\r\n\nPress a key...");
+						read(s, &key, 1);
+					} break;
 				case 'S': // Shut down local fileserver
 				case 'B': // Start up fileserver (the code does both depending on fileserver state, but only one of the two options is displayed on screen)
 					pthread_mutex_lock(&fs_mutex);
@@ -3809,7 +3880,7 @@ fast_handler_reset:
 						fastprintf (d, " Are you sure (y/n)?");
 						read (s, &key2, 1);
 						key2 &= 0xDF; // convert lower to caps
-						while (key2 != 'Y' && key != 'N')
+						while (key2 != 'Y' && key2 != 'N')
 						{
 							read (s, &key2, 1);
 							key2 &= 0xDF;
@@ -3848,15 +3919,21 @@ fast_handler_reset:
 						else if (key == 'C')
 							fastprintf (d, "\nFormat ");
 						
-						fastprintf (d, "which disc? ");
+						fastprintf (d, "which disc (<Q>uit)? ");
 
 						read (s, &key2, 1);
-						if (
-							((max_discs <= 10) && (key2 < '0' || key2 >= ('0' + max_discs)))
+						if ( key2 != 'Q' && key2 != 'q' &&
+							(((max_discs <= 10) && ((key2 < '0') || (key2 >= ('0' + max_discs))))
 						|| 	((max_discs > 10) && !( (key2 >= '0' && key2 <= '9') || (key2 >= 'A' && key2 <= ('A' + max_discs - 10))))
+						)
 						)
 						{
 							fastprintf (d, "\r\n\n*** ERROR: Invalid input. Press a key.");
+							read (s, &key2, 1);
+						}
+						else if (key2 == 'Q' || key2 == 'q')
+						{
+							fastprintf (d, "\r\n\n*** Press a key.");
 							read (s, &key2, 1);
 						}
 						else
@@ -3895,6 +3972,35 @@ fast_handler_reset:
 							fastprintf (d, "\r\n\nPress any key...");
 							read (s, &key2, 1);
 						}
+					} break;
+				case 'X':
+					{
+						uint8_t	key2;
+
+						fastprintf (d, "\r\n*** Shut down Pi - Are you sure?");		
+						read (s, &key2, 1);
+						key2 &= 0xDF; // convert lower to caps
+						while (key2 != 'Y' && key2 != 'N')
+						{
+							read (s, &key2, 1);
+							key2 &= 0xDF;
+						}
+
+						if (key2 == 'Y')
+						{
+							fastprintf (d, "\r\n\n*** Pi shutting down.");
+
+							if (!fork())
+							{
+								if (!setuid(0))
+									execl ("/usr/sbin/shutdown", "shutdown", "-h", "now", (char *) 0);
+							}
+
+							while (1)
+								sleep(100); // Sleep forever
+
+						}
+
 					} break;
 				case 0: break;
 				default:
@@ -4073,30 +4179,34 @@ static void * eb_device_despatcher (void * device)
 				
 			}
 
-			// Initialize *FAST handler
+			// Initialize *FAST handler - but only if we're a fileserver
 
-			d->local.fastbit = 0;
-			d->local.fast_input_ctrl = 0;
-			if (pthread_mutex_init(&(d->local.fast_io_mutex), NULL) == -1)
-				eb_debug (1, 0, "FAST", "Cannot initialize IO mutex");
-
-			d->local.fast_thread_alive = 0;
-			d->local.fast_reset = 0;
-			d->local.fast_client_net = d->local.fast_client_stn = 0;
-			d->local.fast_client_ready = 0;
-			if (pthread_cond_init (&(d->local.fast_wake), NULL) == -1)
-				eb_debug (1, 0, "FAST", "Failed to initialize fast_wake pthread_cond");
-
-			if (socketpair(AF_UNIX, SOCK_STREAM, 0, d->local.fast_to_handler) || socketpair(AF_UNIX, SOCK_STREAM, 0, d->local.fast_to_despatch))
-				eb_debug (1, 0, "FAST", "Cannot create socketpairs for *FAST handler and IO");
-			
-			if (pthread_create(&(d->local.fast_handler), NULL, eb_fast_handler, d))
-				eb_debug(1, 0, "DESPATCH", "Cannot start *FAST handler thread for station %d.%d", d->net, d->local.stn);
-			pthread_detach(d->local.fast_handler);
-
-			if (pthread_create(&(d->local.fast_io_handler), NULL, eb_fast_io_handler, d))
-				eb_debug(1, 0, "DESPATCH", "Cannot start *FAST IO handler thread for station %d.%d", d->net, d->local.stn);
-			pthread_detach(d->local.fast_io_handler);
+			if (d->local.fs.rootpath)
+			{
+				d->local.fastbit = 0;
+				d->local.fast_input_ctrl = 0;
+				if (pthread_mutex_init(&(d->local.fast_io_mutex), NULL) == -1)
+					eb_debug (1, 0, "FAST", "Cannot initialize IO mutex");
+	
+				d->local.fast_thread_alive = 0;
+				d->local.fast_reset = 0;
+				d->local.fast_client_net = d->local.fast_client_stn = 0;
+				d->local.fast_client_ready = 0;
+				ECONET_INIT_STATIONS(d->local.fast_priv_stns); // Clear the privileged station bitmap
+				if (pthread_cond_init (&(d->local.fast_wake), NULL) == -1)
+					eb_debug (1, 0, "FAST", "Failed to initialize fast_wake pthread_cond");
+	
+				if (socketpair(AF_UNIX, SOCK_STREAM, 0, d->local.fast_to_handler) || socketpair(AF_UNIX, SOCK_STREAM, 0, d->local.fast_to_despatch))
+					eb_debug (1, 0, "FAST", "Cannot create socketpairs for *FAST handler and IO");
+				
+				if (pthread_create(&(d->local.fast_handler), NULL, eb_fast_handler, d))
+					eb_debug(1, 0, "DESPATCH", "Cannot start *FAST handler thread for station %d.%d", d->net, d->local.stn);
+				pthread_detach(d->local.fast_handler);
+	
+				if (pthread_create(&(d->local.fast_io_handler), NULL, eb_fast_io_handler, d))
+					eb_debug(1, 0, "DESPATCH", "Cannot start *FAST IO handler thread for station %d.%d", d->net, d->local.stn);
+				pthread_detach(d->local.fast_io_handler);
+			}
 
 		} break;
 
@@ -5608,7 +5718,7 @@ static void * eb_device_despatcher (void * device)
 						{
 			
 						}
-						else if (p->p->p.aun_ttype == ECONET_AUN_DATA && p->p->p.port == 0x00 && p->p->p.ctrl == 0x84) // USRPROC Immediate to a local emulator
+						else if (p->p->p.aun_ttype == ECONET_AUN_DATA && p->p->p.port == 0x00 && p->p->p.ctrl == 0x84 && d->local.fs.rootpath && (ECONET_DEV_STATION(d->local.fast_priv_stns, p->p->p.srcnet, p->p->p.srcstn))) // USRPROC Immediate to a local emulator - but only bother if we are an FS and would have started the *FAST handler - and ignore anything that isn't from a privileged station
 						{
 							struct __econet_packet_aun	*r;
 
@@ -5656,12 +5766,14 @@ static void * eb_device_despatcher (void * device)
 							}
 							if (p->p->p.data[4] == 0x01) // *FAST "Client ready for output reception"
 							{
+								//eb_debug (0, 2, "FAST", "FAST Client signalled ready for output");
+								pthread_mutex_lock (&(d->local.fast_io_mutex));
 								d->local.fast_client_ready = 1;
 								pthread_mutex_unlock(&(d->local.fast_io_mutex));
 								pthread_cond_signal (&(d->local.fast_wake)); // Wake up the FAST handler - it should find its reset and ... well, reset.
 							}
 						}
-						else if (p->p->p.port == 0xA0 && p->p->p.aun_ttype == ECONET_AUN_DATA) // *FAST character input has arrived
+						else if (p->p->p.port == 0xA0 && p->p->p.aun_ttype == ECONET_AUN_DATA && d->local.fs.rootpath && (ECONET_DEV_STATION(d->local.fast_priv_stns, p->p->p.srcnet, p->p->p.srcstn))) // *FAST character input has arrived
 						{
 							if ((p->p->p.ctrl & 0x01) == d->local.fast_input_ctrl)
 							{
@@ -8048,6 +8160,7 @@ int main (int argc, char **argv)
 		{"trunk-keepalive-interval", 	required_argument, 	0, 	0},
 		{"trunk-dead-interval", 	required_argument, 	0, 	0},
 		{"pool-dead-interval",	required_argument,	0,	0},
+		{"enable-syst-fast",	0, 			0, 	0},
 		{0, 			0,			0,	0 }
 	};
 
@@ -8078,6 +8191,7 @@ int main (int argc, char **argv)
 					case 14:	EB_CONFIG_TRUNK_KEEPALIVE_INTERVAL = atoi(optarg); break;
 					case 15:	EB_CONFIG_TRUNK_DEAD_INTERVAL = atoi(optarg); break;
 					case 16:	EB_CONFIG_POOL_DEAD_INTERVAL = atoi(optarg); break;
+					case 17:	fs_set_syst_bridgepriv = 1; break;
 				}
 			} break;
 			case 'c':	strncpy(config_path, optarg, 1023); break;
