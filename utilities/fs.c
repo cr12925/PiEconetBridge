@@ -2207,8 +2207,13 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			if (found == 0) // Didn't find anything
 			{
 
+				fs_read_xattr(result->unixpath,&attr, server);
+
 				// BUG: TODO: Need to set parent_owner, parent_perm and perm here in case we are trying to open a file for write. 20231227
 				result->ftype = FS_FTYPE_NOTFOUND;
+				result->perm = 0;
+				result->parent_owner = attr.owner;
+				result->parent_perm = attr.perm;
 				
 				// Copy to thing we didn't find to result->acornname so it can be reused in the caller
 				strcpy (result->unixfname, acorn_path);
@@ -5603,15 +5608,15 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 
 		sprintf(active[server][active_id].root_dir_tail, "$         ");
 		snprintf(active[server][active_id].root_dir, 2600, "$.");
-		fs_store_tail_path(active[server][active_id].fhandles[active[server][active_id].root].acorntailpath, "$");
-		dollar = strchr(active[server][active_id].fhandles[active[server][active_id].root].acornfullpath, '$');
+		fs_store_tail_path(active[server][active_id].fhandles[root].acorntailpath, "$");
+		dollar = strchr(active[server][active_id].fhandles[root].acornfullpath, '$');
 
 		*(dollar+1) = 0; // Drop everything after the '.' after the dollar sign
 
 		strcpy(active[server][active_id].current_dir_tail, active[server][active_id].root_dir_tail);
 		strcpy(active[server][active_id].current_dir, active[server][active_id].root_dir);
-		fs_store_tail_path(active[server][active_id].fhandles[active[server][active_id].current].acorntailpath, "$");
-		strcpy(active[server][active_id].fhandles[active[server][active_id].current].acornfullpath, active[server][active_id].fhandles[active[server][active_id].root].acornfullpath);
+		fs_store_tail_path(active[server][active_id].fhandles[cur].acorntailpath, "$");
+		strcpy(active[server][active_id].fhandles[cur].acornfullpath, active[server][active_id].fhandles[root].acornfullpath);
 
 	}
 
@@ -7894,7 +7899,7 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 	}
 	else if (!readonly && (p.ftype == FS_FTYPE_NOTFOUND) && 
 		(	(p.parent_owner != active[server][active_id].userid && ((p.parent_perm & FS_PERM_OTH_W) == 0)) ||
-			(p.parent_owner == active[server][active_id].userid && ((p.perm & FS_PERM_OWN_W) == 0))
+			(p.parent_owner == active[server][active_id].userid && ((p.parent_perm & FS_PERM_OWN_W) == 0))
 			) // FNF and we can't write to the directory
 		)
 	{
