@@ -158,6 +158,7 @@ uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 
 // priv2 bits
 #define FS_PRIV2_BRIDGE 0x01 /* Can access *FAST */
+#define FS_PRIV2_CHROOT 0x02 /* Make user home dir appear as root */
 
 // MDFS privilege bits in MDFS format
 #define MDFS_PRIV_PWUNLOCKED 0x01
@@ -243,6 +244,7 @@ struct {
 		char acorntailpath[ECONET_ABS_MAX_FILENAME_LENGTH+1];
 	} fhandles[FS_MAX_OPEN_FILES];
 	unsigned char sequence; // Used to detect duplicate transmissions on putbyte - oscillates 0-1-0-1 - low bit of ctrl byte in packet. Gets re-set whenever there is an operation which is not a putbyte, so that successive putbytes get the tracker, but anything else in the way resets it
+	unsigned char urd_unix_path[1024]; // Used for chroot purposes - stored at login / sdisc
 } active[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_USERS];
 
 struct {
@@ -1739,6 +1741,11 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 	result->disc = -1; // Rogue so that we can tell if there was a discspec in the path
 
+	/* Implement MDFS $DISCNAME notation */
+
+	if (strlen(received_path) >= 2 && (*received_path == '$') && (*(received_path+1) != '.')) // Must be the MDFS notation
+		*(received_path) = ':'; // Convert to Acorn
+
 	/* Fudge the special files here if we have SYST privs */
 
 	if (active[server][user].priv & FS_PRIV_SYSTEM)
@@ -2064,6 +2071,12 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 	sprintf (result->unixpath, "%s/%1d%s", fs_stations[server].directory, result->disc, fs_discs[server][result->disc].name);
 
+	if ((users[server][active[server][user].userid].priv2 & FS_PRIV2_CHROOT) && (relative_to != -1) && (result->disc == users[server][active[server][user].userid].home_disc)) // CHROOT set for this user and we are not logging in / changing disc and we are on the home disc
+	{
+		// Add home directory unix path to result->unixpath here - NB consider making the LIB normalize on login / sdisc relative to the chrooted root - might break things otherwise.
+		strcpy (result->unixpath, active[server][user].urd_unix_path); // Force $ to be home dir
+	}
+
 	if (normalize_debug) fs_debug (0, 1, "Unix dir: %s\n", result->unixpath);
 	if (normalize_debug) fs_debug (0, 1,  "npath = %d\n", result->npath);
 
@@ -2090,19 +2103,31 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		// Next, see if we have xattr and, if not, populate them. We do this for all paths along the way
 
 		fs_read_xattr(result->unixpath,&attr, server);
-		result->owner = 0; // Always SYST if root directory not owned
+
+		if (relative_to != -1 && (users[server][active[server][user].userid].priv2 & FS_PRIV2_CHROOT) && (result->disc == users[server][active[server][user].userid].home_disc))
+		{
+			if (normalize_debug) fs_debug (0, 1, "chroot home directory %s for user %d and on home disc", result->unixpath, active[server][user].userid);
+			result->homeof = attr.homeof;
+			result->owner = result->parent_owner = attr.owner;
+			result->my_perm = result->parent_perm = result->perm = attr.perm;
+		}
+		else
+		{
+			result->owner = 0; // Always SYST if root directory not owned
+			result->homeof = 0;
+			result->perm = FS_PERM_OWN_R | FS_PERM_OWN_W | FS_PERM_OTH_R;
+			result->my_perm = FS_PERM_OWN_R | FS_PERM_OWN_W | FS_PERM_OTH_R;
+			// Added 20231227
+			result->parent_perm = result->perm;
+			result->parent_owner = result->owner;
+	
+			if (!(active[server][user].priv & FS_PRIV_SYSTEM))
+				result->my_perm = FS_PERM_OWN_R; // Read only my_perm for non-System users on a root directory
+ 
+		}
+
 		result->load = 0;
 		result->exec = 0;
-		result->perm = FS_PERM_OWN_R | FS_PERM_OWN_W | FS_PERM_OTH_R;
-		result->my_perm = FS_PERM_OWN_R | FS_PERM_OWN_W | FS_PERM_OTH_R;
-		// Added 20231227
-		result->parent_perm = result->perm;
-		result->parent_owner = result->owner;
-
-		if (!(active[server][user].priv & FS_PRIV_SYSTEM))
-			result->my_perm = FS_PERM_OWN_R; // Read only my_perm for non-System users on a root directory
- 
-		result->homeof = 0;
 
 		fs_write_xattr(result->unixpath, result->owner, result->perm, result->load, result->exec, result->homeof, server);
 
@@ -3708,6 +3733,8 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 						fs_write_xattr(p.unixpath, oa.owner, oa.perm, oa.load, oa.exec, active[server][usercount].userid, server);
 				}
 
+				strcpy (active[server][usercount].urd_unix_path, p.unixpath); // Used in order to enable chroot functionality
+
 				internal_handle = fs_open_interlock(server, p.unixpath, 1, active[server][usercount].userid);
 
 				if ((active[server][usercount].root = fs_allocate_user_dir_channel(server, usercount, internal_handle)) == 0) // Can't allocate
@@ -3747,6 +3774,24 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 				strcpy(active[server][usercount].fhandles[active[server][usercount].current].acornfullpath, p.acornfullpath);
 				fs_store_tail_path(active[server][usercount].fhandles[active[server][usercount].current].acorntailpath, p.acornfullpath);
 				active[server][usercount].fhandles[active[server][usercount].current].mode = 1;
+
+				if (users[server][active[server][usercount].userid].priv2 & FS_PRIV2_CHROOT) // Fudge the root directory information so that $ maps to URD
+				{
+					char *dollar;
+
+					sprintf(active[server][usercount].root_dir_tail, "$         ");
+					snprintf(active[server][usercount].root_dir, 2600, "$.");
+					fs_store_tail_path(active[server][usercount].fhandles[active[server][usercount].root].acorntailpath, "$");
+					dollar = strchr(active[server][usercount].fhandles[active[server][usercount].root].acornfullpath, '$');
+
+					*(dollar+1) = 0; // Drop everything after the '.' after the dollar sign
+
+					strcpy(active[server][usercount].current_dir_tail, active[server][usercount].root_dir_tail);
+					strcpy(active[server][usercount].current_dir, active[server][usercount].root_dir);
+					fs_store_tail_path(active[server][usercount].fhandles[active[server][usercount].current].acorntailpath, "$");
+					strcpy(active[server][usercount].fhandles[active[server][usercount].current].acornfullpath, active[server][usercount].fhandles[active[server][usercount].root].acornfullpath);
+
+				}
 
 				// Next, Library
 
@@ -5509,6 +5554,8 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 		return;
 	}
 
+	strcpy (active[server][active_id].urd_unix_path, p_root.unixpath); // Used in order to enable chroot functionality
+
 	if ((root = fs_allocate_user_dir_channel(server, active_id, internal_root_handle)) == 0) // Can't allocate handle
 	{
 		fs_error(server, reply_port, net, stn, 0xFF, "Root directory channel ?");
@@ -5549,6 +5596,26 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	fs_debug (0, 2, "%12sfrom %3d.%3d Successfully mapped new CWD - uHandle %02X, full path %s", "", net, stn, cur, active[server][active_id].fhandles[cur].acornfullpath);
 
 	sprintf(tmppath, ":%s.%s", discname, lib_dir);
+
+	if ((users[server][active[server][active_id].userid].priv2 & FS_PRIV2_CHROOT) && (p_root.disc == users[server][active[server][active_id].userid].home_disc)) // Fudge the root directory information so that $ maps to URD
+	{
+		char *dollar;
+
+		sprintf(active[server][active_id].root_dir_tail, "$         ");
+		snprintf(active[server][active_id].root_dir, 2600, "$.");
+		fs_store_tail_path(active[server][active_id].fhandles[active[server][active_id].root].acorntailpath, "$");
+		dollar = strchr(active[server][active_id].fhandles[active[server][active_id].root].acornfullpath, '$');
+
+		*(dollar+1) = 0; // Drop everything after the '.' after the dollar sign
+
+		strcpy(active[server][active_id].current_dir_tail, active[server][active_id].root_dir_tail);
+		strcpy(active[server][active_id].current_dir, active[server][active_id].root_dir);
+		fs_store_tail_path(active[server][active_id].fhandles[active[server][active_id].current].acorntailpath, "$");
+		strcpy(active[server][active_id].fhandles[active[server][active_id].current].acornfullpath, active[server][active_id].fhandles[active[server][active_id].root].acornfullpath);
+
+	}
+
+				// Next, Library
 
 	// If we find library directory on new disc, use it. Otherwise leave it alone
 	if (fs_normalize_path(server, active_id, tmppath, -1, &p_lib) && p_lib.ftype == FS_FTYPE_DIR)
@@ -7799,6 +7866,8 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 	//
 	result = fs_normalize_path_wildcard(server, active_id, filename, active[server][active_id].current, &p, 1);
 
+	//fs_debug(0,2, "%12sfrom %3d.%3d Attempt to open %s - p.parent_owner = %d, p.parent_perm = %02X, p.perm = %02X, userid = %d", "", net, stn, filename, p.parent_owner, p.parent_perm, p.perm, active[server][active_id].userid);
+
 	// NB the wildcard normalize copies the first entry found into the &p structure itself for backward compatibility so this should be fine.
 		
 	//e = p.paths;
@@ -7824,7 +7893,7 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 		fs_error(server, reply_port, net, stn, 0xbd, "Insufficient access");
 	}
 	else if (!readonly && (p.ftype == FS_FTYPE_NOTFOUND) && 
-		(	(p.parent_owner != active[server][active_id].userid && ((p.parent_perm & FS_PERM_OTH_W) == 0)) &&
+		(	(p.parent_owner != active[server][active_id].userid && ((p.parent_perm & FS_PERM_OTH_W) == 0)) ||
 			(p.parent_owner == active[server][active_id].userid && ((p.perm & FS_PERM_OWN_W) == 0))
 			) // FNF and we can't write to the directory
 		)
@@ -9445,7 +9514,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				//else if (!strncasecmp("PRIV ", (const char *) command, 5)) // Set user privilege
 				else if (fs_parse_cmd(command, "PRIV", 4, &param) || fs_parse_cmd(command, "REMUSER", 4, &param))
 				{
-					char username[11], priv, priv_byte;
+					char username[11], priv, priv_byte, priv2_byte;
+					int	uid;
 
 					unsigned short count;
 		
@@ -9470,9 +9540,16 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
 						else
 						{
+							uid = fs_get_uid(server, username);
+
+							if (uid < 0)
+								fs_error(server, reply_port, net, stn, 0xbc, "User not found");
+
 							if (command[0] == 'P')
 								priv = param[count];	
 							else	priv = 'D'; // This was REMUSER not PRIV, so we pick 'D' for delete
+
+							priv2_byte = users[server][uid].priv2;
 
 							switch (priv) {
 								case 's': case 'S': // System user
@@ -9490,6 +9567,16 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								case 'd': case 'D': // Invalidate privilege - delete the user
 									priv_byte = 0;
 									break;
+								case 'c': case 'C': // Chroot
+									{
+										priv_byte = users[server][uid].priv;
+										priv2_byte = users[server][uid].priv2 | FS_PRIV2_CHROOT;
+									} break;
+								case 'r': case 'R': // (Normal) root
+									{
+										priv_byte = users[server][uid].priv;
+										priv2_byte = users[server][uid].priv2 & ~FS_PRIV2_CHROOT;
+									} break;
 								default:
 									priv_byte = 0xff;
 									fs_error(server, reply_port, net, stn, 0xfe, "Bad command");
@@ -9498,6 +9585,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 							if (priv_byte != 0xff) // Valid change
 							{
+								/* Old code - uid now found above 
 								unsigned short found = 0;
 								count = 0;
 								char username_padded[11];
@@ -9524,7 +9612,11 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								{
 									fs_error(server, reply_port, net, stn, 0xbc, "User not found");
 								}
-
+								*/
+								users[server][uid].priv = priv_byte;
+								users[server][uid].priv2 = priv2_byte;
+								fs_write_user(server, uid, (unsigned char *) &(users[server][uid]));
+								fs_reply_ok(server, reply_port, net, stn);
 							}
 						}
 					}
