@@ -858,6 +858,22 @@ Privileged commands:
 	  special fileserver functions and, if the bridge is setuid 
 	  root, enables an administrator to shut down the Pi.
 
+*DISCMASK <USERNAME> <ALL | NONE | xxxx>
+	- Hides disc availability on the server from a particular user.
+	- The system will *never* hide the user's home disc, whatever
+	  you attempt to do with this command.
+	- 'ALL' will hide everything except the home disc
+	- 'NONE' will hide nothing
+	- 'xxxx' is 4 hex digits representing a 16-bit mask with one
+	  bit per disc. So bit 0 is disc 0, bit 1 is disc 1, bit 2 is
+	  disc 2, etc.
+	  e.g. to hide discs 4 and 9 only, set the mask to 0210 
+	  (which has bits 4 and 9 set). Remember the discs are numbered
+	  from 0. 
+	- If you have modified the code and have more than 16 discs
+	  (last number 15 therefore), you can't hide the ones beyond
+	  number 15 because the bitmask is only 16 bits long.
+
 *FLOG <station>
 	- Force log a station off
 
@@ -955,6 +971,9 @@ Privileged commands:
 		    needs to see will need to be copied or linked (see *LINK)
 		    into their home directory or they will not be accessible.
 		    This will only apply on their home disc.
+		    To hide all discs except home, so that the user sees
+		    their home directory as the only thing available on the
+ 		    fileserver, see *DISCMASK above
 		R - ("normal Root") - undoes 'C' - user will see disc root
 		    directory as $
 		

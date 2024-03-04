@@ -211,10 +211,18 @@ struct fs_user {
 	unsigned char home_disc;
 	unsigned char year, month, day, hour, min, sec; // Last login time
 	uint8_t		priv2;
-	char unused[8];
+	uint16_t	discmask; // 1 bit per disk number, if set the system will not show that disc to the user. discmask must never have the bit set which refers to the home drive. The FS_DISC_VIS macro deliberately will always return 1 for the home drive
+	char unused[6];
 } users[ECONET_MAX_FS_SERVERS+1][ECONET_MAX_FS_USERS];
 // MAX_FS_SERVERS+1 is because we use the last entry to sort a real server entry to produce an MDFS format password file.
 // We don't use it for live data
+
+// Macro to indicate whether a particular FS disc is visible to a particular user. Will always return 1 if disc number >= 16 (because the bit field is only 16 bits), or if the disc in question is the user's home drive (which can never be hidden), or if the bit in the bitfield is clear (i.e. disc visible)
+
+#define FS_DISC_VIS(s,u,d) ((d >= 16) || (users[(s)][(u)].home_disc == (d)) || !(users[(s)][(u)].discmask & (1 << (d))))
+
+// Macro to provide a shortcut to getting a user's real ID when the caller only knows the index into active[]
+#define FS_ACTIVE_UID(s,a) (active[(s)][(a)].userid)
 
 struct {
 	unsigned char groupname[10]; // First character null means unused.
@@ -811,6 +819,25 @@ void fs_make_mdfs_pw_file(int server)
 
 		fclose(pw);
 	}
+
+}
+
+// Find a disc number by name
+
+int fs_get_discno(int server, char *discname)
+{
+	uint8_t 	count;
+	uint8_t		found = 0;
+
+	while ((count < ECONET_MAX_FS_DISCS) && !found)
+	{
+		if (!strcasecmp(fs_discs[server][count].name, discname))
+			found = 1;
+		else	count++;
+	}
+
+	if (!found) return -1;
+	else return count;
 
 }
 
@@ -1732,9 +1759,13 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 	unsigned short homeof_found = 0; // Non-zero if we traverse a known home directory
 
+	int userid;
+
 	DIR *dir;
 	//struct dirent *d;
 	short count;
+
+	userid = FS_ACTIVE_UID(server, user); // Converts 'user' (which is an index into active[]) into the underlying userid
 
 	result->npath = 0;
 	result->paths = result->paths_tail = NULL;
@@ -1906,7 +1937,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		count = 0;
 		while (count < ECONET_MAX_FS_DISCS && !found)
 		{
-			if (!strcasecmp((const char *) fs_discs[server][count].name, (const char *) result->discname))
+			if ((!strcasecmp((const char *) fs_discs[server][count].name, (const char *) result->discname)) && FS_DISC_VIS(server,userid,count))
 				found = 1;
 			else 	count++;
 		}
@@ -5490,6 +5521,8 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	int root, cur, lib;
 	struct path p_root, /* p_home, */ p_lib;
 	char discname[20];
+	int	discno;
+	int userid;
 	char tmppath[1024], tmppath2[1024];
 	int internal_root_handle, internal_cur_handle, internal_lib_handle;
 	unsigned char home_dir[100], lib_dir[100];
@@ -5497,6 +5530,17 @@ void fs_sdisc(int server, unsigned short reply_port, int active_id, unsigned cha
 	struct __econet_packet_udp r;
 
 	fs_copy_to_cr(discname, command, 19);
+
+	discno = fs_get_discno(server, discname);
+	userid = FS_ACTIVE_UID(server, active_id);
+
+	fprintf (stderr, "SDISC - discno %d, userid %d, visible %d\n", discno, userid, FS_DISC_VIS(server, userid, discno));
+
+	if ((discno < 0) || !FS_DISC_VIS(server, userid, discno))
+	{
+		fs_error(server, reply_port, net, stn, 0xFF, "Bad disc name");
+		return;
+	}
 
 	root = cur = lib = -1;
 
@@ -6331,6 +6375,7 @@ void fs_read_discs(int server, unsigned short reply_port, unsigned char net, uns
 	unsigned short disc_ptr = 0;
 	unsigned short found = 0;
 	unsigned short data_ptr = 3;
+	int	userid;
 
 	r.p.port = reply_port;
 	r.p.ctrl = 0x80;
@@ -6339,6 +6384,8 @@ void fs_read_discs(int server, unsigned short reply_port, unsigned char net, uns
 	r.p.data[0] = 10;
 	r.p.data[1] = 0;
 	
+	userid = FS_ACTIVE_UID(server,active_id);
+
 	fs_debug (0, 2, "%12sfrom %3d.%3d Read Discs from %d (up to %d)", "", net, stn, start, number);
 
 	/* This appears to be wrong. 'start' as delivered by NFS is not, for example, 3 for the 3rd existent disc, it's 3 for disc number 3. 
@@ -6356,7 +6403,7 @@ void fs_read_discs(int server, unsigned short reply_port, unsigned char net, uns
 	{
 		while (disc_ptr < ECONET_MAX_FS_DISCS && (delivered < number))
 		{
-			if (fs_discs[server][disc_ptr].name[0] != '\0')
+			if ((fs_discs[server][disc_ptr].name[0] != '\0') && FS_DISC_VIS(server,userid,disc_ptr))
 			{
 				found++;	
 				snprintf((char * ) &(r.p.data[data_ptr]), 18, "%c%-16s", disc_ptr, fs_discs[server][disc_ptr].name);
@@ -9393,6 +9440,53 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 					}
 
+				}
+				else if (fs_parse_cmd(command, "DISCMASK", 5, &param))
+				{
+					char		parameters[255];
+					char		username[20], discs[10];
+
+					fs_debug (0, 1, "%12sfrom %3d.%3d *DISCMASK %s", "", net, stn, param);
+
+					fs_copy_to_cr (parameters, param, 40);
+
+					if (sscanf(parameters, "%10s %4s", username, discs) != 2)
+						fs_error(server, reply_port, net, stn, 0xFF, "Bad parameters");
+					else
+					{
+						int 	userid;
+						//fs_debug (0, 1, "DISCMASK username '%s', discs '%s'", username, discs);
+
+						userid = fs_get_uid(server, username);
+
+						if (userid < 0)
+							fs_error(server, reply_port, net, stn, 0xFF, "Unknown user");
+						else
+						{
+							uint16_t	mask;
+
+							mask = users[server][userid].discmask;
+
+							if (!strcasecmp(discs, "ALL"))
+								mask = 0xffff;
+							else if (!strcasecmp(discs, "NONE"))
+								mask = 0x0000;
+							else
+							{
+								if (sscanf(discs, "%04hX", &mask) != 1)
+									mask = users[server][userid].discmask;
+							}
+
+							if (mask != users[server][userid].discmask)
+							{
+								users[server][userid].discmask = mask;
+								fs_write_user(server, userid, (unsigned char *) &(users[server][userid]));
+								fs_reply_ok(server, reply_port, net, stn);
+							}
+							else
+								fs_error(server, reply_port, net, stn, 0xFF, "Bad parameter or mask unchanged");
+						}
+					}
 				}
 #ifdef BRIDGE_V2
 				else if (fs_parse_cmd(command, "BRIDGEUSER", 7, &param))
