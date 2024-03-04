@@ -949,6 +949,14 @@ Privileged commands:
 		N - Unlocked (normal) user, but cannot change password
 		S - System user
 		U - Unlocked (normal) user
+	- Set user functionality
+		C - ("chroot") - user's home directory will appear to them as $
+		    If using this, any library or other directories the user
+		    needs to see will need to be copied or linked (see *LINK)
+		    into their home directory or they will not be accessible.
+		    This will only apply on their home disc.
+		R - ("normal Root") - undoes 'C' - user will see disc root
+		    directory as $
 		
 *REMUSER <username>
 	- Removes the user specified. 
