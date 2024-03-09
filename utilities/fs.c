@@ -870,7 +870,7 @@ void fs_make_mdfs_pw_file(int server)
 
 int fs_get_discno(int server, char *discname)
 {
-	uint8_t 	count;
+	uint8_t 	count = 0;
 	uint8_t		found = 0;
 
 	while ((count < ECONET_MAX_FS_DISCS) && !found)
