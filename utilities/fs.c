@@ -159,6 +159,8 @@ uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 // priv2 bits
 #define FS_PRIV2_BRIDGE 0x01 /* Can access *FAST */
 #define FS_PRIV2_CHROOT 0x02 /* Make user home dir appear as root */
+#define FS_PRIV2_HIDEOTHERS 0x04 /* Don't show other users in fs_users() */
+#define FS_PRIV2_ANFSNAMEBODGE 0x08 /* ANFS strips the colon off the start of a filename if it appears to be a disc number instead of a disc name. This privilege causes the normalizer to spot [0-9].$ and replace with :[0-9].$ in filenames. This is a per user priv because it can break filenames! */
 
 // MDFS privilege bits in MDFS format
 #define MDFS_PRIV_PWUNLOCKED 0x01
@@ -195,7 +197,7 @@ struct {
 	uint8_t fs_infcolon; // Uses :inf for alternative to xattrs instead of .inf, and maps Acorn / to Unix . instead of Unix :
 	uint8_t fs_manyhandle; // Enables user handles > 8, and presents them as 8-bit integers rather than handle n presented as 2^n (which is what FS 3 does with its limit of 8 handles)
 	uint8_t fs_mdfsinfo; // Enables longer output from *INFO akin to MDFS
-	uint8_t pad[248]; // Spare spare in the config
+	uint8_t pad[247]; // Spare spare in the config
 } fs_config[ECONET_MAX_FS_SERVERS];
 
 struct fs_user {
@@ -445,12 +447,54 @@ void fs_debug (uint8_t death, uint8_t level, char *fmt, ...)
 void fs_get_parameters (uint8_t server, uint32_t *params, uint8_t *fnlength)
 {
 
+	*params = fs_config[server].fs_fnamelen << 24;
+	
+	if (fs_config[server].fs_acorn_home)	*params |= FS_CONFIG_ACORNHOME;
+	if (fs_config[server].fs_sjfunc)	*params |= FS_CONFIG_SJFUNC;
+	if (fs_config[server].fs_bigchunks)	*params |= FS_CONFIG_BIGCHUNKS;
+	if (fs_config[server].fs_infcolon)	*params |= FS_CONFIG_INFCOLON;
+	if (fs_config[server].fs_manyhandle)	*params |= FS_CONFIG_MANYHANDLE;
+	if (fs_config[server].fs_mdfsinfo)	*params |= FS_CONFIG_MDFSINFO;
 }
 
-void fs_set_parameters (uint8_t server, uint32_t params, uint8_t fnlength)
+void fs_set_parameters (uint8_t server, uint32_t params)
 {
 
+	unsigned char		regex[1024], configfile[512];
+	FILE *			config;
+	uint8_t			fnlength;
 
+	fnlength = (params & 0xff000000) >> 24;
+
+	fs_config[server].fs_acorn_home = (params & FS_CONFIG_ACORNHOME) ? 1 : 0;
+	fs_config[server].fs_sjfunc = (params & FS_CONFIG_SJFUNC) ? 1 : 0;
+	fs_config[server].fs_bigchunks = (params & FS_CONFIG_BIGCHUNKS) ? 1 : 0;
+	fs_config[server].fs_infcolon = (params & FS_CONFIG_INFCOLON) ? 1 : 0;
+	fs_config[server].fs_manyhandle = (params & FS_CONFIG_MANYHANDLE) ? 1 : 0;
+	fs_config[server].fs_mdfsinfo = (params & FS_CONFIG_MDFSINFO) ? 1 : 0;
+
+	if (fnlength != fs_config[server].fs_fnamelen)
+	{
+		fs_config[server].fs_fnamelen = fnlength;
+
+		sprintf(regex, "^(%s{1,%d})", FSACORNREGEX, ECONET_ABS_MAX_FILENAME_LENGTH);
+
+		if (regcomp(&r_pathname, regex, REG_EXTENDED) != 0)
+			fs_debug (1, 0, "Unable to compile regex for file and directory names.");
+	}
+
+	sprintf(configfile, "%s/Configuration", fs_stations[server].directory);
+
+	config = fopen(configfile, "w+");
+
+	if (!config)
+		fs_debug (0, 1, "Unable to write config file!");
+	else
+	{
+		fwrite(&(fs_config[server]), 256, 1, config);
+		fclose(config);
+		fs_write_readable_config(server);
+	}
 
 }
 
@@ -1868,8 +1912,20 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		// Otherwise fall through to the normal routine
 	}
 
-	strcpy(path, received_path);
 	
+	// Implement ANFS name bodge
+	
+	if (
+			(users[server][FS_ACTIVE_UID(server,user)].priv2 & FS_PRIV2_ANFSNAMEBODGE)
+		&&	(strlen(received_path) >= 3 && *received_path >= '0' && *received_path <= '9' && *(received_path+1) == '.' && (*(received_path+2)) == '$')
+	   )
+	{
+		path[0] = ':';
+		strcpy(&(path[1]), received_path);
+	}
+	else
+		strcpy(path, received_path);
+
 	if (normalize_debug) fs_debug(0,1, "path=%s, received_path=%s, relative to %d, wildcard = %d, server %d, user %d, active user fhandle.handle = %d, acornfullpath = %s", path, received_path, relative_to, wildcard, server, user, active[server][user].fhandles[relative_to].handle, active[server][user].fhandles[relative_to].acornfullpath);
 
 	// If the handle we have for 'relative to' is invalid, then return directory error
@@ -1937,7 +1993,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		count = 0;
 		while (count < ECONET_MAX_FS_DISCS && !found)
 		{
-			if ((!strcasecmp((const char *) fs_discs[server][count].name, (const char *) result->discname)) && FS_DISC_VIS(server,userid,count))
+			if ((!strcasecmp((const char *) fs_discs[server][count].name, (const char *) result->discname) || ((users[server][userid].priv2 & FS_PRIV2_ANFSNAMEBODGE) && (count == atoi(result->discname)))) && FS_DISC_VIS(server,userid,count))
 				found = 1;
 			else 	count++;
 		}
@@ -6484,7 +6540,7 @@ void fs_read_logged_on_users(int server, unsigned short reply_port, unsigned cha
 
 	while (active_ptr < ECONET_MAX_FS_USERS && found < start)
 	{
-		if (active[server][active_ptr].net != 0 || active[server][active_ptr].stn != 0)
+		if ((active[server][active_ptr].net != 0 || active[server][active_ptr].stn != 0) && ((users[server][FS_ACTIVE_UID(server,active_id)].priv2 & FS_PRIV2_HIDEOTHERS) == 0 || (active[server][active_ptr].net == net && active[server][active_ptr].stn == stn)))
 			found++;
 		active_ptr++;
 	}
@@ -6495,7 +6551,13 @@ void fs_read_logged_on_users(int server, unsigned short reply_port, unsigned cha
 
 		while (active_ptr < ECONET_MAX_FS_USERS && deliver_count < number)
 		{
-			if (active[server][active_ptr].net != 0 || active[server][active_ptr].stn != 0)
+			if (
+					(active[server][active_ptr].net != 0 || active[server][active_ptr].stn != 0)
+				&&	(
+						((users[server][FS_ACTIVE_UID(server,active_id)].priv2 & FS_PRIV2_HIDEOTHERS) == 0)
+					||	(active[server][active_ptr].net == net && active[server][active_ptr].stn == stn)
+					)
+			   )
 			{
 				char username[11];
 				char *spaceptr;
@@ -9675,6 +9737,26 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 									{
 										priv_byte = users[server][uid].priv;
 										priv2_byte = users[server][uid].priv2 & ~FS_PRIV2_CHROOT;
+									} break;
+								case 'v': case 'V': // Show all users
+									{
+										priv_byte = users[server][uid].priv;
+										priv2_byte = users[server][uid].priv2 & ~FS_PRIV2_HIDEOTHERS;
+									} break;
+								case 'h': case 'H': // Hide other users
+									{
+										priv_byte = users[server][uid].priv;
+										priv2_byte = users[server][uid].priv2 | FS_PRIV2_HIDEOTHERS;
+									} break;
+								case 'a': case 'A': // Turn on ANFS Name Bodge
+									{
+										priv_byte = users[server][uid].priv;
+										priv2_byte = users[server][uid].priv2 | FS_PRIV2_ANFSNAMEBODGE;
+									} break;
+								case 'b': case 'B': // Turn off ANFS Name Bodge
+									{
+										priv_byte = users[server][uid].priv;
+										priv2_byte = users[server][uid].priv2 & ~FS_PRIV2_ANFSNAMEBODGE;
 									} break;
 								default:
 									priv_byte = 0xff;

@@ -976,6 +976,21 @@ Privileged commands:
  		    fileserver, see *DISCMASK above
 		R - ("normal Root") - undoes 'C' - user will see disc root
 		    directory as $
+		H - Hide other users in user list (*USERS)
+		    Can have the ffect (especially with 'C' above and
+		    *DISCMASK) of making the user appear always to be
+		    the only one using the server, on the only disc
+		    with only their files on it.
+		V - Reveal other users in user list (*USERS)
+		A - Turn on ANFS name bodge. This causes the FS to
+		    spot filenames beginning [0-9].$ and insert a :
+		    on the start of the name. ANFS appears to strip
+		    colons in those circumstances - probably deliberately
+		    but it breaks some games designed to work on DFS or
+		    ADFS. The priv also causes the normalizer to
+		    recognize a digit after the colon as a disc number
+		    instead of a name.
+		B - Turn off ANFS name bodge.
 		
 *REMUSER <username>
 	- Removes the user specified. 
