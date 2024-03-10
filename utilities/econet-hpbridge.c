@@ -9247,6 +9247,9 @@ static void * eb_statistics (void *nothing)
 					case EB_DEF_NULL:
 						sprintf (trunkdest, "Local null");
 						break;
+					case EB_DEF_POOL:
+						sprintf (trunkdest, "Local pool");
+						break;
 				}
 							
 				pthread_mutex_lock (&(device->statsmutex));
