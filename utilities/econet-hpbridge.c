@@ -9154,7 +9154,7 @@ static void * eb_statistics (void *nothing)
 					sprintf (trunkdest, "Local null");
 					break;
 				case EB_DEF_POOL:
-					sprintf (trunkdest, "Local pool");
+					sprintf (trunkdest, "Local pool %s", device->pool.data->name);
 					break;
 			}
 						
@@ -9254,7 +9254,7 @@ static void * eb_statistics (void *nothing)
 						sprintf (trunkdest, "Local null");
 						break;
 					case EB_DEF_POOL:
-						sprintf (trunkdest, "Local pool");
+						sprintf (trunkdest, "Local pool %s", device->pool.data->name);
 						break;
 				}
 							
