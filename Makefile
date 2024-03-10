@@ -13,6 +13,7 @@ install-mkgroup:
 	-sudo usermod -a -G econet `whoami`
 
 utilities: install-mkgroup
+	-sudo systemctl stop econet-hpbridge
 	cd utilities ; make
 
 install-utilities:	install-mkgroup utilities
