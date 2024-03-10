@@ -1917,7 +1917,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	
 	if (
 			(users[server][FS_ACTIVE_UID(server,user)].priv2 & FS_PRIV2_ANFSNAMEBODGE)
-		&&	(strlen(received_path) >= 3 && *received_path >= '0' && *received_path <= '9' && *(received_path+1) == '.' && (*(received_path+2)) == '$')
+		&&	(strlen(received_path) >= 4 && *received_path >= '0' && *received_path <= '9' && *(received_path+1) == '.' && (*(received_path+3)) == '.')
 	   )
 	{
 		path[0] = ':';
