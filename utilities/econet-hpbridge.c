@@ -3850,7 +3850,9 @@ fast_handler_reset:
 						uint8_t 	finished = 0;
 						uint32_t	params;
 
+						pthread_mutex_lock(&fs_mutex);
 						fs_get_parameters (d->local.fs.index, &params);
+						pthread_mutex_unlock(&fs_mutex);
 
 						while (!finished)
 						{
@@ -3913,7 +3915,11 @@ fast_handler_reset:
 										}
 
 										if ((key2 & 0xDF) == 'Y')
+										{
+											pthread_mutex_lock(&fs_mutex);
 											fs_set_parameters(d->local.fs.index, params);
+											pthread_mutex_unlock(&fs_mutex);
+										}
 
 										finished = 1;
 									} break;
