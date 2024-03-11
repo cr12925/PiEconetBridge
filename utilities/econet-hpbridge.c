@@ -2451,7 +2451,7 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 		return 0;
 	}
 
-	if (dest == source) // This would be a loop
+	if ((dest == source) && (dest->type != EB_DEF_POOL)) // This would be a loop - but we allow it if it's a pool device because pool members need to be able to talk to each other 20240311
 	{
 		eb_debug (0, 1, "BRIDGE", "%-8s %3d.%3d from %3d.%3d LOOP PREVENTED port &%02X ctrl &%02X length &%04X seq 0x%08lX",
 			eb_type_str(dest->type),
