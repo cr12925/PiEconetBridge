@@ -9188,16 +9188,19 @@ static void * eb_statistics (void *nothing)
 					{
 					
 						if (hostlist->source->type == EB_DEF_TRUNK)
-							snprintf (dest, 127, "%d.%d via trunk to %s:%d",
+							snprintf (dest, 127, "%d.%d %svia trunk to %s:%d",
 								hostlist->s_net, hostlist->s_stn,
+								(hostlist->is_static ? "(static) " : ""),
 								(hostlist->source->trunk.hostname ? hostlist->source->trunk.hostname : "(Not connected)"), 
 								(hostlist->source->trunk.hostname ? hostlist->source->trunk.remote_port : 0));
 						else if (hostlist->source->type == EB_DEF_WIRE) // Wire source
-							snprintf (dest, 127, "%d.%d via wire net %d",
+							snprintf (dest, 127, "%d.%d %svia wire net %d",
 								hostlist->s_net, hostlist->s_stn,
+								(hostlist->is_static ? "(static) " : ""),
 								hostlist->source->net);
-						else 	snprintf (dest, 127, "%d.%d via unknown device",
-								hostlist->s_net, hostlist->s_stn);
+						else 	snprintf (dest, 127, "%d.%d %svia unknown device",
+								hostlist->s_net, hostlist->s_stn,
+								(hostlist->is_static ? "(static) " : ""));
 	
 						pthread_mutex_lock (&(hostlist->statsmutex));
 						fprintf (output, "%03d|%03d|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	device->net, hostlist->stn, "Pool", dest, hostlist->b_in, hostlist->b_out);
@@ -9330,16 +9333,19 @@ static void * eb_statistics (void *nothing)
 						{
 						
 							if (hostlist->source->type == EB_DEF_TRUNK)
-								snprintf (dest, 127, "%d.%d via trunk to %s:%d",
+								snprintf (dest, 127, "%d.%d %svia trunk to %s:%d",
 									hostlist->s_net, hostlist->s_stn,
+									(hostlist->is_static ? "(static) " : ""),
 									(hostlist->source->trunk.hostname ? hostlist->source->trunk.hostname : "(Not connected)"), 
 									(hostlist->source->trunk.hostname ? hostlist->source->trunk.remote_port : 0));
 							else if (hostlist->source->type == EB_DEF_WIRE) // Wire source
-								snprintf (dest, 127, "%d.%d via wire net %d",
+								snprintf (dest, 127, "%d.%d %svia wire net %d",
 									hostlist->s_net, hostlist->s_stn,
+									(hostlist->is_static ? "(static) " : ""),
 									hostlist->source->net);
-							else 	snprintf (dest, 127, "%d.%d via unknown device",
-									hostlist->s_net, hostlist->s_stn);
+							else 	snprintf (dest, 127, "%d.%d %svia unknown device",
+									hostlist->s_net, hostlist->s_stn,
+									(hostlist->is_static ? "(static) " : ""));
 		
 							pthread_mutex_lock (&(hostlist->statsmutex));
 							fprintf (output, "%03d|%03d|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	net, hostlist->stn, "Pool", dest, hostlist->b_in, hostlist->b_out);
