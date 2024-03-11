@@ -9166,6 +9166,51 @@ static void * eb_statistics (void *nothing)
 		
 			pthread_mutex_unlock (&(device->statsmutex));
 
+			if (device->type == EB_DEF_POOL) // Dump live pool connections
+			{
+				uint8_t		net;
+				struct __eb_pool_host	*hostlist;
+				char		dest[128];
+
+				net = device->net;
+
+				pthread_mutex_lock(&(device->pool.data->updatemutex));
+
+				hostlist = device->pool.data->hosts_net[net];
+
+				while (hostlist)
+				{
+					struct timeval	now;
+
+					gettimeofday (&now, 0);
+
+					if ((hostlist->is_static) || (timediffmsec(&(hostlist->last_traffic), &now) <= (EB_CONFIG_POOL_DEAD_INTERVAL * 1000)))
+					{
+					
+						if (hostlist->source->type == EB_DEF_TRUNK)
+							snprintf (dest, 127, "%d.%d via trunk to %s:%d",
+								hostlist->s_net, hostlist->s_stn,
+								(hostlist->source->trunk.hostname ? hostlist->source->trunk.hostname : "(Not connected)"), 
+								(hostlist->source->trunk.hostname ? hostlist->source->trunk.remote_port : 0));
+						else if (hostlist->source->type == EB_DEF_WIRE) // Wire source
+							snprintf (dest, 127, "%d.%d via wire net %d",
+								hostlist->s_net, hostlist->s_stn,
+								hostlist->source->net);
+						else 	snprintf (dest, 127, "%d.%d via unknown device",
+								hostlist->s_net, hostlist->s_stn);
+	
+						pthread_mutex_lock (&(hostlist->statsmutex));
+						fprintf (output, "%03d|%03d|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	device->net, hostlist->stn, "Pool", dest, hostlist->b_in, hostlist->b_out);
+						pthread_mutex_unlock (&(hostlist->statsmutex));
+					}
+
+					hostlist = hostlist->next_net;
+				}
+
+				pthread_mutex_unlock(&(device->pool.data->updatemutex));
+
+			}
+
 			if (device->type == EB_DEF_NULL || device->type == EB_DEF_WIRE)
 			{
 
