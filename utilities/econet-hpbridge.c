@@ -9342,7 +9342,7 @@ static void * eb_statistics (void *nothing)
 									hostlist->s_net, hostlist->s_stn);
 		
 							pthread_mutex_lock (&(hostlist->statsmutex));
-							fprintf (output, "%03d|%03d|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	device->net, hostlist->stn, "Pool", dest, hostlist->b_in, hostlist->b_out);
+							fprintf (output, "%03d|%03d|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	net, hostlist->stn, "Pool", dest, hostlist->b_in, hostlist->b_out);
 							pthread_mutex_unlock (&(hostlist->statsmutex));
 						}
 	
