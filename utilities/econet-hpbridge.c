@@ -9266,7 +9266,10 @@ static void * eb_statistics (void *nothing)
 
 			pthread_mutex_lock (&(device->statsmutex));
 
-			fprintf (output, "999|000|Trunk|Local %d to %s:%d|%" PRIu64 "|%" PRIu64 "|%.0f|\n",	(device->trunk.local_port), (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), (device->trunk.hostname ? device->trunk.remote_port : 0), device->b_in, device->b_out, difftime(time(NULL), device->last_rx));
+			if (difftime(time(NULL), device->last_rx) > EB_CONFIG_TRUNK_DEAD_INTERVAL) // Trunk never used
+				fprintf (output, "999|000|Trunk|Local %d to %s:%d|%" PRIu64 "|%" PRIu64 "|Dead|\n",	(device->trunk.local_port), (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), (device->trunk.hostname ? device->trunk.remote_port : 0), device->b_in, device->b_out);
+			else
+				fprintf (output, "999|000|Trunk|Local %d to %s:%d|%" PRIu64 "|%" PRIu64 "|%.0f|\n",	(device->trunk.local_port), (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), (device->trunk.hostname ? device->trunk.remote_port : 0), device->b_in, device->b_out, difftime(time(NULL), device->last_rx));
 		
 			pthread_mutex_unlock (&(device->statsmutex));
 

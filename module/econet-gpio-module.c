@@ -37,6 +37,7 @@
 #include <linux/hrtimer.h>
 #include <linux/time64.h>
 #include <linux/ktime.h>
+#include <linux/version.h>
 
 #include <asm/uaccess.h>
 
@@ -310,10 +311,15 @@ void econet_gpio_release_pins(void)
 {
 
 	unsigned short counter;
+	unsigned short add = 0;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,4,0)
+	add = 512;
+#endif	
 
 	for (counter = 0; counter < 19; counter++)
 		if(econet_gpio_reg_obtained[counter])
-			gpio_free(econet_gpio_pins[counter]);
+			gpio_free(econet_gpio_pins[counter]+add);
 
 	return;
 
@@ -393,6 +399,15 @@ short econet_gpio_init(void)
 	u32 t; /* Variable to read / write GPIO registers in this function */
 	unsigned short counter;
 	int err;
+	u32 add = 0;
+
+
+// This is an intermediate fix for the change in GPIO numbers. No postcards are required complaining about it, I know
+// it needs updating so that we used the gpiod functions. Thanks. CR
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,4,0)
+	add = 512;
+#endif	
 
 	/* Set up the pin assignments array - Data lines */
 	for (counter = 0; counter < 8; counter++)
@@ -426,7 +441,9 @@ short econet_gpio_init(void)
 
 	for (counter = 0; counter < 19; counter++)
 	{
-		if ((err = gpio_request(econet_gpio_pins[counter], THIS_MODULE->name)) != 0)
+		//if (counter != EGP_RST)
+		{
+		if ((err = gpio_request(econet_gpio_pins[counter]+add, THIS_MODULE->name)) != 0)
 		{
 			printk (KERN_INFO "ECONET-GPIO: Failed to request GPIO BCM %d\n", econet_gpio_pins[counter]);
 			econet_gpio_release_pins();
@@ -435,9 +452,17 @@ short econet_gpio_init(void)
 		else
 		{
 			econet_gpio_reg_obtained[counter] = 1;	
-			gpio_export(econet_gpio_pins[counter], false);
+			//gpio_export(econet_gpio_pins[counter], false);
+		}
 		}
 	}
+
+	// Test gpiod_ interface for RST pin
+	
+	/*
+	if (IS_ERR(gpiod_get(econet_data->dev, "rst", GPIOD_OUT_HIGH)))
+		printk (KERN_INFO "ECONET-GPIO: gpiod_get() failed");
+	*/
 
 #ifdef ECONET_GPIO_DEBUG_SETUP
 	printk (KERN_INFO "ECONET-GPIO: GPIOs successfully requested.\n");
@@ -623,7 +648,7 @@ short econet_gpio_init(void)
 
 	}
 
-	econet_data->irq = gpio_to_irq(econet_gpio_pins[EGP_IRQ]);
+	econet_data->irq = gpio_to_irq(econet_gpio_pins[EGP_IRQ]+add);
 
 	econet_set_irq_state(1);
 
@@ -2672,7 +2697,11 @@ static int __init econet_init(void)
 		return econet_data->major;
 	}
 
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(6,4,0)
 	if (IS_ERR(econet_class = class_create(THIS_MODULE, CLASS_NAME)))
+#else
+	if (IS_ERR(econet_class = class_create(CLASS_NAME)))
+#endif
 	{
 		printk (KERN_INFO "ECONET-GPIO: Failed creating device class\n");
 		result = PTR_ERR(econet_class);
