@@ -81,6 +81,7 @@ unsigned GPIO_PWM_RANGE = 0x28;
 u8 sr1, sr2;
 //long gpioset_value;
 u32 gpioset_value;
+u32 gpio_add;
 
 u8 econet_gpio_reg_obtained[19];
 
@@ -311,15 +312,10 @@ void econet_gpio_release_pins(void)
 {
 
 	unsigned short counter;
-	unsigned short add = 0;
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,4,0)
-	add = 512;
-#endif	
 
 	for (counter = 0; counter < 19; counter++)
 		if(econet_gpio_reg_obtained[counter])
-			gpio_free(econet_gpio_pins[counter]+add);
+			gpio_free(econet_gpio_pins[counter]+gpio_add);
 
 	return;
 
@@ -399,15 +395,11 @@ short econet_gpio_init(void)
 	u32 t; /* Variable to read / write GPIO registers in this function */
 	unsigned short counter;
 	int err;
-	u32 add = 0;
 
 
 // This is an intermediate fix for the change in GPIO numbers. No postcards are required complaining about it, I know
 // it needs updating so that we used the gpiod functions. Thanks. CR
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,4,0)
-	add = 512;
-#endif	
 
 	/* Set up the pin assignments array - Data lines */
 	for (counter = 0; counter < 8; counter++)
@@ -443,7 +435,7 @@ short econet_gpio_init(void)
 	{
 		//if (counter != EGP_RST)
 		{
-		if ((err = gpio_request(econet_gpio_pins[counter]+add, THIS_MODULE->name)) != 0)
+		if ((err = gpio_request(econet_gpio_pins[counter]+gpio_add, THIS_MODULE->name)) != 0)
 		{
 			printk (KERN_INFO "ECONET-GPIO: Failed to request GPIO BCM %d\n", econet_gpio_pins[counter]);
 			econet_gpio_release_pins();
@@ -469,7 +461,7 @@ short econet_gpio_init(void)
 	printk (KERN_INFO "ECONET-GPIO: Requesting IRQ on BCM pin %02d\n", econet_gpio_pins[EGP_IRQ]);
 #endif
 
-	gpio_direction_input(econet_gpio_pins[EGP_IRQ]);
+	gpio_direction_input(econet_gpio_pins[EGP_IRQ]+gpio_add);
 
 #ifdef ECONET_GPIO_DEBUG_SETUP
 	printk (KERN_INFO "ECONET-GPIO: IRQ Successfully set up - IRQ %d\n", econet_data->irq);
@@ -525,8 +517,8 @@ short econet_gpio_init(void)
 
 	INP_GPIO(ECONET_GPIO_PIN_BUSY); // v2 hardware busy line
 
-	gpio_direction_output(econet_gpio_pins[EGP_READLED], 1);
-	gpio_direction_output(econet_gpio_pins[EGP_WRITELED], 0);
+	gpio_direction_output(econet_gpio_pins[EGP_READLED]+gpio_add, 1);
+	gpio_direction_output(econet_gpio_pins[EGP_WRITELED]+gpio_add, 0);
 
 	// Ask for clock function on CLK pin
 
@@ -648,7 +640,7 @@ short econet_gpio_init(void)
 
 	}
 
-	econet_data->irq = gpio_to_irq(econet_gpio_pins[EGP_IRQ]+add);
+	econet_data->irq = gpio_to_irq(econet_gpio_pins[EGP_IRQ]+gpio_add);
 
 	econet_set_irq_state(1);
 
@@ -2316,7 +2308,7 @@ void econet_led_state(uint8_t arg)
 
 	pin = (arg & ECONETGPIO_READLED) ? EGP_READLED : EGP_WRITELED;
 
-	gpio_set_value(econet_gpio_pins[pin], (arg & ECONETGPIO_LEDON) ? 1 : 0);
+	gpio_set_value(econet_gpio_pins[pin]+gpio_add, (arg & ECONETGPIO_LEDON) ? 1 : 0);
 
 }
 
@@ -2599,6 +2591,11 @@ static int __init econet_init(void)
 	int err;
 	int result;
 
+	gpio_add = 0;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,4,0)
+	gpio_add = 512;
+#endif	
+
 	/* Initialize some debug instrumentation */
 	tx_packets = 0; 
 
@@ -2771,8 +2768,8 @@ static int __init econet_probe (struct platform_device *pdev)
 static void econet_exit(void)
 {
 
-	gpio_direction_output(econet_gpio_pins[EGP_READLED], 0);
-	gpio_direction_output(econet_gpio_pins[EGP_WRITELED], 0);
+	gpio_direction_output(econet_gpio_pins[EGP_READLED]+gpio_add, 0);
+	gpio_direction_output(econet_gpio_pins[EGP_WRITELED]+gpio_add, 0);
 
 	econet_gpio_release();
 	
