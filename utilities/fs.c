@@ -4732,7 +4732,7 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		r.p.data[replylen++] = p.monthyear;
 	}
 
-	if (/* command == 4 || */ command == 5) // arg 4 doesn't request owner
+	if (command == 4 || command == 5) // arg 4 doesn't request ownership - but the RISC OS PRM says it does, so we'll put this back
 		r.p.data[replylen++] = (active[server][active_id].userid == p.owner) ? 0x00 : 0xff; 
 
 	if (command == 6)
