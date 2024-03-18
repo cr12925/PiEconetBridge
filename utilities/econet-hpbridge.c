@@ -9311,7 +9311,19 @@ static void * eb_statistics (void *nothing)
 							
 				pthread_mutex_lock (&(device->statsmutex));
 	
-				fprintf (output, "%03d|%03d|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	net, (device->type == EB_DEF_TRUNK && (device->trunk.xlate_out[net])) ? device->trunk.xlate_out[net] : net, eb_type_str(device->type), 
+				if (device->type == EB_DEF_TRUNK)
+				{
+					char	extra[128];
+
+					strcpy(extra, "");
+
+					if (device->trunk.xlate_out[net])
+						sprintf (extra, " (net %d at remote)", device->trunk.xlate_out[net]);
+
+					strcat(trunkdest, extra);
+				}
+
+				fprintf (output, "%03d|000|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	net, eb_type_str(device->type), 
 					trunkdest,
 					device->b_in, device->b_out);
 			
