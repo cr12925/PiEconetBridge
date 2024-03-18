@@ -62,7 +62,7 @@ eeprom-v1: eeprom-general
 	cp dts/econet-gpio-v1.dtbo /boot/overlays
 	@echo Now add "dtoverlay=econet-gpio-v1" to your config.txt
 
-eep:
+eep: eeprom-general
 	@cat v2eeprom/warning.txt
 	@read a
 	[ -d hats ] || git clone https://github.com/raspberrypi/hats.git hats
