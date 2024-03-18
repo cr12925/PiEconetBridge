@@ -172,6 +172,7 @@ struct __econet_packet_pipe {
 #define ECONETGPIO_IOC_NETCLOCK		_IOW(ECONETGPIO_MAGIC, 12, uint32_t) /* Set network clock via hardware PWM on v2r3 boards */
 /* No function 13 - bad luck */
 #define ECONETGPIO_IOC_READGENTLE	_IO(ECONETGPIO_MAGIC, 14) /* Set module to read mode without a full cleardown */
+#define ECONETGPIO_IOC_RESILIENTACK	_IO(ECONETGPIO_MAGIC, 15) /* Send final ACK to client station on wire because we received an ACK from the distant station the client was sending a 4-way to - moves kernel module out of EA_PENDINGFINALACK */
 
 /* The following are for debugging and testing only, and only with interrupts off */
 #define ECONETGPIO_IOC_SETA		_IOW(ECONETGPIO_MAGIC, 100, int) /* bit0 is A0, bit1 is A1 */
@@ -239,7 +240,8 @@ enum econet_aunstate {
         EA_I_WRITEIMM, // We got an immediate from userspace and are putting it on the wire
         EA_I_READREPLY, // We've written an immediate to the wire, we are now waiting for the response from the wire
         EA_I_IMMSENTTOAUN, // We've received an immediate off the wire and sent it to userspace. We are waiting for a reply to come back and will then transmit it
-        EA_W_WRITEBCAST // Writing a broadcast. Don't hang about for a reply
+        EA_W_WRITEBCAST, // Writing a broadcast. Don't hang about for a reply
+	EA_R_PENDINGFINALACK // We received scout, sent ACK, received data, and are now flagfilling whilst waiting for userspace to tell us whether to send final ack. (And userspace must put us back in read mode if that ACK is not received from the distant station - based on a timeout.)
 };
 
 #endif

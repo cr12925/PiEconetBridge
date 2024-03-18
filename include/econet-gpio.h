@@ -71,7 +71,7 @@
 /* Function declarations */
 
 static int econet_probe(struct platform_device *);
-int econet_remove(struct platform_device *);
+static int econet_remove(struct platform_device *);
 int econet_open(struct inode *, struct file *);
 int econet_release(struct inode *, struct file *);
 long econet_ioctl (struct file *, unsigned int, unsigned long);
@@ -131,6 +131,7 @@ struct __econet_data {
 	u64 aun_last_writefd;
 	u64 aun_last_statechange;
 	short last_tx_user_error;
+	struct gpio_desc	*econet_gpios[20];
 	unsigned char clock; // 0 = no clock; anything else = clock - set when reading registers
 	unsigned char hwver;
 	unsigned char current_dir; // Current databus direction
@@ -138,6 +139,7 @@ struct __econet_data {
 	unsigned char extralogs; // If 1, extra dmesg logging happens (e.g. collisions, rx aborts, etc.)
 	unsigned long peribase; // Peripheral base address
 	unsigned long clockdiv; // Clock divider setting
+	u8 resilience; // 0 = off; 1 = in AUN mode, will just flag fill after receipt of data from station when reading a 4-way instead of sending final ACK. (Not implemented yet.) Userspace will use ioctl() to signal the ACK has arrived and that the wire ACK can then be sent. In this mode, userspace will have set a thread going which waits for a timeout, checks to see if the kernel is still in EA_R_PENDINGFINALACK and if it is then puts it back into read mode. This will generate net error on the sending wire station, which is the best we can do if destination station fails to respond (perhaps over trunk) when the module has to convert 4-way traffic to AUN.
 };
 
 struct __econet_pkt_buffer {

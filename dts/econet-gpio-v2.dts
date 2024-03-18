@@ -46,6 +46,9 @@
 						<&gpio 25 0>,
 						<&gpio 26 0>,
 						<&gpio 27 0>;
+				writeled-gpios = <&gpio 11 0>;
+				readled-gpios = <&gpio 8 0>;
+				version = /bits/ 8 < 0x02 >;
 				status = "okay";
 			};
 		};

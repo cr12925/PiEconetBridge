@@ -1,0 +1,12 @@
+
+WARNING
+-------
+
+Do not proceed unless you have compiled & installed the latest kernel module
+otherwise your bridge will fail catastrophically.
+
+If you have not yet done 'make install' then please stop and do so now.
+
+Press RETURN to continue or Ctrl-C to quit
+
+

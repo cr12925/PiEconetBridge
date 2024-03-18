@@ -1,16 +1,16 @@
-all:	install-hp
+all:		install-hp
 
 install:	install-hp
+
+install-mkgroup:
+	-sudo groupadd econet
+	-sudo usermod -a -G econet `whoami`
 
 install-module:	install-mkgroup
 	cd module ; make clean ; make
 	[ -f /etc/udev/rules.d/90-econet.rules ] || sudo cp udev/90-econet.rules /etc/udev/rules.d/90-seconet.rules
 	sudo cp module/econet-gpio.ko /lib/modules/`uname -r`/kernel/drivers/net
 	sudo /usr/sbin/depmod
-
-install-mkgroup:
-	-sudo groupadd econet
-	-sudo usermod -a -G econet `whoami`
 
 utilities: install-mkgroup
 	-sudo systemctl stop econet-hpbridge
@@ -53,3 +53,23 @@ clean:
 	cd module ; make clean
 	cd utilities ; make clean
 
+eeprom-general:
+	cd dts ; ./dtcompile
+
+eeprom-v1: eeprom-general
+	@cat v2eeprom/v1warning.txt
+	@read a
+	cp dts/econet-gpio-v1.dtbo /boot/overlays
+	@echo Now add "dtoverlay=econet-gpio-v1" to your config.txt
+
+eep:
+	@cat v2eeprom/warning.txt
+	@read a
+	[ -d hats ] || git clone https://github.com/raspberrypi/hats.git hats
+	cd hats/eepromutils ; make
+	hats/eepromutils/eepmake v2eeprom/econet_eeprom.txt v2eeprom/econet-gpio-v2.eep dts/econet-gpio-v2.dtb -c v2eeprom/Copyright.txt v2eeprom/ReadMe.txt
+
+eeprom-v2: eeprom-general eep
+	dd if=/dev/zero ibs=1k count=8 of=blank.eep
+	hats/eepromutils/eepflash.sh -w -f=blank.eep -t=24c64
+	hats/eepromutils/eepflash.sh -w -f=v2eeprom/econet-gpio-v2.eep -t=24c64

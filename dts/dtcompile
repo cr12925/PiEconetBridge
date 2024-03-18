@@ -1,0 +1,5 @@
+#!/bin/bash
+dtc -@ -Hepapr -I dts -O dtb -o econet-gpio-v1.dtb econet-gpio-v1.dts
+dtc -@ -Hepapr -I dts -O dtb -o econet-gpio-v1.dtbo econet-gpio-v1.dts
+dtc -@ -Hepapr -I dts -O dtb -o econet-gpio-v2.dtb econet-gpio-v2.dts
+dtc -@ -Hepapr -I dts -O dtb -o econet-gpio-v2.dtbo econet-gpio-v2.dts
