@@ -71,5 +71,5 @@ eep: eeprom-general
 
 eeprom-v2: eeprom-general eep
 	dd if=/dev/zero ibs=1k count=8 of=blank.eep
-	hats/eepromutils/eepflash.sh -w -f=blank.eep -t=24c64
-	hats/eepromutils/eepflash.sh -w -f=v2eeprom/econet-gpio-v2.eep -t=24c64
+	sudo hats/eepromutils/eepflash.sh -w -f=blank.eep -t=24c64
+	sudo hats/eepromutils/eepflash.sh -w -f=v2eeprom/econet-gpio-v2.eep -t=24c64
