@@ -70,6 +70,6 @@ eep: eeprom-general
 	hats/eepromutils/eepmake v2eeprom/econet_eeprom.txt v2eeprom/econet-gpio-v2.eep dts/econet-gpio-v2.dtb -c v2eeprom/Copyright.txt v2eeprom/ReadMe.txt
 
 eeprom-v2: eeprom-general eep
-	dd if=/dev/zero ibs=1k count=8 of=blank.eep
-	sudo hats/eepromutils/eepflash.sh -w -f=blank.eep -t=24c64
+	dd if=/dev/zero ibs=1k count=8 of=v2eeprom/blank.eep
+	sudo hats/eepromutils/eepflash.sh -w -f=v2eeprom/blank.eep -t=24c64
 	sudo hats/eepromutils/eepflash.sh -w -f=v2eeprom/econet-gpio-v2.eep -t=24c64
