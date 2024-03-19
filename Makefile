@@ -73,3 +73,4 @@ eeprom-v2: eeprom-general eep
 	dd if=/dev/zero ibs=1k count=8 of=v2eeprom/blank.eep
 	sudo hats/eepromutils/eepflash.sh -w -f=v2eeprom/blank.eep -t=24c64
 	sudo hats/eepromutils/eepflash.sh -w -f=v2eeprom/econet-gpio-v2.eep -t=24c64
+	@echo +++ Now comment out the two lines you added to config.txt and reboot!

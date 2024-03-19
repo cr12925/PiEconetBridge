@@ -2479,7 +2479,7 @@ static int econet_probe (struct platform_device *pdev)
 	ECONET_GETGPIO(EGP_DIR, "busy", GPIOD_IN); // Only used on v2
 	ECONET_GETGPIO(EGP_IRQ, "irq", GPIOD_IN);
 	ECONET_GETGPIO(EGP_READLED, "readled", GPIOD_OUT_HIGH); // Only used on v2
-	ECONET_GETGPIO(EGP_WRITELED, "writeled", GPIOD_OUT_HIGH); // Only used on v2
+	ECONET_GETGPIO(EGP_WRITELED, "writeled", GPIOD_OUT_LOW); // Only used on v2
 
 	for (count = 0; count < 19; count++)
 		ECONET_GPIOERR(count);
