@@ -344,15 +344,15 @@ struct path {
 	unsigned char acornname[ECONET_ABS_MAX_FILENAME_LENGTH+1]; // Acorn format filename - tail end - gets populated on not found for non-wildcard searches to enable *SAVE to return it
 	short npath; // Number of entries in path[]. 1 means last entry is [0]
 	unsigned char path_from_root[2560]; // Path from root directory in Econet format // Was 256 - extended for long fnames
-	int owner; // Owner user ID
-	int parent_owner;
-	unsigned short homeof;
+	uint16_t owner; // Owner user ID
+	uint16_t parent_owner;
+	uint16_t homeof;
 	unsigned char ownername[11]; // Readable name of owner
-	unsigned short perm; // Permissions for owner & other - ECONET_PERM_... etc.
-	unsigned short parent_perm; // If object is not found or is a file, this contains permission on parent dir
-	unsigned short my_perm; // This user's access rights to this object - i.e. only bottom 3 bits of perm, adjusted for ownership
-	unsigned long load, exec, length;
-	unsigned long internal; // System internal name for file. (aka inode number for us)
+	uint8_t perm; // Permissions for owner & other - ECONET_PERM_... etc.
+	uint8_t parent_perm; // If object is not found or is a file, this contains permission on parent dir
+	uint8_t my_perm; // This user's access rights to this object - i.e. only bottom 3 bits of perm, adjusted for ownership
+	uint32_t load, exec, length;
+	uint32_t internal; // System internal name for file. (aka inode number for us)
 	struct objattr attr; // Not yet in use generally
 	unsigned char unixpath[1024]; // Full unix path from / in the filesystem (done because Econet is case insensitive)
 	unsigned char acornfullpath[1024]; // Full acorn path within this server, including disc name
@@ -1430,7 +1430,7 @@ void fs_read_xattr(unsigned char *path, struct objattr *r, int server)
 
 }
 
-void fs_write_xattr(unsigned char *path, int owner, short perm, unsigned long load, unsigned long exec, int homeof, int server)
+void fs_write_xattr(unsigned char *path, uint16_t owner, uint8_t perm, uint32_t load, uint32_t exec, uint16_t homeof, int server)
 {
 	char *dotfile=pathname_to_dotfile(path, fs_config[server].fs_infcolon);
 	int dotexists=access(dotfile, F_OK);
@@ -1444,23 +1444,23 @@ void fs_write_xattr(unsigned char *path, int owner, short perm, unsigned long lo
 
 	unsigned char attrbuf[20];
 
-	sprintf ((char * ) attrbuf, "%02x", perm);
+	sprintf ((char * ) attrbuf, "%02X", perm);
 	if (setxattr((const char *) path, "user.econet_perm", (const void *) attrbuf, 2, 0)) // Flags = 0 means create if not exist, replace if does
 		fs_debug (0, 1, "Failed to set permission on %s\n", path);
 
-	sprintf((char * ) attrbuf, "%04x", owner);
+	sprintf((char * ) attrbuf, "%04X", owner);
 	if (setxattr((const char *) path, "user.econet_owner", (const void *) attrbuf, 4, 0))
 		fs_debug (0, 1, "Failed to set owner on %s", path);
 
-	sprintf((char * ) attrbuf, "%08lx", load);
+	sprintf((char * ) attrbuf, "%08X", load);
 	if (setxattr((const char *) path, "user.econet_load", (const void *) attrbuf, 8, 0))
 		fs_debug (0, 1, "Failed to set load address on %s", path);
 
-	sprintf((char * ) attrbuf, "%08lx", exec);
+	sprintf((char * ) attrbuf, "%08X", exec);
 	if (setxattr((const char *) path, "user.econet_exec", (const void *) attrbuf, 8, 0))
 		fs_debug (0, 1, "Failed to set exec address on %s: %s", path, strerror(errno));
 
-	sprintf((char *) attrbuf, "%04x", homeof);
+	sprintf((char *) attrbuf, "%04X", homeof);
 	if (setxattr((const char *) path, "user.econet_homeof", (const void *) attrbuf, 4, 0))
 		fs_debug (0, 1, "Failed to set home directory flag on %s: %s", path, strerror(errno));
 }
@@ -6962,10 +6962,7 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn)
 		free(p->packet);
 		free(p);
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wuse-after-free"
 		fs_debug (0, 4, "Packet queue entry freed at %p", p);
-#pragma GCC diagnostic pop
 
 		if (!(l->pq_head)) // Ran out of packets
 		{
