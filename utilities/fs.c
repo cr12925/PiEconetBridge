@@ -6962,7 +6962,10 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn)
 		free(p->packet);
 		free(p);
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuse-after-free"
 		fs_debug (0, 4, "Packet queue entry freed at %p", p);
+#pragma GCC diagnostic pop
 
 		if (!(l->pq_head)) // Ran out of packets
 		{
