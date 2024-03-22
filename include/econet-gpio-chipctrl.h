@@ -41,25 +41,43 @@ void econet_flagfill(void);
 #define OUT_GPIO(g) *(GPIO_PORT+((g)/10)) |=  (1<<(((g)%10)*3))
 #define SET_GPIO_ALT(g,a) *(GPIO_PORT+(((g)/10))) |= (((a)<=3?(a)+4:(a)==4?3:2)<<(((g)%10)*3))
 
-#define econet_gpio_pin(p) 	(readl(GPIO_PORT + GPLEV0) & (1 << p))
-
-#define econet_isbusy()		(econet_gpio_pin(ECONET_GPIO_PIN_BUSY))
-	
 /* Low level chip control functions */
 
-#define econet_set_addr(x,y)	gpioset_value = (((x) << (ECONET_GPIO_PIN_ADDR + 1)) | ((y) << (ECONET_GPIO_PIN_ADDR))); \
-				writel(gpioset_value, GPIO_PORT + GPSET0); \
-				writel(((~gpioset_value) & ECONET_GPIO_CLRMASK_ADDR), GPIO_PORT + GPCLR0); \
-				barrier()
+#ifdef ECONET_GPIO_NEW
+	#define econet_isbusy()		(gpiod_get_value(econet_data->econet_gpios[EGP_DIR]))
+	#define econet_set_cs(x)	(gpiod_set_value(econet_data->econet_gpios[EGP_CS], (x)))
+	#define econet_set_rst(x)	(gpiod_set_value(econet_data->econet_gpios[EGP_RST], (x)))
+	#define econet_set_rw(x)	(gpiod_set_value(econet_data->econet_gpios[EGP_RW], (x)))
+	#define econet_set_addr(x,y)	{	unsigned long int g;  \
+						g = ((x) << 1) | (y); \
+						gpiod_set_array_value(2, a01rw_desc_array, NULL, &g); \
+						barrier(); \
+					}
 
-#define econet_set_board(x)	gpioset_value = (((y) << (ECONET_GPIO_PIN_BOARDSEL))); \
-				writel(gpioset_value, GPIO_PORT + GPSET0); \
-				writel(((~gpioset_value) & ECONET_GPIO_CLRMASK_BOARDSEL), GPIO_PORT + GPCLR0); \
-				barrier()
+#else
 
-#define econet_set_rw(x)	if (x)	writel(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPSET0)); \
-				else	writel(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPCLR0))
+	#define econet_gpio_pin(p) 	(readl(GPIO_PORT + GPLEV0) & (1 << p))
 
+	#define econet_isbusy()		(econet_gpio_pin(ECONET_GPIO_PIN_BUSY))
+
+	#define econet_set_cs(x)	if (x)	writel(ECONET_GPIO_CLRMASK_CS, (GPIO_PORT + (econet_data->hwver < 2 ? GPSET0 : GPCLR0))); \
+					else	writel(ECONET_GPIO_CLRMASK_CS, (GPIO_PORT + (econet_data->hwver < 2 ? GPCLR0 : GPSET0)))
+
+	#define econet_set_rst(x)	if (x)	writel(ECONET_GPIO_CLRMASK_RST, (GPIO_PORT + GPSET0)); \
+					else	writel(ECONET_GPIO_CLRMASK_RST, (GPIO_PORT + GPCLR0))
+
+	#define econet_set_rw(x)	if (x)	writel(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPSET0)); \
+					else	writel(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPCLR0))
+
+	#define econet_set_addr(x,y)	gpioset_value = (((x) << (ECONET_GPIO_PIN_ADDR + 1)) | ((y) << (ECONET_GPIO_PIN_ADDR))); \
+					writel(gpioset_value, GPIO_PORT + GPSET0); \
+					writel(((~gpioset_value) & ECONET_GPIO_CLRMASK_ADDR), GPIO_PORT + GPCLR0); \
+					barrier()
+#endif
+
+	
+
+/* Thought to be unused
 #define econet_set_datadir_in	for (gpioset_value = ECONET_GPIO_PIN_DATA; gpioset_value < (ECONET_GPIO_PIN_DATA + 8); gpioset_value++) \
 				{ \
 					*(GPIO_PORT + GPSEL0 + (gpioset_value/10)) &= (7<<((gpioset_value % 10) * 3)); \
@@ -68,12 +86,7 @@ void econet_flagfill(void);
 				{ \
 					*(GPIO_PORT + GPSEL0 + (gpioset_value/10)) |= (7<<((gpioset_value %10) * 3)); \
 				}
-#define econet_set_cs(x)	if (x)	writel(ECONET_GPIO_CLRMASK_CS, (GPIO_PORT + (econet_data->hwver < 2 ? GPSET0 : GPCLR0))); \
-				else	writel(ECONET_GPIO_CLRMASK_CS, (GPIO_PORT + (econet_data->hwver < 2 ? GPCLR0 : GPSET0)))
-
-#define econet_set_rst(x)	if (x)	writel(ECONET_GPIO_CLRMASK_RST, (GPIO_PORT + GPSET0)); \
-				else	writel(ECONET_GPIO_CLRMASK_RST, (GPIO_PORT + GPCLR0))
-
+*/
 
 #define econet_ndelay(t)	{ \
 					u64 p; \

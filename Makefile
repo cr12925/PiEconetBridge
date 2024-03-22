@@ -7,6 +7,7 @@ install-mkgroup:
 	-sudo usermod -a -G econet `whoami`
 
 install-module:	install-mkgroup
+	[ ! -f include/econet-gpio-kernel-mode.h ] || touch include/econet-gpio-kernel-mode.h
 	cd module ; make clean ; make
 	[ -f /etc/udev/rules.d/90-econet.rules ] || sudo cp udev/90-econet.rules /etc/udev/rules.d/90-seconet.rules
 	sudo cp module/econet-gpio.ko /lib/modules/`uname -r`/kernel/drivers/net
@@ -74,3 +75,12 @@ eeprom-v2: eeprom-general eep
 	sudo hats/eepromutils/eepflash.sh -w -f=v2eeprom/blank.eep -t=24c64
 	sudo hats/eepromutils/eepflash.sh -w -f=v2eeprom/econet-gpio-v2.eep -t=24c64
 	@echo +++ Now comment out the two lines you added to config.txt and reboot!
+
+old-mode:
+	[ ! -f include/econet-gpio-kernel-mode.h ] || rm include/econet-gpio-kernel-mode.h
+	touch include/econet-gpio-kernel-mode.h
+
+new-mode:
+	[ ! -f include/econet-gpio-kernel-mode.h ] || rm include/econet-gpio-kernel-mode.h
+	echo '#define ECONET_NEW_MODE\n' > include/econet-gpio-kernel-mode.h
+

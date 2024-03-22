@@ -14,6 +14,9 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Turn on use of gpiod_ to read and write the lines
+#include "../include/econet-gpio-kernel-mode.h"
+
 /* LEVEL TRIGGERED CLEANED UP CODE */
 
 #include <linux/init.h>
@@ -31,6 +34,7 @@
 #include <linux/mod_devicetable.h>
 #include <linux/gpio/consumer.h>
 #include <linux/clk.h>
+#include <linux/pwm.h>
 #include <linux/delay.h>
 #include <linux/kfifo.h>
 #include <linux/wait.h>
@@ -45,13 +49,16 @@
 
 // GPIOD macros
 #define ECOPIN(a)	econet_data->econet_gpios[(a)]
-#define ECONET_GETGPIO(i,n,d)	econet_data->econet_gpios[(i)] = gpiod_get(dev, n, (d))
-#define ECONET_GPIOERR(i) if (IS_ERR(econet_data->econet_gpios[(i)])) { printk (KERN_INFO "econet-gpio: Failed to obtain GPIO ref %d\n", (i)); return -1; }
-
-
+#define ECONET_GETGPIO(i,n,d)	econet_data->econet_gpios[(i)] = devm_gpiod_get(dev, n, (d))
+#define ECONET_GPIOERR(i) if (IS_ERR(econet_data->econet_gpios[(i)])) { printk (KERN_INFO "econet-gpio: Failed to obtain GPIO ref %d\n", (i)); return PTR_ERR(econet_data->econet_gpios[(i)]); }
 
 #define ECONET_GPIO_CLOCK_DUTY_CYCLE  1000   /* In nanoseconds - 2MHz clock is 500 ns duty cycle, 1MHz is 1us, or 1000ns */
 #define ECONET_GPIO_CLOCK_US_DUTY_CYCLE	1	/* In uSecs - 1us is the cycle time on a 1MHz clock, which is what the existing hardware has built on */
+
+#ifdef ECONET_GPIO_NEW
+struct gpio_desc *a01rw_desc_array[3];
+struct gpio_desc *data_desc_array[11]; // Top 3 are the address & RnW lines in case of need
+#endif
 
 unsigned long *GPIO_PORT = NULL;
 unsigned GPIO_RANGE = 0x40;
@@ -86,7 +93,6 @@ unsigned GPIO_PWM_RANGE = 0x28;
 #define econet_get_tx_status() atomic_read(&(econet_data->tx_status))
 
 u8 sr1, sr2;
-//long gpioset_value;
 u32 gpioset_value;
 
 struct file_operations econet_fops = {
@@ -156,9 +162,23 @@ u64 last_data_rcvd;
 void econet_set_dir(short d)
 {
 
+#ifdef ECONET_GPIO_NEW
+
+	u8	count;
+
+	for (count = EGP_D0; count <= EGP_D7; count++)
+	{
+		if (d == ECONET_GPIO_WRITE)
+			gpiod_direction_output(econet_data->econet_gpios[count], 0); // Set to 0 output for now
+		else
+			gpiod_direction_input(econet_data->econet_gpios[count]);
+	}
+
+#else
 	writel((readl(GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10)) & ~ECONET_GPIO_DATA_PIN_MASK) | 
 		(d == ECONET_GPIO_WRITE ? ECONET_GPIO_DATA_PIN_OUT : 0),
 		GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10));
+#endif
 
 	econet_set_rw(d);
 
@@ -173,8 +193,12 @@ void econet_set_dir(short d)
  */
 void econet_write_cr(unsigned short r, unsigned char d)
 {
-	//unsigned long gpioval, gpiomask;
+#ifdef ECONET_GPIO_NEW
+	unsigned long int gpioval;
+	u8	count;
+#else
 	u32 gpioval, gpiomask;
+#endif
 
 	if (r > 4)
 	{
@@ -184,16 +208,33 @@ void econet_write_cr(unsigned short r, unsigned char d)
 
 	r--;
 
+#ifndef ECONET_GPIO_NEW
 	gpiomask = ECONET_GPIO_CLRMASK_DATA | ECONET_GPIO_CLRMASK_RW | ECONET_GPIO_CLRMASK_ADDR;
 
 	gpioval = (r & 0x03) << ECONET_GPIO_PIN_ADDR;
 	gpioval |= (d << ECONET_GPIO_PIN_DATA);
+#endif
 
 	// No need to set RW because it will be 0 by virtue of the first assignment to gpioval above.
 
 	if (econet_data->hwver >= 2)
 		while (econet_isbusy());
 
+#ifdef ECONET_GPIO_NEW
+
+	// Turn direction around
+
+	if (econet_data->current_dir != ECONET_GPIO_WRITE)
+		for (count = EGP_D0; count <= EGP_D7; count++)
+			gpiod_direction_output(econet_data->econet_gpios[count], 0); // Set to 0 output for now
+
+	econet_data->current_dir = ECONET_GPIO_WRITE;
+
+	// Set address & RnW & data
+	gpioval = (r << 8) | d; // RnW = 0 for write
+	gpiod_set_array_value (11, data_desc_array, NULL, &gpioval); // 11 because the address & RnW are in 8,9,10
+
+#else
 	// Put that lot on the GPIO
 	writel(gpioval, GPIO_PORT+GPSET0);
 	writel((~gpioval) & gpiomask, GPIO_PORT + GPCLR0);
@@ -207,6 +248,8 @@ void econet_write_cr(unsigned short r, unsigned char d)
 	}
 
 	barrier();
+#endif
+
 
 	// Enable nCS
 	econet_set_cs(ECONET_GPIO_CS_ON);
@@ -215,11 +258,9 @@ void econet_write_cr(unsigned short r, unsigned char d)
 	if (econet_data->hwver < 2)
 	{
 		econet_wait_pin_low(ECONET_GPIO_PIN_CSRETURN, (ECONET_GPIO_CLOCK_DUTY_CYCLE));
-		// 20220505 And wait a cycle before turning it off again
-		barrier();
 	}
-	else
-		barrier();
+
+	barrier(); // Operates for both v1 & v2 hardware
 
 	// Disable nCS again
 	econet_set_cs(ECONET_GPIO_CS_OFF);
@@ -232,7 +273,12 @@ void econet_write_cr(unsigned short r, unsigned char d)
 	if (econet_data->hwver < 2)
 	{
 		// ? Try a barrier() here to see if we get a suitable delay.
+#ifdef ECONET_GPIO_NEW
+		// 20240319 tried something shorter: econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
+		econet_ndelay(2000);
+#else
 		econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
+#endif
 	}
 	else
 		while (econet_isbusy()); // Wait until the ADLC has read our data. Not massively reliable yet.. SHouldn't be required, but seems to be!
@@ -246,8 +292,11 @@ void econet_write_cr(unsigned short r, unsigned char d)
 unsigned char econet_read_sr(unsigned short r)
 {
 	unsigned char d;
-	//unsigned long gpioval, gpiomask;
+#ifdef ECONET_GPIO_NEW
+	unsigned long int 	gpioval;
+#else
 	u32 gpioval, gpiomask;
+#endif
 
 	if (r > 4)
 	{
@@ -264,12 +313,33 @@ unsigned char econet_read_sr(unsigned short r)
 
 	if (econet_data->current_dir != ECONET_GPIO_READ)
 	{
+#ifdef ECONET_GPIO_NEW
+		u8	count;
+#endif
+
 		econet_data->current_dir = ECONET_GPIO_READ;
+#ifdef ECONET_GPIO_NEW
+
+		for (count = EGP_D0; count <= EGP_D7; count++)
+			gpiod_direction_input(econet_data->econet_gpios[count]);
+#else
 		writel(readl(GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10)) & ~ECONET_GPIO_DATA_PIN_MASK, GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10));
+#endif
 	}
 
-	barrier(); // In case needed on a bus direction change
+	barrier();
 
+#ifdef ECONET_GPIO_NEW
+
+	gpioval = r | 0x04; // 0x04 is third bit in the value, which is the RW figure, and we need 1 for read because the pin is RnW
+
+	if (gpiod_set_array_value (3, a01rw_desc_array, NULL, &gpioval) < 0)
+	{
+		printk (KERN_ERR "econet-gpio: Error writing address lines ready to ready SR\n");
+		return 0;
+	}
+	
+#else
 	// New code - sets up a single gpio value & mask and plonks it on the hardware in one go
 	// And the mask, so that we can write the 0s properly
 	gpiomask = ECONET_GPIO_CLRMASK_ADDR | ECONET_GPIO_CLRMASK_RW;
@@ -283,6 +353,8 @@ unsigned char econet_read_sr(unsigned short r)
 	writel((~gpioval) & gpiomask, GPIO_PORT + GPCLR0);
 	
 	// Shouldn't need a barrier here because apparently writel() has one in it.
+
+#endif
 
 	barrier();
 
@@ -308,7 +380,22 @@ unsigned char econet_read_sr(unsigned short r)
 	else
 		while (econet_isbusy());
 
+#ifdef ECONET_GPIO_NEW
+
+	if (gpiod_get_array_value(8, data_desc_array, NULL, &gpioval) < 0)
+	{
+		printk (KERN_ERR "econet-gpio: Error reading GPIOs!\n");
+		d = 0;
+	}
+	else
+	{
+		d = gpioval & 0xff;
+	}
+
+#else
+
 	d = (readl(GPIO_PORT + GPLEV0) & ECONET_GPIO_CLRMASK_DATA) >> ECONET_GPIO_PIN_DATA;
+#endif
 
 	return d;	
 }
@@ -359,6 +446,7 @@ int econet_probe_adapter(void)
 short econet_gpio_init(void)
 {
 
+#ifndef ECONET_GPIO_NEW
 	u32 t; /* Variable to read / write GPIO registers in this function */
 
 	request_region(GPIO_PERI_BASE, GPIO_RANGE, DEVICE_NAME);
@@ -376,12 +464,7 @@ short econet_gpio_init(void)
 		return 0;
 	}
 
-	// Ask for clock function on CLK pin
-
-	t = (readl(GPIO_PORT) & ~(0x07 << (3 * ECONET_GPIO_PIN_CLK))) | (ECONET_GPIO_CLK_ALT_FUNCTION << (3 * ECONET_GPIO_PIN_CLK));
-	writel (t, GPIO_PORT); /* Select alt function for clock output pin */
-
-	// Now set the clock up on it
+	// Request the clock region
 
 	request_region(CLOCK_PERI_BASE, GPIO_CLK_RANGE, DEVICE_NAME);
 
@@ -399,6 +482,13 @@ short econet_gpio_init(void)
 		return 0;
 	}
 	
+	// Ask for clock function on CLK pin - done in probe if ECONET_GPIO_NEW defined.
+
+	t = (readl(GPIO_PORT) & ~(0x07 << (3 * ECONET_GPIO_PIN_CLK))) | (ECONET_GPIO_CLK_ALT_FUNCTION << (3 * ECONET_GPIO_PIN_CLK));
+	writel (t, GPIO_PORT); /* Select alt function for clock output pin */
+
+	// Now set the clock up on it
+
 	writel ((readl(GPIO_CLK + ECONET_GPIO_CMCTL) & ~0xF0) | ECONET_GPIO_CLOCKDISABLE, GPIO_CLK + ECONET_GPIO_CMCTL); // Disable clock
 
 	barrier();
@@ -418,6 +508,7 @@ short econet_gpio_init(void)
 	writel(ECONET_GPIO_CLOCKENABLE, GPIO_CLK + ECONET_GPIO_CMCTL); // Turn the clock back on
 
 	barrier();
+
 
 	// Set up access to PWM control so we can put a network clock waveform out on pin 18 if someone wants us to
 
@@ -486,10 +577,6 @@ short econet_gpio_init(void)
 		econet_set_pwm(20, 4); 
 
 	}
-	else // CS RETURN only used on v1 hardware boards. Used for network clock output on v2r3 onwards.
-	{
-		gpiod_direction_input(ECOPIN(EGP_CSRETURN));
-	}
 
 
 
@@ -505,6 +592,7 @@ short econet_gpio_init(void)
 		(readl(GPIO_PORT + GPLEN0) & (1 << ECONET_GPIO_PIN_IRQ)) ? "Set" : "Unset");
 #endif
 
+#endif
 	return 1;
 }
 
@@ -2134,6 +2222,15 @@ void econet_set_pwm(uint8_t period, uint8_t mark)
 
 	if (econet_data->hwver < 2)	return; // Not on v1 hardware!
 
+#ifdef ECONET_GPIO_NEW
+	
+	pwm_disable(econet_data->gpio18pwm);
+	pwm_config(econet_data->gpio18pwm, mark * 250, period * 250); // ( * 250 = (* 1000 / 4) )
+	pwm_enable(econet_data->gpio18pwm);
+
+	printk (KERN_INFO "econet-gpio: Econet clock set: period/mark = %d/%d ns\n", mark * 250, period * 250);
+
+#else
 	// First, reset the PWM
 
 	writel(0, (GPIO_PWM + PWM_CTL));
@@ -2163,6 +2260,7 @@ void econet_set_pwm(uint8_t period, uint8_t mark)
 		printk (KERN_INFO "econet-gpio: PWM Clock period/mark set to %d, %d\n", (period & 0x1F), (mark & 0x0F));
 #endif
 	}
+#endif
 
 }
 
@@ -2278,7 +2376,10 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 #ifdef ECONET_GPIO_DEBUG_IOCTL
 			printk (KERN_INFO "econet-gpio: ioctl(set address, %02lx) called\n", (arg & 0x03));
 #endif
-			if (econet_data->hwver >= 2) while (econet_isbusy());
+			if (econet_data->hwver >= 2)
+			{
+				 while (econet_isbusy());
+			}
 			econet_set_addr((arg & 0x2) >> 1, (arg & 0x1));
 			break;
 		case ECONETGPIO_IOC_WRITEMODE:
@@ -2302,9 +2403,16 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 
 			econet_set_dir(ECONET_GPIO_WRITE);
 			
+#ifdef ECONET_GPIO_NEW
+
+			// Set address & RnW & data
+			gpiod_set_array_value (8, data_desc_array, NULL, &arg); // 11 because the address & RnW are in 8,9,10
+#else
+
 			// Put it on the bus
 			writel((arg << ECONET_GPIO_PIN_DATA), GPIO_PORT + GPSET0);
 			writel((~(arg << ECONET_GPIO_PIN_DATA)) & ECONET_GPIO_CLRMASK_DATA, GPIO_PORT + GPCLR0);
+#endif
 			break;
 		case ECONETGPIO_IOC_TEST:
 #ifdef ECONET_GPIO_DEBUG_IOCTL
@@ -2407,8 +2515,16 @@ static int econet_probe (struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct device_node *econet_device;
 	u8	version = 0;
+#ifdef ECONET_GPIO_NEW
+	u32	gpio4clk_rate;
+#endif
 
+#ifdef ECONET_GPIO_NEW
+
+	printk (KERN_INFO "econet-gpio: Module loading in new mode\n");
+#else
 	printk (KERN_INFO "econet-gpio: Module loading\n");
+#endif
 
 	econet_data = kzalloc(sizeof(struct __econet_data), GFP_KERNEL);
 
@@ -2442,6 +2558,16 @@ static int econet_probe (struct platform_device *pdev)
 
 	printk (KERN_INFO "econet-gpio: Found version %d hardware\n", econet_data->hwver); 
 
+#ifdef ECONET_GPIO_NEW
+	if (econet_data->hwver < 2)
+	{
+		printk (KERN_ERR "econet-gpio: Hardware version incompatible with this module. Please compile module in old mode.\n");
+		kfree(econet_data);
+		return -ENODEV;
+	}
+
+#endif
+
 	econet_set_chipstate(EM_TEST);
 	econet_set_irq_state(-1);
 	econet_data->aun_mode = 0;
@@ -2454,28 +2580,41 @@ static int econet_probe (struct platform_device *pdev)
 	econet_data->spoof_immediate = 0;
 	econet_data->extralogs = 0;
 	econet_data->irq = 0;
-	
+	econet_data->gpio4clk = NULL;
 	memset (&(econet_data->econet_gpios), 0, sizeof(econet_data->econet_gpios));
 
 	// First, pick up the data line GPIOs from DT
 	
 	for (count = 0; count < 8; count++)
 	{
-		econet_data->econet_gpios[EGP_D0+count] = gpiod_get_index(dev, "data", count, GPIOD_OUT_HIGH);
+		econet_data->econet_gpios[EGP_D0+count] = devm_gpiod_get_index(dev, "data", count, GPIOD_OUT_HIGH);
 		ECONET_GPIOERR(EGP_D0+count);
+#ifdef ECONET_GPIO_NEW
+		data_desc_array[count] = econet_data->econet_gpios[EGP_D0+count];
+#endif
 	}
 
 	for (count = 0; count < 2; count++)
 	{
-		econet_data->econet_gpios[EGP_A0+count] = gpiod_get_index(dev, "addr", count, GPIOD_OUT_HIGH);
+		econet_data->econet_gpios[EGP_A0+count] = devm_gpiod_get_index(dev, "addr", count, GPIOD_OUT_HIGH);
 		ECONET_GPIOERR(EGP_A0+count);
+#ifdef ECONET_GPIO_NEW
+		a01rw_desc_array[count] = econet_data->econet_gpios[EGP_A0+count];
+#endif
 	}
 
 	ECONET_GETGPIO(EGP_RST, "rst", GPIOD_OUT_HIGH);
 	ECONET_GETGPIO(EGP_CS, "cs", GPIOD_OUT_HIGH);
-	ECONET_GETGPIO(EGP_CSRETURN, "csr", GPIOD_IN);
-	ECONET_GETGPIO(EGP_CLK, "clk", GPIOD_OUT_LOW);
+	
+	if (econet_data->hwver < 2) // CSRETURN is redeployed as ALT5 PWM0 for network clock on 2+ boards (well, some of them - it's certainly not CSRETURN on v2 onwards).
+		ECONET_GETGPIO(EGP_CSRETURN, "csr", GPIOD_IN);
+
+	// ECONET_GETGPIO(EGP_CLK, "clk", GPIOD_OUT_LOW); // Don't grab the clk line - it's set up by the device tree
+
 	ECONET_GETGPIO(EGP_RW, "rw", GPIOD_OUT_HIGH);
+#ifdef ECONET_GPIO_NEW
+	a01rw_desc_array[2] = econet_data->econet_gpios[EGP_RW];
+#endif
 	ECONET_GETGPIO(EGP_DIR, "busy", GPIOD_IN); // Only used on v2
 	ECONET_GETGPIO(EGP_IRQ, "irq", GPIOD_IN);
 	ECONET_GETGPIO(EGP_READLED, "readled", GPIOD_OUT_HIGH); // Only used on v2
@@ -2484,11 +2623,18 @@ static int econet_probe (struct platform_device *pdev)
 	for (count = 0; count < 19; count++)
 		ECONET_GPIOERR(count);
 
+	if (econet_data->hwver < 2)
+		gpiod_direction_input(ECOPIN(EGP_CSRETURN));
+
+#ifdef ECONET_GPIO_NEW
+	// Copy A01RW to data_desc_array[8,9,10]
+	memcpy (&(data_desc_array[8]), a01rw_desc_array, sizeof(a01rw_desc_array));
+#endif
+
 	/* Initialize some debug instrumentation */
 	tx_packets = 0; 
 
 	/* See what sort of system we have */
-
 
 	/* See if our ancient econet_ndelay code is disabled */
 #ifdef ECONET_NO_NDELAY
@@ -2520,6 +2666,7 @@ static int econet_probe (struct platform_device *pdev)
 	spin_lock_init(&econet_irqstate_spin);
 	spin_lock_init(&econet_tx_spin);
 
+#ifndef ECONET_GPIO_NEW
 	/* Allocate internal state */
 
 	econet_data->peribase = 0xFE000000; // Assume Pi4-class unless we find otherwise
@@ -2553,14 +2700,66 @@ static int econet_probe (struct platform_device *pdev)
 		econet_data->clockdiv = ECONET_GPIO_CLOCKDIVSET;
 		printk (KERN_INFO "econet-gpio: This appears to be a PiZero2\n");
 	}
-	else printk (KERN_INFO "econet-gpio: Machine compatibility uncertain - assuming Peripheral base at 0xFE000000");
+	else 
+	{
+		printk (KERN_INFO "econet-gpio: Machine compatibility uncertain - assuming Peripheral base at 0xFE000000\n");
+	}
+#endif
 
+#ifdef ECONET_GPIO_NEW
+	// Set up clock on GPIO4 here if in new mode - econet_gpio_init() won't do it if that define is set
+
+	if (econet_data->hwver >= 2)
+	{
+
+		int ret;
+
+		econet_data->gpio4clk = devm_clk_get(dev, NULL);
+		if (IS_ERR(econet_data->gpio4clk))
+		{
+			printk (KERN_ERR "econet-gpio: Unable to obtain GPIO 4 clock (GPCLK0) for ADLC clock\n");
+			econet_remove(NULL);
+			return PTR_ERR(econet_data->gpio4clk);
+		}
+	
+		if ((ret = of_property_read_u32(dev->of_node, "clock-frequency", &gpio4clk_rate)))
+		{
+			printk (KERN_ERR "econet-gpio: Unable to find clock frequency for gpio4 (ADLC) clock in device tree\n");
+			econet_remove(NULL);
+			return ret;
+		}
+	
+		printk (KERN_INFO "econet-gpio: Setting gpio4 ADLC clock (GPCLK0) to %dHz\n", gpio4clk_rate);
+	
+		clk_set_rate (econet_data->gpio4clk, gpio4clk_rate);
+		clk_prepare (econet_data->gpio4clk);
+
+	
+		// Next set up the clock output on GPIO18 if this is a v2 board
+	
+		econet_data->gpio18pwm = devm_pwm_get(dev, "netclk");
+
+		if (IS_ERR(econet_data->gpio18pwm))
+		{
+			printk (KERN_ERR "econet-gpio: Unable to obtain BCM 18 PWM (PWM0) for Econet clock (Error %ld)\n", PTR_ERR(econet_data->gpio18pwm));
+			econet_remove(NULL);
+			return PTR_ERR(econet_data->gpio18pwm);
+		}
+
+		pwm_config(econet_data->gpio18pwm, 5000, 1000); // 1us / 5us
+		pwm_enable(econet_data->gpio18pwm);
+
+		printk (KERN_INFO "econet-gpio: Econet clock enabled on BCM 18 at 1us/5us\n");
+	}
+
+#else
 	if (!econet_gpio_init())
 	{
 		printk (KERN_ERR "Unable to configure GPIO machinery\n");
 		econet_remove(NULL);
-		return -1;
+		return -ENODEV;
 	}
+#endif
 
 	if ((version == 1) && (!econet_probe_adapter()))
 	{
@@ -2568,6 +2767,12 @@ static int econet_probe (struct platform_device *pdev)
 		return -ENODEV;
 	}
 	// printk (KERN_INFO "econet-gpio: Peripheral base address set to 0x%08lX\n", econet_data->peribase);
+
+
+	/*
+	 * Now create the device in /dev, since we're all set up 
+	 *
+	 */
 
 	econet_data->major=register_chrdev(0, DEVICE_NAME, &econet_fops);
 	if (econet_data->major < 0)
@@ -2585,7 +2790,7 @@ static int econet_probe (struct platform_device *pdev)
 	{
 		printk (KERN_INFO "econet-gpio: Failed creating device class\n");
 		econet_remove(NULL);
-		return -1;
+		return PTR_ERR(econet_class);
 	}
 
 	econet_class_initialized = 1;
@@ -2594,7 +2799,7 @@ static int econet_probe (struct platform_device *pdev)
 	{
 		printk (KERN_INFO "econet-gpio: Failed creating device\n");
 		econet_remove(NULL);
-		return -1;
+		return PTR_ERR(econet_data->dev);
 	}
 		
 	econet_device_created = 1;
@@ -2611,7 +2816,10 @@ static int econet_probe (struct platform_device *pdev)
 	econet_set_rst(ECONET_GPIO_RST_CLR);
 
 	if (econet_data->hwver == 1 && !econet_probe_adapter())
-		return 0;
+	{
+		econet_remove(NULL);
+		return -ENODEV;
+	}
 
 	econet_reset(); // Does the station array clear
 
@@ -2649,7 +2857,7 @@ static int econet_probe (struct platform_device *pdev)
 static int econet_remove(struct platform_device *pdev)
 {
 
-	u8	gpio;
+	//u8	gpio; // Not needed now using devm gpio get - no put required.
 
 	/* Turn off the read/write LEDs */
 
@@ -2659,9 +2867,11 @@ static int econet_remove(struct platform_device *pdev)
 	if (ECOPIN(EGP_WRITELED))
 		gpiod_direction_output(ECOPIN(EGP_WRITELED), GPIOD_OUT_LOW);
 
+/* No longer needed - we are using device-managed GPIO
 	for (gpio = 0; gpio < 19; gpio++)
 		if (econet_data->econet_gpios[gpio])
 			gpiod_put(econet_data->econet_gpios[gpio]);
+*/
 
 	if (econet_data)
 	{

@@ -20,11 +20,11 @@
 
 / {
 
-	compatible = "brcm,bcm2711", "brcm,bcm2837", "brcm,bcm2710";
 
 	/* Create an econet-gpio driver instance */
 
 	fragment@0 {
+		compatible = "raspberrypi,4-model-b", "raspberrypi,400";
 		target-path = "/";
 		__overlay__ {
 			econet_gpio: econet@0 {
