@@ -2225,8 +2225,17 @@ void econet_set_pwm(uint8_t period, uint8_t mark)
 #ifdef ECONET_GPIO_NEW
 	
 	pwm_disable(econet_data->gpio18pwm);
-	pwm_config(econet_data->gpio18pwm, mark * 250, period * 250); // ( * 250 = (* 1000 / 4) )
-	pwm_enable(econet_data->gpio18pwm);
+	if (pwm_config(econet_data->gpio18pwm, mark * 250, period * 250)) // ( * 250 = (* 1000 / 4) )
+	{
+		printk (KERN_ERR "econet-gpio: Econet clock change failed!\n");
+		return;
+	}
+
+	if (pwm_enable(econet_data->gpio18pwm))
+	{
+		printk (KERN_ERR "econet-gpio: Econet clock enable failed!\n");
+		return;
+	}
 
 	printk (KERN_INFO "econet-gpio: Econet clock set: period/mark = %d/%d ns\n", mark * 250, period * 250);
 
@@ -2713,11 +2722,12 @@ static int econet_probe (struct platform_device *pdev)
 	{
 
 		int ret;
+		int err;
 
 		econet_data->gpio4clk = devm_clk_get(dev, NULL);
 		if (IS_ERR(econet_data->gpio4clk))
 		{
-			printk (KERN_ERR "econet-gpio: Unable to obtain GPIO 4 clock (GPCLK0) for ADLC clock\n");
+			printk (KERN_ERR "econet-gpio: Unable to obtain GPIO 4 clock (GPCLK0) for ADLC clock (%ld)\n", PTR_ERR(econet_data->gpio4clk));
 			econet_remove(NULL);
 			return PTR_ERR(econet_data->gpio4clk);
 		}
@@ -2746,8 +2756,20 @@ static int econet_probe (struct platform_device *pdev)
 			return PTR_ERR(econet_data->gpio18pwm);
 		}
 
-		pwm_config(econet_data->gpio18pwm, 5000, 1000); // 1us / 5us
-		pwm_enable(econet_data->gpio18pwm);
+		if ((err = pwm_config(econet_data->gpio18pwm, 1000, 5000)))
+		{
+			printk (KERN_ERR "econet-gpio: Econet clock config failure during probe! (%d)\n", err);
+			econet_remove(NULL);
+			return (-ENODEV);
+		}
+
+		if ((err = pwm_enable(econet_data->gpio18pwm)))
+		{
+			printk (KERN_ERR "econet-gpio: Econet clock enable failure during probe! (%d)\n", err);
+			econet_remove(NULL);
+			return (-ENODEV);
+		}
+
 
 		printk (KERN_INFO "econet-gpio: Econet clock enabled on BCM 18 at 1us/5us\n");
 	}
@@ -2929,4 +2951,4 @@ module_platform_driver(econet_driver);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Chris Royle");
 MODULE_DESCRIPTION("Acorn Econet(R) to IP bridge");
-MODULE_VERSION("2.01");
+MODULE_VERSION("3.00");
