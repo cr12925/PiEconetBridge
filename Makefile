@@ -82,5 +82,5 @@ old-mode:
 
 new-mode:
 	[ ! -f include/econet-gpio-kernel-mode.h ] || rm include/econet-gpio-kernel-mode.h
-	echo '#define ECONET_NEW_MODE\n' > include/econet-gpio-kernel-mode.h
+	echo '#define ECONET_GPIO_NEW\n' > include/econet-gpio-kernel-mode.h
 
