@@ -18,7 +18,9 @@
 
 #define __ECONETGPIOCHIPCTRL_H__
 
+#ifndef ECONET_GPIO_NEW
 #include "gpioreg.h"
+#endif
 
 /* Functions to read/write the data bus */
 

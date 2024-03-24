@@ -15,7 +15,7 @@
 */
 
 // Turn on use of gpiod_ to read and write the lines
-#define ECONET_GPIO_NEW
+#include "../include/econet-gpio-kernel-mode.h"
 
 /* LEVEL TRIGGERED CLEANED UP CODE */
 
