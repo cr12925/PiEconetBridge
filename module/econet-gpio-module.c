@@ -2819,11 +2819,13 @@ static int econet_probe (struct platform_device *pdev)
 	msleep(100);
 	econet_set_rst(ECONET_GPIO_RST_CLR);
 
+#ifndef ECONET_GPIO_NEW
 	if (econet_data->hwver == 1 && !econet_probe_adapter())
 	{
 		econet_remove(NULL);
 		return -ENODEV;
 	}
+#endif
 
 	econet_reset(); // Does the station array clear
 
