@@ -928,7 +928,8 @@ void econet_irq_write(void)
 
 		byte_counter = 0;
 
-		econet_set_tx_status(ECONET_TX_INPROGRESS);
+		// Should be unnecessary as we did this after seizing the line - 20240324 - See if this fixes some underruns?
+		//econet_set_tx_status(ECONET_TX_INPROGRESS);
 
 		while (byte_counter < 1)
 		{
