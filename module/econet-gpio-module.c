@@ -2904,13 +2904,19 @@ static int econet_remove(struct platform_device *pdev)
 	if (econet_rx_queue_initialized) kfifo_free(&econet_rx_queue);
 	if (econet_tx_queue_initialized) kfifo_free(&econet_tx_queue);
 
+#ifndef ECONET_GPIO_NEW
 	if (GPIO_PORT)
 	{
 		iounmap(GPIO_PORT);
 		GPIO_PORT = NULL;
 	}
+#endif
 
-	printk(KERN_INFO "econet-gpio: Unloaded.\n");
+	if (pdev)
+		printk(KERN_INFO "econet-gpio: Unloaded.\n");
+	else
+		printk(KERN_INFO "econet-gpio: Unprobed but module remains loaded.\n");
+
 	return 0;
 
 }
