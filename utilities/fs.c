@@ -7447,6 +7447,13 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 		{
 
 			fs_debug (0, 2, "%12sfrom %3d.%3d Set file pointer on channel %02X to %06lX, current extent %06lX%s", "", net, stn, handle, value, extent, (value > extent) ? " which is beyond EOF" : "");
+
+			if ((value > extent) && active[server][active_id].fhandles[handle].mode == 1) // Don't extend if read only!
+			{
+				fs_error(server, reply_port, net, stn, 0xB9, "Outside file");
+				return;
+			}
+
 			if (value > extent) // Need to expand file
 			{
 				unsigned char buffer[4096];
@@ -7479,7 +7486,7 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 			}
 
 			active[server][active_id].fhandles[handle].cursor = value; // (value <= extent ? value : extent);
-		
+			active[server][active_id].fhandles[handle].pasteof = 0; // We have no longer just read the last byte of the file	
 			// This didn't seem to work!
 			//if (value > extent) r.p.data[1] = 0xC0;
 			//if (value == extent) r.p.data[1] = 0x00;
@@ -7488,6 +7495,12 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 		case 1: // Set file extent
 		{
 			fs_debug (0, 2, "%12sfrom %3d.%3d Set file extent on channel %02X to %06lX, current extent %06lX%s", "", net, stn, handle, value, extent, (value > extent) ? " so adding bytes to end of file" : "");
+
+			if (active[server][active_id].fhandles[handle].mode == 1) // Read only - refuse!
+			{
+				fs_error(server, reply_port, net, stn, 0xC1, "File read only");
+				return;
+			}
 /*
 			if (value > extent)
 			{
@@ -7688,6 +7701,8 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 	active[server][active_id].fhandles[handle].cursor += total_received; // And update the cursor
 	active[server][active_id].fhandles[handle].sequence = (ctrl & 0x01); // Store this ctrl byte, whether it was right or wrong
+
+	if (eofreached)	active[server][active_id].fhandles[handle].pasteof = 1; // Since we've read the end of the file, make sure getbyte() doesn't offer more data
 
 	if (fserroronread)
 		fs_error(server, reply_port, net, stn, 0xFF, "FS Error on read");
