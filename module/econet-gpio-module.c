@@ -406,7 +406,12 @@ unsigned char econet_read_sr(unsigned short r)
 }
 
 /* Probe the hardware, once GPIOs obtained */
+/*
+ * Only required on v1 hardware, so only old-mode
+ *
+ */
 
+#ifndef ECONET_GPIO_NEW
 int econet_probe_adapter(void)
 {
 
@@ -445,6 +450,7 @@ int econet_probe_adapter(void)
 	return 1;
 
 }
+#endif
 
 /* Set up GPIO region */
 
@@ -2757,7 +2763,6 @@ static int econet_probe (struct platform_device *pdev)
 		econet_remove(NULL);
 		return -ENODEV;
 	}
-#endif
 
 	if ((version == 1) && (!econet_probe_adapter()))
 	{
@@ -2766,6 +2771,7 @@ static int econet_probe (struct platform_device *pdev)
 	}
 	// printk (KERN_INFO "econet-gpio: Peripheral base address set to 0x%08lX\n", econet_data->peribase);
 
+#endif
 
 	/*
 	 * Now create the device in /dev, since we're all set up 
