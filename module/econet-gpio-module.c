@@ -60,12 +60,15 @@ struct gpio_desc *a01rw_desc_array[3];
 struct gpio_desc *data_desc_array[11]; // Top 3 are the address & RnW lines in case of need
 #endif
 
+#ifndef ECONET_GPIO_NEW
 unsigned long *GPIO_PORT = NULL;
 unsigned GPIO_RANGE = 0x40;
 unsigned long *GPIO_CLK;
 unsigned GPIO_CLK_RANGE = 0xA8;
 unsigned long *GPIO_PWM;
 unsigned GPIO_PWM_RANGE = 0x28;
+u32 gpioset_value;
+#endif
 
 // This used to do an RX RESET as well, but now it doesn't.
 #define econet_discontinue() \
@@ -93,7 +96,6 @@ unsigned GPIO_PWM_RANGE = 0x28;
 #define econet_get_tx_status() atomic_read(&(econet_data->tx_status))
 
 u8 sr1, sr2;
-u32 gpioset_value;
 
 struct file_operations econet_fops = {
 	.open = econet_open,
