@@ -254,12 +254,14 @@ void econet_write_cr(unsigned short r, unsigned char d)
 	// Enable nCS
 	econet_set_cs(ECONET_GPIO_CS_ON);
 
+#ifndef ECONET_GPIO_NEW
 	// If v1 hardware, wait until we know CS has reached the ADLC
 	if (econet_data->hwver < 2)
 	{
 		econet_wait_pin_low(ECONET_GPIO_PIN_CSRETURN, (ECONET_GPIO_CLOCK_DUTY_CYCLE));
 	}
 
+#endif
 	barrier(); // Operates for both v1 & v2 hardware
 
 	// Disable nCS again
