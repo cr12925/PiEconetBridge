@@ -270,17 +270,16 @@ void econet_write_cr(unsigned short r, unsigned char d)
 
 	barrier();
 
+#ifndef ECONET_GPIO_NEW
+	/* This only works on v1 boards, which are not new-mode compatible anyuway */
+	/* So if in old mode, this will put ndelay() on for v1 hardware, or do isbusy() for v2 */
+
 	if (econet_data->hwver < 2)
 	{
-		// ? Try a barrier() here to see if we get a suitable delay.
-#ifdef ECONET_GPIO_NEW
-		// 20240319 tried something shorter: econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
-		econet_ndelay(2000);
-#else
 		econet_ndelay(ECONET_GPIO_CLOCK_DUTY_CYCLE);
-#endif
 	}
 	else
+#endif
 		while (econet_isbusy()); // Wait until the ADLC has read our data. Not massively reliable yet.. SHouldn't be required, but seems to be!
 }
 
@@ -362,22 +361,26 @@ unsigned char econet_read_sr(unsigned short r)
 	
 	econet_set_cs(ECONET_GPIO_CS_ON);
 
+#ifndef ECONET_GPIO_NEW
 	if (econet_data->hwver < 2)
 	{
 		econet_wait_pin_low(ECONET_GPIO_PIN_CSRETURN, (ECONET_GPIO_CLOCK_DUTY_CYCLE));
 	}
 	else
+#endif
 		barrier();
 
 	econet_set_cs(ECONET_GPIO_CS_OFF);	
 
 	barrier();
 
+#ifndef ECONET_GPIO_NEW
 	if (econet_data->hwver < 2)
 	{
 		econet_ndelay(100);
 	}
 	else
+#endif
 		while (econet_isbusy());
 
 #ifdef ECONET_GPIO_NEW
@@ -891,6 +894,7 @@ void econet_irq_write(void)
 	char tdra_flag;
 	int loopcount = 0;
 
+
 	// Added 25.07.21 - Mark transmission even if not successful otherwise the reset timer gets stuck
 	econet_data->aun_last_tx = ktime_get_ns(); // Used to check if we have fallen out of bed on receiving a packet
 
@@ -947,7 +951,7 @@ void econet_irq_write(void)
 				// Next line reinstated 20211024 to see if it helps
 				econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_CLR_TX_STATUS |
 					ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE);
-				udelay(10); // Shorter delay - Changed to 10 20240322 to try and avoid underruns
+				udelay(10); // Shorter delay - Changed to 10 (was 20) 20240322 to try and avoid underruns
 				tdra_flag = ((sr1 = econet_read_sr(1)) & ECONET_GPIO_S1_TDRA); // Only read SR1. (get_sr now always reads both, but we aren't fussed about sr2 here)
 			}
 
@@ -986,6 +990,7 @@ void econet_irq_write(void)
 			econet_write_fifo(econet_pkt_tx.d.data[econet_pkt_tx.ptr++]);
 
 			/* Last byte of packet? If so, flag end of transmission and show an empty packet */
+
 			if (econet_pkt_tx.ptr == econet_pkt_tx.length)
 			{
 				econet_finish_tx();
@@ -1642,10 +1647,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 	//sr2 = econet_read_sr(2);
 
 
-#ifdef ECONET_GPIO_DEBUG_IRQ
-	printk (KERN_INFO "econet-gpio: econet_irq(): IRQ in mode %d, SR1 = 0x%02x, SR2 = 0x%02x. RX len=%d,ptr=%d, TX len=%d,ptr=%d\n", econet_get_chipstate(), sr1, sr2, econet_pkt_rx.length, econet_pkt_rx.ptr, econet_pkt_tx.length, econet_pkt_tx.ptr);
-#endif
-
 	chip_state = econet_get_chipstate();
 
 	if (econet_data->aun_mode)
@@ -1653,6 +1654,10 @@ irqreturn_t econet_irq(int irq, void *ident)
 		aun_state = econet_get_aunstate();
 		tx_status = econet_get_tx_status();
 	}
+
+#ifdef ECONET_GPIO_DEBUG_IRQ
+	printk (KERN_INFO "econet-gpio: econet_irq(): IRQ in mode %d, SR1 = 0x%02x, SR2 = 0x%02x. RX len=%d,ptr=%d, TX len=%d,ptr=%d\n", chip_state, sr1, sr2, econet_pkt_rx.length, econet_pkt_rx.ptr, econet_pkt_tx.length, econet_pkt_tx.ptr);
+#endif
 
 	if (!(sr1 & ECONET_GPIO_S1_IRQ)) // No IRQ actually present - return
 	{
@@ -1675,7 +1680,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 		econet_set_read_mode();
 	}
-	// Are we in the middle of writing a packet? - */
 	else if (chip_state == EM_WRITE) /* Write mode - see what there is to do */
 		econet_irq_write();
 	else if ((sr2 & ECONET_GPIO_S2_RX_IDLE) && !(sr2 & ECONET_GPIO_S2_VALID) && (econet_data->initialized)) 
@@ -1735,14 +1739,14 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 		econet_set_read_mode();
 	}
-	// Are we in the middle of writing a packet? - Code was moved from here 20240322
+	// Are we in the middle of writing a packet? /* Code moved from here up above 20240324 */
 	// Have we flagged end of transmission and are waiting for FC bit to be set before re-initializing read mode?
 	else if (chip_state == EM_WRITE_WAIT) /* IRQ on completion of frame */
 	{
 		if (econet_data->aun_mode) // What state are we in - do we need to move state?
 		{
 
-			unsigned short aun_state;
+			//unsigned short aun_state;
 
 			// Commented 25.07.21
 			econet_data->aun_last_tx = ktime_get_ns(); // Used to check if we have fallen out of bed on receiving a packet
