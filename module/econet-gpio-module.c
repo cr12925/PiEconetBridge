@@ -968,7 +968,7 @@ void econet_irq_write(void)
 				// Next line reinstated 20211024 to see if it helps
 				econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_CLR_TX_STATUS |
 					ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE);
-				udelay(20); // Shorter delay
+				udelay(10); // Shorter delay - 20240325 was 20us
 				tdra_flag = ((sr1 = econet_read_sr(1)) & ECONET_GPIO_S1_TDRA); // Only read SR1. (get_sr now always reads both, but we aren't fussed about sr2 here)
 			}
 
@@ -1025,8 +1025,9 @@ void econet_irq_write(void)
 				/* Query whether this is necessary - possible TDRA is self-resetting */
 				//econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_CLR_TX_STATUS |
 					//ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE);
-				econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_CLR_TX_STATUS |
-					ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE);
+				/* It probably isn't. The two lines below were commented 20240325 */
+				/* econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_CLR_TX_STATUS |
+					ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE); */
 			}
 
 			byte_counter++;
@@ -1607,7 +1608,7 @@ unexpected_scout:
 			d = econet_read_fifo(); 
 			econet_process_rx(d);
 	}
-	else if (sr1 & ECONET_GPIO_S1_RDA) // Ordinary data
+	else if ((sr1 & ECONET_GPIO_S1_RDA) || (sr2 & ECONET_GPIO_S2_RDA)) // Ordinary data - NB, S2 seems to have an RDA and sometimes it's not set when s1's flag is?
 	{
 		if (econet_pkt_rx.ptr == 0) // Shouldn't be getting here without AP set (caught above)
 		{
@@ -1654,8 +1655,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 	spin_lock_irqsave(&econet_irq_spin, flags);
 
 	sr1 = econet_read_sr(1);
-	// Force read sr2 to get DCD if necessary
-	sr2 = econet_read_sr(2); 
+	// Force read sr2 to get DCD if necessary - now done below
+	//sr2 = econet_read_sr(2); 
 
 	chip_state = econet_get_chipstate();
 	if (econet_data->aun_mode)
@@ -1676,7 +1677,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 	{
 		printk (KERN_INFO "econet-gpio: IRQ in Test mode - how did that happen?");
 	}
-	else if ((sr2 & ECONET_GPIO_S2_RX_IDLE) && !(sr2 & ECONET_GPIO_S2_VALID) && (econet_data->initialized) && (econet_data->aun_mode) && (aun_state == EA_W_READFINALACK)) // Line idle whilst waiting for final ack on a write = handshakefail. Don't match on frame valid in case we're getting FV & LINE IDLE in same IRQ, because we'll miss a valid frame then
+	else if (((sr2 = econet_read_sr(2)) & ECONET_GPIO_S2_RX_IDLE) && !(sr2 & ECONET_GPIO_S2_VALID) && (econet_data->initialized) && (econet_data->aun_mode) && (aun_state == EA_W_READFINALACK)) // Line idle whilst waiting for final ack on a write = handshakefail. Don't match on frame valid in case we're getting FV & LINE IDLE in same IRQ, because we'll miss a valid frame then
 	{
 
 		/*
@@ -2874,8 +2875,8 @@ static int econet_probe (struct platform_device *pdev)
 
 	econet_set_irq_state(1);
 
-	// 20210919 OLD if ((econet_data->irq < 0) || ((err = request_irq(econet_data->irq, econet_irq, IRQF_SHARED | ((econet_data->hwver < 2) ? IRQF_TRIGGER_FALLING : IRQF_TRIGGER_RISING), THIS_MODULE->name, THIS_MODULE->name)) != 0))
-	if ((econet_data->irq < 0) || ((err = request_irq(econet_data->irq, econet_irq, IRQF_SHARED | ((econet_data->hwver < 2) ? IRQF_TRIGGER_LOW : IRQF_TRIGGER_HIGH), THIS_MODULE->name, THIS_MODULE->name)) != 0))
+	// 20210919 OLD if ((econet_data->irq < 0) || ((err = request_irq(econet_data->irq, econet_irq,  IRQF_SHARED | ((econet_data->hwver < 2) ? IRQF_TRIGGER_FALLING : IRQF_TRIGGER_RISING), THIS_MODULE->name, THIS_MODULE->name)) != 0))
+	if ((econet_data->irq < 0) || ((err = request_irq(econet_data->irq, econet_irq, /* IRQF_SHARED | */ ((econet_data->hwver < 2) ? IRQF_TRIGGER_LOW : IRQF_TRIGGER_HIGH), THIS_MODULE->name, THIS_MODULE->name)) != 0))
 	{
 		printk (KERN_INFO "econet-gpio: Failed to request IRQ\n");
 		econet_remove(NULL);
