@@ -327,10 +327,10 @@ unsigned char econet_read_sr(unsigned short r)
 			gpiod_direction_input(econet_data->econet_gpios[count]);
 #else
 		writel(readl(GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10)) & ~ECONET_GPIO_DATA_PIN_MASK, GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10));
+		barrier();
 #endif
 	}
 
-	barrier();
 
 #ifdef ECONET_GPIO_NEW
 
@@ -357,9 +357,9 @@ unsigned char econet_read_sr(unsigned short r)
 	
 	// Shouldn't need a barrier here because apparently writel() has one in it.
 
-#endif
-
 	barrier();
+
+#endif
 
 	// Waggle nCS appropriately
 	
@@ -1671,7 +1671,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 	if (!(sr1 & ECONET_GPIO_S1_IRQ)) // No IRQ actually present - return
 	{
-		printk (KERN_INFO "econet-gpio: IRQ handler called but ADLC not flagging an IRQ. What?\n");
+		printk (KERN_INFO "econet-gpio: IRQ handler called but ADLC not flagging an IRQ. SR1=0x%02X, SR2=0x%02X, Chip State %d, AUN State %d\n", sr1, econet_read_sr(2), chip_state, aun_state);
 	}
 	else if (chip_state == EM_TEST) /* IRQ in Test Mode - ignore */
 	{
