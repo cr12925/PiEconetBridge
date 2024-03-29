@@ -302,11 +302,10 @@ void econet_write_cr(unsigned short r, unsigned char d)
 unsigned char econet_read_sr(unsigned short r)
 {
 	unsigned char d;
-#ifdef xECONET_GPIO_NEW
-	unsigned long int 	gpioval;
-#else
-	u32 gpioval, gpiomask;
+#ifdef ECONET_GPIO_NEW
+	unsigned long int 	gpioval_array;
 #endif
+	u32 gpioval, gpiomask;
 
 	if (r > 4)
 	{
@@ -399,14 +398,14 @@ unsigned char econet_read_sr(unsigned short r)
 
 #ifdef ECONET_GPIO_NEW
 
-	if (gpiod_get_array_value(8, data_desc_array, NULL, &gpioval) < 0)
+	if (gpiod_get_array_value(8, data_desc_array, NULL, &gpioval_array) < 0)
 	{
 		printk (KERN_ERR "econet-gpio: Error reading GPIOs!\n");
 		d = 0;
 	}
 	else
 	{
-		d = gpioval & 0xff;
+		d = gpioval_array & 0xff;
 	}
 
 #else
