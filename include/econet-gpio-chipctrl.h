@@ -74,7 +74,6 @@ void econet_flagfill(void);
 
 	#define econet_set_rw(x)	if (x)	writel(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPSET0)); \
 					else	writel(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPCLR0))
-#else
 	#define econet_set_addr(x,y)	gpioset_value = (((x) << (ECONET_GPIO_PIN_ADDR + 1)) | ((y) << (ECONET_GPIO_PIN_ADDR))); \
 					writel(gpioset_value, GPIO_PORT + GPSET0); \
 					writel(((~gpioset_value) & ECONET_GPIO_CLRMASK_ADDR), GPIO_PORT + GPCLR0); \
