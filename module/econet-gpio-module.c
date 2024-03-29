@@ -14,9 +14,6 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// Turn on use of gpiod_ to read and write the lines
-#include "../include/econet-gpio-kernel-mode.h"
-
 /* LEVEL TRIGGERED CLEANED UP CODE */
 
 #include <linux/init.h>
@@ -181,7 +178,7 @@ void econet_set_dir(short d)
 	}
 
 #else
-	writel((readl(GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10)) & ~ECONET_GPIO_DATA_PIN_MASK) | 
+	iowrite32((ioread32(GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10)) & ~ECONET_GPIO_DATA_PIN_MASK) | 
 		(d == ECONET_GPIO_WRITE ? ECONET_GPIO_DATA_PIN_OUT : 0),
 		GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10));
 #endif
@@ -245,14 +242,14 @@ void econet_write_cr(unsigned short r, unsigned char d)
 
 #else
 	// Put that lot on the GPIO
-	writel(gpioval, GPIO_PORT+GPSET0);
-	writel((~gpioval) & gpiomask, GPIO_PORT + GPCLR0);
+	iowrite32(gpioval, GPIO_PORT+GPSET0);
+	iowrite32((~gpioval) & gpiomask, GPIO_PORT + GPCLR0);
 
 	// Now swing our own bus direction round
 
 	if (econet_data->current_dir != ECONET_GPIO_WRITE)
 	{
-		writel((readl(GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10)) & ~ECONET_GPIO_DATA_PIN_MASK) | ECONET_GPIO_DATA_PIN_OUT, GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10));
+		iowrite32((ioread32(GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10)) & ~ECONET_GPIO_DATA_PIN_MASK) | ECONET_GPIO_DATA_PIN_OUT, GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10));
 		econet_data->current_dir = ECONET_GPIO_WRITE;
 	}
 
@@ -334,7 +331,7 @@ unsigned char econet_read_sr(unsigned short r)
 		for (count = EGP_D0; count <= EGP_D7; count++)
 			gpiod_direction_input(econet_data->econet_gpios[count]);
 #else
-		writel(readl(GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10)) & ~ECONET_GPIO_DATA_PIN_MASK, GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10));
+		iowrite32(ioread32(GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10)) & ~ECONET_GPIO_DATA_PIN_MASK, GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10));
 		barrier();
 #endif
 	}
@@ -362,10 +359,10 @@ unsigned char econet_read_sr(unsigned short r)
 
 	// Now, put that on the hardware
 
-	writel(gpioval, GPIO_PORT + GPSET0);
-	writel((~gpioval) & gpiomask, GPIO_PORT + GPCLR0);
+	iowrite32(gpioval, GPIO_PORT + GPSET0);
+	iowrite32((~gpioval) & gpiomask, GPIO_PORT + GPCLR0);
 	
-	// Shouldn't need a barrier here because apparently writel() has one in it.
+	// Shouldn't need a barrier here because apparently iowrite32() has one in it.
 
 	barrier();
 
@@ -411,7 +408,7 @@ unsigned char econet_read_sr(unsigned short r)
 
 #else
 
-	d = (readl(GPIO_PORT + GPLEV0) & ECONET_GPIO_CLRMASK_DATA) >> ECONET_GPIO_PIN_DATA;
+	d = (ioread32(GPIO_PORT + GPLEV0) & ECONET_GPIO_CLRMASK_DATA) >> ECONET_GPIO_PIN_DATA;
 #endif
 
 	return d;	
@@ -431,7 +428,7 @@ int econet_probe_adapter(void)
 	econet_set_cs(0);
 
 	udelay(2); // 2us should always be enough
-	if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
+	if ((ioread32(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
 	{
 
 		printk (KERN_ERR "econet-gpio: Version 1 hardware test failed - nCS return not returning (test 1).\n");
@@ -441,7 +438,7 @@ int econet_probe_adapter(void)
 	econet_set_cs(1);
 	udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
 
-	if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) == 0)
+	if ((ioread32(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) == 0)
 	{
 		printk (KERN_ERR "econet-gpio: Version 1 hardware test failed - nCS return not returning (test 2).\n");
 		return 0;
@@ -450,7 +447,7 @@ int econet_probe_adapter(void)
 	econet_set_cs(0);
 	udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
 
-	if ((readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
+	if ((ioread32(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
 	{
 		printk (KERN_ERR "econet-gpio: Version 1 hardware test failed - nCS return not returning (test 3).\n");
 		return 0;
@@ -505,28 +502,28 @@ short econet_gpio_init(void)
 	
 	// Ask for clock function on CLK pin - done in probe if ECONET_GPIO_NEW defined.
 
-	t = (readl(GPIO_PORT) & ~(0x07 << (3 * ECONET_GPIO_PIN_CLK))) | (ECONET_GPIO_CLK_ALT_FUNCTION << (3 * ECONET_GPIO_PIN_CLK));
-	writel (t, GPIO_PORT); /* Select alt function for clock output pin */
+	t = (ioread32(GPIO_PORT) & ~(0x07 << (3 * ECONET_GPIO_PIN_CLK))) | (ECONET_GPIO_CLK_ALT_FUNCTION << (3 * ECONET_GPIO_PIN_CLK));
+	iowrite32 (t, GPIO_PORT); /* Select alt function for clock output pin */
 
 	// Now set the clock up on it
 
-	writel ((readl(GPIO_CLK + ECONET_GPIO_CMCTL) & ~0xF0) | ECONET_GPIO_CLOCKDISABLE, GPIO_CLK + ECONET_GPIO_CMCTL); // Disable clock
+	iowrite32 ((ioread32(GPIO_CLK + ECONET_GPIO_CMCTL) & ~0xF0) | ECONET_GPIO_CLOCKDISABLE, GPIO_CLK + ECONET_GPIO_CMCTL); // Disable clock
 
 	barrier();
 
-	while (readl(GPIO_CLK + ECONET_GPIO_CMCTL) & 0x80); // Wait for not busy
+	while (ioread32(GPIO_CLK + ECONET_GPIO_CMCTL) & 0x80); // Wait for not busy
 
 	// Select speed
 
-	writel(ECONET_GPIO_CLOCKSOURCEPLLD, GPIO_CLK + ECONET_GPIO_CMCTL); // Select PLLD
+	iowrite32(ECONET_GPIO_CLOCKSOURCEPLLD, GPIO_CLK + ECONET_GPIO_CMCTL); // Select PLLD
 
 	barrier();
 	
-	writel(econet_data->clockdiv, GPIO_CLK + ECONET_GPIO_CMCTL + 1);
+	iowrite32(econet_data->clockdiv, GPIO_CLK + ECONET_GPIO_CMCTL + 1);
 
 	barrier();
 
-	writel(ECONET_GPIO_CLOCKENABLE, GPIO_CLK + ECONET_GPIO_CMCTL); // Turn the clock back on
+	iowrite32(ECONET_GPIO_CLOCKENABLE, GPIO_CLK + ECONET_GPIO_CMCTL); // Turn the clock back on
 
 	barrier();
 
@@ -556,20 +553,20 @@ short econet_gpio_init(void)
 
 		// Ask for ALT5 function (PWM0) on pin 18
 
-		t = (readl(GPIO_PORT + (ECONET_GPIO_PIN_NET_CLOCK / 10)) & ~(0x07 << (3 * (ECONET_GPIO_PIN_NET_CLOCK % 10)))) | (0x02 << (3 * (ECONET_GPIO_PIN_NET_CLOCK % 10))); // 0x02 is the sequence for ALT 5.
-		writel (t, GPIO_PORT + (ECONET_GPIO_PIN_NET_CLOCK / 10)); /* Select alt function for clock output pin */
+		t = (ioread32(GPIO_PORT + (ECONET_GPIO_PIN_NET_CLOCK / 10)) & ~(0x07 << (3 * (ECONET_GPIO_PIN_NET_CLOCK % 10)))) | (0x02 << (3 * (ECONET_GPIO_PIN_NET_CLOCK % 10))); // 0x02 is the sequence for ALT 5.
+		iowrite32 (t, GPIO_PORT + (ECONET_GPIO_PIN_NET_CLOCK / 10)); /* Select alt function for clock output pin */
 
 		// Put a default 5us period with 1us mark out but set it up on a 4MHz clock so that we can do quarter point marks
 
-		while (readl(GPIO_CLK + ECONET_GPIO_PWM_CLKCTL) & 0x80) // Wait for not busy
+		while (ioread32(GPIO_CLK + ECONET_GPIO_PWM_CLKCTL) & 0x80) // Wait for not busy
 		{
-			writel ((readl(GPIO_CLK + ECONET_GPIO_PWM_CLKCTL) & ~0xF0) | ECONET_GPIO_CLOCKDISABLE, GPIO_CLK + ECONET_GPIO_PWM_CLKCTL); // Disable clock
+			iowrite32 ((ioread32(GPIO_CLK + ECONET_GPIO_PWM_CLKCTL) & ~0xF0) | ECONET_GPIO_CLOCKDISABLE, GPIO_CLK + ECONET_GPIO_PWM_CLKCTL); // Disable clock
 			barrier();
 		}
 
 		// Select clock - PLLD
 	
-		writel(ECONET_GPIO_CLOCKSOURCEPLLD, GPIO_CLK + ECONET_GPIO_PWM_CLKCTL); // Select PLLD
+		iowrite32(ECONET_GPIO_CLOCKSOURCEPLLD, GPIO_CLK + ECONET_GPIO_PWM_CLKCTL); // Select PLLD
 	
 		barrier();
 		
@@ -581,11 +578,11 @@ short econet_gpio_init(void)
 		else
 			clockdiv = (ECONET_GPIO_CLOCKPASSWD | (125 << 12));
 			
-		writel(clockdiv, GPIO_CLK + ECONET_GPIO_PWM_CLKDIV);
+		iowrite32(clockdiv, GPIO_CLK + ECONET_GPIO_PWM_CLKDIV);
 
 		barrier();
 
-		writel(ECONET_GPIO_CLOCKENABLE, GPIO_CLK + ECONET_GPIO_PWM_CLKCTL); // Turn the clock back on
+		iowrite32(ECONET_GPIO_CLOCKENABLE, GPIO_CLK + ECONET_GPIO_PWM_CLKCTL); // Turn the clock back on
 	
 		barrier();
 	
@@ -604,13 +601,13 @@ short econet_gpio_init(void)
 #ifdef ECONET_GPIO_DEBUG_IRQ
 	printk (KERN_INFO "econet-gpio: GPREN0(%d) = %s, GPFEN0(%d) = %s, GPHEN0(%d) = %s, GPLEN0(%d) = %s\n",
 		ECONET_GPIO_PIN_IRQ,
-		(readl(GPIO_PORT + GPREN0) & (1 << ECONET_GPIO_PIN_IRQ)) ? "Set" : "Unset",
+		(ioread32(GPIO_PORT + GPREN0) & (1 << ECONET_GPIO_PIN_IRQ)) ? "Set" : "Unset",
 		ECONET_GPIO_PIN_IRQ,
-		(readl(GPIO_PORT + GPFEN0) & (1 << ECONET_GPIO_PIN_IRQ)) ? "Set" : "Unset",
+		(ioread32(GPIO_PORT + GPFEN0) & (1 << ECONET_GPIO_PIN_IRQ)) ? "Set" : "Unset",
 		ECONET_GPIO_PIN_IRQ,
-		(readl(GPIO_PORT + GPHEN0) & (1 << ECONET_GPIO_PIN_IRQ)) ? "Set" : "Unset",
+		(ioread32(GPIO_PORT + GPHEN0) & (1 << ECONET_GPIO_PIN_IRQ)) ? "Set" : "Unset",
 		ECONET_GPIO_PIN_IRQ,
-		(readl(GPIO_PORT + GPLEN0) & (1 << ECONET_GPIO_PIN_IRQ)) ? "Set" : "Unset");
+		(ioread32(GPIO_PORT + GPLEN0) & (1 << ECONET_GPIO_PIN_IRQ)) ? "Set" : "Unset");
 #endif
 
 	return 1;
@@ -2277,28 +2274,28 @@ void econet_set_pwm(uint8_t period, uint8_t mark)
 #if 0
 	// First, reset the PWM
 
-	writel(0, (GPIO_PWM + PWM_CTL));
+	iowrite32(0, (GPIO_PWM + PWM_CTL));
 
 	barrier();
 
 	// Clear various error states
 
-	writel(0xffffffff, (GPIO_PWM + PWM_STA));
-	writel(0, (GPIO_PWM + PWM_DMAC));
+	iowrite32(0xffffffff, (GPIO_PWM + PWM_STA));
+	iowrite32(0, (GPIO_PWM + PWM_DMAC));
 
 	barrier();
 
 	// Set range & data - constrain our parameters to 31/4 us period (7.something us), and
 	// 15/4 us mark (3.something us)
 
-	writel(period & 0x1f, (GPIO_PWM + PWM_RNG1));
-	writel(mark & 0x0f, (GPIO_PWM + PWM_DAT1));
+	iowrite32(period & 0x1f, (GPIO_PWM + PWM_RNG1));
+	iowrite32(mark & 0x0f, (GPIO_PWM + PWM_DAT1));
 
 	// Enable the PWM
 
 	if ((period & 0x1f) > (mark & 0x0f)) // If resulting mark is < resulting period, don't bother enabling the PWM because it'll be nonsence
 	{
-		writel(	(readl(GPIO_PWM + PWM_CTL) & ~(0xff)) | (PWM_CTL_MSEN1 | PWM_CTL_PWEN1),
+		iowrite32(	(ioread32(GPIO_PWM + PWM_CTL) & ~(0xff)) | (PWM_CTL_MSEN1 | PWM_CTL_PWEN1),
 			(GPIO_PWM + PWM_CTL)	);
 #ifdef ECONET_GPIO_DEBUG_SETUP
 		printk (KERN_INFO "econet-gpio: PWM Clock period/mark set to %d, %d\n", (period & 0x1F), (mark & 0x0F));
@@ -2454,8 +2451,8 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 #else
 
 			// Put it on the bus
-			writel((arg << ECONET_GPIO_PIN_DATA), GPIO_PORT + GPSET0);
-			writel((~(arg << ECONET_GPIO_PIN_DATA)) & ECONET_GPIO_CLRMASK_DATA, GPIO_PORT + GPCLR0);
+			iowrite32((arg << ECONET_GPIO_PIN_DATA), GPIO_PORT + GPSET0);
+			iowrite32((~(arg << ECONET_GPIO_PIN_DATA)) & ECONET_GPIO_CLRMASK_DATA, GPIO_PORT + GPCLR0);
 #endif
 			break;
 		case ECONETGPIO_IOC_TEST:

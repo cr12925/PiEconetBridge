@@ -66,17 +66,17 @@ void econet_flagfill(void);
 
 	#define econet_isbusy()		(econet_gpio_pin(ECONET_GPIO_PIN_BUSY))
 
-	#define econet_set_cs(x)	if (x)	writel(ECONET_GPIO_CLRMASK_CS, (GPIO_PORT + (econet_data->hwver < 2 ? GPSET0 : GPCLR0))); \
-					else	writel(ECONET_GPIO_CLRMASK_CS, (GPIO_PORT + (econet_data->hwver < 2 ? GPCLR0 : GPSET0)))
+	#define econet_set_cs(x)	if (x)	iowrite32(ECONET_GPIO_CLRMASK_CS, (GPIO_PORT + (econet_data->hwver < 2 ? GPSET0 : GPCLR0))); \
+					else	iowrite32(ECONET_GPIO_CLRMASK_CS, (GPIO_PORT + (econet_data->hwver < 2 ? GPCLR0 : GPSET0)))
 
-	#define econet_set_rst(x)	if (x)	writel(ECONET_GPIO_CLRMASK_RST, (GPIO_PORT + GPSET0)); \
-					else	writel(ECONET_GPIO_CLRMASK_RST, (GPIO_PORT + GPCLR0))
+	#define econet_set_rst(x)	if (x)	iowrite32(ECONET_GPIO_CLRMASK_RST, (GPIO_PORT + GPSET0)); \
+					else	iowrite32(ECONET_GPIO_CLRMASK_RST, (GPIO_PORT + GPCLR0))
 
-	#define econet_set_rw(x)	if (x)	writel(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPSET0)); \
-					else	writel(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPCLR0))
+	#define econet_set_rw(x)	if (x)	iowrite32(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPSET0)); \
+					else	iowrite32(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPCLR0))
 	#define econet_set_addr(x,y)	gpioset_value = (((x) << (ECONET_GPIO_PIN_ADDR + 1)) | ((y) << (ECONET_GPIO_PIN_ADDR))); \
-					writel(gpioset_value, GPIO_PORT + GPSET0); \
-					writel(((~gpioset_value) & ECONET_GPIO_CLRMASK_ADDR), GPIO_PORT + GPCLR0); \
+					iowrite32(gpioset_value, GPIO_PORT + GPSET0); \
+					iowrite32(((~gpioset_value) & ECONET_GPIO_CLRMASK_ADDR), GPIO_PORT + GPCLR0); \
 					barrier()
 #endif
 
@@ -106,10 +106,10 @@ void econet_flagfill(void);
 					u64 timer; \
 					\
 					timer = ktime_get_ns() + t; \
-					while ( (ktime_get_ns() < timer) && (readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)));\
+					while ( (ktime_get_ns() < timer) && (ioread32(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)));\
 				}
 #else
-	#define econet_wait_pin_low(p,t)	while (readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN))
+	#define econet_wait_pin_low(p,t)	while (ioread32(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN))
 #endif
 #endif /* ECONET_GPIO_NEW */
 					
