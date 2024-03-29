@@ -302,7 +302,7 @@ void econet_write_cr(unsigned short r, unsigned char d)
 unsigned char econet_read_sr(unsigned short r)
 {
 	unsigned char d;
-#ifdef ECONET_GPIO_NEW
+#ifdef xECONET_GPIO_NEW
 	unsigned long int 	gpioval;
 #else
 	u32 gpioval, gpiomask;
@@ -342,7 +342,7 @@ unsigned char econet_read_sr(unsigned short r)
 	// Disused econet_set_dir(ECONET_GPIO_READ);
 
 
-#ifdef ECONET_GPIO_NEW
+#ifdef xECONET_GPIO_NEW
 
 	gpioval = r | 0x04; // 0x04 is third bit in the value, which is the RW figure, and we need 1 for read because the pin is RnW
 
