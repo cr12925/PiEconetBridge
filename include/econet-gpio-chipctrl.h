@@ -18,7 +18,7 @@
 
 #define __ECONETGPIOCHIPCTRL_H__
 
-#ifndef ECONET_GPIO_NEW
+#ifndef xECONET_GPIO_NEW
 #include "gpioreg.h"
 #endif
 
