@@ -51,21 +51,17 @@ void econet_flagfill(void);
 
 /* Low level chip control functions */
 
-//#ifdef ECONET_GPIO_NEW
+#ifdef ECONET_GPIO_NEW
 	#define econet_isbusy()		(gpiod_get_value(econet_data->econet_gpios[EGP_DIR]))
 	#define econet_set_cs(x)	(gpiod_set_value(econet_data->econet_gpios[EGP_CS], (x)))
 	#define econet_set_rst(x)	(gpiod_set_value(econet_data->econet_gpios[EGP_RST], (x)))
 	#define econet_set_rw(x)	(gpiod_set_value(econet_data->econet_gpios[EGP_RW], (x)))
-#if 0
 	#define econet_set_addr(x,y)	{	unsigned long int g;  \
 						g = ((x) << 1) | (y); \
 						gpiod_set_array_value(2, a01rw_desc_array, NULL, &g); \
 						barrier(); \
 					}
-#endif
-
-#if 0
-
+#else
 	#define econet_gpio_pin(p) 	(readl(GPIO_PORT + GPLEV0) & (1 << p))
 
 	#define econet_isbusy()		(econet_gpio_pin(ECONET_GPIO_PIN_BUSY))
