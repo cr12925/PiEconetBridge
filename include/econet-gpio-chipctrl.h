@@ -62,7 +62,7 @@ void econet_flagfill(void);
 						barrier(); \
 					}
 #else
-	#define econet_gpio_pin(p) 	(readl(GPIO_PORT + GPLEV0) & (1 << p))
+	#define econet_gpio_pin(p) 	(ioread32(GPIO_PORT + GPLEV0) & (1 << p))
 
 	#define econet_isbusy()		(econet_gpio_pin(ECONET_GPIO_PIN_BUSY))
 
