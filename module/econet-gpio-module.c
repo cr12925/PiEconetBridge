@@ -60,7 +60,7 @@ struct gpio_desc *a01rw_desc_array[3];
 struct gpio_desc *data_desc_array[11]; // Top 3 are the address & RnW lines in case of need
 #endif
 
-#ifndef ECONET_GPIO_NEW
+#ifndef xECONET_GPIO_NEW
 unsigned long *GPIO_PORT = NULL;
 unsigned GPIO_RANGE = 0x40;
 unsigned long *GPIO_CLK;
@@ -164,7 +164,10 @@ u64 last_data_rcvd;
 void econet_set_dir(short d)
 {
 
-#ifdef ECONET_GPIO_NEW
+	if (econet_data->current_dir == d)
+		return; // No need to do anything - direction currently as we want it
+
+#ifdef xECONET_GPIO_NEW
 
 	u8	count;
 
@@ -185,6 +188,8 @@ void econet_set_dir(short d)
 	econet_set_rw(d);
 
 	econet_data->current_dir = d;
+
+	barrier();
 
 }
 
@@ -222,7 +227,8 @@ void econet_write_cr(unsigned short r, unsigned char d)
 	if (econet_data->hwver >= 2)
 		while (econet_isbusy());
 
-#ifdef ECONET_GPIO_NEW
+	 
+#ifdef xECONET_GPIO_NEW
 
 	// Turn direction around
 
@@ -252,6 +258,7 @@ void econet_write_cr(unsigned short r, unsigned char d)
 	barrier();
 #endif
 
+	// Disused econet_set_dir(ECONET_GPIO_WRITE);
 
 	// Enable nCS
 	econet_set_cs(ECONET_GPIO_CS_ON);
@@ -312,16 +319,17 @@ unsigned char econet_read_sr(unsigned short r)
 	if (econet_data->hwver >= 2)
 		while (econet_isbusy());
 
+	 
 	// First, set the data pins to read if need be
 
 	if (econet_data->current_dir != ECONET_GPIO_READ)
 	{
-#ifdef ECONET_GPIO_NEW
+#ifdef xECONET_GPIO_NEW
 		u8	count;
 #endif
 
 		econet_data->current_dir = ECONET_GPIO_READ;
-#ifdef ECONET_GPIO_NEW
+#ifdef xECONET_GPIO_NEW
 
 		for (count = EGP_D0; count <= EGP_D7; count++)
 			gpiod_direction_input(econet_data->econet_gpios[count]);
@@ -330,6 +338,8 @@ unsigned char econet_read_sr(unsigned short r)
 		barrier();
 #endif
 	}
+
+	// Disused econet_set_dir(ECONET_GPIO_READ);
 
 
 #ifdef ECONET_GPIO_NEW
@@ -457,6 +467,7 @@ short econet_gpio_init(void)
 
 	u32 t; /* Variable to read / write GPIO registers in this function */
 
+/* - moved to probe routine
 	request_region(GPIO_PERI_BASE, GPIO_RANGE, DEVICE_NAME);
 	GPIO_PORT = ioremap(GPIO_PERI_BASE, GPIO_RANGE);
 
@@ -471,6 +482,8 @@ short econet_gpio_init(void)
 		printk (KERN_INFO "econet-gpio: GPIO base remap failed.\n");
 		return 0;
 	}
+
+*/
 
 	// Request the clock region
 
@@ -1608,7 +1621,7 @@ unexpected_scout:
 			d = econet_read_fifo(); 
 			econet_process_rx(d);
 	}
-	else if ((sr1 & ECONET_GPIO_S1_RDA) || (sr2 & ECONET_GPIO_S2_RDA)) // Ordinary data - NB, S2 seems to have an RDA and sometimes it's not set when s1's flag is?
+	else if ((sr1 & ECONET_GPIO_S1_RDA) /* || (sr2 & ECONET_GPIO_S2_RDA) */) // Ordinary data - NB, S2 seems to have an RDA and sometimes it's not set when s1's flag is?
 	{
 		if (econet_pkt_rx.ptr == 0) // Shouldn't be getting here without AP set (caught above)
 		{
@@ -2599,6 +2612,7 @@ static int econet_probe (struct platform_device *pdev)
 #endif
 
 	econet_set_chipstate(EM_TEST);
+	econet_data->current_dir = 0xff; // Rogue so first operation sets direction
 	econet_set_irq_state(-1);
 	econet_data->aun_mode = 0;
 	econet_data->resilience = 0; // Rest of resilience not implemented yet! (20240317)
@@ -2735,6 +2749,21 @@ static int econet_probe (struct platform_device *pdev)
 		printk (KERN_INFO "econet-gpio: Machine compatibility uncertain - assuming Peripheral base at 0xFE000000\n");
 	}
 #endif
+
+	request_region(GPIO_PERI_BASE, GPIO_RANGE, DEVICE_NAME);
+	GPIO_PORT = ioremap(GPIO_PERI_BASE, GPIO_RANGE);
+
+	if (GPIO_PORT)
+	{
+#ifdef ECONET_GPIO_DEBUG_SETUP
+		printk (KERN_INFO "econet-gpio: GPIO base remapped to 0x%08lx\n", (unsigned long) GPIO_PORT);
+#endif
+	}
+	else
+	{
+		printk (KERN_INFO "econet-gpio: GPIO base remap failed.\n");
+		return -ENODEV;
+	}
 
 #ifdef ECONET_GPIO_NEW
 	// Set up clock on GPIO4 here if in new mode - econet_gpio_init() won't do it if that define is set
@@ -2934,18 +2963,19 @@ static int econet_remove(struct platform_device *pdev)
 	if (econet_rx_queue_initialized) kfifo_free(&econet_rx_queue);
 	if (econet_tx_queue_initialized) kfifo_free(&econet_tx_queue);
 
-#ifndef ECONET_GPIO_NEW
+#ifndef xECONET_GPIO_NEW
 	if (GPIO_PORT)
 	{
 		iounmap(GPIO_PORT);
 		GPIO_PORT = NULL;
 	}
 #endif
-
+	/*
 	if (!pdev)
-		printk (KERN_INFO "econet-gpio: Unprobed but module remains loaded\n");
+		printk (KERN_INFO "econet-gpio: Unprobed\n");
 	else
-		printk(KERN_INFO "econet-gpio: Unloaded.\n");
+	*/
+		printk(KERN_INFO "econet-gpio: Unprobed.\n");
 
 	return 0;
 
