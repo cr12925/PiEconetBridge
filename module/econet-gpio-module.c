@@ -628,10 +628,13 @@ void econet_adlc_cleardown(unsigned short in_irq)
 
 	/* Hold RST low for 100ms */
 	econet_set_rst(ECONET_GPIO_RST_RST);
+	/*
 	if (in_irq)
 		mdelay(100);
 	else
 		msleep(100);
+	*/
+	udelay(10); // Spec says we only need 1us...
 
 	econet_set_rst(ECONET_GPIO_RST_CLR);
 
@@ -2861,7 +2864,8 @@ static int econet_probe (struct platform_device *pdev)
 	// Do a reset to make sure IRQ line is clear
 
 	econet_set_rst(ECONET_GPIO_RST_RST);
-	msleep(100);
+	//msleep(100);
+	udelay(10);
 	econet_set_rst(ECONET_GPIO_RST_CLR);
 
 #ifndef ECONET_GPIO_NEW

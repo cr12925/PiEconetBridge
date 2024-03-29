@@ -41,26 +41,30 @@ void econet_flagfill(void);
 // 0x249249 is a bit pattern 001 001 001 ... which is the 'OUT' mode for three bits on a GPIO reg
 #define ECONET_GPIO_DATA_PIN_OUT (0x00249249 << (ECONET_GPIO_PIN_DATA % 10))
 
+#if 0 // Disused
 #define INP_GPIO(g) *(GPIO_PORT+((g)/10)) &= ~(7<<(((g)%10)*3))
 #define OUT_GPIO(g) *(GPIO_PORT+((g)/10)) |=  (1<<(((g)%10)*3))
 #define SET_GPIO_ALT(g,a) *(GPIO_PORT+(((g)/10))) |= (((a)<=3?(a)+4:(a)==4?3:2)<<(((g)%10)*3))
+#endif
 
 #endif
 
 /* Low level chip control functions */
 
-#ifdef ECONET_GPIO_NEW
+//#ifdef ECONET_GPIO_NEW
 	#define econet_isbusy()		(gpiod_get_value(econet_data->econet_gpios[EGP_DIR]))
 	#define econet_set_cs(x)	(gpiod_set_value(econet_data->econet_gpios[EGP_CS], (x)))
 	#define econet_set_rst(x)	(gpiod_set_value(econet_data->econet_gpios[EGP_RST], (x)))
 	#define econet_set_rw(x)	(gpiod_set_value(econet_data->econet_gpios[EGP_RW], (x)))
+#if 0
 	#define econet_set_addr(x,y)	{	unsigned long int g;  \
 						g = ((x) << 1) | (y); \
 						gpiod_set_array_value(2, a01rw_desc_array, NULL, &g); \
 						barrier(); \
 					}
+#endif
 
-#else
+#if 0
 
 	#define econet_gpio_pin(p) 	(readl(GPIO_PORT + GPLEV0) & (1 << p))
 
@@ -74,7 +78,7 @@ void econet_flagfill(void);
 
 	#define econet_set_rw(x)	if (x)	writel(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPSET0)); \
 					else	writel(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPCLR0))
-
+#else
 	#define econet_set_addr(x,y)	gpioset_value = (((x) << (ECONET_GPIO_PIN_ADDR + 1)) | ((y) << (ECONET_GPIO_PIN_ADDR))); \
 					writel(gpioset_value, GPIO_PORT + GPSET0); \
 					writel(((~gpioset_value) & ECONET_GPIO_CLRMASK_ADDR), GPIO_PORT + GPCLR0); \
