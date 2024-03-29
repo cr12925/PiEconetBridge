@@ -2255,8 +2255,6 @@ void econet_set_pwm(uint8_t period, uint8_t mark)
 
 	if (econet_data->hwver < 2)	return; // Not on v1 hardware!
 
-#ifdef ECONET_GPIO_NEW
-	
 	pwm_disable(econet_data->gpio18pwm);
 	if (pwm_config(econet_data->gpio18pwm, mark * 250, period * 250)) // ( * 250 = (* 1000 / 4) )
 	{
@@ -2272,7 +2270,7 @@ void econet_set_pwm(uint8_t period, uint8_t mark)
 
 	printk (KERN_INFO "econet-gpio: Econet clock set: period/mark = %d/%d ns\n", mark * 250, period * 250);
 
-#else
+#if 0
 	// First, reset the PWM
 
 	writel(0, (GPIO_PWM + PWM_CTL));
@@ -2557,9 +2555,7 @@ static int econet_probe (struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct device_node *econet_device;
 	u8	version = 0;
-#ifdef ECONET_GPIO_NEW
 	u32	gpio4clk_rate;
-#endif
 
 #ifdef ECONET_GPIO_NEW
 
@@ -2764,7 +2760,6 @@ static int econet_probe (struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-#ifdef ECONET_GPIO_NEW
 	// Set up clock on GPIO4 here if in new mode - econet_gpio_init() won't do it if that define is set
 
 	if (econet_data->hwver >= 2)
@@ -2822,17 +2817,6 @@ static int econet_probe (struct platform_device *pdev)
 
 		printk (KERN_INFO "econet-gpio: Econet clock enabled on BCM 18 at 1us/5us\n");
 	}
-
-#else
-	if (!econet_gpio_init())
-	{
-		printk (KERN_ERR "Unable to configure GPIO machinery\n");
-		econet_remove(NULL);
-		return -ENODEV;
-	}
-
-#endif
-
 
 	/*
 	 * Now create the device in /dev, since we're all set up 
