@@ -200,7 +200,7 @@ void econet_set_dir(short d)
  */
 void econet_write_cr(unsigned short r, unsigned char d)
 {
-#ifdef ECONET_GPIO_NEW
+#ifdef xECONET_GPIO_NEW
 	unsigned long int gpioval;
 	u8	count;
 #else
