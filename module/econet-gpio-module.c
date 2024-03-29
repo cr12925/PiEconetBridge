@@ -73,6 +73,7 @@ unsigned GPIO_PWM_RANGE = 0x28;
 #define econet_discontinue() \
 		econet_pkt_rx.length = econet_pkt_rx.ptr = 0; \
 		econet_set_chipstate(EM_IDLE); \
+		if (econet_data->aun_mode) { econet_set_aunstate(EA_IDLE); } \
 		econet_write_cr(ECONET_GPIO_CR2, C2_READ); \
 		econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_DISC); /* Discontinue reception */ 
 
