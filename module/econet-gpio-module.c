@@ -2710,7 +2710,7 @@ static int econet_probe (struct platform_device *pdev)
 	spin_lock_init(&econet_irqstate_spin);
 	spin_lock_init(&econet_tx_spin);
 
-#ifndef ECONET_GPIO_NEW
+#ifndef xECONET_GPIO_NEW
 	/* Allocate internal state */
 
 	econet_data->peribase = 0xFE000000; // Assume Pi4-class unless we find otherwise
