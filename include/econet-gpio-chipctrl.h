@@ -35,6 +35,8 @@ void econet_gpio_release(void);
 void econet_reset(void);
 void econet_flagfill(void);
 
+#ifndef xECONET_GPIO_NEW
+
 #define ECONET_GPIO_DATA_PIN_MASK (0x00ffffff << (ECONET_GPIO_PIN_DATA % 10))
 // 0x249249 is a bit pattern 001 001 001 ... which is the 'OUT' mode for three bits on a GPIO reg
 #define ECONET_GPIO_DATA_PIN_OUT (0x00249249 << (ECONET_GPIO_PIN_DATA % 10))
@@ -42,6 +44,8 @@ void econet_flagfill(void);
 #define INP_GPIO(g) *(GPIO_PORT+((g)/10)) &= ~(7<<(((g)%10)*3))
 #define OUT_GPIO(g) *(GPIO_PORT+((g)/10)) |=  (1<<(((g)%10)*3))
 #define SET_GPIO_ALT(g,a) *(GPIO_PORT+(((g)/10))) |= (((a)<=3?(a)+4:(a)==4?3:2)<<(((g)%10)*3))
+
+#endif
 
 /* Low level chip control functions */
 
@@ -97,6 +101,7 @@ void econet_flagfill(void);
 					while (ktime_get_ns() < p);\
 				}
 
+#ifndef ECONET_GPIO_NEW
 #ifndef ECONET_NO_NDELAY
 	#define econet_wait_pin_low(p,t)	{ \
 					u64 timer; \
@@ -107,6 +112,7 @@ void econet_flagfill(void);
 #else
 	#define econet_wait_pin_low(p,t)	while (readl(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN))
 #endif
+#endif /* ECONET_GPIO_NEW */
 					
 /* Note that there are two assignments to sr2 here. The first is the historical one. The second is because we discovered that SR2Q on S1 did not go high when, for example, /DCD alone was set in SR2, so we now read both registers. Old code left so we don't lose it */
 #define econet_get_sr()	{ \
