@@ -2783,18 +2783,10 @@ static int econet_probe (struct platform_device *pdev)
 	}
 #endif
 
-#ifdef CONFIG_ARM64
-	econet_data->peribase = 0x47E000000; // Full 35-bit ARM address of main peripherals in high peripheral mode
-#endif
-
 	request_region(GPIO_PERI_BASE, GPIO_RANGE, DEVICE_NAME);
 	GPIO_PORT = ioremap(GPIO_PERI_BASE, GPIO_RANGE);
 
-	if (GPIO_PORT)
-	{
-		printk (KERN_INFO "econet-gpio: GPIO base remapped to 0x%08lx\n", (unsigned long) GPIO_PORT);
-	}
-	else
+	if (!GPIO_PORT)
 	{
 		printk (KERN_INFO "econet-gpio: GPIO base remap failed.\n");
 		return -ENODEV;

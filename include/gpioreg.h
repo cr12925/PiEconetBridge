@@ -59,10 +59,17 @@
 #define GPLEV0 0x0d
 
 // Fixes for test 64bit compat
+#ifdef CONFIG_ARM64
+#define NGPSET0 (volatile void __iomem *) ((u64) GPIO_PORT + 0x1c)
+#define NGPCLR0 (volatile void __iomem *) ((u64) GPIO_PORT + 0x28)
+#define NGPLEV0 (volatile void __iomem *) ((u64) GPIO_PORT + 0x34)
+#define NGPFSEL0 (volatile void __iomem *) ((u64) GPIO_PORT + 0x00)
+#else
 #define NGPSET0 (volatile void __iomem *) ((u32) GPIO_PORT + 0x1c)
 #define NGPCLR0 (volatile void __iomem *) ((u32) GPIO_PORT + 0x28)
 #define NGPLEV0 (volatile void __iomem *) ((u32) GPIO_PORT + 0x34)
 #define NGPFSEL0 (volatile void __iomem *) ((u32) GPIO_PORT + 0x00)
+#endif
 
 // PWM defines (with thanks to the authors of PiGPIO)
 #define PWM_CTL      0
