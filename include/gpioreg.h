@@ -58,6 +58,12 @@
 #define GPCLR0 0x0a
 #define GPLEV0 0x0d
 
+// Fixes for test 64bit compat
+#define NGPSET0 (volatile void __iomem *) ((u32) GPIO_PORT + 0x1c)
+#define NGPCLR0 (volatile void __iomem *) ((u32) GPIO_PORT + 0x28)
+#define NGPLEV0 (volatile void __iomem *) ((u32) GPIO_PORT + 0x34)
+#define NGPFSEL0 (volatile void __iomem *) ((u32) GPIO_PORT + 0x00)
+
 // PWM defines (with thanks to the authors of PiGPIO)
 #define PWM_CTL      0
 #define PWM_STA      1

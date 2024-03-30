@@ -178,9 +178,15 @@ void econet_set_dir(short d)
 	}
 
 #else
+#if 0
 	iowrite32((ioread32(GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10)) & ~ECONET_GPIO_DATA_PIN_MASK) | 
 		(d == ECONET_GPIO_WRITE ? ECONET_GPIO_DATA_PIN_OUT : 0),
 		GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10));
+#else
+	iowrite32((ioread32(NGPFSEL0) & ~ECONET_GPIO_DATA_PIN_MASK) | 
+		(d == ECONET_GPIO_WRITE ? ECONET_GPIO_DATA_PIN_OUT : 0),
+		NGPFSEL0);
+#endif
 #endif
 
 	econet_set_rw(d);
@@ -242,8 +248,13 @@ void econet_write_cr(unsigned short r, unsigned char d)
 
 #else
 	// Put that lot on the GPIO
+#if 0
 	iowrite32(gpioval, GPIO_PORT+GPSET0);
 	iowrite32((~gpioval) & gpiomask, GPIO_PORT + GPCLR0);
+#else
+	iowrite32(gpioval, NGPSET0);
+	iowrite32((~gpioval) & gpiomask, NGPCLR0);
+#endif
 
 	// Now swing our own bus direction round
 
@@ -359,8 +370,13 @@ unsigned char econet_read_sr(unsigned short r)
 
 	// Now, put that on the hardware
 
+#if 0
 	iowrite32(gpioval, GPIO_PORT + GPSET0);
 	iowrite32((~gpioval) & gpiomask, GPIO_PORT + GPCLR0);
+#else
+	iowrite32(gpioval, NGPSET0);
+	iowrite32((~gpioval) & gpiomask, NGPCLR0);
+#endif
 	
 	// Shouldn't need a barrier here because apparently iowrite32() has one in it.
 
@@ -408,7 +424,11 @@ unsigned char econet_read_sr(unsigned short r)
 
 #else
 
+#if 0
 	d = (ioread32(GPIO_PORT + GPLEV0) & ECONET_GPIO_CLRMASK_DATA) >> ECONET_GPIO_PIN_DATA;
+#else
+	d = (ioread32(NGPLEV0) & ECONET_GPIO_CLRMASK_DATA) >> ECONET_GPIO_PIN_DATA;
+#endif
 #endif
 
 	return d;	
@@ -428,7 +448,11 @@ int econet_probe_adapter(void)
 	econet_set_cs(0);
 
 	udelay(2); // 2us should always be enough
+#if 0
 	if ((ioread32(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
+#else
+	if ((ioread32(NGPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
+#endif
 	{
 
 		printk (KERN_ERR "econet-gpio: Version 1 hardware test failed - nCS return not returning (test 1).\n");
@@ -438,7 +462,11 @@ int econet_probe_adapter(void)
 	econet_set_cs(1);
 	udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
 
+#if 0
 	if ((ioread32(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) == 0)
+#else
+	if ((ioread32(NGPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) == 0)
+#endif
 	{
 		printk (KERN_ERR "econet-gpio: Version 1 hardware test failed - nCS return not returning (test 2).\n");
 		return 0;
@@ -447,7 +475,11 @@ int econet_probe_adapter(void)
 	econet_set_cs(0);
 	udelay(ECONET_GPIO_CLOCK_US_DUTY_CYCLE);
 
+#if 0
 	if ((ioread32(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
+#else
+	if ((ioread32(NGPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)) != 0)
+#endif
 	{
 		printk (KERN_ERR "econet-gpio: Version 1 hardware test failed - nCS return not returning (test 3).\n");
 		return 0;
@@ -2451,8 +2483,13 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 #else
 
 			// Put it on the bus
+#if 0
 			iowrite32((arg << ECONET_GPIO_PIN_DATA), GPIO_PORT + GPSET0);
 			iowrite32((~(arg << ECONET_GPIO_PIN_DATA)) & ECONET_GPIO_CLRMASK_DATA, GPIO_PORT + GPCLR0);
+#else
+			iowrite32((arg << ECONET_GPIO_PIN_DATA), NGPSET0);
+			iowrite32((~(arg << ECONET_GPIO_PIN_DATA)) & ECONET_GPIO_CLRMASK_DATA, NGPCLR0);
+#endif
 #endif
 			break;
 		case ECONETGPIO_IOC_TEST:
@@ -2746,14 +2783,16 @@ static int econet_probe (struct platform_device *pdev)
 	}
 #endif
 
+#ifdef CONFIG_ARM64
+	econet_data->peribase = 0x47E000000; // Full 35-bit ARM address of main peripherals in high peripheral mode
+#endif
+
 	request_region(GPIO_PERI_BASE, GPIO_RANGE, DEVICE_NAME);
 	GPIO_PORT = ioremap(GPIO_PERI_BASE, GPIO_RANGE);
 
 	if (GPIO_PORT)
 	{
-#ifdef ECONET_GPIO_DEBUG_SETUP
 		printk (KERN_INFO "econet-gpio: GPIO base remapped to 0x%08lx\n", (unsigned long) GPIO_PORT);
-#endif
 	}
 	else
 	{
