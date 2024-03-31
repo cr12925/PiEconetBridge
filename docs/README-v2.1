@@ -1,5 +1,5 @@
-AUN to Econet Bridge
---------------------
+AUN to Econet Bridge - The High Performance Bridge ("HPB")
+----------------------------------------------------------
 
 
 /*
@@ -35,6 +35,37 @@ develop without sight of the code at github.com/stardot/ArduinoFilestore.
 I am told it is stardot.org.uk user @gazzaD - well, @gazzaD, thank you -
 I could not have done it without you.
 
+
+WARNING - NO, REALLY, YOU SHOULD READ THIS!
+-------------------------------------------
+
+I was once told that the difference between a professional musician and an 
+amateur is that the amateur practices until he gets the piece right; the
+professional practices until the piece simply will not go wrong.
+
+On any view, by analogy, this is amateur code.
+
+This is work which I have produced with no real experience of either
+electronics, the 68B54 ADLC, or kernel module programming.
+
+In particular, the following undesirable characteristics of this system should
+be noted. These are typically owing to a lack of talent on my part. I well
+understand the desirability of fixing them all. If anyone with more talent
+than me wishes to have a go, I would be genuinely very happy. Notwithstanding
+the list below, I am a huge fan of doing things the 'proper' way. It is a
+matter of regret that I have not managed to do so. In particular:
+
+	- It reads and writes directly from the GPIO hardware instead of using
+	  the kernel routines. I accept this renders it less portable even
+	  within Raspberry Pi systems, though at least the Peripheral Base
+	  address is in a #define!
+
+	- It probably does not handle AUN ACK and NAK quite the way it should.
+
+It is some time since I saw a kernel crash with this module, but you should be
+alive to the prospect that it might happen. If you use this on a production
+system that's doing something else, you have been warned!
+
 RELEASE NOTES FOR V2.1
 ----------------------
 
@@ -54,6 +85,7 @@ RELEASE NOTES FOR V2.1
     filesystem
 - Kernel module and the bridge supports all the immediate operations
   which in fact use a 4-way handshake (e.g. OSPROC, USRPROC, JSR).
+- Kernel now supports 64 bit operations, and uses the Linux kernel's own calls for accessing GPIO Clock and PWM function (for the ADLC clock and Network clock respectively). It continues to write directly to the GPIO hardware for speed, having attempted to use the official calls for that purpose without success.
 - Bridge now has pool address translation enabled to facilitate
   trunking of a significantly larger number of networks together
   where most stations are clients rather than servers
@@ -69,10 +101,15 @@ but the latter cannot be generated without collecting the data
 phase of the 4-way handshake, which is needed to build the AUN
 type packets used for AUN stations / trunks.
 
-- Possible MUD server via pipe (which will also talk directly
-  to IP-connected clients)
+- Fix displayed directory privileges when the FS is in 'Acorn Directory' mode (i.e. display 'D/' or 'DL/' only instead of the full privileges.
 
-Introduction
+- Fix a bug in *NEWUSER if the user's directory already exists.
+
+- Improve MDFS password file functionality, hopefully including writing to it.
+
+- Move to a threaded fileserver
+
+INTRODUCTION
 ------------
 
 The combination of this hardware and software is intended to provide a
@@ -112,16 +149,14 @@ is performed over AUN over IP in between the two bridges.
 Prerequisites
 -------------
 
-** Do NOT attempt to run this on PiOS 64 bit yet. There is an incompatibility
-   with the kernel module which will crash your system. I suspect it is the
-   direct writes to the GPIO hardware. This is on the list to fix.
-**
-
 The system will require:
-	- Raspberry Pi (unless you are running a version 1 bridge board
+	- Raspberry Pi Zero 2W, 3B+, or 4 (unless you are running a version 1 bridge board
 	  in which case nothing less than a Pi 4B will do, and you must
 	  not install the desktop!).
-	- A proper RPi 4 PSU. Experimentation shows that the Econet hardware
+
+	  *** This software and its associated hardware WILL NOT WORK ON A PI 5 - Don't even try. ***
+
+	- A proper RPi PSU. Experimentation shows that the Econet hardware
           has quite a current draw and an underpowered PSU can lead to
           rx/tx problems
 	- No other GPIO usage on the system
@@ -133,14 +168,16 @@ The system will require:
 	  longer recommend the original hardware design: if you want
 	  Econet wired connectivity (e.g. to a real BBC) rather than just
 	  a fileserver for (say) some BeebEm machines, then buy a hardware
-	  HAT from @KenLowe, or use his latest design.
+	  HAT from @KenLowe, or use his latest design, which is available on GitHub at https://github.com/kgl2001/PiEconetBridgePCB
 	- Your installation of PiOS having the kernel headers installed (see
           below)
 	- A pre-existing functioning Econet (with clock) with a spare station
           port to connect to the hardware, if you want to use real BBCs
 
-You will need to fix the clock on your Pi - i.e. it MUST NOT switch in and
-out of turbo mode. If you don't, then expect unreliability.
+If you are using a version 1 hardware board
+-------------------------------------------
+
+All recent versions sold since about 2021 are version 2 boards. If you are using the earlier design ("version 1") which has a dedicated line for detecting with the /CS (chip select) signal has reached the ADLC, then you also need to fix the ARM clock in your Pi to a specific speed to stop it switching in and out of turbo mode. If you don't, then your bridge will be unreliable because of some sensitive timing routines in the v1 board support in the kernel module.
 
 In your /boot/config.txt file, set
 arm_freq=900
@@ -148,37 +185,6 @@ force_turbo=1
 
 ... and reboot. 900MHz is conservative. It'll probably work at a faster
 speed quite happily.
-
-WARNING - NO, REALLY, YOU SHOULD READ THIS!
--------------------------------------------
-
-I was once told that the difference between a professional musician and an 
-amateur is that the amateur practices until he gets the piece right; the
-professional practices until the piece simply will not go wrong.
-
-On any view, by analogy, this is amateur code.
-
-This is work which I have produced with no real experience of either
-electronics, the 68B54 ADLC, or kernel module programming.
-
-In particular, the following undesirable characteristics of this system should
-be noted. These are typically owing to a lack of talent on my part. I well
-understand the desirability of fixing them all. If anyone with more talent
-than me wishes to have a go, I would be genuinely very happy. Notwithstanding
-the list below, I am a huge fan of doing things the 'proper' way. It is a
-matter of regret that I have not managed to do so. In particular:
-
-	- It reads and writes directly from the GPIO hardware instead of using
-	  the kernel routines. I accept this renders it less portable even
-	  within Raspberry Pi systems, though at least the Peripheral Base
-	  address is in a #define!
-
-	- It probably does not handle AUN ACK and NAK quite the way it should.
-
-It is some time since I saw a kernel crash with this module, but you should be
-alive to the prospect that it might happen. If you use this on a production
-system that's doing something else, you have been warned!
-
 
 INSTALLATION
 ------------
@@ -194,39 +200,78 @@ longer supported.
 Acknowledgment to @KenLowe for his excellent work - it is his, not 
 mine.
 
+Since the document is his work not mine, below is a version updated by me which deals with v1/v2 differences and how to install if you have a version 2 board which has not been updated.
 
-LOADING THE KERNEL MODULE
--------------------------
+Install the Pi OS
+-----------------
 
-This should only be necessary if you have an older board which does not
-have the EEPROM properly wired in and populated, because the EEPROM
-in the HAT will cause the kernel module to load.
+Find a spare MicroSD card. If it isn't formatted, format it to FAT32. On Windows, Ken's choice of software for doing that is 'Rufus'.
 
-If you really want to load it manually then here is how.
+Obtain the Pi Imager tool from the raspberrypi.com website and use it to install the most recent 32- or 64- bit for your chosen platform but don't install the desktop. As part of that process:
+- Always use the "Lite" version (doesn't install the desktop).
+- Use the "Advanced Options" cog and set an appropriate username and password for logging into your Pi.
+- In the same set of options, enable SSH so that you can access the Pi remotely without needing a screen or keyboard.
+- Also configure your WiFi settings if you want to use it.
+- Then tell the imager to write the OS to the card and, when it has verified and finished, put the card into your Pi.
 
-	cd module
-	sudo insmod ./econet-gpio.ko
+Connect the Bridge board to the Pi's GPIO pins.
 
-If you are not running the utilities are root, you should change the
-permissions on the newly arrived /dev/econet-gpio, e.g.:
+Turn on your Pi and connect using SSH (e.g. PuTTY on Windows, or the built in ssh client on MacOS/Linux). Log in with the username & password you set earlier.
 
-	sudo chmod a+rw /dev/econet-gpio
+If you are using a 'shutdown' button that connects to the GPIOs, use your favourite editor (e.g. vi, nano) to edit /boot/config.txt (or, more recently, /boot/firmware/config.txt) to include the following additional entry:
 
-If you want to choose the group / permissions for the /dev/econet-gpio device,
-you can put a file such as that in the 'udev' directory into /etc/udev/rules.d
+	dtoverlay=gpio-shutdown
 
-Obviously if you want to use the group 'econet' as set out in the example file,
-then you will need to create it as root with something like
+If you are using a version 1 hardware board, as referred to above please also include the following entries:
 
-	groupadd econet
+	arm_freq=1000
+	force_turbo=1
 
-And then add the pi user to it with something like
+Then save config.txt
 
-	usermod -a -G econet pi
+Next, you will need to install some packages to ensure that the Pi can build the bridge software itself, so execute the following commands:
 
-You should then find that the pi user can run the utilities (rather than root)
-but can still talk to the Econet device.
+	sudo apt update
+	sudo apt upgrade
+	sudo apt install raspberry-pi-kernel-headers libexplain51 libexplain-dev libexplain-doc libssl-dev git
 
+Then reboot your Pi:
+
+	sudo shutdown -r now
+
+When rebooted, log back in over SSH and install the bridge software
+
+	git clone https://github.com/cr12925/PiEconetBridge
+	cd PiEconetBridge
+	make
+
+The next step depends on what kind of board you have.
+
+	A. Version 1 boards. You need to fix your ARM processor frequency if you didn't do it above and then put an overlay in your /boot partition
+	
+		make eeprom-v1
+
+	   You will need to follow the instructions to edit your config.txt (use the same method as above).
+
+	B. Version 2 boards which do not have an up to date EEPROM. (As at 31.03.2024, no version 2 board 'in the wild' has been updated). The following will update your EEPROM without which the bridge kernel module will not operate. You need only do this once for each physical board.
+
+		First, ensure your EEPROM's write enable solder bridge is made. See instructions with your Bridge board or contact supplier if you don't know how. Then:
+
+		make eep
+		make eeprom-v2
+
+	C. Version 2 boards which do not have an up to date EEPROM and which have a defectively wired write enable line (or where you do not for some reason fancy re-blowing the EEPROM as in (B) above!). These EEPROMs cannot be upgraded following (B) above and you need to implement a workaround as follows:
+
+		make eeprom-general
+		sudo cp dts/econet-gpio-v2-overlay.dtbo /boot/firmware/overlays
+
+		.. and then edit your config.txt to include "dtoverlay=econet-gpio-v2-overlay"
+
+	   That will cause the missing parts of the EEPROM to be put into the Device Tree by way of an overlay at boot time, and thus enable the module to start properly.
+
+Then reboot:
+
+	sudo shutdown -r now
 
 A WORD ON THE KERNEL MODULE
 ---------------------------
@@ -260,81 +305,327 @@ provides a means of doing network monitoring. Thus the 'econet-monitor'
 utilities does not upload a station map, so that the module remains in 'raw'
 mode.
 
-Immediate queries are now handled properly (and forwarded on to AUN etc. if
-appropriate). If you want the kernel module to spoof Immediate replies like
-it used to, you must now turn on the -i command line switch to the Econet
-bridge. There should be no need to do so and use is discouraged.
+NORMAL OPERATIONS
+-----------------
 
-*FAST
------
+The installation procedure should have accomplished the following things:
 
-The MDFS *FAST utility was used to access an administrative menu inside an
-MDFS server when it was in a particular mode by a keyswitch. The HP Bridge
-will respond to *FAST when it is running, and will present a menu of
-options to control both the local fileserver on a particular virtual
-station, and to be able to shut down the Pi itself if the binary is
-setuid root.
+- Installed the kernel module and enough EEPROM or Device Tree overlay information to cause it to load an initialize on boot, including creating the /dev/econet-gpio device. The kernel module will also (subject to the DIP switches on the Bridge board - see the separate hardware documentation which came with your board):
 
-However, access to this functionality is only available:
+	- Turn on the Pi's PWM on GPIO 18 with a waveform that the Bridge board can use to provide an Econet clock to the network, at 1us mark / 5us period.
 
-- On virtual servers which are running a fileserver
-- To users who are logged into the fileserver AND who have a special
-  'bridge' privilege.
+	- Turn on the Pi's GPCLK0 on GPIO 4 to provide an 8MHz clock which is divided down to 2MHz to drive the ADLC (network controller) on the Bridge board.
 
-By default, no users (including SYST) have the bridge privilege.
-To cause all local fileservers to grant the bridge privilege to
-SYST on startup (permanently), run the bridge from the command line
-with the --enable-syst-fast command line option. This is only
-required once.
+- Installed various utilities (described below), including the main HP Bridge utility which is the thing you need to run to get machines (real or virtual) to talk to the Pi.
 
-To grant the bridge privilege to another user, use the privileged
-command *BRIDGEUSER (see below). You cannot modify the bridge
-privilege of the user who executes that command - you can only
-modify the privilege for other users. It is possible to grant
-the bridge privilege to a non-system user, but such a user will
-not be able to grant or revoke the privilege for anyone else
-because *BRIDGEUSER requires SYST and BRIDGE privileges to
-function.
+- Implemented a udev entry which means that the /dev/econet-gpio device is owned by the right user.
 
-On login as a user with the bridge privilege, the FS will notify
-the bridge that *for that virtual station only*, the user's 
-station has bridge privileges. Thereafter the bridge will respond
-to the *FAST utility from that particular user's station and only
-in respect of the virtual fileserver station that they logged
-into. 
+- Implemented a systemd script which starts the HP Bridge on boot and re-starts it if it stops.
 
-On logout, that flag will be cleared.
+- Provided a stock configuration which sets up the wired network as network 1 and provides a fileserver on host 254 (i.e. 1.254).
 
-Since the *FAST handler in the bridge allows the shutting down of
-the fileserver, the notification above allows a bridge privileged
-user to log in, use *FAST to shut the fileserver down, change
-its parameters (e.g. rename a disc or format a new disc) and
-then, even if they quit *FAST, providing no other programme
-has been loaded, they can re-execute the *FAST code by using
+Thus, after the final reboot in the installation procedure, if you have a BBC plugged into your Bridge board and a properly terminated network (either with the DIP switches on the Bridge board, or separate), and an active network clock (ditto), then providing your BBC is Econet-enabled and has NFS or ANFS in it, you should be able to log into the fileserver on the Pi with
 
-CALL &2800
+	*NET
+	*I AM SYST
 
-from BASIC. The bridge will, because of the notification system
-above, still know that the station has bridge privileges even
-though the fileserver has been shut down. The fileserver can,
-for example, then be re-started.
+The built in fileserver will have a blank 'disc' called PIBRIDGE-00. You will need to copy library utilities and other data onto it. The fileserver broadly supports Acorn Level 3 operations (in full, I think!) though there are some differences - see "THE FILESERVER" below for operation and configuration information.
 
-It is therefore important that users with bridge privileges 
-log out properly with *BYE so that the relevant notification
-bit is cleared and a subsequent user cannot log in. The bit
-is NOT cleared on a logout caused by, for example, *FLOG.
+Print server
+------------
 
-Shutting down the Pi with *FAST:
-- This will only work if the econet-hpbridge binary is setuid root.
-- The binary does not attempt to assume root privileges until the
-  moment before it calls the 'shutdown' binary if this option is
-  used.
-- If the binary is not setuid root, the shutdown option will do
-  nothing.
-- To install the binary setuid root, use the following instead
-  of make install each time you build / install
+The PiBridge implements a print server. It can have multiple printers per fileserver, and their information can be obtained, and printers selected, using MDFS-style commands such as *PRINTER and *PRINTOUT .
 
-  make setuid
+Documentation below.
+
+IP Server
+---------
+
+The PiBridge implements a router-version of the Phil Blundell IP ROM protocol, thus enabling real BBCs to access the Internet via Telnet or raw data over a TCP port (e.g. to connect to a Viewdata system available by that means). PB's ROM uses the serial buffer for sent/received data if not using the Telnet programme, so you need something like the Prestel ROM to make it work. (It doesn't work with Commstar, though.)
+
+AUN Operations
+--------------
+
+The bridge can:
+
+- Expose whole networks or single hosts that it knows about over AUN, so that they can be accessed by Emulators such as BeebEm, or real RISC OS machines on an Ethernet.
+
+- Allow access from unknown AUN clients, and allocate them dynamic network addresses (see the DYNAMIC configuration option below)
+
+Trunks and Econet wired bridges
+-------------------------------
+
+The PiBridge can:
+
+- Interoperate with Acorn/SJ bridges on an Econet and exchange network information with them and correctly route traffic.
+
+- Interoperate with other PiBridges over UDP-based encrypted trunks to exchange network information and route traffic.
+
+- Detect when an announced network is already known, and drop the annoucement for that particular network
+
+- Translate an incoming network number announced to the bridge into a different network number if you have networks with overlapping numbering (providing there is no loop in the network!)
+
+- Announce a local (or other known) network to a distant PiBridge as a different number (again, in case of overlapping networks)
+
+- Block or allow particular network numbers from either being received on inbound announcements, or being sent out on outbound announcements (e.g. if you want to stop one of several remote network numbers on a particular trunk or Econet communicating with your Bridge and onward connections, or if you wish to keep one or more of your networks from being seen at all by remote sites).
+
+- Block selected traffic (like a firewall) on trunk connections. (This is different to blocking or allowing network number announcements: the firewall operates when the networks are known (i.e. not blocked), but then it can selectively block particular traffic between certain combinations of individual hosts, although it also supports wildcards for "any" host.)
+
+- Implement a 'many to one' NAT system on trunks and Econets as a means of connecting many networks together which may have overlapping numbers or where there would be insufficient network numbers to join them all together even with NAT, ideally where such distant networks are sparse in terms of numbers of stations. What the pool system does is allocate a number of networks into the "pool". It then does not announce the pooled networks arriving on each trunk or Econet to any other bridges, but instead each time it sees traffic from a station, it allocates a dynamic host number out of the pool and translates back and forth. It is possible to statically allocate entries if (for example) a server is to be exposed. This was developed for the Econet LAN parties at Bletchley so that many remote sites could join.
+
+
+STARTING, STOPPING, AND CONFIGURATION
+-------------------------------------
+
+The utility which runs the bridge's day to day operations is called "econet-hpbridge" and will have been installed in your system by the installation routine. You can run it as the user that installed it wihtout 'sudo'. It generates help if run as
+
+	econet-hpbridge -h
+
+You will see a number of tunable settings which are discussed later.
+
+econet-hpbridge is the second generation of the user space bridge code. It is
+backwards compatible in terms of features with econet-bridge, which is the
+first generation. However, it has a number of improvements:
+
+A. It is no longer necessary to expose all of your Econet hosts to AUN. You
+   can do so selectively.
+
+B. Performance is intended to be superior because, among other things, the
+   code is threaded and so writes to the Econet (wire) no longer hold up 
+   other traffic passing through the bridge (e.g. from an AUN or trunk
+   host to a local fileserver).
+
+C. The code has been designed to cope with multiple Econets (wires) in case
+   of future expansion. (The kernel module does not presently support
+   multiple different Econet wires. But it might...)
+
+D. The IP Gateway for Phil Blundell's EcoTCP ROM is now built in.
+
+E. *ALL* configuration requires network numbers other than 0. Even if you
+   have only one network. The system works out when to substitute '0' as
+   the network number in a transmitted packet (and vice versa on receipt),
+   just as real Acorn systems did. This is to simplify configuration.
+
+F. The configuration is designed to be far more human readable and to require
+   fewer configuration lines to achieve a given purpose.
+
+G. The configuration is more flexible in terms of exposing your wired / local
+   hosts to AUN, and in terms of defining where remote AUN/IP hosts are and
+   what port numbers they use. Although at the time of writing it remains
+   necessary to create any IP tunnel or sub-interfaces for use with the bridge,
+   it is hoped that even that can be automated in future. Thus, to define
+   a whole network's worth of AUN/IP machines only a single line is required
+   in the configuration (see below). To expose an entire network of Econet
+   (or even trunked) machines to AUN/IP, again only a single line of
+   configuration is needed, but you will first need to add all the necessary
+   sub-interfaces to your 'lo' or ethernet interface first (see elsewhere).
+
+H. The command line parameters have been considerably simplified.
+
+I. Having at least one Econet board is no longer required. If you do not
+   define an Econet (wire) network, the system won't try to find one and will
+   cheerfully just operate doing trunking and/or AUN/IP.
+
+J. For the large majority of cases, only memory which is actually needed is
+   allocated, thus the large memory allocations which were used (even at 
+   startup) in the old bridge are avoided.
+
+After installation, the Bridge will be configured to start econet-hpbridge when the Pi boots, so you should not need to do anything but switch on in order to have a working system.
+
+By default, the Bridge is configured by editing /etc/econet-gpio/econet-hpbridge.cfg. 
+You must re-start the bridge each time you change the file. You can do that by logging into the bridge and executing:
+
+	sudo systemctl restart econet-hpbridge
+
+If you want to stop the bridge software you can run
+
+	sudo systemctl stop econet-hpbridge
+
+If you don't want the bridge software to run at boot, you can run
+
+	sudo systemctl disable econet-hpbridge
+
+The reverse of each of the above two are:
+
+	sudo systemctl start econet-hpbridge
+and	sudo systemctl enable econet-hpbridge
+
+... respectively.
+
+You can use the '-c' switch to econet-hpbridge to make the bridge use a different configuration file if you want.
+
+Command line parameters
+-----------------------
+
+You will not normally need any of these.
+
+-h		Produces help text.
+
+-c <path>	Specify alternate configuration file. Default is
+		/etc/econet-gpio/econet-hpbridge.cfg
+
+		In theory this makes it possible to run two independent
+  		bridges on the same machine. If and when mulitple Econets
+		are supported, they could be run either by two separate
+		userspace bridges, or by one.
+
+-d <path>	Path to write debug output to. It will go to stderr by 
+		default as it previously did, but it can also now be 
+		directed to a file. (You can always 'tail -f' the file
+		to see it in another console window.)
+
+-l		Local mode. Won't attempt to open Econet devices even if they
+		are defined. 
+
+-n <num>	Number of data bytes to display when showing packet data.
+		Default is 0. They are now displayed rather more nicely 
+		than before, in 16-byte lines with characters at the right.
+
+-p [iIoO]	Turn on packet dumps. You must select at least one of the four
+		directions, but you can have any combination thereafter.
+	
+		They mean:
+
+		i:	Packet has arrived off the device in question. This
+			will show its properties before any network number
+			translation. E.g. packets off the Econet may show
+			network 0.
+
+		I:	Packet as received from a device, but after any
+			network number translation. E.g. if your local Econet
+			is network 6, a packet which shows as 0.5 on an 'i'
+			trace will now show as 6.5. Traffic arriving on a 
+			trunk with network address translation turned on
+			will show its translated network number rather than
+			the one it arrived with (which will appear on 'i').
+
+		o:	First output stage in destination device. Shows
+			network numbers before any translation (so this is
+			pretty much like 'I' but in the output phase).
+
+		O:	Final output stage (if the packet has not been 
+			dropped for some reason) - the equivalent of 'i' but
+			for output: it shows the final network numbers as
+			transmitted with the packet.
+
+		Note, even if you turn all these on, you may not see four
+		traces per packet. Example reasons are:
+
+		- Traffic generated by a local emulator. There will be no
+		  i or I phases.
+
+		- Broadcast traffic. You'll see i and I, but probably
+		  multiple o and/or O.
+
+		- Traffic dropped by firewall - you'll probably only see
+		  i and I.
+
+		- Traffic with no known destination - you'll probably only 
+		  see i and I.
+
+-s		Dump configuration at startup. The more '-s's you do, the
+		more it will tell you. E.g. with only one, it won't bother
+		dumping all your remote AUN/IP hosts.
+
+-z		Debug. Specify up to 5 times for increasingly eye-watering
+		output. One is sufficient to tell you what is going on in
+		normal operation. Three starts to get very busy. 5 is only
+		really useful if you're writing to a file and will examine
+		it in detail later.
+
+		Specify none, and without -s you'll get no output except
+		configuration or startup errors to stderr, almost all of which
+		will cause the bridge to exit anyway.
+
+		NOTE: This now controls fileserver debug as well. 
+		No -z is equivalent to the old quiet.
+		One is equivalent to not quiet (ie. produces logs of activity)
+		Two is equivalent to the old 'noisy'.
+
+--disable-7bitbodge	Turns off the Acorn '7 bit bodge' required to 
+		enable Y2K compliant dates in fileserver traffic. This is
+		on by default. This command line switch turns it off for
+		*all* fileservers emulated by this bridge. (In the future,
+		this will be a per-server, persistent, configurable.)
+
+--enable-syst-fast	Turns on the 'Bridge' privilege that allows *FAST to be used 		against a given Fileserver station. Since in the future this will 		allow the user to shut down the Pi hardware, only turn this on on 		fileservers you will use yourself. Comment any others out of the 		configuration before using this and then uncomment them later. You 		need only do this once per fileserver - it is not needed every time.
+
+--malloc-debug	Providing you have at least -zz, this will show you all 
+		malloc() and free() attempts, what they were for and the
+		amount of memory sought/freed.
+
+
+
+The next few switches ought not to be needed but just in case:
+
+--wire-max-tx <n>	Maximum number of times to try and transmit a
+			packet on the Econet before giving up. If you have
+			RISC OS machines, this should be at least 3. It
+			defaults to 10.
+
+--wire-interval <n>	Milliseconds between retransmit attempts. Default 50.
+
+--wire-imm-wait <n>	Milliseconds to wait before putting the Econet module
+			back into read mode after receiving an Immediate Query
+			from the Econet. If the queried station never responds
+			the Econet will otherwise get stuck waiting to 
+			transmit the reply and will read no more traffic. It 
+			will, for some seconds, also sit in flag fill mode.
+			Default is 1000 (i.e. 1s).
+
+--aun-max-tx <n>	The comparable setting for AUN/IP to --wire-max-tx
+			RISC OS AUN/IP machines occasionally are not listening
+			when they should be. So at least 3 is a good plan.
+
+--aun-interval <b>	Milliseconds between AUN/IP retries for an
+			unacknowledged packet (or a negative acknowledged
+			packet within the NAK tolerance (see below)). Default
+			1000, because BeebEm sometimes takes a while to
+			deal with traffic and anything lower seems to cause
+			problems. If you have no BeebEm, you could probably
+			lower this significantly (e.g. more like 50 ms).
+
+--aun-nak-tolerance <n>	Number of NAKs to tolerate from an AUN/IP host before
+			treating it as really not listening. This is because
+			RISC OS sometimes isn't listening when it ought to be
+			and will NAK a packet it should really have accepted.
+			Beyond this limit, the bridge will treat a NAK as a 
+			real NAK. Prior to the limit, it will just have another
+			go at transmission. Default 2.
+
+--max-sockets <n>	If you expose a lot of stations, you will need to
+			increase the number of file descriptors available to
+			the bridge. A process is often limited to 1024, and
+			if you expose, say, 4 full networks, that would be
+			just over 1,000 and a few more for other functions
+			may exceed the limit. Typically you will see an error
+			on startup to the effect that the bridge could not
+			start a listener for an AUN exposure. If so, use this
+			command line option to increase the limit if your
+			system will allow you to - e.g. to 8192, or even
+			higher.
+
+--flashtime <n>		Number of milliseconds to flash each of the activity
+			LEDs (read, write) *off* to signal activity on the
+			Econet.
+
+--led-blink-on		Read/write LEDs (on more recent boards) will blink ON for 			activity instead of OFF.
+
+--leds-off		Read/write LEDs permanently OFF.
+
+--pool-dead-interval <n>	Number of seconds without reception before a host 			allocated out of a pool (other than statically) is declared 			dead and can be re-used.
+
+--trunk-keepalive-interval <n>	Number of seconds between trunk keepalives
+				Default 30
+
+--trunk-dead-interval <n>	Seconds without traffic before trunk
+				considered dead. Default 2.5 x keepalive
+				interval.
+
+The Configuration File
+----------------------
+
+See README.CONFIG
 
 ON BOARD CLOCK / TERMINATION
 ----------------------------
@@ -372,7 +663,8 @@ to give you help.
 econet-hpbridge
 ---------------
 
-See README.HPBRIDGE
+Described throughout this document.
+
 
 econet-monitor
 --------------
@@ -537,21 +829,8 @@ do anything on a unix-like terminal, or may cause weird characters to
 appear on screen.
 
 
-TO DO
------
-
-- Implement device tree so that the GPIO pins are defined outside the code
-- Use better routines to access GPIOs in kernel
-
-
-KNOWN BUGS
-----------
-
-- Incompatible with PiOS 64 bit
-
-
-PRINT HANDLERS
---------------
+PRINT SERVER AND PRINT HANDLERS
+-------------------------------
 
 If you use a print serer, you can control the headers and footers
 sent by the bridge to the printer in question by adding files into
@@ -622,6 +901,7 @@ to do final delivery if you don't want lp or sendmail for this
 printer. E.g. if you wanted to send the print job by some 
 sort of messaging service you can access over the Internet.
 
+
 THE FILESERVER
 --------------
 
@@ -637,31 +917,55 @@ newly created Library directory as SYST once you get the server up and running.
 One function not implemented is user quotas. READFREE will return something,
 but it will be erroneous. SETFREE will appear to complete but achieve nothing.
 
-The server is *broadly* a Level 3-esque server. One day I will implement
-the SJ Research addons. It has some differences:
+PiFS vs Acorn Level 3 vs MDFS
+-----------------------------
 
- - It has permissions on directories which are typically enforced
- - The passwords file is not in $ but is held in the directory hierarcy
-   above where the virutal disks are created (see below) - but it can
-   still be read by a system user by accessing the special file
-   %Passwords
- - There is a concept of an 'owner' for each file or directory. Whereas
-   Level 3's semantics were that a user owned everything below their
-   home direcotry, that is not so in this implementation. Ownership can
-   be viewed with *OWNER, and changed with *CHOWN. 
- - Thus permissions on a file in your home directory as an ordinary user
-   *may* be the ones *after* the / in the permissions if you don't
-   own it.
+As above, the PiFS broadly supports most things that a Level 3 fileserver from Acorn did. There are some differences however:
+
+- Groups are not yet supported.
+- The Passwords file is not in the main root directory on any disc. It is held separately. System privileged users can read and write to it by opening "%PIPASSWD".
+- Directories by default have full privilege sets. Where the Level 3 system had all directories as "WR/R" but only displayed "DL/", PiFS implements full permissions on directories and displays them by default. You can turn the former off, but not yet the latter (see v2.2 roadmap above!). Thus you can stop a user from even changing into any given directory if they do not own it by removing the "R" permission for non-owners.
+- By default, ownership is per file and per directory. Acorn Level 3 implemented an ownership model where everything within a user's home directory was treated as owner by that user. PiFS has ownership for every object. Thus a user can have a home directory they do not own, or can have a file in their home directory they do not own and (if there are no 'other' permissions on it) cannot access it either. This can be changed for each PiFS with a software switch. See below.
+- PiFS implements the "7 bit bodge" to provide dates into this century. Not all Level 3 systems did.
+- A single Pi bridge can run up to 4 fileservers. (There is in fact no conceptual limit, but the memory to be reserved for each server takes up space - so I set it to four. You can always change the #define in fs.c if you want - it shouldn't break anything.)
+- By default, the PiFS will only let a given station have 8 file descriptors - each having a different bit set in the file descriptor provided. 3 are typically used for URD, CWD and LIB. This is compatible with NFS 3. If you only use ANFS (or RISC OS), you can tell the FS to allow many handles (i.e. with more than one bit set in the byte). See below. There is still a maximum of 512 files open at any one time per fileserver though.
  - Where the L3 server will not permit *DIR ^ within your home directory
    or $, this server *will*. From home it has the expected behaviour.
    From $ (or if $ is home) it will effectively be ignored.
- - One day there may be switches to turn some of this on and off.
+- You can *VIEW a PiFS station and it will give you information about what how it is configured.
 
-Configuration file syntax: see README.HPBRIDGE
+Similarly, when enabled, *some* MDFS functionality is available, e.g.
+
+- A read-only MDFS Passwords file ("%PASSWORDS"). This is created on the hoof at start up from the PiFS's own data. It cannot presently be written to.
+- Various fileserver operations - such as obtaining printer information - are available.
+
+User privilege differences. PiFS implements the following "privileges" (or "user flags"):
+
+- System - has System privileges on the particular fileserver
+- Bridge - has Bridge privileges - will be able to use *FAST against the fileserver and can potentially thus shut down the entire Pi.
+- Locked - User cannot log in
+- Password change - User cannot change password
+- ChRoot - When user logs in, $ for this user will be their home directory. The will see no other directories or discs.
+- Hide Others - The FS will not show this user any other users who are logged in (e.g. by using *USERS). A compbination of ChRoom & this privilege will cause a user to "appear" as the only user on the system and with the only files on the system too.
+- ANFS Name Bodge - If the PiFS sees [0-9].xxx it will interpret that as meaning "Disc [0-9].$.xxx".
+
+File privilege differences
+--------------------------
+
+- See above as to directory permissions.
+- The server implements the Level 3-esque set of read, write and locked (can't delete) permissions for Owner and Other.
+- In addition, PiFS supports *LINK which puts a symbolic link in the filesystem and makes a file in one directory appear in another.
+- PiFS also implements a 'Hidden' permission - which will stop a file appearing in directory listings except for the owner & System privileged users.
+- When *LINK is used, the linked file will by default be Locked.
+
+Storage of files within PiFS
+----------------------------
+
+All files are stored in the Pi filesystem. The default fileserver stores files in ~/econetfs . Each "Disc" is created as a directory thereunder. The first character of the disc's directory name in PiFS is its disc number (e.g. '0'). So if disc 0 is called 'PIBRIDGE-00', there will be a directory '0PIBRIDGE-00'.
 
 Basically you need to identify a directory for each virtual fileserver
 which has permissions that the bridge can read and write from, and
-into which it will store the fileserver's files.
+into which it will store the fileserver's files. The stock installation will, as above, create one in your home directory - but you can move it elsewhere, or even have a partition for each server, or even each FS "disc" if you want.
 
 Within that directory you need to create directories for each disk
 the virtual server will present. The install routine will do this
@@ -709,15 +1013,18 @@ The fileserver translates certain non-Linux-friendly characters in filenames
 so that they can be stored. It also handles high-bit characters used by
 Archimedes class machines in filenames.
 
-The version of the FS in v.2.1 also handles long filenames EXPERIMENTALLY.
+The version of the FS in v.2.1 also handles long filenames.
 See the documentation below about *FNLENGTH
 
 On first execution, if Passwords does not exist it will be created with one
 user 'SYST' with a blank password.
 
-By default, Load, Execute and Econet owner are stored as extended attributes,
-so you need to make sure your filesystem supports them. Ext4 does by default
-on the standard Pi installation.
+SYST will not have bridge privileges (i.e. the ability to use *FAST) by default. To enable that, you need to use the --enable-syst-fast switch to econet-hpbridge. That will enable *FAST on all system privileged users on all fileservers presently configured. (So temporarily comment out any servers you don't want it to happen to before you use the option!)
+
+Storage of file attributes in PiFS
+----------------------------------
+
+File attributes (load, exec, owner, privilege) are stored in the extended attributes of each file and directory. If you are using a filesystem which does not support extended attributes (such as NFS) then there is a way to make the PiFS use .inf files instead.
 
 If your filesystem does not support extended attributes then you can force
 the FS to store the attributes in a separate .inf file for each stored file
@@ -738,39 +1045,8 @@ the corresponding .inf file.
 
 The .inf files do not show in directory listings on client stations.
 
-Wildcards
----------
-
-I have implemented the * and # BBC wildcards best I can. I think they work.
-If you get odd results, please post somewhere and if I get to hear about it
-I will try to investigate when I can.
-
-Permissions
------------
-
-More complex than Level 3. Directories can have WR attributes as well,
-and a lack of write access to a directory ought to prevent creation of 
-a new file / directory therein.
-
-There is an 'H' attribute which hides the file from directory listings for
-all but the owner & system users.
-
-The 'L' attribute does what the Acorn one does. However, if you use the
-*LINK functionality (see below), the FS will automatically set the L attribute
-in the hope that it will remind you that one of the apparently identical files
-is the *actual* unix file because if you delete that one, things will go 
-haywire. (There is a need for some sanity checking there - be prepared for
-seg faults if you push this too hard.)
-
-Special files
--------------
-
-System privilege users can open the file %Passwords in any directory
-and will receive a handle to the system passwords file which is not in fact
-accessible in the Econet directory hierarchy.
-
-CLI commands implemented in the server
---------------------------------------
+CLI commands implemented in the PiFS
+------------------------------------
 
 Non-privileged commands:
 
@@ -1026,6 +1302,78 @@ but only for users with SYST privileges. They are as follows:
 %CONFIG		Readable FS config for this FS (e.g. will show you
 		the current settings of each of the NETCONFIG
 		variables)
+
+*FAST
+-----
+
+The MDFS *FAST utility was used to access an administrative menu inside an
+MDFS server when it was in a particular mode by a keyswitch. The HP Bridge
+will respond to *FAST when it is running, and will present a menu of
+options to control both the local fileserver on a particular virtual
+station, and to be able to shut down the Pi itself if the binary is
+setuid root.
+
+However, access to this functionality is only available:
+
+- On virtual servers which are running a fileserver
+- To users who are logged into the fileserver AND who have a special
+  'bridge' privilege.
+
+By default, no users (including SYST) have the bridge privilege.
+To cause all local fileservers to grant the bridge privilege to
+SYST on startup (permanently), run the bridge from the command line
+with the --enable-syst-fast command line option. This is only
+required once.
+
+To grant the bridge privilege to another user, use the privileged
+command *BRIDGEUSER (see below). You cannot modify the bridge
+privilege of the user who executes that command - you can only
+modify the privilege for other users. It is possible to grant
+the bridge privilege to a non-system user, but such a user will
+not be able to grant or revoke the privilege for anyone else
+because *BRIDGEUSER requires SYST and BRIDGE privileges to
+function.
+
+On login as a user with the bridge privilege, the FS will notify
+the bridge that *for that virtual station only*, the user's 
+station has bridge privileges. Thereafter the bridge will respond
+to the *FAST utility from that particular user's station and only
+in respect of the virtual fileserver station that they logged
+into. 
+
+On logout, that flag will be cleared.
+
+Since the *FAST handler in the bridge allows the shutting down of
+the fileserver, the notification above allows a bridge privileged
+user to log in, use *FAST to shut the fileserver down, change
+its parameters (e.g. rename a disc or format a new disc) and
+then, even if they quit *FAST, providing no other programme
+has been loaded, they can re-execute the *FAST code by using
+
+CALL &2800
+
+from BASIC. The bridge will, because of the notification system
+above, still know that the station has bridge privileges even
+though the fileserver has been shut down. The fileserver can,
+for example, then be re-started.
+
+It is therefore important that users with bridge privileges 
+log out properly with *BYE so that the relevant notification
+bit is cleared and a subsequent user cannot log in. The bit
+is NOT cleared on a logout caused by, for example, *FLOG.
+
+Shutting down the Pi with *FAST does not presently work. It will at some stage. WHen it does:
+- This will only work if the econet-hpbridge binary is setuid root.
+- The binary does not attempt to assume root privileges until the
+  moment before it calls the 'shutdown' binary if this option is
+  used.
+- If the binary is not setuid root, the shutdown option will do
+  nothing.
+- To install the binary setuid root, use the following instead
+  of make install each time you build / install
+
+  make setuid
+
 
 THE END
 -------

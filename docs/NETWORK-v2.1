@@ -197,98 +197,78 @@ Bridge configuration (Finally!)
 Now we have the network and clients configured, we need to set up the
 bridge.
 
-We have a command "B" that sets the Base Network address ("Basenet") for
-the bridge.  When in Basenet mode the AUTO commmand changes functionality
-and will set the listening IP address to be based on the station ID and
-the port to 32768.  AUTO also now works with File and Print servers.
+To expose (via AUN) hosts which are either on the Econet wire or are
+reachable by trunks or other bridges via ths Pi, we have to expose
+them over AUN. This is done using the 'EXPOSE' command set in the
+HP Bridge's configuration.
 
-Here's an example:
+E.g. to expose a whole network:
 
-    # For RiscOS support, add a base network.  This will let AUTO generate
-    # a unique network address for each station
-    B 192.168.140
+	EXPOSE NET 1 ON 172.17.1.0 PORT FIXED AUTO
 
-    # We are station 254 and running a file server
-    F 0 254 AUTO /econet
+This will expose host 1.1 on the Econet on IP address 172.17.1.1
+on port 32768, 1.2 on 172.17.1.2, and so on. If you want to use
+a port number other than 32768, put that in the command line in
+place of 'AUTO' - however, RiscOS will not talk to such hosts and
+that is only really useful with emulators like BeebEm.
 
-    # We are also a printer
-    P 0 235 AUTO lp
+If you wish to use a single IP address (e.g. that of the bridge)
+to expose a whole network, change the IP address from something
+ending in .0 to the IP address you want to use, and then use the
+sequential port numbering option. E.g. to expose Econet network 1
+on 192.168.2.3 with ports 20001 for host 1, 20002 for host 2 etc.
+use
 
-    #### Wired devices we know about.
+	EXPOSE NET 1 on 192.168.2.3 PORT SEQ 20000
 
-    # Main Beeb
-    W 0 195 AUTO
+Again, however, because RiscOS wants to use port 32768, it won't
+talk to you and this is only really useful for emulators.
 
-    # Master 128
-    W 0 227 AUTO
+If you want to use a default base port number of 10000 you can
+just put 'AUTO' instead of the port number.
 
-    # Old Fileserver (M128 L3FS)
-    W 0 253 AUTO
 
-    #### AUN hosts we know about
+A concrete example
+------------------
 
-    # BeebEm instances
-    A 0 140 10.0.0.140 32768
-    A 0 141 10.0.0.141 32768
+Say we have:
 
-    # pi400
-    A 0 222 10.0.0.222 32768
+ - A bridge whose eth0 IP address is 192.168.1.1
+ - Set up IP addresses 192.168.140.1 up to 254 as described above
+ - Our local Econet is network 1
+ - There is an Acorn fileserver at station 253 on the Econet
+ - We want to expose network 1 to AUN on the IP addresses just above
+ - One of our machines is a RiscOS machine which only speaks AUN
+   but we want it to be part of network 1 - let's say it's station 100
+   and it's on our local IP network which is 192.168.1.0, addressed
+   as 192.168.1.100
 
-    # rpcemu
-    A 0 10 192.168.99.10 32768
+Our econet-hpbridge.cfg will contain something like this:
+
+-- snip --
+WIRE NET 1 ON device /dev/econet-gpio
+EXPOSE NET 1 ON 192.168.140.0 PORT FIXED AUTO
+AUN MAP HOST 1.100 ON 192.168.1.100 PORT 32768 AUTOACK
+-- snip --
+
+And on the RISC OS machine, I've implemented an AUN MAP in line with the
+above, but routing 192.168.140.0/24 to my local bridge IP address
+of 192.168.1.1 (see above) instead of the 10.x.x.x address in the earlier
+example. The RISC OS machine will then see network 1 as network 140.
 
 With this configuration running we can look at the ports the bridge listens
 on:
 
     $ sudo netstat -anp | grep econet | sort
-    udp        0      0 192.168.140.195:32768   0.0.0.0:*   3075/./econet-bridg 
-    udp        0      0 192.168.140.227:32768   0.0.0.0:*   3075/./econet-bridg 
-    udp        0      0 192.168.140.235:32768   0.0.0.0:*   3075/./econet-bridg 
-    udp        0      0 192.168.140.253:32768   0.0.0.0:*   3075/./econet-bridg 
-    udp        0      0 192.168.140.254:32768   0.0.0.0:*   3075/./econet-bridg 
+    udp        0      0 192.168.140.1:32768   0.0.0.0:*   3075/./econet-hpbridg 
+    udp        0      0 192.168.140.2:32768   0.0.0.0:*   3075/./econet-hpbridg 
+	... etc.
+	
+From my RiscOS client I can login to the PiBridge server (station 254)
 
-We can easily see the 5 services (2 local and 3 wired) are now visible on
-the network.
-
-From my BeebEm client I can login to the PiBridge server (station 254)
-
-    *I AM 254 SYST
+    *I AM 140.254 SYST
 
 Or I can login to the Master 128 Fileserver (station 253)
 
-    *I AM 253 SYST
-
-Similarly, on RiscOS I can access them as 140.254 and 140.253
-
-Caveats
--------
-
-There are a couple of subtle interactions to be careful of.  Typically
-these won't be a problem, but are documented for awareness.
-
-When using basenet you can still define services locally, e.g
-
-    F 0 254 12345 /econet
-
-If you do this then that port 12345 will be visible on every IP address.
-
-But if you attempt to use port 32768 then this may block AUTO from working
-for other services.  You will get a warning if you try this.  e.g.
-
-    B 192.168.140
-    F 0 254 32768 /econet
-    W 0 195 AUTO
-
-Will cause this result:
-
-    Warning: direct use of port 32768 for station 0.254 may prevent AUTO in base network mode from working
-       FS: Server 0 successfully initialized
-    Failed to bind listening socket for econet net/stn 0/195: Address already in use.
-
-
-If you define a service (eg fileserver or printserver) with AUTO but do
-not have basenet enabled then this will cause the server to appear on a
-random port.  You will get a warning such as:
-
-    Warning: use of AUTO mode for station 0.254 with no base network will generate a random port
+    *I AM 140.253 SYST
 

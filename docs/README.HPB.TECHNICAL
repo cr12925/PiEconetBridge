@@ -68,6 +68,134 @@ else. The types (which also serve as examples) are:
 2. A locally emulated server - e.g. a fileserver or printserver
 3. A station connected by a named pipe in the Unix filesystem.
 
+In addition, there are Pool devices. These are virtual devices whose only 
+function is to receive traffic for a 'pool' address, translate it to a 
+triple of (source device, network number, station number) and send it 
+on its way. Such devices also receive traffic from trunks and Econets which
+have pooling enabled, and when that happens they will allocate a dynamic
+address out of the pool and cause the source device to translate all such
+received traffic into the pooled address. Except where defined as a static
+mapping (e.g. for a server), such addresses time out after a while so they
+can be re-used and the pool does not become exhausted. 
+
+Thus the pool device will receive traffic, translate it as above, and then
+simply put it on the output queue destined to its real destination. When
+a device on which pooling is enabled (which can be for a selection of
+that device's networks only), it will do the opposite translation, and
+allocating a new pool address if need be.
+
+Where a device has pooling enabled, those networks which are translated
+into the pool are not put into the Bridge's master network table and 
+are not directly reachable via the Bridge at all. Their constituent 
+stations are reachable only through the pooled addresses.
+
+The purpose of a pool device is to allow a very large number of networks
+to be joined together. Given that most Econets are spare in terms of
+stations, the pool provides a method of conserving address space by
+only using a pool address for the stations which actually send traffic
+to the wider network. Since the actual network numbers at such remote
+sites are not in the Bridge's master network table, it matters not if 
+they overlap with anything on the wider network (and if they do, then
+address translation can probably solve that problem). So it is that
+pools enable, say, 1,000 networks all numbered 1 to be trunked together
+into a single bridge. If the pool uses, say, networks 20-22, then each
+station which generates traffic into the wider network from any one of
+those remote sites will get an address 20.X, and can communicate with
+any other active station in any of networks 20-22 as well.
+
+Static mappings for hosts on particular trunks allow those networks
+to expose servers to the wider world.
+
+e.g.
+
+Server 254 @ Site A Net 1 <--------> (Trunk pool GLOBAL) Bridge
+                                      ^              (Not pooled)      
+Station 1 @ Site B Net 1 <------------|                   ^
+                                                          |
+Main Site (C) Net 2 <-------------------------------------|
+   |
+   |------ Server Station 254
+   |
+   |------ Client machine 1
+
+In the above:
+
+Site A uses net number 1, and has a single station, a server at
+   station 254.
+
+Site B also uses net number 1, and has a single station, a client
+   at station 1.
+
+Site C is the main site. Its network is not subject to pool nat.
+   It has two stations: a server at 254 (2.254) and a client at
+   station 1 (2.1)
+
+Without pooling or address translation, the Bridge will only
+listen to the announcement of network 1 at whichever of Site A
+or Site B announces it first.
+
+With address translation, Site A's net 1 could, for example, be
+translated to net 3 and then there would be no overlapping net
+numbers. But that does not scale to a large number of networks
+because it's a faff to configure, and once you get to 127 or so
+you run out of network numbers - especially if you've got some
+remote or dynamic AUN going on.
+
+Enter pools...
+
+Assuming the pool named GLOBAL is defined as networks 20-22 and
+that network 1 at both stes A & B is pooled, then:
+
+First, at neither Site A nor Site B will network 1 be put into
+the Bridge's master networks table when it is received as a
+bridge announcement because the Bridge knows that network
+is subject to pooling. So nothing at Site C can try to 
+address 1.254 (Site A) or 1.1 (Site B) at all. They are 
+effectively 'hidden'.
+
+The pool can be configured so that Site A's server at 1.254 is
+statically mapped to say 20.1 at the Bridge. Site B would have
+no static mapping because it only has a client station.
+
+When Site A 1.254 generates traffic, the Bridge will translate
+that to 20.1 when it arrives over the trunk. Likewise, any 
+traffic arriving at the Bridge for 20.1 will be directed to the
+Pool special device. That device will translate it and force it
+back down the trunk to Site A. If the trunk is not up, it will
+drop the traffic.
+
+When Site B's 1.1 generates traffic, it has no static mapping.
+So the pool system on the Bridge will find an unused address
+within the pool and translate the traffic to it. Typically the
+allocation selects from the next network after the last one
+from which an allocation came so as to spread allocations
+across the available network numbers. Let's say B 1.1 is 
+allocated 22.3 as its address. All traffic from B 1.1 is
+thereafter translated to 22.3. Since 22 is a pool network,
+reply traffic gets sent to the pool device, which looks up
+the source, untranslates it, and puts it on the output queue
+to go to the specific source device - here, the trunk to B.
+
+Static maps always stay configured. If no traffic is received
+on a dynamically allocated pool address, then it will become
+available for reallocation. Typically this is 30 or 60
+minutes.
+
+This creates a risk - as with dynamic AUN - that someone may
+have logged into a fileserver and not logged out. Then the
+address is reallocated and theoretically the new occupier of 
+the address can use their logon at the fileserver.
+
+Pooled network numbers are announced to other bridges 
+(including to other Econet bridges) and accessible (and 
+can those be exposed to AUN) just as any other networks.
+
+So it is that if one scales up the above diagram, there 
+could be 1,000 or more sites (all using any network numbers
+they like) all joined together using a small amount of
+network number realestate.
+
+
 TRAFFIC MOVEMENT - OUTLINE
 --------------------------
 
