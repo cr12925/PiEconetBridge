@@ -1,0 +1,62 @@
+/*
+  (c) 2024 Chris Royle
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
+/dts-v1/;
+
+/plugin/;
+
+
+/ {
+
+	compatible = "brcm,bcm2711", "brcm,bcm2837", "brcm,bcm2710";
+
+	/* Create an econet-gpio driver instance */
+
+	fragment@0 {
+		target-path = "/econet@0";
+		__overlay__ {
+				version = /bits/ 8 < 0x02 >;
+				clocks = <&clocks 38>; //GPCLK0
+				clock-frequency = <8000000>;
+				pwms = <&pwm 0 4000000 0>; // Third cell is 0 for polarity normal
+				pwm-names = "netclk";
+				pinctrl-names = "default";
+				pinctrl-0 = <&econet_gpio_pins>;
+                                writeled-gpios = <&gpio 11 0>;
+                                readled-gpios = <&gpio 8 0>;
+				status = "okay";
+		};
+	};
+
+	fragment@1 {
+		target = <&gpio>;
+		__overlay__ {
+			econet_gpio_pins: econet_gpio_pins {
+				brcm,pins = <4 18>;
+				brcm,function = <4 2>;// pin 4 GPCLCK0 (ALT0), pin 18 PWM0 (ALT 5)
+			};
+		};
+	};
+
+	fragment@2 {
+		target = <&pwm>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+};
+
+
