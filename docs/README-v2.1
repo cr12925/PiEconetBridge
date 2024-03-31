@@ -1364,9 +1364,9 @@ is NOT cleared on a logout caused by, for example, *FLOG.
 
 Shutting down the Pi with *FAST does not presently work. It will at some stage. WHen it does:
 - This will only work if the econet-hpbridge binary is setuid root.
-- The binary does not attempt to assume root privileges until the
-  moment before it calls the 'shutdown' binary if this option is
-  used.
+- The binary will drop its root privileges immediately on startup,
+  and will only re-obtain them when it has fork()ed in order to
+  run the shutdown programme.
 - If the binary is not setuid root, the shutdown option will do
   nothing.
 - To install the binary setuid root, use the following instead
