@@ -4586,7 +4586,7 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 int fs_scandir_regex(const struct dirent *d)
 {
 
-	return (((strcasecmp(d->d_name, "lost+found") == 0) || (regexec(&r_wildcard, d->d_name, 0, NULL, 0) != 0)) ? 0 : 1); // regexec returns 0 on match, so we need to return 0 (no match) if it returns other than 0.
+	return (((strcasecmp(d->d_name, "lost+found") == 0) || (strcasecmp(d->d_name, ".") == 0) || (strcasecmp(d->d_name, "..") == 0) || (strcasecmp(d->d_name, "lost+found") == 0) || (regexec(&r_wildcard, d->d_name, 0, NULL, 0) != 0)) ? 0 : 1); // regexec returns 0 on match, so we need to return 0 (no match) if it returns other than 0.
 
 }
 
@@ -4620,6 +4620,8 @@ short fs_get_acorn_entries(int server, int active_id, char *unixpath)
 		return -1; // Regex failure!
 
 	entries = scandir(unixpath, &list, fs_scandir_regex, fs_alphacasesort);
+
+	//fs_debug (0, 3, "%12s            fs_get_acorn_entries(%d, %d, %s) = %d", "", server, active_id, unixpath, entries);
 
 	if (entries == -1) // Failure
 		return -1;
