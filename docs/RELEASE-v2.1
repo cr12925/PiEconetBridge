@@ -1,0 +1,84 @@
+ECONET(R) HIGH PERFORMANCE BRIDGE - VERSION 2.1 RELEASE NOTE
+
+/*
+  (c) 2024 Chris Royle This program is free software: you can redistribute it
+and/or modify it under the terms of the GNU General Public License as published
+by the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version.
+
+    This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License along
+with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+*/
+
+
+RELEASE NOTES FOR V2.1 
+----------------------
+
+- Fileserver updates
+
+  - supports long filenames - but will cause display problems for certain
+    client machines depending on which FSOps the client uses
+
+  - defaults to file handles with only 1 bit set for compatibility with NFS 3.
+    Previous behaviour can be re-enabled if you are not using NFS 3 with
+    *NETCONF (see below).
+
+  - Changing a password to something in quotes now works properly
+
+  - Allows a system user to change another user's password with *SETPASS (see
+    below)
+
+  - *RENAME now works if the fileserver storage area is mounted on an NFS
+    share.
+
+  - Translates '/' in Acorn filenames to '.' in the underlying filesystem
+
+
+- Kernel updates
+
+  - Kernel module and the bridge supports all the immediate operations which in
+    fact use a 4-way handshake (e.g. OSPROC, USRPROC, JSR).
+
+  - Kernel now supports 64 bit operations, and uses the Linux kernel's own calls
+    for accessing GPIO Clock and PWM function (for the ADLC clock and Network
+    clock respectively). It continues to write directly to the GPIO hardware for
+    speed, having attempted to use the official calls for that purpose without
+    success.
+
+- Core bridge functionality
+
+  - The original userspace bridge utility has been removed. The HPB is now
+    stable and has far better functionality.
+
+  - Bridge now has pool address translation enabled to facilitate trunking of a
+    significantly larger number of networks together where most stations are
+    clients rather than servers
+
+
+Roadmap to v2.2 
+---------------
+
+- Possible kernel change so that 4-way handshakes do not complete with a final
+  ACK from the bridge until it has had an ACK from the distant machine. This
+  will generate 'Net error' at the local site if the distant machine is not
+  there, rather than 'Not listening', but the latter cannot be generated without
+  collecting the data phase of the 4-way handshake, which is needed to build the
+  AUN type packets used for AUN stations / trunks.
+
+- Fix displayed directory privileges when the FS is in 'Acorn Directory' mode
+  (i.e. display 'D/' or 'DL/' only instead of the full privileges.
+
+- Fix a bug in *NEWUSER if the user's directory already exists.
+
+- Improve MDFS password file functionality, hopefully including writing to it.
+
+- Move to a threaded fileserver
+
+
+CR
+April 2024
