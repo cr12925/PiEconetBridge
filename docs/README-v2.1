@@ -1200,9 +1200,16 @@ massive modern figure.
 If your installer user is 'econet', you can create the set of storage locations
 above with the sample commands below, whilst logged in as (or sudo'd to) root:
 
-	mkdir /econet mkdir /econet/0ECONET mkdir /econet/1STORAGE
+	mkdir /econet 
+        mkdir /econet/0ECONET 
+        mkdir /econet/1STORAGE
 
 	chown -R pi /econet
+
+(The default 'make' install will put a hierarchy like that in your home 
+directory ready - but you can move it where you like in the filesystem, or
+create a complete new one. Or several if you are implementing several
+fileservers!)
 
 The fileserver translates certain non-Linux-friendly characters in filenames so
 that they can be stored. It also handles high-bit characters used by Archimedes

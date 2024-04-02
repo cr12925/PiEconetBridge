@@ -24,10 +24,11 @@
 	/* Create an econet-gpio driver instance */
 
 	fragment@0 {
-		/* compatible = "brcm,bcm2711", "brcm,bcm2837", "brcm,bcm2710"; OLD */
 		compatible = "raspberrypi,model-zero",
 			"raspberrypi,model-zero-w",
+			"raspberrypi,3-model-a-plus",
 			"raspberrypi,3-model-b-plus",
+			"raspberrypi,3-model-b",
 			"raspberrypi,4-model-b",
 			"raspberrypi,400",
 			"raspberrypi,4-compute-module",
