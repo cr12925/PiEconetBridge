@@ -145,9 +145,7 @@ The system will require:
           part of @KenLowe and input from people like @arg. I no longer recommend 
           the original hardware design: if you want Econet wired connectivity (e.g. 
           to a real BBC) rather than just a fileserver for (say) some BeebEm 
-          machines, then buy a hardware HAT from @KenLowe, or use his latest 
-          design, which is available on GitHub at 
-          https://github.com/kgl2001/PiEconetBridgePCB
+          machines, then buy a hardware HAT from @KenLowe on the stardot forums.
 
 	- Your installation of PiOS having the kernel headers installed (see
 	  below)
@@ -227,7 +225,8 @@ favourite editor (e.g. vi, nano) to edit /boot/config.txt (or, more recently,
 If you are using a version 1 hardware board, as referred to above please also
 include the following entries:
 
-	arm_freq=1000 force_turbo=1
+	arm_freq=1000 
+        force_turbo=1
 
 Then save config.txt
 
@@ -235,9 +234,10 @@ Then save config.txt
 Next, you will need to install some packages to ensure that the Pi can build
 the bridge software itself, so execute the following commands:
 
-	sudo apt update sudo apt upgrade sudo apt install \
-             raspberry-pi-kernel-headers libexplain51 libexplain-dev \
-             libexplain-doc libssl-dev git
+	sudo apt update 
+        sudo apt full-upgrade 
+        sudo apt install raspberry-pi-kernel-headers libexplain51 \
+             libexplain-dev libexplain-doc libssl-dev git
 
 
 Then reboot your Pi:
@@ -262,7 +262,13 @@ you didn't do it above and then put an overlay in your /boot partition
 		make eeprom-v1
 
 	   You will need to follow the instructions to edit your config.txt
-(use the same method as above).
+(use the same method as above). You will need to ensure that the dtbo file
+is copied into /boot/overlays (or /boot/firmware/overlays depending on your
+system), and that you put the right entry in your config.txt:
+
+	sudo cp {PiBridgeDirectory}/dts/econet-gpio-v1.dtbo /boot/overlays
+
+and	Include "dtoverlay=econet-gpio-v1" in your config.txt.
 
 
 	B. Version 2 boards which do not have an up to date EEPROM. (As at
@@ -272,9 +278,17 @@ operate. You need only do this once for each physical board.
 
 		First, ensure your EEPROM's write enable solder bridge is made.
 See instructions with your Bridge board or contact supplier if you don't know
-how. Then:
+how. @KenLowe's revision 4d boards (and onwards) have a DIP switch to set
+the EEPROM to be write-enabled - it's SW1; set it EAST (ON). Then:
 
-		make eep make eeprom-v2
+		make eep 
+                make eeprom-v2
+
+                If you do not have the soldering tools or skills to make the
+EEPROM solder bridge, JP1, or if you have somehow managed to get hold of a
+revision 1a bridge board (where the EEPROM is wired to the incorrect GPIO
+pins), then you will need to implement a workaround as described in (C),
+below.
 
 
 	C. Version 2 boards which do not have an up to date EEPROM and which
@@ -282,8 +296,8 @@ have a defectively wired write enable line (or where you do not for some reason
 fancy re-blowing the EEPROM as in (B) above!). These EEPROMs cannot be upgraded
 following (B) above and you need to implement a workaround as follows:
 
-		make eeprom-general sudo cp dts/econet-gpio-v2-overlay.dtbo
-/boot/firmware/overlays
+		make eeprom-general 
+                sudo cp dts/econet-gpio-v2-overlay.dtbo /boot/firmware/overlays
 
            ... and then edit your config.txt to include
 
@@ -292,6 +306,10 @@ following (B) above and you need to implement a workaround as follows:
 	   That will cause the missing parts of the EEPROM to be put into the
 Device Tree by way of an overlay at boot time, and thus enable the module to
 start properly.
+
+           It is thought that there are in fact no such boards "in the wild",
+as they were only produced in small numbers and weren't sold as bridge boards.
+This section (C) is here just in case.
 
 
 Then reboot:
