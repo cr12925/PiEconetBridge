@@ -18,9 +18,8 @@
 
 #define __ECONETGPIOCHIPCTRL_H__
 
-#ifndef xECONET_GPIO_NEW
+// Including gpioreg.h won't be needed if we ever get to using exclusively gpiod_ calls
 #include "gpioreg.h"
-#endif
 
 /* Functions to read/write the data bus */
 
@@ -35,23 +34,14 @@ void econet_gpio_release(void);
 void econet_reset(void);
 void econet_flagfill(void);
 
-#ifndef xECONET_GPIO_NEW
-
+// Next two defines unused if we move to gpiod_-based operations
 #define ECONET_GPIO_DATA_PIN_MASK (0x00ffffff << (ECONET_GPIO_PIN_DATA % 10))
 // 0x249249 is a bit pattern 001 001 001 ... which is the 'OUT' mode for three bits on a GPIO reg
 #define ECONET_GPIO_DATA_PIN_OUT (0x00249249 << (ECONET_GPIO_PIN_DATA % 10))
 
-#if 0 // Disused
-#define INP_GPIO(g) *(GPIO_PORT+((g)/10)) &= ~(7<<(((g)%10)*3))
-#define OUT_GPIO(g) *(GPIO_PORT+((g)/10)) |=  (1<<(((g)%10)*3))
-#define SET_GPIO_ALT(g,a) *(GPIO_PORT+(((g)/10))) |= (((a)<=3?(a)+4:(a)==4?3:2)<<(((g)%10)*3))
-#endif
-
-#endif
-
 /* Low level chip control functions */
 
-#ifdef ECONET_GPIO_NEW
+#ifdef ECONET_GPIO_NEW /* gpiod_-based control */
 	#define econet_isbusy()		(gpiod_get_value(econet_data->econet_gpios[EGP_DIR]))
 	#define econet_set_cs(x)	(gpiod_set_value(econet_data->econet_gpios[EGP_CS], (x)))
 	#define econet_set_rst(x)	(gpiod_set_value(econet_data->econet_gpios[EGP_RST], (x)))
@@ -61,25 +51,7 @@ void econet_flagfill(void);
 						gpiod_set_array_value(2, a01rw_desc_array, NULL, &g); \
 						barrier(); \
 					}
-#else
-#if 0
-	#define econet_gpio_pin(p) 	(ioread32(GPIO_PORT + GPLEV0) & (1 << p))
-
-	#define econet_isbusy()		(econet_gpio_pin(ECONET_GPIO_PIN_BUSY))
-
-	#define econet_set_cs(x)	if (x)	iowrite32(ECONET_GPIO_CLRMASK_CS, (GPIO_PORT + (econet_data->hwver < 2 ? GPSET0 : GPCLR0))); \
-					else	iowrite32(ECONET_GPIO_CLRMASK_CS, (GPIO_PORT + (econet_data->hwver < 2 ? GPCLR0 : GPSET0)))
-
-	#define econet_set_rst(x)	if (x)	iowrite32(ECONET_GPIO_CLRMASK_RST, (GPIO_PORT + GPSET0)); \
-					else	iowrite32(ECONET_GPIO_CLRMASK_RST, (GPIO_PORT + GPCLR0))
-
-	#define econet_set_rw(x)	if (x)	iowrite32(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPSET0)); \
-					else	iowrite32(ECONET_GPIO_CLRMASK_RW, (GPIO_PORT + GPCLR0))
-	#define econet_set_addr(x,y)	gpioset_value = (((x) << (ECONET_GPIO_PIN_ADDR + 1)) | ((y) << (ECONET_GPIO_PIN_ADDR))); \
-					iowrite32(gpioset_value, GPIO_PORT + GPSET0); \
-					iowrite32(((~gpioset_value) & ECONET_GPIO_CLRMASK_ADDR), GPIO_PORT + GPCLR0); \
-					barrier()
-#else
+#else /* The stuff that's always used */
 
 	#define econet_gpio_pin(p) 	(ioread32(NGPLEV0) & (1 << p))
 
@@ -98,21 +70,8 @@ void econet_flagfill(void);
 					iowrite32(((~gpioset_value) & ECONET_GPIO_CLRMASK_ADDR), NGPCLR0); \
 					barrier()
 #endif
-#endif
 
 	
-
-/* Thought to be unused
-#define econet_set_datadir_in	for (gpioset_value = ECONET_GPIO_PIN_DATA; gpioset_value < (ECONET_GPIO_PIN_DATA + 8); gpioset_value++) \
-				{ \
-					*(GPIO_PORT + GPSEL0 + (gpioset_value/10)) &= (7<<((gpioset_value % 10) * 3)); \
-				}
-#define econet_set_datadir_out	for (gpioset_value = ECONET_GPIO_PIN_DATA; gpioset_value < (ECONET_GPIO_PIN_DATA + 8); gpioset_value++) \
-				{ \
-					*(GPIO_PORT + GPSEL0 + (gpioset_value/10)) |= (7<<((gpioset_value %10) * 3)); \
-				}
-*/
-
 #define econet_ndelay(t)	{ \
 					u64 p; \
 					\
@@ -120,46 +79,78 @@ void econet_flagfill(void);
 					while (ktime_get_ns() < p);\
 				}
 
-#ifndef ECONET_GPIO_NEW
+#ifndef ECONET_GPIO_NEW // GPIO_NEW (gpiod_ calls) will not use this macro because it is only used on v1 boards, which are not compatible with gpiod_ operation.
 #ifndef ECONET_NO_NDELAY
-#if 0
-	#define econet_wait_pin_low(p,t)	{ \
-					u64 timer; \
-					\
-					timer = ktime_get_ns() + t; \
-					while ( (ktime_get_ns() < timer) && (ioread32(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)));\
-				}
-#else
 	#define econet_wait_pin_low(p,t)	{ \
 					u64 timer; \
 					\
 					timer = ktime_get_ns() + t; \
 					while ( (ktime_get_ns() < timer) && (ioread32(NGPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN)));\
 				}
-#endif
-#else
-#if 0
-	#define econet_wait_pin_low(p,t)	while (ioread32(GPIO_PORT + GPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN))
 #else
 	#define econet_wait_pin_low(p,t)	while (ioread32(NGPLEV0) & (1 << ECONET_GPIO_PIN_CSRETURN))
 #endif
-#endif
 #endif /* ECONET_GPIO_NEW */
 					
-/* Note that there are two assignments to sr2 here. The first is the historical one. The second is because we discovered that SR2Q on S1 did not go high when, for example, /DCD alone was set in SR2, so we now read both registers. Old code left so we don't lose it */
+
+/* Macro to read status registers (both of them at once) 
+ * Note that there are two assignments to sr2 here. 
+ * The first is the historical one. 
+ * The second is because we discovered that SR2Q on S1 did not go high when, 
+ * for example, /DCD alone was set in SR2, so we now read both registers. 
+ * Old code left so we don't lose it 
+ */
+
 #define econet_get_sr()	{ \
 		sr1 = econet_read_sr(1); \
 		sr2 = (sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : ((sr1 & ECONET_GPIO_S1_RDA) ? 0x80 : 0x00); \
 		}
 
-#endif
+/* Atomic kernel state variable manipulation macros 
+ * econet_{g,s}et_aunstate() were in econet-gpio.h but have been moved here
+ */
 
 #define econet_set_chipstate(x) { \
 	atomic_set(&(econet_data->mode), (x)); \
-	/* printk (KERN_INFO "ECONET-GPIO: econet_set_chipstate(%d)\n", (x)); */ \
 }
 
 #define econet_get_chipstate() atomic_read(&(econet_data->mode))
+
+#define econet_set_aunstate(x) { \
+        atomic_set(&(econet_data->aun_state), (x)); \
+        econet_data->aun_last_statechange = ktime_get_ns(); \
+}
+
+#define econet_get_aunstate() atomic_read(&(econet_data->aun_state))
+
+#define econet_set_tx_status(x) \
+        atomic_set(&(econet_data->tx_status), (x))
+
+#define econet_set_irq_state(x) \
+        atomic_set(&(econet_data->irq_state), (x))
+
+#define econet_get_irq_state()  atomic_read(&(econet_data->irq_state))
+
+#define econet_get_tx_status() atomic_read(&(econet_data->tx_status))
+
+/* The following defines were in the module itself but have been moved in here.
+ * Macros to discontinue reception, cleardown the ADLC ready for read, cleardown & reset
+ */
+
+#define econet_discontinue() \
+                econet_pkt_rx.length = econet_pkt_rx.ptr = 0; \
+                econet_set_chipstate(EM_IDLE); \
+                if (econet_data->aun_mode) { econet_set_aunstate(EA_IDLE); } \
+                econet_write_cr(ECONET_GPIO_CR2, C2_READ); \
+                econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_DISC); /* Discontinue reception */
+
+#define econet_rx_cleardown() \
+                        econet_write_cr(ECONET_GPIO_CR2, C2_READ);  /* We use this here to clear the RX status */
+
+#define econet_rx_cleardown_reset() \
+                        econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_RESET); /* Maybe try commenting this out to see if we pick up receptions immediately after transmissions? */ \
+                        econet_write_cr(ECONET_GPIO_CR2, C2_READ);  /* We use this here to clear the RX status */ \
+                        econet_write_cr(ECONET_GPIO_CR1, C1_READ)
 
 /* Control and status reg indexes */
 #define ECONET_GPIO_CR1 1
@@ -261,3 +252,8 @@ void econet_flagfill(void);
 /* End of frame on transmit */
 //#define C2_WRITE_EOF (ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_TXLAST | ECONET_GPIO_C2_FC | ECONET_GPIO_C2_FLAGIDLE | ECONET_GPIO_C2_2BYTES | ECONET_GPIO_C2_PSE)
 #define C2_WRITE_EOF (ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_TXLAST | ECONET_GPIO_C2_FC | ECONET_GPIO_C2_FLAGIDLE | ECONET_GPIO_C2_PSE)
+
+
+
+#endif /* Inclusion of econet-gpio-chipctrl.h */
+
