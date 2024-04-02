@@ -146,7 +146,10 @@ struct __econet_data {
 	short open_count;
 	wait_queue_head_t econet_read_queue;
 	atomic_t tx_status;
-	short aun_mode;
+	u8 aun_mode;
+	u8 plain_mode; // Plain tx/rx type
+	u16 plain_ptr; // PTR to plain packet
+	u16 plain_length; // Length of plain packet
 	atomic_t aun_state;
 	short spoof_immediate;
 	long aun_seq;
@@ -179,12 +182,5 @@ struct __aun_pkt_buffer {
 	struct __econet_packet_aun d;
 	unsigned int length;
 };
-
-#define econet_set_aunstate(x) { \
-	atomic_set(&(econet_data->aun_state), (x)); \
-	econet_data->aun_last_statechange = ktime_get_ns(); \
-}
-
-#define econet_get_aunstate() atomic_read(&(econet_data->aun_state))
 
 #endif
