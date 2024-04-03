@@ -151,7 +151,6 @@ struct __econet_data {
 	u16 plain_ptr; // PTR to plain packet
 	u16 plain_length; // Length of plain packet
 	atomic_t aun_state;
-	short spoof_immediate;
 	long aun_seq;
 	u64 aun_last_tx;
 	u64 aun_last_rx;
@@ -159,15 +158,13 @@ struct __econet_data {
 	u64 aun_last_statechange;
 	short last_tx_user_error;
 	struct gpio_desc	*econet_gpios[20];
-	unsigned char clock; // 0 = no clock; anything else = clock - set when reading registers
 	unsigned char hwver;
 	unsigned char current_dir; // Current databus direction
 	unsigned char initialized; // Whether module is actually initialized
 	unsigned char extralogs; // If 1, extra dmesg logging happens (e.g. collisions, rx aborts, etc.)
 	unsigned long peribase; // Peripheral base address
-	unsigned long clockdiv; // Clock divider setting
 	u8 resilience; // 0 = off; 1 = in AUN mode, will just flag fill after receipt of data from station when reading a 4-way instead of sending final ACK. (Not implemented yet.) Userspace will use ioctl() to signal the ACK has arrived and that the wire ACK can then be sent. In this mode, userspace will have set a thread going which waits for a timeout, checks to see if the kernel is still in EA_R_PENDINGFINALACK and if it is then puts it back into read mode. This will generate net error on the sending wire station, which is the best we can do if destination station fails to respond (perhaps over trunk) when the module has to convert 4-way traffic to AUN.
-	struct clk	*gpio4clk;
+	struct clk		*gpio4clk;
 	struct pwm_device	*gpio18pwm;
 };
 
