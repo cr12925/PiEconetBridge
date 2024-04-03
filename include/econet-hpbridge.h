@@ -244,6 +244,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 	pthread_cond_t		qwake; // Condition which wakes us up when we might need to manage the queues
 	struct __eb_outq	*out; // Queue leaving this device to outside world, separate queues per destination
 	struct __eb_packetqueue	*in; // Inbound queue (all one list)
+	struct __econet_pcaket_aun	*priority; // Not implemented yet. Will have 12 bits malloc()'d at startup and contains the pattern we are looking for as a packet to prioritize to top of input queue. Will be used both for immediates and for spotting ACKs when in the proposed new 'resilience' mode
 	uint8_t 		p_net, p_stn; // Priority net, stn - if an immediate arrives from outside world from this net, stn, put it on head of inbound queue
 	uint32_t		p_seq; // Priority sequence number
 	pthread_mutex_t		priority_mutex; // Locks the priority variables above, read & write
@@ -428,6 +429,10 @@ struct __eb_config {
 	uint8_t		trunk_dead_interval; // Seconds after which trunk considered dead (bridge reset) if no traffic received
 	uint8_t		trunk_keepalive_ctrl; // Ctrl byte used for trunk keepalive packets
 	uint16_t	pool_dead_interval; // Seconds before a pool host will be treated as stale
+	uint8_t		trunk_reset_qty; // Number of Bridge reset copies to send on UDP trunks
+	uint8_t		trunk_update_qty; // Number of Bridge update copies to send on UDP trunks
+	uint8_t		wire_reset_qty; // Number of bridge reset copies to send on Econet wires
+	uint8_t		wire_update_qty; // Number of bridge update copies to send on Econet wires
 };
 
 /* Global debug vars */
@@ -469,6 +474,10 @@ struct __eb_config {
 #define EB_CONFIG_TRUNK_DEAD_INTERVAL		(config.trunk_dead_interval)
 #define EB_CONFIG_TRUNK_KEEPALIVE_CTRL		(config.trunk_keepalive_ctrl)
 #define EB_CONFIG_POOL_DEAD_INTERVAL	(config.pool_dead_interval)
+#define EB_CONFIG_TRUNK_RESET_QTY	(config.trunk_reset_qty)
+#define EB_CONFIG_TRUNK_UPDATE_QTY	(config.trunk_update_qty)
+#define EB_CONFIG_WIRE_RESET_QTY	(config.wire_reset_qty)
+#define EB_CONFIG_WIRE_UPDATE_QTY	(config.wire_update_qty)
 
 // Printer status
 
@@ -579,11 +588,6 @@ struct __econet_packet_ip {
 	uint32_t destination;
 	unsigned char rest[ECONET_MAX_PACKET_SIZE];
 };
-
-#define TRUNK_SERIAL_IDLE 0 // Waiting for start of a packet - will ditch anything but 10x FFs in a row
-#define TRUNK_SERIAL_PACKET 1 // We have received a start marker, we are receiving packet data
-#define TRUNK_SERIAL_9FF 2 // We have received 9FFs and then a zero in packet mode. If next character is FF then remove the zero, otherwise reset FF counter
-// NB, there is no corresponding END state, because the receiver tracks the FFs and if it gets enough of them, that'll be packet end if it's in TRUNK_SERIAL_PACKET state
 
 #endif
 

@@ -135,6 +135,7 @@ void eb_set_whole_wire_net (uint8_t, struct __eb_device *);
 void eb_set_single_wire_host (uint8_t, uint8_t);
 void eb_clr_single_wire_host (uint8_t, uint8_t);
 void eb_setclr_single_wire_host (uint8_t, uint8_t, uint8_t);
+void eb_clear_zero_hosts (struct __eb_device *);
 uint8_t eb_firewall (struct __econet_packet_aun *);
 void eb_reset_tables(void);
 void eb_debug (uint8_t, uint8_t, char *, char *, ...);
@@ -1493,7 +1494,10 @@ static void * eb_wire_immediate_reset (void * ebic)
  *
  */
 
-/* Find a network number to use as our bridge sender address
+/* 
+ * eb_bridge_sender_net()
+ *
+ * Find a network number to use as our bridge sender address
  * (Which is supposed to be the other side network on a trad Acorn bridge,
  * so it can't be a network which is on the same device as the one
  * that needs to know a sender net (i.e. 'destnet') - so we just hunt
@@ -1538,7 +1542,10 @@ uint8_t eb_bridge_sender_net (struct __eb_device *destnet)
 
 }
 
-/* Bridge update internal routine - malloc's the update, builds it and sends
+/* 
+ * eb_bridge_update_single()
+ *
+ * Bridge update internal routine - malloc's the update, builds it and sends
  * to a particular device
  */
 
@@ -1609,6 +1616,13 @@ void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *d
 	 *
 	 * Reset sent twice; Update sent 10 times
 	 *
+	 * These values have now been made tunable
+	 * with the following defaults:
+	 * Wire reset - 2 copies
+	 * Wire update - 10 copies
+	 * Trunk reset - 2 copies
+	 * Trunk reset - 2 copies
+	 *
 	 */
 
 	if (dest->type == EB_DEF_WIRE)
@@ -1618,7 +1632,15 @@ void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *d
 		eb_debug (0, 2, "BRIDGE", "%-8s         Send bridge %s to Trunk on %s:%d%s", (trigger ? eb_type_str(trigger->type) : "Internal"), (ctrl == 0x80 ? "reset" : "update"), (dest->trunk.hostname ? dest->trunk.hostname : "(Not connected)"), dest->trunk.hostname ? dest->trunk.remote_port : 0, debug_string);
 	}
 
-	for (tx_count = 0; tx_count < (ctrl == 0x81 ? 10 : 2); tx_count++)
+	for (tx_count = 0; 
+		tx_count < 
+			(ctrl == 0x81 ? 
+			 	(dest->type == EB_DEF_WIRE ? 
+				 	EB_CONFIG_WIRE_UPDATE_QTY : EB_CONFIG_TRUNK_UPDATE_QTY)
+			: 	(dest->type == EB_DEF_WIRE ? 
+					EB_CONFIG_WIRE_RESET_QTY : EB_CONFIG_TRUNK_RESET_QTY)
+			); 
+		tx_count++)
 	{
 
 		update_send = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge update/reset packet for TX", 12 + data_count);
@@ -1648,7 +1670,10 @@ void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *d
 
 }
 
-/* Bridge update sender 
+/* 
+ * eb_bridge_update()
+ *
+ * Bridge update sender 
  * Create a bridge update and send it to all devices except
  * the one serviced by trigger. Do this by iterating through
  * the device list so that we only send once to each device
@@ -1720,7 +1745,10 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 	}
 }
 
-/* Bridge reset routine
+/* 
+ * eb_bridge_reset()
+ *
+ * Bridge reset routine
  * Send reset to all but *trigger - by iterating through
  * the device list.
  * Then blank off our networks list (by iterating through
@@ -1803,6 +1831,30 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 
 	if (!farside)
 		return; // Barf - No farside net
+
+	if (source->type == EB_DEF_WIRE) // Always should be wire, but just in case
+	{
+		/*
+		 * Clear any .0 hosts out of this wire's station map
+		 * and then add farside.0 to the map so the kernel
+		 * module listens for the ACK on the 4-way we are
+		 * about to send.
+		 */
+
+		eb_clear_zero_hosts (source);
+
+		/*
+		 * Now set the map to include farside.0
+		 * that we are actually sending from.
+		 *
+		 */
+
+		ECONET_SET_STATION(source->wire.stations, farside, 0);
+
+		/* And poke the map into the kernel */
+
+		ioctl(source->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(source->wire.stations)); 
+	}
 
 	reply->p.srcstn = 0;
 	reply->p.srcnet = farside;
@@ -6672,6 +6724,14 @@ void eb_set_whole_wire_net (uint8_t net, struct __eb_device *src)
 
 }
 
+/*
+ * eb_setclr_single_wire_host()
+ *
+ * Insert, or remove, a single station from
+ * an Econet wire station map used by the kernel.
+ *
+ */
+
 void eb_setclr_single_wire_host (uint8_t net, uint8_t stn, uint8_t set)
 {
 
@@ -6709,7 +6769,36 @@ void eb_setclr_single_wire_host (uint8_t net, uint8_t stn, uint8_t set)
 
 }
 
-/* Put a single host in all the station[] values on all wired networks */
+/* 
+ * eb_clear_zero_hosts()
+ *
+ * Take all n.0 hosts out of a station map in one go.
+ * Used by WhatNet/IsNet to clear out any old .0 hosts
+ * which may be lurking in a station map because only
+ * one 'farside' (station 0) host will respond with
+ * 4-ways to WhatNet/IsNet Queries.
+ *
+ * NB does NOT update kernel map - caller must do that,
+ * because typically the caller will have some other
+ * update to follow this one.
+ *
+ */
+
+void eb_clear_zero_hosts (struct __eb_device *dev)
+{
+
+	uint8_t net;
+
+	for (net = 1; net < 255; net++)
+		ECONET_CLR_STATION(dev->wire.stations, net, 0);
+
+}
+
+/* 
+ * eb_set_single_wire_host()
+ *
+ * Put a single host in all the station[] values on all wired networks 
+ */
 
 void eb_set_single_wire_host (uint8_t net, uint8_t stn)
 {
@@ -8235,6 +8324,13 @@ Queuing management options (usually need not be adjusted):\n\
 --pool-dead-interval n\tSeconds before a dynamic pool entry times out as idle (Current %d)\n\
 --enable-syst-fast\tEnable bridge control privilege for SYST on all fileservers (Once only)\n\
 \n\
+Bridge protocol tuning:\n\
+\n\
+--wire-reset-qty n\tNumber of bridge resets to send on Econet wires (Current %d)\n\
+--wire-update-qty n\tNumber of bridge update packets to send on Econet wires (Current %d)\n\
+--trunk-reset-qty n\tNumber of bridge resets to send on UDP trunks (Current %d)\n\
+--trunk-update_qty n\tNumber of bridge update packets to send on UDP trunks (Current %d)\n\
+\n\
 Statistics port control:\n\
 \n\
 --stats-port n\t\tTCP port number for traffic stats burst\n\
@@ -8258,7 +8354,11 @@ Deep-level debugging options:\n\
 	EB_CONFIG_AUN_RETX,
 	EB_CONFIG_AUN_NAKTOLERANCE,
 	EB_CONFIG_FLASHTIME, 
-	EB_CONFIG_POOL_DEAD_INTERVAL);
+	EB_CONFIG_POOL_DEAD_INTERVAL,
+	EB_CONFIG_WIRE_RESET_QTY,
+	EB_CONFIG_WIRE_UPDATE_QTY,
+	EB_CONFIG_TRUNK_RESET_QTY,
+	EB_CONFIG_TRUNK_UPDATE_QTY);
 
 
 }
@@ -8336,6 +8436,10 @@ int main (int argc, char **argv)
 	EB_CONFIG_TRUNK_KEEPALIVE_CTRL = 0xD0; // Default keepalive packet ctrl byte
 	EB_CONFIG_TRUNK_DEAD_INTERVAL = EB_CONFIG_TRUNK_KEEPALIVE_INTERVAL * 2.5; // Default trunk dead interval
 	EB_CONFIG_POOL_DEAD_INTERVAL = 1800; // 30 minutes to dead
+	EB_CONFIG_TRUNK_RESET_QTY = 2; // UDP trunks are fairly reliable
+	EB_CONFIG_TRUNK_UPDATE_QTY = 2; // UDP trunks are fairly reliable
+	EB_CONFIG_WIRE_RESET_QTY = 2; // Same as Acorn / SJ Bridges
+	EB_CONFIG_WIRE_UPDATE_QTY = 10; // Same as Acorn / SJ Bridges - avoids clashing with resets
 
 	strcpy (config_path, "/etc/econet-gpio/econet-hpbridge.cfg");
 	/* Clear networks[] table */
@@ -8377,6 +8481,10 @@ int main (int argc, char **argv)
 		{"trunk-dead-interval", 	required_argument, 	0, 	0},
 		{"pool-dead-interval",	required_argument,	0,	0},
 		{"enable-syst-fast",	0, 			0, 	0},
+		{"wire-reset-qty",	required_argument,	0,	0},
+		{"wire-update-qty",	required_argument,	0,	0},
+		{"trunk-reset-qty",	required_argument,	0,	0},
+		{"trunk-update-qty",	required_argument,	0,	0},
 		{0, 			0,			0,	0 }
 	};
 
@@ -8408,6 +8516,10 @@ int main (int argc, char **argv)
 					case 15:	EB_CONFIG_TRUNK_DEAD_INTERVAL = atoi(optarg); break;
 					case 16:	EB_CONFIG_POOL_DEAD_INTERVAL = atoi(optarg); break;
 					case 17:	fs_set_syst_bridgepriv = 1; break;
+					case 18:	EB_CONFIG_WIRE_RESET_QTY = atoi(optarg); break;
+					case 19:	EB_CONFIG_WIRE_UPDATE_QTY = atoi(optarg); break;
+					case 20:	EB_CONFIG_TRUNK_RESET_QTY = atoi(optarg); break;
+					case 21:	EB_CONFIG_TRUNK_UPDATE_QTY = atoi(optarg); break;
 				}
 			} break;
 			case 'c':	strncpy(config_path, optarg, 1023); break;
