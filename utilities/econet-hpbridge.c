@@ -1545,9 +1545,10 @@ uint8_t eb_bridge_sender_net (struct __eb_device *destnet)
 void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *dest, uint8_t ctrl, uint8_t sender_net)
 {
 
-	struct __econet_packet_aun	*update;
+	struct __econet_packet_aun	*update, *update_send;
 	char				debug_string[1024];
 	uint8_t				data_count;
+	uint8_t				tx_count;
 
 	update = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge packet", 12 + 255);
 
@@ -1597,8 +1598,11 @@ void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *d
 		pthread_mutex_unlock (&networks_update);
 	}
 
-	eb_enqueue_input (dest, update, data_count);
-	pthread_cond_signal (&(dest->qwake));
+	/*
+	 * Copy the packet and send 10 times, which
+	 * is apparently what Acorn/SJ bridges do!
+	 *
+	 */
 
 	if (dest->type == EB_DEF_WIRE)
 		eb_debug (0, 2, "BRIDGE", "%-8s         Send bridge %s to %s net %d%s", (trigger ? eb_type_str(trigger->type) : "Internal"), (ctrl == 0x80 ? "reset" : "update"), eb_type_str(dest->type), dest->net, debug_string);
@@ -1606,6 +1610,34 @@ void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *d
 	{
 		eb_debug (0, 2, "BRIDGE", "%-8s         Send bridge %s to Trunk on %s:%d%s", (trigger ? eb_type_str(trigger->type) : "Internal"), (ctrl == 0x80 ? "reset" : "update"), (dest->trunk.hostname ? dest->trunk.hostname : "(Not connected)"), dest->trunk.hostname ? dest->trunk.remote_port : 0, debug_string);
 	}
+
+	for (tx_count = 0; tx_count < 10; tx_count++)
+	{
+
+		update_send = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge update/reset packet for TX", 12 + data_count);
+
+		if (!update_send)
+			eb_debug (1, 0, "BRIDGE", "Internal     Malloc() failed creating bridge packet for TX!");
+
+		memcpy (update_send, update, 12 + data_count); // Copy packet
+
+		eb_enqueue_input (dest, update_send, data_count);
+		pthread_cond_signal (&(dest->qwake));
+	}
+
+	/*
+	 * Free the original update packet.
+	 * Original code only sent one reset/update,
+	 * which eb_enqueue_input() would free after
+	 * we had malloc()d it. Original malloc retained
+	 * only so that I didn't have to change all the
+	 * pointer dereferencing to '.' from '->'. But
+	 * we now need to free the original version of
+	 * the packet.
+	 *
+	 */
+
+	eb_free(__FILE__, __LINE__, "BRIDGE", "Free template bridge update/reset packet", update);
 
 }
 
@@ -1788,7 +1820,7 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 		}
 	}
 
-	if ((ctrl == 0x83 && networks[query_net] != source) || (ctrl == 0x82))
+	if ((ctrl == 0x83 && networks[query_net] && networks[query_net] != source) || (ctrl == 0x82))
 	{
 		
 		usleep (5 * 1000 * farside); // Delay
@@ -4136,7 +4168,9 @@ fast_handler_reset:
 
 							if (!fork())
 							{
-								if (!setuid(0))
+								/* Grab root privs */
+
+								if (!seteuid(0))
 									execl ("/usr/sbin/shutdown", "shutdown", "-h", "now", (char *) 0);
 							}
 
@@ -8234,6 +8268,14 @@ int main (int argc, char **argv)
 	struct __eb_aun_exposure *e;
 	int	optind;
 	struct rlimit	max_fds;
+
+	/* Drop privs in case we're setuid for *FAST */
+
+	if (seteuid(getuid()) != 0)
+	{
+		fprintf (stderr, "Failed to drop privileges on startup. Quitting. \n");
+		exit (EXIT_FAILURE);
+	}
 
 	/* Set up some initial config
 	*/
