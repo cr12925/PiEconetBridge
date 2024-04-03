@@ -1271,6 +1271,17 @@ void econet_irq_read(void)
 
 		econet_discontinue();
 
+		/* 
+		 * If CRC error, that suggests something is badly wrong. 
+		 * Try a cleardown. I suspect we are writing to CRs in both
+		 * writefd and IRQ routine at the same time, though how I have
+		 * no idea.
+		 *
+		 */
+
+		if (sr2 & ECONET_GPIO_S2_ERR)
+			econet_adlc_cleardown(1);
+
 	}
 	else if (sr2 & ECONET_GPIO_S2_VALID) // Frame valid received - i.e. end of frame received
 	{
