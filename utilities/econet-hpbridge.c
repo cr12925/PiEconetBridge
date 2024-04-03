@@ -1602,6 +1602,13 @@ void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *d
 	 * Copy the packet and send 10 times, which
 	 * is apparently what Acorn/SJ bridges do!
 	 *
+	 * Further update. If it's a reset, only
+	 * send it twice. The apparent point of 10
+	 * updates is to make sure there are no 
+	 * resets still floating around...
+	 *
+	 * Reset sent twice; Update sent 10 times
+	 *
 	 */
 
 	if (dest->type == EB_DEF_WIRE)
@@ -1611,7 +1618,7 @@ void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *d
 		eb_debug (0, 2, "BRIDGE", "%-8s         Send bridge %s to Trunk on %s:%d%s", (trigger ? eb_type_str(trigger->type) : "Internal"), (ctrl == 0x80 ? "reset" : "update"), (dest->trunk.hostname ? dest->trunk.hostname : "(Not connected)"), dest->trunk.hostname ? dest->trunk.remote_port : 0, debug_string);
 	}
 
-	for (tx_count = 0; tx_count < 10; tx_count++)
+	for (tx_count = 0; tx_count < (ctrl == 0x81 ? 10 : 2); tx_count++)
 	{
 
 		update_send = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge update/reset packet for TX", 12 + data_count);
