@@ -7,6 +7,7 @@ install-mkgroup:
 	-sudo usermod -a -G econet `whoami`
 
 install-module:	install-mkgroup
+	[ -d /lib/modules/`uname -r`/build ] || sudo ln -s /usr/src/linux-headers-`uname -r` /lib/modules/`uname -r`/build
 	[ -f include/econet-gpio-kernel-mode.h ] || touch include/econet-gpio-kernel-mode.h
 	cd module ; make clean ; make
 	[ -f /etc/udev/rules.d/90-econet.rules ] || sudo cp udev/90-econet.rules /etc/udev/rules.d/90-seconet.rules
@@ -32,7 +33,7 @@ install-utilities:	install-mkgroup utilities
 	utilities/config-mangle config/econet-hpbridge.cfg-EconetPlusFileserverAndTrunk
 	utilities/config-mangle config/econet-hpbridge.cfg-EconetFSPlusDynamicAUN
 	utilities/config-mangle systemd/econet-hpbridge.service
-	[ -f /etc/econet-gpio/econet-hpbridge.cfg ] || sudo cp config/econet-hpbridge.cfg-EconetPlusFileserver.local /etc/econet-gpio/econet-hpbridge.cfg
+	[ -f /etc/econet-gpio/econet-hpbridge.cfg ] || (sudo cp config/econet-hpbridge.cfg-EconetPlusFileserver.local /etc/econet-gpio/econet-hpbridge.cfg ; sudo chown `whoami` /etc/econet-gpio/econet-hpbridge.cfg )
 	[ -f /etc/systemd/system/econet-hpbridge.service ] || sudo cp systemd/econet-hpbridge.service.local /etc/systemd/system/econet-hpbridge.service
 	sudo cp BEEBMEM /etc/econet-gpio
 
@@ -75,12 +76,4 @@ eeprom-v2: eeprom-general eep
 	sudo hats/eepromutils/eepflash.sh -w -f=v2eeprom/blank.eep -t=24c64
 	sudo hats/eepromutils/eepflash.sh -w -f=v2eeprom/econet-gpio-v2.eep -t=24c64
 	@echo +++ Now comment out the two lines you added to config.txt and reboot!
-
-old-mode:
-	[ ! -f include/econet-gpio-kernel-mode.h ] || rm include/econet-gpio-kernel-mode.h
-	touch include/econet-gpio-kernel-mode.h
-
-new-mode:
-	[ ! -f include/econet-gpio-kernel-mode.h ] || rm include/econet-gpio-kernel-mode.h
-	echo '#define ECONET_GPIO_NEW\n' > include/econet-gpio-kernel-mode.h
 
