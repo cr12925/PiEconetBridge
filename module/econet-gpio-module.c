@@ -1271,13 +1271,6 @@ void econet_irq_read(void)
 
 		econet_discontinue();
 		
-		/*
-		 * We seem to get stuck in CRC sometimes. Try a cleadown as well.
-		 *
-		 */
-
-		econet_adlc_cleardown(1);
-
 	}
 	else if (sr2 & ECONET_GPIO_S2_VALID) // Frame valid received - i.e. end of frame received
 	{
