@@ -1264,13 +1264,6 @@ void econet_irq_read(void)
 		else if (sr2 & ECONET_GPIO_S2_ERR) // Checksum error
 			printk (KERN_INFO "econet-gpio: CRC Error (SR1 = 0x%02X, SR2 = 0x%02X\n", sr1, sr2);
 
-		/*
-		 * In all cases, discontinue reception.
-		 *
-		 */
-
-		econet_discontinue();
-
 		/* 
 		 * If CRC error, that suggests something is badly wrong. 
 		 * Try a cleardown. I suspect we are writing to CRs in both
@@ -1281,6 +1274,14 @@ void econet_irq_read(void)
 
 		if (sr2 & ECONET_GPIO_S2_ERR)
 			econet_adlc_cleardown(1);
+
+		/*
+		 * In all cases, discontinue reception.
+		 *
+		 */
+
+		econet_discontinue();
+
 
 	}
 	else if (sr2 & ECONET_GPIO_S2_VALID) // Frame valid received - i.e. end of frame received
@@ -1971,6 +1972,19 @@ irqreturn_t econet_irq(int irq, void *ident)
 	if (!(sr1 & ECONET_GPIO_S1_IRQ))
 	{
 		printk (KERN_INFO "econet-gpio: IRQ handler called but ADLC not flagging an IRQ. SR1=0x%02X, SR2=0x%02X, Chip State %d, AUN State %d\n", sr1, econet_read_sr(2), chip_state, aun_state);
+
+		/* In heavy use, this seems to preclude a meltdown. 
+		 * So let's do a cleardown & read mode
+		 *
+		 * TODO: Work out what these weird states are where we get SR1=0x65 and SR2=0x80 
+		 * followed by a meltdown and loads of CRC errors. Suspect we are managing to
+		 * read the SRs at the same time as writing them from userspace or some
+		 * weird thing like that.
+		 *
+		 */
+
+		econet_adlc_cleardown(1);
+		econet_set_read_mode();
 	}
 
 	/*
