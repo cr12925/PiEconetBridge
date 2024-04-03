@@ -2589,6 +2589,8 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	if (econet_data->aun_mode && (aunstate == EA_W_READFIRSTACK || aunstate == EA_W_READFINALACK || aunstate == EA_I_READREPLY || aunstate == EA_R_READDATA) && ((ktime_get_ns() - econet_data->aun_last_tx) > 100000000))
 	{
+
+		if (econet_data->extralogs) printk (KERN_INFO "econet-gpio: Return to AUN idle - more than 0.1s since we last tx'd and we are still waiting for read data to arrive - in AUN state 0x%02x\n", aunstate);
 		econet_set_tx_status(ECONET_TX_SUCCESS);
 		econet_set_aunstate(EA_IDLE); 
 		econet_set_chipstate(EM_IDLE);
@@ -2646,6 +2648,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	 */
 
 	sr2 = econet_read_sr(2);
+
 	if (sr2 & ECONET_GPIO_S2_DCD) // No clock
 	{
 		sr2 = econet_read_sr(2);
@@ -2715,6 +2718,9 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	else 
 	{
+
+		/* Consider unlocking the IRQ after going into write mode? */
+
 		spin_unlock(&econet_irqstate_spin);
 		econet_set_write_mode (&econet_pkt, len);
 	}
