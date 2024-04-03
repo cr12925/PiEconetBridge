@@ -1882,11 +1882,28 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 	if ((ctrl == 0x83 && networks[query_net] && networks[query_net] != source) || (ctrl == 0x82))
 	{
 		
-		usleep (5 * 1000 * farside); // Delay
-		eb_enqueue_input (source, reply, 2);
-		pthread_cond_signal(&(source->qwake));
+		struct timeval	now;
 
-		eb_debug (0, 2, "BRIDGE", "%-8s %3d     What/IsNet reply from %3d.%3d to %3d.%3d", eb_type_str(source->type), source->net, farside, 0, net, stn);
+		gettimeofday (&now, NULL);
+
+		if (
+			(ctrl == 0x82 && (timediffmsec(&(source->wire.last_bridge_whatnet[stn]), &now) > EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL))
+		||	
+			(ctrl == 0x83 && (timediffmsec(&(source->wire.last_bridge_isnet[stn]), &now) > EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL))
+		)
+		{
+			//usleep (5 * 1000 * farside); // Delay
+
+			eb_enqueue_input (source, reply, 2);
+			pthread_cond_signal(&(source->qwake));
+	
+			if (ctrl == 0x82)
+				gettimeofday(&(source->wire.last_bridge_whatnet[stn]), NULL);
+			else
+				gettimeofday(&(source->wire.last_bridge_isnet[stn]), NULL);
+
+			eb_debug (0, 2, "BRIDGE", "%-8s %3d     What/IsNet reply from %3d.%3d to %3d.%3d", eb_type_str(source->type), source->net, farside, 0, net, stn);
+		}
 
 	}
 
@@ -7106,6 +7123,12 @@ int eb_readconfig(char *f)
 
 				p->wire.pool = NULL;
 				memset(&(p->wire.use_pool), 0, sizeof(p->wire.use_pool));
+
+				// Initialize bridge response timers
+			
+				memset (&(p->wire.last_bridge_whatnet), 0, sizeof(p->wire.last_bridge_whatnet));
+				memset (&(p->wire.last_bridge_isnet), 0, sizeof(p->wire.last_bridge_isnet));
+				
 				
 			}
 			else if (!regexec(&r_trunk, line, 4, matches, 0) ||
@@ -7212,7 +7235,6 @@ int eb_readconfig(char *f)
 					struct __eb_device	*r;
 					struct __eb_aun_remote	*a;
 	
-					//r = eb_device_init (net, EB_DEF_AUN, flags);
 					r = eb_new_local (net, stn, EB_DEF_AUN);
 
 					p->null.divert[stn] = r;
@@ -8330,6 +8352,7 @@ Bridge protocol tuning:\n\
 --wire-update-qty n\tNumber of bridge update packets to send on Econet wires (Current %d)\n\
 --trunk-reset-qty n\tNumber of bridge resets to send on UDP trunks (Current %d)\n\
 --trunk-update_qty n\tNumber of bridge update packets to send on UDP trunks (Current %d)\n\
+--bridge-query-interval n\tMinimum time between bridge query responses sent to a given station on the Econet (ms) (Current %d)\n\
 \n\
 Statistics port control:\n\
 \n\
@@ -8358,7 +8381,8 @@ Deep-level debugging options:\n\
 	EB_CONFIG_WIRE_RESET_QTY,
 	EB_CONFIG_WIRE_UPDATE_QTY,
 	EB_CONFIG_TRUNK_RESET_QTY,
-	EB_CONFIG_TRUNK_UPDATE_QTY);
+	EB_CONFIG_TRUNK_UPDATE_QTY,
+	EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL);
 
 
 }
@@ -8440,6 +8464,7 @@ int main (int argc, char **argv)
 	EB_CONFIG_TRUNK_UPDATE_QTY = 2; // UDP trunks are fairly reliable
 	EB_CONFIG_WIRE_RESET_QTY = 2; // Same as Acorn / SJ Bridges
 	EB_CONFIG_WIRE_UPDATE_QTY = 10; // Same as Acorn / SJ Bridges - avoids clashing with resets
+	EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL = 2000; // 2s between responses to WhatNet / IsNet to a particular station
 
 	strcpy (config_path, "/etc/econet-gpio/econet-hpbridge.cfg");
 	/* Clear networks[] table */
@@ -8485,6 +8510,7 @@ int main (int argc, char **argv)
 		{"wire-update-qty",	required_argument,	0,	0},
 		{"trunk-reset-qty",	required_argument,	0,	0},
 		{"trunk-update-qty",	required_argument,	0,	0},
+		{"bridge-query-interval",	required_argument,	0,	0},
 		{0, 			0,			0,	0 }
 	};
 
@@ -8520,6 +8546,7 @@ int main (int argc, char **argv)
 					case 19:	EB_CONFIG_WIRE_UPDATE_QTY = atoi(optarg); break;
 					case 20:	EB_CONFIG_TRUNK_RESET_QTY = atoi(optarg); break;
 					case 21:	EB_CONFIG_TRUNK_UPDATE_QTY = atoi(optarg); break;
+					case 22:	EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL = atoi(optarg); break;
 				}
 			} break;
 			case 'c':	strncpy(config_path, optarg, 1023); break;
@@ -8913,48 +8940,12 @@ int main (int argc, char **argv)
 		p = p->next;
 	}
 
-/* OLD CODE COMMENTED OUT AFTER MOVE TO ONE-THREAD-PER-NETWORK AUN LISTENERS
-
-	// Start the inactive AUN listeners - which won't have been started
-	// by their parent devices, because they're orphans
-
-	e = exposures;
-
-	while (e)
-	{
-		int 	err;
-		pthread_attr_t	attrs;
-
-		pthread_attr_init (&attrs);
-		pthread_attr_setstacksize(&attrs, 2 * PTHREAD_STACK_MIN);
-
-		pthread_mutex_lock(&(e->exposure_mutex));
-
-		if (!e->active)
-		{
-			pthread_mutex_unlock(&(e->exposure_mutex));
-			if ((err = pthread_create (&(e->me), NULL, eb_aun_listener, e)))
-				eb_debug (1, 0, "MAIN", "%-8s         Unable to start AUN listener for %d.%d (%s)", "", e->net, e->stn, strerror(err));
-
-			pthread_detach (e->me);
-
-			eb_thread_started();
-		}
-		else
-			pthread_mutex_unlock(&(e->exposure_mutex));
-
-		e = e->next;
-
-	}
-*/
 
 	/* Start exposures here */
 
 	{
 		uint8_t			nets_done[32];
 
-//#define NETMAP_SET(x, y)	{ (x)[(y)/8] |= (1 << ((y) % 8)); }
-//#define NETMAP_ISSET(x, y)	((x)[(y)/8] & (1 << ((y) % 8)))
 #define NETMAP_SET(x, y)	{ (x)[(y)/32] |= (1 << ((y) & 0x07)); }
 #define NETMAP_ISSET(x, y)	((x)[(y)/32] & (1 << ((y) & 0x07)))
 #define NETMAP_RESET(x)		memset(&(x), 0, sizeof((x)))

@@ -309,6 +309,8 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			struct __eb_device	*divert[255]; // Pointers to diverted stations. E.g. if station 1.254 on the wire is actually a local station, this will point to its __eb_device
 			uint8_t		filter_in[256], filter_out[256]; // Networks we ignore (i.e. we ditch traffic, and we ignore/don't send adverts)
 			uint8_t		period, mark; // clock speed. 0 = not set by user.
+			struct timeval	last_bridge_whatnet[256]; // This and the corresponding _isnet array tell us when we last successfully sent a reply to such a query to a station on this wire.
+			struct timeval  last_bridge_isnet[256];
 
 			// Pool nat config
 			uint8_t			use_pool[255];
@@ -433,6 +435,7 @@ struct __eb_config {
 	uint8_t		trunk_update_qty; // Number of Bridge update copies to send on UDP trunks
 	uint8_t		wire_reset_qty; // Number of bridge reset copies to send on Econet wires
 	uint8_t		wire_update_qty; // Number of bridge update copies to send on Econet wires
+	uint32_t		wire_bridge_query_interval; // Gap between successive IsNet or WhatNet responses to a given station on the wire (ms)
 };
 
 /* Global debug vars */
@@ -478,6 +481,7 @@ struct __eb_config {
 #define EB_CONFIG_TRUNK_UPDATE_QTY	(config.trunk_update_qty)
 #define EB_CONFIG_WIRE_RESET_QTY	(config.wire_reset_qty)
 #define EB_CONFIG_WIRE_UPDATE_QTY	(config.wire_update_qty)
+#define EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL	(config.wire_bridge_query_interval)
 
 // Printer status
 

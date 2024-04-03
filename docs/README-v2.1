@@ -748,6 +748,29 @@ The next few switches ought not to be needed but just in case:
 --trunk-dead-interval <n>	Seconds without traffic before trunk considered
                         dead. Default 2.5 x keepalive interval.
 
+Bridge protocol tunables
+
+--trunk-reset-qty <n>	Number of bridge reset packets to send on UDP trunk.
+			Default 2
+
+--wire-reset-qty <n>	Number of bridge reset packets to send on Econet wire.
+			Default 2 - same as Acorn & SJ bridges.
+
+--trunk-update-qty <n>	Number of duplicate bridge update packets to send
+ 			on UDP trunks.
+			Default 2
+
+--wire-update-qty <n> 	Number of duplicate bridge update packets to send on
+			Econet wires
+			Default 10 - same as Acorn and SJ bridges
+
+--bridge-querry-interval <n>	Minimum time between responses to IsNet or
+			WhatNet queries from any given station on the wire
+			in ms. Calculated separately for each type of query,
+			but the minimum time from this parameter is applied
+			to both.
+			Default 2000 (2s)
+
 
 The Configuration File 
 ----------------------
