@@ -4371,6 +4371,8 @@ static void * eb_device_despatcher (void * device)
 			ioctl(d->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(d->wire.stations));	
 			ioctl(d->wire.socket, ECONETGPIO_IOC_READMODE); // Rest just in case...
 
+			ioctl(d->wire.socket, ECONETGPIO_IOC_EXTRALOGS, EB_CONFIG_EXTRALOGS);
+
 			// Flashing the LEDs leaves them ON, signalling device active.
 
 			led_read.led = ECONETGPIO_READLED;
@@ -8327,6 +8329,7 @@ Options:\n\
 \t-p [iIoO]\tPacket dump - i/I: input phase, before/after NAT; o/O: output phase, likewise\n\
 \t-s\t\tDump configuration at startup (repeat for extra debug)\n\
 \t-z\t\tDebug Level (each occurrence increases; max 5)\n\
+\t-e\t\tTurn on extra logging from kernel module to dmesg\n\
 \n\
 Queuing management options (usually need not be adjusted):\n\
 \n\
@@ -8465,6 +8468,7 @@ int main (int argc, char **argv)
 	EB_CONFIG_WIRE_RESET_QTY = 2; // Same as Acorn / SJ Bridges
 	EB_CONFIG_WIRE_UPDATE_QTY = 10; // Same as Acorn / SJ Bridges - avoids clashing with resets
 	EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL = 2000; // 2s between responses to WhatNet / IsNet to a particular station
+	EB_CONFIG_EXTRALOGS = 0; // Extra kernel logging
 
 	strcpy (config_path, "/etc/econet-gpio/econet-hpbridge.cfg");
 	/* Clear networks[] table */
@@ -8516,7 +8520,7 @@ int main (int argc, char **argv)
 
 	/* Parse command line */
 
-	while ((opt = getopt_long(argc, argv, "hc:d:ln:p:sz", long_options, &optind)) != -1)	
+	while ((opt = getopt_long(argc, argv, "hc:d:eln:p:sz", long_options, &optind)) != -1)	
 	{
 		switch (opt)
 		{
@@ -8551,6 +8555,7 @@ int main (int argc, char **argv)
 			} break;
 			case 'c':	strncpy(config_path, optarg, 1023); break;
 			case 'd':	strncpy(debug_path, optarg, 1023); break;
+			case 'e':	EB_CONFIG_EXTRALOGS = 1; break;
 			case 'h':	eb_help(argv[0]); exit(EXIT_SUCCESS); break;
 			case 'l':	EB_CONFIG_LOCAL = 1; break;
 			case 'n':	EB_CONFIG_MAX_DUMP_BYTES = atoi(optarg); break; // Max packet dump data bytes
@@ -8583,7 +8588,6 @@ int main (int argc, char **argv)
 	max_fds.rlim_cur = max_fds.rlim_max = RLIM_INFINITY;
 
 	setrlimit (RLIMIT_CORE, &max_fds);
-
 
 	/* Clear BeebMem - used for *VIEW */
 

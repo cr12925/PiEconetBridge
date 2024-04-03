@@ -436,6 +436,7 @@ struct __eb_config {
 	uint8_t		wire_reset_qty; // Number of bridge reset copies to send on Econet wires
 	uint8_t		wire_update_qty; // Number of bridge update copies to send on Econet wires
 	uint32_t		wire_bridge_query_interval; // Gap between successive IsNet or WhatNet responses to a given station on the wire (ms)
+	uint8_t		wire_extralogs; // Turn extra kernel logging on to dmesg
 };
 
 /* Global debug vars */
@@ -482,6 +483,7 @@ struct __eb_config {
 #define EB_CONFIG_WIRE_RESET_QTY	(config.wire_reset_qty)
 #define EB_CONFIG_WIRE_UPDATE_QTY	(config.wire_update_qty)
 #define EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL	(config.wire_bridge_query_interval)
+#define EB_CONFIG_EXTRALOGS	(config.wire_extralogs)
 
 // Printer status
 
