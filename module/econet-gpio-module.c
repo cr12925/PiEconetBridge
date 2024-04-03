@@ -1258,11 +1258,11 @@ void econet_irq_read(void)
 	if (sr2 & (ECONET_GPIO_S2_RX_ABORT | ECONET_GPIO_S2_OVERRUN | ECONET_GPIO_S2_ERR)) 
 	{
 		if (sr2 & ECONET_GPIO_S2_RX_ABORT) // Abort flag set
-			printk (KERN_INFO "econet-gpio: econet_irq_read(): RX Abort received at ptr = 0x%02x\n", econet_pkt_rx.ptr);
+			printk (KERN_INFO "econet-gpio: econet_irq_read(): RX Abort received at ptr = 0x%02x (SR1 = 0x%02X, SR1 = 0x%02X)\n", econet_pkt_rx.ptr, sr1, sr2);
 		else if (sr2 & ECONET_GPIO_S2_OVERRUN) // Receiver overrun
-			printk (KERN_INFO "econet-gpio: econet_irq_read(): RX Overrun at ptr = 0x%02x\n", econet_pkt_rx.ptr);
+			printk (KERN_INFO "econet-gpio: econet_irq_read(): RX Overrun at ptr = 0x%02x (SR1 = 0x%02X, SR2 = 0x%02X)\n", econet_pkt_rx.ptr, sr1, sr2);
 		else if (sr2 & ECONET_GPIO_S2_ERR) // Checksum error
-			printk (KERN_INFO "econet-gpio: CRC Error\n");
+			printk (KERN_INFO "econet-gpio: CRC Error (SR1 = 0x%02X, SR2 = 0x%02X\n", sr1, sr2);
 
 		/*
 		 * In all cases, discontinue reception.
@@ -1271,14 +1271,6 @@ void econet_irq_read(void)
 
 		econet_discontinue();
 
-		/* If CRC error, which seems to occur in 
-		 * waves after we get some weird reading from SR1, 
-		 * do a full cleardown
-		 */
-
-		if (sr2 & ECONET_GPIO_S2_ERR)
-			econet_adlc_cleardown(1);
-		
 	}
 	else if (sr2 & ECONET_GPIO_S2_VALID) // Frame valid received - i.e. end of frame received
 	{
