@@ -1270,6 +1270,14 @@ void econet_irq_read(void)
 		 */
 
 		econet_discontinue();
+
+		/* If CRC error, which seems to occur in 
+		 * waves after we get some weird reading from SR1, 
+		 * do a full cleardown
+		 */
+
+		if (sr2 & ECONET_GPIO_S2_ERR)
+			econet_adlc_cleardown(1);
 		
 	}
 	else if (sr2 & ECONET_GPIO_S2_VALID) // Frame valid received - i.e. end of frame received
