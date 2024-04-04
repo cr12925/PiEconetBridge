@@ -1555,7 +1555,9 @@ void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *d
 	struct __econet_packet_aun	*update, *update_send;
 	char				debug_string[1024];
 	uint8_t				data_count;
+	/*
 	uint8_t				tx_count;
+	*/
 
 	update = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge packet", 12 + 255);
 
@@ -1632,6 +1634,8 @@ void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *d
 		eb_debug (0, 2, "BRIDGE", "%-8s         Send bridge %s to Trunk on %s:%d%s", (trigger ? eb_type_str(trigger->type) : "Internal"), (ctrl == 0x80 ? "reset" : "update"), (dest->trunk.hostname ? dest->trunk.hostname : "(Not connected)"), dest->trunk.hostname ? dest->trunk.remote_port : 0, debug_string);
 	}
 
+	/* This seems to cause problems
+	 *
 	for (tx_count = 0; 
 		tx_count < 
 			(ctrl == 0x81 ? 
@@ -1641,6 +1645,7 @@ void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *d
 					EB_CONFIG_WIRE_RESET_QTY : EB_CONFIG_TRUNK_RESET_QTY)
 			); 
 		tx_count++)
+	*/
 	{
 
 		update_send = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge update/reset packet for TX", 12 + data_count);
