@@ -5286,7 +5286,11 @@ void fs_close_interlock(int server, unsigned short index, unsigned short mode)
 
 	fs_debug (0, 2, "%12sInterlock close internal handle %d, mode %d. Readers now = %d, Writers now = %d, path %s", "", index, mode, fs_files[server][index].readers, fs_files[server][index].writers, fs_files[server][index].name);
 
-	if (fs_files[server][index].readers <= 0 && fs_files[server][index].writers <= 0)
+	// Safety valve here - only close when both are 0, not <= 0
+	// Otherwise we sometimes overclose - e.g. in the fs_garbage_collect() routine
+	
+	// if (fs_files[server][index].readers <= 0 && fs_files[server][index].writers <= 0)
+	if (fs_files[server][index].readers == 0 && fs_files[server][index].writers == 0)
 	{
 		fs_debug (0, 2, "%12sInterlock closing internal handle %d in operating system", "", index);
 		fclose(fs_files[server][index].handle);
@@ -7368,6 +7372,9 @@ void fs_get_random_access_info(int server, unsigned char reply_port, unsigned ch
 	r.p.ptype = ECONET_AUN_DATA;
 	r.p.data[0] = r.p.data[1] = 0;
 
+	/* TODO. Somehow the data sent on IW's system is correct when printed during arg=0 fs_debug, but is corrupted
+	 * when transmitted. So when it prints 'data returned 00 08 00', it sends '01 00 00'. Hmm. 
+	 */
 
 	switch (function) 
 	{
@@ -7942,6 +7949,7 @@ void fs_close(int server, unsigned char reply_port, unsigned char net, unsigned 
 		{	
 			if (active[server][active_id].fhandles[count].handle != -1 && !(active[server][active_id].fhandles[count].is_dir)) // Close it only if it's open and not a directory handle
 			{
+				// TODO: Don't close if it's a bulk port handle? Or maybe do because on a CLOSE#0 you'd be closing anything you were trying to do a putbytes on, and *SAVE bulk transfers won't have handles...
 				fs_close_handle(server, reply_port, net, stn, active_id, count);
 			}
 			count++;
@@ -8376,6 +8384,13 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 			r.p.ptype = ECONET_AUN_DATA;
 			r.p.data[0] = r.p.data[1] = 0;
 
+			// 20240404 Insert delay. Looks like some beebs aren't listening for the close packet immediately
+			// after sending the last packet in a data burst and then when the bridge eventually 
+			// gets to transmit it on retry, they've sent another command and everything goes one
+			// packet out of sequence.
+
+			usleep(20000); // Try 20ms to start with.
+
 			if (fs_bulk_ports[server][port].user_handle) // This was PutBytes, not save
 			{
 				r.p.data[2] = port;
@@ -8424,7 +8439,7 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 			fs_bulk_ports[server][port].handle = -1; // Make the bulk port available again
 
 		}
-		else
+		else // Send an intermediate ACK.
 		{	
 			r.p.port = fs_bulk_ports[server][port].ack_port;
 			r.p.ctrl = ctrl;
@@ -8460,8 +8475,15 @@ void fs_garbage_collect(int server)
 
 				if (fs_bulk_ports[server][count].active_id != 0) // No user handle = this was a SAVE operation, so if non zero we need to close the file & a user handle
 				{
-					fs_close_interlock(server, fs_bulk_ports[server][count].handle, fs_bulk_ports[server][count].mode);
-					fs_deallocate_user_file_channel(server, fs_bulk_ports[server][count].active_id, fs_bulk_ports[server][count].user_handle);
+					// TODO: This is overclosing. Either update the last_receive on a close, or check the handle is still live here.
+					// This possibly occurs on a putbytes where there is a bulk port set up but in fact putbytes extends the file for some reason?
+					if (fs_files[server][fs_bulk_ports[server][count].handle].handle != NULL) // Problem above solved - if already fully closed, don't close it again
+					{
+						fs_close_interlock(server, fs_bulk_ports[server][count].handle, fs_bulk_ports[server][count].mode);
+						fs_deallocate_user_file_channel(server, fs_bulk_ports[server][count].active_id, fs_bulk_ports[server][count].user_handle);
+					}
+					else
+						fs_debug (0, 2, "%12sfrom %3d.%3d Garbage collector did not close bulk port %d because it had already closed.", "", fs_bulk_ports[server][count].net, fs_bulk_ports[server][count].stn, count);
 				}
 
 				fs_bulk_ports[server][count].handle = -1;
