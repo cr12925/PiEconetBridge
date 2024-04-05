@@ -259,6 +259,8 @@ struct __eb_device { // Structure holding information about a "physical" device 
 
 	// Timeouts
 	time_t			last_rx; // Last reception on this device - used to time out dead trunks and dynamic AUN stations (when I've written that bit!)
+	time_t			last_bridge_thread_started; // When last bridge update thread started. Used in order to determine whether to start a new one.
+	pthread_mutex_t		last_bridge_thread_started_mutex; // locks last_bridge_thread_started
 
 	// Per device type information
 	union {

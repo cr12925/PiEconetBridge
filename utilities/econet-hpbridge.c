@@ -144,6 +144,13 @@ static void * eb_statistics (void *);
 
 unsigned char beebmem[65536];
 
+/* Define for structure passed to bridge update/reset threads */
+
+struct __eb_update_info {
+	struct __eb_device	*trigger, *dest;
+	uint8_t			ctrl, sender_net;
+};
+
 /* Some defines for the FAST handler */
 #define EB_FAST_LOGON 0
 #define EB_FAST_READY 1
@@ -973,6 +980,9 @@ struct __eb_device * eb_device_init (uint8_t net, uint16_t type, uint8_t config)
 		if (pthread_mutex_init(&(p->priority_mutex), NULL) == -1)
 			eb_debug (1, 0, "CONFIG", "Cannot initialize priority mutex for net %d", net);
 
+		if (pthread_mutex_init(&(p->last_bridge_thread_started_mutex), NULL) == -1)
+			eb_debug (1, 0, "CONFIG", "Cannot initialize bridge thread start mutex for net %d", net);
+
 		p->out = NULL; // Init queues
 		p->in = NULL;
 
@@ -1007,6 +1017,8 @@ struct __eb_device * eb_device_init (uint8_t net, uint16_t type, uint8_t config)
 
 		eb_set_network (net, p);
 	}
+
+	p->last_bridge_thread_started = 0; // Ensure we always start new thread first call
 
 	return p;
 
@@ -1547,17 +1559,39 @@ uint8_t eb_bridge_sender_net (struct __eb_device *destnet)
  *
  * Bridge update internal routine - malloc's the update, builds it and sends
  * to a particular device
+ *
+ * Converted to be run as a new spawned thread per *dest 2024405, to enable
+ * the sleep(1) between each transmission without delaying rest of bridge.
+ *
+ * The pointer to struct passed into this thread must be one per thread
+ * because it needs to be allocated by the caller and free'd inside here.
+ * That's because when called, we are calling this routine several times
+ * with different parameters, so we need several copies of the struct.
+ *
  */
 
-void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *dest, uint8_t ctrl, uint8_t sender_net)
+//void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *dest, uint8_t ctrl, uint8_t sender_net)
+static void * eb_bridge_update_single (void *update_info)
 {
+
+	struct __eb_device	*trigger, *dest;
+	uint8_t			ctrl, sender_net, net_count;
+
+	struct __eb_update_info	*info;
 
 	struct __econet_packet_aun	*update, *update_send;
 	char				debug_string[1024];
 	uint8_t				data_count;
-	/*
 	uint8_t				tx_count;
-	*/
+
+	info = (struct __eb_update_info *) update_info;
+
+	trigger = info->trigger;
+	dest = info->dest;
+	ctrl = info->ctrl;
+	sender_net = info->sender_net;
+	
+	eb_free (__FILE__, __LINE__, "BRIDGE", "Freeing bridge update structure", update_info);
 
 	update = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge packet", 12 + 255);
 
@@ -1577,10 +1611,20 @@ void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *d
 
 	data_count = 0;
 
-	//if (ctrl == 0x81) // Update - collect our known nets into the data area
+	for (tx_count = 1; 
+		tx_count <= 
+			(ctrl == 0x81 ? 
+			 	(dest->type == EB_DEF_WIRE ? 
+				 	EB_CONFIG_WIRE_UPDATE_QTY : EB_CONFIG_TRUNK_UPDATE_QTY)
+			: 	(dest->type == EB_DEF_WIRE ? 
+					EB_CONFIG_WIRE_RESET_QTY : EB_CONFIG_TRUNK_RESET_QTY)
+			);
+		tx_count++)
 	{
 
-		uint8_t			net_count;
+		/* Collect our networks together; apply NAT */
+
+		pthread_mutex_lock (&networks_update);
 
 		strcpy (debug_string, " with nets ");
 	
@@ -1605,18 +1649,9 @@ void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *d
 		}
 
 		pthread_mutex_unlock (&networks_update);
-	}
 
 	/*
-	 * Copy the packet and send 10 times, which
-	 * is apparently what Acorn/SJ bridges do!
-	 *
-	 * Further update. If it's a reset, only
-	 * send it twice. The apparent point of 10
-	 * updates is to make sure there are no 
-	 * resets still floating around...
-	 *
-	 * Reset sent twice; Update sent 10 times
+	 * Packet repeat count
 	 *
 	 * These values have now been made tunable
 	 * with the following defaults:
@@ -1627,27 +1662,6 @@ void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *d
 	 *
 	 */
 
-	if (dest->type == EB_DEF_WIRE)
-		eb_debug (0, 2, "BRIDGE", "%-8s         Send bridge %s to %s net %d%s", (trigger ? eb_type_str(trigger->type) : "Internal"), (ctrl == 0x80 ? "reset" : "update"), eb_type_str(dest->type), dest->net, debug_string);
-	else
-	{
-		eb_debug (0, 2, "BRIDGE", "%-8s         Send bridge %s to Trunk on %s:%d%s", (trigger ? eb_type_str(trigger->type) : "Internal"), (ctrl == 0x80 ? "reset" : "update"), (dest->trunk.hostname ? dest->trunk.hostname : "(Not connected)"), dest->trunk.hostname ? dest->trunk.remote_port : 0, debug_string);
-	}
-
-	/* This seems to cause problems
-	 *
-	for (tx_count = 0; 
-		tx_count < 
-			(ctrl == 0x81 ? 
-			 	(dest->type == EB_DEF_WIRE ? 
-				 	EB_CONFIG_WIRE_UPDATE_QTY : EB_CONFIG_TRUNK_UPDATE_QTY)
-			: 	(dest->type == EB_DEF_WIRE ? 
-					EB_CONFIG_WIRE_RESET_QTY : EB_CONFIG_TRUNK_RESET_QTY)
-			); 
-		tx_count++)
-	*/
-	{
-
 		update_send = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge update/reset packet for TX", 12 + data_count);
 
 		if (!update_send)
@@ -1657,6 +1671,13 @@ void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *d
 
 		eb_enqueue_input (dest, update_send, data_count);
 		pthread_cond_signal (&(dest->qwake));
+
+		if (dest->type == EB_DEF_WIRE)
+			eb_debug (0, 2, "BRIDGE", "%-8s         Send bridge %s #%d to %s net %d%s", (trigger ? eb_type_str(trigger->type) : "Internal"), (ctrl == 0x80 ? "reset" : "update"), tx_count, eb_type_str(dest->type), dest->net, debug_string);
+		else
+			eb_debug (0, 2, "BRIDGE", "%-8s         Send bridge %s #%d to Trunk on %s:%d%s", (trigger ? eb_type_str(trigger->type) : "Internal"), (ctrl == 0x80 ? "reset" : "update"), tx_count, (dest->trunk.hostname ? dest->trunk.hostname : "(Not connected)"), dest->trunk.hostname ? dest->trunk.remote_port : 0, debug_string);
+
+		sleep(1);
 	}
 
 	/*
@@ -1673,6 +1694,7 @@ void eb_bridge_update_single (struct __eb_device *trigger, struct __eb_device *d
 
 	eb_free(__FILE__, __LINE__, "BRIDGE", "Free template bridge update/reset packet", update);
 
+	return NULL;
 }
 
 /* 
@@ -1696,6 +1718,13 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 
 	struct __eb_device		*dev;
 	uint8_t				sender_net;
+	struct __eb_update_info		*info;
+	pthread_t			update_thread;
+	int				err;
+	time_t				now;
+	uint8_t				reps, proportion;
+
+	now = time(NULL);
 
 	// Send to all but trigger. If trigger is NULL, this was an internally forced reset/update - send everywhere
 
@@ -1718,10 +1747,56 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 			continue;
 		}
 
-		if (dev == trigger && ctrl == 0x80) // Always send update if this was a reset
-			eb_bridge_update_single (trigger, dev, 0x81, sender_net);
-		else if (dev != trigger) // Don't send to trigger otherwise
-			eb_bridge_update_single (trigger, dev, ctrl, sender_net);
+		/* Make new struct to pass to new thread 
+		 * The alloc gets freed within the new thread
+		 */
+
+		if (!(info = eb_malloc(__FILE__, __LINE__, "BRIDGE", "New bridge update info structure", sizeof(struct __eb_update_info))))
+			eb_debug (1, 0, "BRIDGE", "%-8s         Failed to malloc update info structure for bridge update/reset to wire net %d from %s", "", dev->net, (trigger ? eb_type_str(trigger->type) : "Internal"));
+
+		info->trigger = trigger;
+		info->dest = dev;
+		info->sender_net = sender_net;
+		info->ctrl = ctrl;
+
+		if (dev == trigger && ctrl == 0x80) // Always send update if this was a reset and we are sending to the source of that reset - otherwise it goes as an onward reset
+			info->ctrl = 0x81;
+
+		/* Always send resets, so we only need to know how many reps the thread will do for updates */
+
+		reps = EB_CONFIG_WIRE_UPDATE_QTY;
+		proportion = 0.2 * reps;
+
+		/* Work out whether to start a new bridge update thread. The update thread will make up the list of networks for each transmission, so
+		 * if we started a thread and there is more than 20% of its runtime left, don't bother with a new one - too much traffic!
+		 */
+
+		pthread_mutex_lock (&(dev->last_bridge_thread_started_mutex));
+
+		/*
+		eb_debug (0, 2, "BRIDGE", "%-8s        Work out whether to send bridge packet ctrl = 0x%02X: last one started %d, now = %d, difference %d, reps = %d, proportion = %d",
+				"", 
+				info->ctrl,
+				dev->last_bridge_thread_started,
+				now,
+				now - dev->last_bridge_thread_started,
+				reps,
+				proportion);
+				*/
+
+		if (info->ctrl == 0x80 || (now - dev->last_bridge_thread_started) > reps || (now > (dev->last_bridge_thread_started + reps - proportion))) /* Always go on a reset, but only do updates if there isn't a thread with > 80% to go */
+		{
+
+			if ((err = pthread_create (&(update_thread), NULL, eb_bridge_update_single, info)))
+				eb_debug (1, 0, "BRIDGE", "Cannot start bridge update thread - error %d (%s)", dev->net, strerror(err));
+			else
+			{
+				dev->last_bridge_thread_started = time(NULL);
+				pthread_detach(update_thread);
+			}
+		}
+
+		pthread_mutex_unlock (&(dev->last_bridge_thread_started_mutex));
 
 		dev = dev->next;
 
@@ -1741,11 +1816,46 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 			continue;
 		}
 
-		if (dev == trigger && ctrl == 0x80) // Always send update if this was a reset
-			eb_bridge_update_single (trigger, dev, 0x81, sender_net);
-		else if (dev != trigger) // Don't send to trigger otherwise
-			eb_bridge_update_single (trigger, dev, ctrl, sender_net);
+		/* Make new struct to pass to update thread.
+		 * Thread will free it.
+		 */
 
+		if (!(info = eb_malloc(__FILE__, __LINE__, "BRIDGE", "New bridge update info structure for trunk", sizeof(struct __eb_update_info))))
+			eb_debug (1, 0, "BRIDGE", "%-8s         Failed to malloc update info structure for bridge update/reset to trunk on port %d from %s", "", dev->trunk.remote_port, (trigger ? eb_type_str(trigger->type) : "Internal"));
+
+
+		info->trigger = trigger;
+		info->dest = dev;
+		info->sender_net = sender_net;
+		info->ctrl = ctrl;
+
+		if (dev == trigger && ctrl == 0x80) // Always send update if this was a reset and we are sending to the source of that reset - otherwise it goes as an onward reset
+			info->ctrl = 0x81;
+
+		/* Always send resets, so we only need to know how many reps the thread will do for updates */
+
+		reps = EB_CONFIG_TRUNK_UPDATE_QTY;
+		proportion = 0.2 * reps;
+
+		/* Work out whether to start a new bridge update thread. The update thread will make up the list of networks for each transmission, so
+		 * if we started a thread and there is more than 20% of its runtime left, don't bother with a new one - too much traffic!
+		 */
+
+		pthread_mutex_lock (&(dev->last_bridge_thread_started_mutex));
+
+		if (info->ctrl == 0x80 || (now - dev->last_bridge_thread_started) > reps || (now > (dev->last_bridge_thread_started + reps - proportion))) /* Always go on a reset, but only do updates if there isn't a thread with > 80% to go */
+		{
+			if ((err = pthread_create (&(update_thread), NULL, eb_bridge_update_single, info)))
+				eb_debug (1, 0, "BRIDGE", "Cannot start bridge update thread - error %d (%s)", dev->net, strerror(err));
+			else
+			{
+				dev->last_bridge_thread_started = time(NULL);
+				pthread_detach(update_thread);
+			}
+		}
+
+		pthread_mutex_unlock (&(dev->last_bridge_thread_started_mutex));
+		
 		dev = dev->next;
 	}
 }
@@ -2148,8 +2258,23 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 		else if ((p->p.ctrl & 0xFE) == 0x80) // Incoming reset or update
 		{
 
-			uint8_t		data_count;
+			uint8_t		data_count, netlist_changed = 1; /* Starting assumption is the netlist will change, just in case */
 			char		debug_string[1024];
+
+			struct __eb_device	*old_networks[255];
+
+			/*
+			 * Copy networks[] array so we can see if it changed, either
+			 * by reference to defined/known networks, or the device that
+			 * handles a particular network (since that will affect
+			 * where we advertise those networks).
+			 */
+
+			pthread_mutex_lock (&networks_update);
+
+			memcpy (&(old_networks), &(networks), sizeof(networks));
+
+			pthread_mutex_unlock (&networks_update);
 
 			if (p->p.ctrl == 0x80) eb_reset_tables(); // Reset if need be
 
@@ -2235,14 +2360,22 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 			
 			pthread_mutex_unlock (&networks_update);
 
+			/* See if we can avoid doing a new update. Always send resets. Default netlist_changed is 1 so we look to see if we can safely set to 0 */
+
+			if (p->p.ctrl == 0x81 && !memcmp(&(networks), &(old_networks), sizeof(networks)))
+				netlist_changed = 0;
+
 			if (source->type == EB_DEF_WIRE)
-				eb_debug (0, 2, "BRIDGE", "Wire     %3d     Received bridge %s with %s%s", source->net, (p->p.ctrl == 0x80 ? "reset" : "update"), (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string);
+				eb_debug (0, 2, "BRIDGE", "Wire     %3d     Received bridge %s with %s%s%s", source->net, (p->p.ctrl == 0x80 ? "reset" : "update"), (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string, 
+						(netlist_changed ? "" : " (Not forwarded - net list unchanged)"));
 			else
 			{
-				eb_debug (0, 2, "BRIDGE", "Trunk            Received bridge %s from %s:%d with %s%s", (p->p.ctrl == 0x80 ? "reset" : "update"), source->trunk.hostname ? source->trunk.hostname : "(Not connected)", source->trunk.hostname ? source->trunk.remote_port : 0, (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string);
+				eb_debug (0, 2, "BRIDGE", "Trunk            Received bridge %s from %s:%d with %s%s%s", (p->p.ctrl == 0x80 ? "reset" : "update"), source->trunk.hostname ? source->trunk.hostname : "(Not connected)", source->trunk.hostname ? source->trunk.remote_port : 0, (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string,
+						(netlist_changed ? "" : " (Not forwarded - net list unchanged)"));
 			}
 
-			eb_bridge_update (source, p->p.ctrl);
+			if (netlist_changed)
+				eb_bridge_update (source, p->p.ctrl);
 	
 		}
 				
