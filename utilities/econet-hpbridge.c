@@ -1581,8 +1581,9 @@ static void * eb_bridge_update_single (void *update_info)
 
 	struct __econet_packet_aun	*update, *update_send;
 	char				debug_string[1024];
-	uint8_t				data_count;
+	uint8_t				data_count, old_data_count;
 	uint8_t				tx_count;
+	uint8_t				old_update[255];
 
 	info = (struct __eb_update_info *) update_info;
 
@@ -1591,8 +1592,10 @@ static void * eb_bridge_update_single (void *update_info)
 	ctrl = info->ctrl;
 	sender_net = info->sender_net;
 	
-	eb_debug (0, 2, "BRIDGE", "New update single thread started for device type %s %d", eb_type_str(dest->type), (dest->type == EB_DEF_WIRE ? dest->net : dest->trunk.local_port));
+	eb_debug (0, 2, "BRIDGE", "New update single thread started for device type %s %d %s", eb_type_str(dest->type), (dest->type == EB_DEF_WIRE ? dest->net : dest->trunk.local_port), (ctrl == 0x80 ? "RESET" : "Update"));
 
+	memset(old_update, 0, 255);
+	old_data_count = 0;
 
 	eb_free (__FILE__, __LINE__, "BRIDGE", "Freeing bridge update structure", update_info);
 
@@ -1653,6 +1656,16 @@ static void * eb_bridge_update_single (void *update_info)
 
 		pthread_mutex_unlock (&networks_update);
 
+		/* Has the net array changed? If so, start at 1 again */
+
+		if (tx_count != 1 && ((old_data_count != data_count) || memcmp(old_update, update->p.data, data_count)))
+			tx_count = 1;
+
+		/* Copy current update set to old update for comparison */
+
+		memcpy (old_update, &(update->p.data), data_count);
+		old_data_count = data_count;
+
 	/*
 	 * Packet repeat count
 	 *
@@ -1681,6 +1694,7 @@ static void * eb_bridge_update_single (void *update_info)
 			eb_debug (0, 2, "BRIDGE", "%-8s         Send bridge %s #%d to Trunk on %s:%d%s", (trigger ? eb_type_str(trigger->type) : "Internal"), (ctrl == 0x80 ? "reset" : "update"), tx_count, (dest->trunk.hostname ? dest->trunk.hostname : "(Not connected)"), dest->trunk.hostname ? dest->trunk.remote_port : 0, debug_string);
 
 		sleep(1);
+
 	}
 
 	/*
@@ -1725,7 +1739,7 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 	pthread_t			update_thread;
 	int				err;
 	time_t				now;
-	uint8_t				reps, proportion;
+	uint8_t				reps;
 
 	now = time(NULL);
 
@@ -1768,7 +1782,6 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 		/* Always send resets, so we only need to know how many reps the thread will do for updates */
 
 		reps = EB_CONFIG_WIRE_UPDATE_QTY;
-		proportion = 0.2 * reps;
 
 		/* Work out whether to start a new bridge update thread. The update thread will make up the list of networks for each transmission, so
 		 * if we started a thread and there is more than 20% of its runtime left, don't bother with a new one - too much traffic!
@@ -1776,30 +1789,37 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 
 		pthread_mutex_lock (&(dev->last_bridge_thread_started_mutex));
 
-		/*
-		eb_debug (0, 2, "BRIDGE", "%-8s        Work out whether to send bridge packet ctrl = 0x%02X: last one started %d, now = %d, difference %d, reps = %d, proportion = %d",
+		eb_debug (0, 2, "BRIDGE", "%-8s        Work out whether to send bridge packet ctrl = 0x%02X: last one started %d, now = %d, %s thread",
 				"", 
 				info->ctrl,
 				dev->last_bridge_thread_started,
 				now,
-				now - dev->last_bridge_thread_started,
-				reps,
-				proportion);
-				*/
+				(info->ctrl == 0x80 || (dev->last_bridge_thread_started < (now - reps))) ? "STARTING" : "NOT STARTING");
 
-		if (info->ctrl == 0x80 || dev->last_bridge_thread_started <= (now - reps) || (now >= (dev->last_bridge_thread_started + reps - proportion))) /* Always go on a reset, but only do updates if there isn't a thread with > 80% to go */
+		if (info->ctrl == 0x80 || dev->last_bridge_thread_started < (now - reps)) /* Always go on a reset, but only do updates if we are not presently updating. The updater will start against from 0 reps if the net list changes */
 		{
 
-			eb_debug (0, 2, "BRIDGE", "STARTING New update single thread started for device type %s %d", eb_type_str(info->dest->type), (info->dest->type == EB_DEF_WIRE ? info->dest->net : info->dest->trunk.local_port));
+			eb_debug (0, 2, "BRIDGE", "STARTING New update single thread started for device type %s %d ctrl = 0x%02X %s", eb_type_str(info->dest->type), (info->dest->type == EB_DEF_WIRE ? info->dest->net : info->dest->trunk.local_port), info->ctrl, info->ctrl == 0x80 ? "(RESET)" : "(Update)");
 
 			if ((err = pthread_create (&(update_thread), NULL, eb_bridge_update_single, info)))
 				eb_debug (1, 0, "BRIDGE", "Cannot start bridge update thread - error %d (%s)", dev->net, strerror(err));
 			else
 			{
-				if (info->ctrl == 0x80)
+				/* We used to set to 0 on a reset, but that caused multiple
+				 * updates to be started. Set to 0 if this is a reset
+				 * and the last start was more than number of update
+				 * reps ago
+				 *
+				 * Because the updater will go back to 0 reps if the
+				 * net list changes.
+				 *
+				 */
+
+				if (info->ctrl == 0x80 && (dev->last_bridge_thread_started < (time(NULL) - (dev->type == EB_DEF_WIRE ? EB_CONFIG_WIRE_UPDATE_QTY : EB_CONFIG_TRUNK_UPDATE_QTY))))
 					dev->last_bridge_thread_started = 0;
 				else
 					dev->last_bridge_thread_started = time(NULL);
+
 				pthread_detach(update_thread);
 			}
 		}
@@ -1843,7 +1863,6 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 		/* Always send resets, so we only need to know how many reps the thread will do for updates */
 
 		reps = EB_CONFIG_TRUNK_UPDATE_QTY;
-		proportion = 0.2 * reps;
 
 		/* Work out whether to start a new bridge update thread. The update thread will make up the list of networks for each transmission, so
 		 * if we started a thread and there is more than 20% of its runtime left, don't bother with a new one - too much traffic!
@@ -1851,7 +1870,7 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 
 		pthread_mutex_lock (&(dev->last_bridge_thread_started_mutex));
 
-		if (info->ctrl == 0x80 || dev->last_bridge_thread_started <= (now - reps) || (now >= (dev->last_bridge_thread_started + reps - proportion))) /* Always go on a reset, but only do updates if there isn't a thread with > 80% to go */
+		if (info->ctrl == 0x80 || dev->last_bridge_thread_started < (now - reps)) /* Always go on a reset, but only do updates if we are not presently updating. The updater will start against from 0 reps if the net list changes */
 		{
 			if ((err = pthread_create (&(update_thread), NULL, eb_bridge_update_single, info)))
 				eb_debug (1, 0, "BRIDGE", "Cannot start bridge update thread - error %d (%s)", dev->net, strerror(err));
