@@ -1591,6 +1591,9 @@ static void * eb_bridge_update_single (void *update_info)
 	ctrl = info->ctrl;
 	sender_net = info->sender_net;
 	
+	eb_debug (0, 2, "BRIDGE", "New update single thread started for device type %s %d", eb_type_str(dest->type), (dest->type == EB_DEF_WIRE ? dest->net : dest->trunk.local_port));
+
+
 	eb_free (__FILE__, __LINE__, "BRIDGE", "Freeing bridge update structure", update_info);
 
 	update = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge packet", 12 + 255);
@@ -1784,14 +1787,19 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 				proportion);
 				*/
 
-		if (info->ctrl == 0x80 || (now - dev->last_bridge_thread_started) > reps || (now > (dev->last_bridge_thread_started + reps - proportion))) /* Always go on a reset, but only do updates if there isn't a thread with > 80% to go */
+		if (info->ctrl == 0x80 || dev->last_bridge_thread_started <= (now - reps) || (now >= (dev->last_bridge_thread_started + reps - proportion))) /* Always go on a reset, but only do updates if there isn't a thread with > 80% to go */
 		{
+
+			eb_debug (0, 2, "BRIDGE", "STARTING New update single thread started for device type %s %d", eb_type_str(info->dest->type), (info->dest->type == EB_DEF_WIRE ? info->dest->net : info->dest->trunk.local_port));
 
 			if ((err = pthread_create (&(update_thread), NULL, eb_bridge_update_single, info)))
 				eb_debug (1, 0, "BRIDGE", "Cannot start bridge update thread - error %d (%s)", dev->net, strerror(err));
 			else
 			{
-				dev->last_bridge_thread_started = time(NULL);
+				if (info->ctrl == 0x80)
+					dev->last_bridge_thread_started = 0;
+				else
+					dev->last_bridge_thread_started = time(NULL);
 				pthread_detach(update_thread);
 			}
 		}
@@ -1843,13 +1851,16 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 
 		pthread_mutex_lock (&(dev->last_bridge_thread_started_mutex));
 
-		if (info->ctrl == 0x80 || (now - dev->last_bridge_thread_started) > reps || (now > (dev->last_bridge_thread_started + reps - proportion))) /* Always go on a reset, but only do updates if there isn't a thread with > 80% to go */
+		if (info->ctrl == 0x80 || dev->last_bridge_thread_started <= (now - reps) || (now >= (dev->last_bridge_thread_started + reps - proportion))) /* Always go on a reset, but only do updates if there isn't a thread with > 80% to go */
 		{
 			if ((err = pthread_create (&(update_thread), NULL, eb_bridge_update_single, info)))
 				eb_debug (1, 0, "BRIDGE", "Cannot start bridge update thread - error %d (%s)", dev->net, strerror(err));
 			else
 			{
-				dev->last_bridge_thread_started = time(NULL);
+				if (info->ctrl == 0x80)
+					dev->last_bridge_thread_started = 0;
+				else
+					dev->last_bridge_thread_started = time(NULL);
 				pthread_detach(update_thread);
 			}
 		}
@@ -4048,7 +4059,7 @@ fast_handler_reset:
 
 	while (state == 1) { 
 
-		char	key, key2;
+		unsigned char	key, key2;
 		struct pollfd	fds;
 		struct utsname	u;
 
