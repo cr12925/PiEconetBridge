@@ -1592,7 +1592,7 @@ static void * eb_bridge_update_single (void *update_info)
 	ctrl = info->ctrl;
 	sender_net = info->sender_net;
 	
-	eb_debug (0, 2, "BRIDGE", "New update single thread started for device type %s %d %s", eb_type_str(dest->type), (dest->type == EB_DEF_WIRE ? dest->net : dest->trunk.local_port), (ctrl == 0x80 ? "RESET" : "Update"));
+	//eb_debug (0, 2, "BRIDGE", "New update single thread started for device type %s %d %s", eb_type_str(dest->type), (dest->type == EB_DEF_WIRE ? dest->net : dest->trunk.local_port), (ctrl == 0x80 ? "RESET" : "Update"));
 
 	memset(old_update, 0, 255);
 	old_data_count = 0;
@@ -1789,17 +1789,19 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 
 		pthread_mutex_lock (&(dev->last_bridge_thread_started_mutex));
 
+		/*
 		eb_debug (0, 2, "BRIDGE", "%-8s        Work out whether to send bridge packet ctrl = 0x%02X: last one started %d, now = %d, %s thread",
 				"", 
 				info->ctrl,
 				dev->last_bridge_thread_started,
 				now,
 				(info->ctrl == 0x80 || (dev->last_bridge_thread_started < (now - reps))) ? "STARTING" : "NOT STARTING");
+				*/
 
 		if (info->ctrl == 0x80 || dev->last_bridge_thread_started < (now - reps)) /* Always go on a reset, but only do updates if we are not presently updating. The updater will start against from 0 reps if the net list changes */
 		{
 
-			eb_debug (0, 2, "BRIDGE", "STARTING New update single thread started for device type %s %d ctrl = 0x%02X %s", eb_type_str(info->dest->type), (info->dest->type == EB_DEF_WIRE ? info->dest->net : info->dest->trunk.local_port), info->ctrl, info->ctrl == 0x80 ? "(RESET)" : "(Update)");
+			//eb_debug (0, 2, "BRIDGE", "STARTING New update single thread started for device type %s %d ctrl = 0x%02X %s", eb_type_str(info->dest->type), (info->dest->type == EB_DEF_WIRE ? info->dest->net : info->dest->trunk.local_port), info->ctrl, info->ctrl == 0x80 ? "(RESET)" : "(Update)");
 
 			if ((err = pthread_create (&(update_thread), NULL, eb_bridge_update_single, info)))
 				eb_debug (1, 0, "BRIDGE", "Cannot start bridge update thread - error %d (%s)", dev->net, strerror(err));
