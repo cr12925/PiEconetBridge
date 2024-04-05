@@ -1609,8 +1609,6 @@ static void * eb_bridge_update_single (void *update_info)
 	
 	strcpy (debug_string, "");
 
-	data_count = 0;
-
 	for (tx_count = 1; 
 		tx_count <= 
 			(ctrl == 0x81 ? 
@@ -1623,6 +1621,8 @@ static void * eb_bridge_update_single (void *update_info)
 	{
 
 		/* Collect our networks together; apply NAT */
+
+		data_count = 0;
 
 		pthread_mutex_lock (&networks_update);
 
