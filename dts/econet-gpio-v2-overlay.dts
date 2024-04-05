@@ -37,6 +37,10 @@
 				pinctrl-0 = <&econet_gpio_pins>;
                                 writeled-gpios = <&gpio 11 0>;
                                 readled-gpios = <&gpio 8 0>;
+
+				dts-version = < 0x02 >;
+				patched-dt = "Yes"; /* Indicates v2 board overlay has been patched from EEPROM */
+
 				status = "okay";
 		};
 	};

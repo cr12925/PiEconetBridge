@@ -31,6 +31,7 @@
 				label = "ECONET-GPIO";
 				compatible = "econet-gpio";
 				version = /bits/ 8 < 0x01 >;
+				dts-version = /bits/ 8 < 0x02 >;
 				clk-gpios = <&gpio 4 0>;
 				cs-gpios = <&gpio 5 0>;
 				rw-gpios = <&gpio 6 0>;

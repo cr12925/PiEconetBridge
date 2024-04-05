@@ -76,6 +76,9 @@
 				/* Board version */
 				version = /bits/ 8 < 0x02 >;
 
+				/* DTS version */
+				dts-version = /bits/ 8 < 0x02 >;
+
 				status = "okay";
 			};
 		};
