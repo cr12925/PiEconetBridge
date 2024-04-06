@@ -1605,7 +1605,7 @@ static void * eb_bridge_update_watcher (void *device)
 		if (!sender_net) // No bridge sender net available!
 		{
 			/* Go around again */
-			eb_debug (0,2, "BRIDGE", "%-8s   %5d   Unable to find sender net. Not sending bridge update.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.remote_port);
+			eb_debug (0,2, "BRIDGE", "%-8s   %5d   Unable to find sender net. Not sending bridge update.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.local_port);
 			continue;
 		}
 
@@ -1681,7 +1681,7 @@ static void * eb_bridge_update_watcher (void *device)
 			if (me->type == EB_DEF_WIRE)
 				eb_debug (0, 2, "BRIDGE", "Wire     %3d     Send bridge update #%d %s", me->net, tx_count + 1, debug_string);
 			else
-				eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Send bridge update #%d to Trunk to %s%s", me->trunk.remote_port, tx_count + 1, me->trunk.hostname, debug_string);
+				eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Send bridge update #%d to Trunk to %s%s", me->trunk.local_port, tx_count + 1, me->trunk.hostname, debug_string);
 
 			sleep(1);
 
@@ -1742,7 +1742,7 @@ static void * eb_bridge_reset_watcher (void *device)
 		if (!sender_net) // No bridge sender net available!
 		{
 			/* Go around again */
-			eb_debug (0,2, "BRIDGE", "%-8s   %5d   Unable to find sender net. Not sending bridge reset.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.remote_port);
+			eb_debug (0,2, "BRIDGE", "%-8s   %5d   Unable to find sender net. Not sending bridge reset.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.local_port);
 			continue;
 		}
 
@@ -1777,7 +1777,7 @@ static void * eb_bridge_reset_watcher (void *device)
 			if (me->type == EB_DEF_WIRE)
 				eb_debug (0, 2, "BRIDGE", "Wire     %3d     Send bridge RESET #%d", me->net, tx_count + 1);
 			else
-				eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Send bridge RESET #%d to Trunk on %s", me->trunk.remote_port, tx_count + 1, me->trunk.hostname);
+				eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Send bridge RESET #%d to Trunk on %s", me->trunk.local_port, tx_count + 1, me->trunk.hostname);
 
 			sleep(1);
 
@@ -2382,7 +2382,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 						(netlist_changed ? "" : " (Not forwarded - net list unchanged)"));
 			else
 			{
-				eb_debug (0, 2, "BRIDGE", "Trunk            Received bridge %s from %s:%d with %s%s%s", (p->p.ctrl == 0x80 ? "reset" : "update"), source->trunk.hostname ? source->trunk.hostname : "(Not connected)", source->trunk.hostname ? source->trunk.remote_port : 0, (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string,
+				eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Received bridge %s from %s:%d with %s%s%s", source->trunk.local_port, (p->p.ctrl == 0x80 ? "reset" : "update"), source->trunk.hostname ? source->trunk.hostname : "(Not connected)", source->trunk.hostname ? source->trunk.remote_port : 0, (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string,
 						(netlist_changed ? "" : " (Not forwarded - net list unchanged)"));
 			}
 
@@ -4888,26 +4888,32 @@ static void * eb_device_despatcher (void * device)
 					struct sockaddr_in	src_addr;
 					socklen_t		addr_len;
 
-					uint8_t			dead;
+					uint8_t			was_dead;
 
-					time_t			last_rx; // Work out if trunk dead prior to this traffic arriving
+					time_t			now, dead_diff, last_rx;
 
 					// See if this trunk was dead - used to work out whether to reset if we have valid traffic
 					
 					pthread_mutex_lock (&(d->statsmutex));
 
 					last_rx = d->last_rx;
+					now = time(NULL);
+
+					dead_diff = now - last_rx;
 
 					pthread_mutex_unlock (&(d->statsmutex));
 
-					if (difftime(time(NULL), last_rx) > EB_CONFIG_TRUNK_DEAD_INTERVAL)
-						dead = 1;
+					was_dead = 0;
 
-					//length = read (l_socket, &(d->trunk.cipherpacket), TRUNK_CIPHER_TOTAL);
+					if (dead_diff > EB_CONFIG_TRUNK_DEAD_INTERVAL)
+						was_dead = 1;
 
 					addr_len = sizeof(src_addr);
 
 					length = recvfrom (l_socket, &(d->trunk.cipherpacket), TRUNK_CIPHER_TOTAL, 0, (struct sockaddr *) &src_addr, &addr_len);
+
+					if (was_dead)
+						eb_debug (0, 2, "DESPATCH", "%-8s %5d   Packet received for trunk which was dead - last_rx = %d, now = %d, diff = %d (> %d)", eb_type_str(d->type), d->trunk.local_port, last_rx, now, dead_diff, EB_CONFIG_TRUNK_DEAD_INTERVAL);
 
 					if (d->trunk.sharedkey && (length < (TRUNK_CIPHER_DATA + AES_BLOCK_SIZE)) )
 						eb_debug (0, 2, "DESPATCH", "%-8s %3d     Encrypted runt packet received - discarded", eb_type_str(d->type), d->net);
@@ -4916,7 +4922,7 @@ static void * eb_device_despatcher (void * device)
 						if (!(d->trunk.ctx_dec = EVP_CIPHER_CTX_new()))
 							eb_debug (1, 0, "DESPATCH", "%-8s         Unable to set up decryption control for local port %d", "Trunk", d->trunk.local_port);
 
-						eb_debug (0, 3, "DESPATCH", "%-8s %3d     Encrypted trunk packet received - type %d, IV bytes %02x %02x %02x ...", eb_type_str(d->type), d->net, d->trunk.cipherpacket[TRUNK_CIPHER_ALG], d->trunk.cipherpacket[TRUNK_CIPHER_IV], d->trunk.cipherpacket[TRUNK_CIPHER_IV+1], d->trunk.cipherpacket[TRUNK_CIPHER_IV+2]);
+						eb_debug (0, 3, "DESPATCH", "%-8s %5d   Encrypted trunk packet received - type %d, IV bytes %02x %02x %02x ...", eb_type_str(d->type), d->trunk.local_port, d->trunk.cipherpacket[TRUNK_CIPHER_ALG], d->trunk.cipherpacket[TRUNK_CIPHER_IV], d->trunk.cipherpacket[TRUNK_CIPHER_IV+1], d->trunk.cipherpacket[TRUNK_CIPHER_IV+2]);
 
 						switch (d->trunk.cipherpacket[TRUNK_CIPHER_ALG])
 						{
@@ -4924,7 +4930,7 @@ static void * eb_device_despatcher (void * device)
 								EVP_DecryptInit_ex(d->trunk.ctx_dec, EVP_aes_256_cbc(), NULL, d->trunk.sharedkey, &(d->trunk.cipherpacket[TRUNK_CIPHER_IV]));
 								break;
 							default:
-								eb_debug (0, 2, "DESPATCH", "%-8s %3d     Encryption type %02x in encrypted unknown - discarded", eb_type_str(d->type), d->net, d->trunk.cipherpacket[TRUNK_CIPHER_ALG]);
+								eb_debug (0, 2, "DESPATCH", "%-8s %5d   Encryption type %02x in encrypted unknown - discarded", eb_type_str(d->type), d->trunk.local_port, d->trunk.cipherpacket[TRUNK_CIPHER_ALG]);
 								break;
 						}
 
@@ -4933,7 +4939,7 @@ static void * eb_device_despatcher (void * device)
 
 							int	tmp_len;
 
-							eb_debug (0, 3, "DESPATCH", "%-8s %3d     Encryption type in encrypted is valid - %02x; encrypted data length %04x", eb_type_str(d->type), d->net, d->trunk.cipherpacket[TRUNK_CIPHER_ALG], (length - TRUNK_CIPHER_DATA));
+							eb_debug (0, 3, "DESPATCH", "%-8s %5d   Encryption type in encrypted is valid - %02x; encrypted data length %04x", eb_type_str(d->type), d->trunk.local_port, d->trunk.cipherpacket[TRUNK_CIPHER_ALG], (length - TRUNK_CIPHER_DATA));
 
 							if ((!EVP_DecryptUpdate(d->trunk.ctx_dec, temp_packet, &(d->trunk.encrypted_length), (unsigned char *) &(d->trunk.cipherpacket[TRUNK_CIPHER_DATA]), length - TRUNK_CIPHER_DATA)))
 								eb_debug (0, 2, "DESPATCH", "%-8s %3d     DecryptUpdate of trunk packet failed", eb_type_str(d->type), d->net);
@@ -4942,18 +4948,19 @@ static void * eb_device_despatcher (void * device)
 
 								d->trunk.encrypted_length += tmp_len;
 
-								eb_debug (0, 3, "DESPATCH", "%-8s %3d     Trunk packet length %04x", eb_type_str(d->type), d->net, d->trunk.encrypted_length);
+								eb_debug (0, 3, "DESPATCH", "%-8s %5d   Trunk packet length %04x", eb_type_str(d->type), d->trunk.local_port, d->trunk.encrypted_length);
 
 								datalength = (temp_packet[0] * 256) + temp_packet[1];
 
 								if (datalength >= 12) // Valid packet size received
 								{
-									eb_debug (0, 3, "DESPATCH", "%-8s %3d     Encrypted trunk packet validly received - specified length %04x, decrypted length %04x", eb_type_str(d->type), d->net, datalength, d->trunk.encrypted_length);
+									eb_debug (0, 3, "DESPATCH", "%-8s %5d   Encrypted trunk packet validly received - specified length %04x, decrypted length %04x, marking receipt at %d seconds", eb_type_str(d->type), d->trunk.local_port, datalength, d->trunk.encrypted_length, time(NULL));
 									memcpy(&packet, &(temp_packet[2]), datalength); // data length always ignores the ECONET part of the data
 									length = datalength;
 									packetreceived = 1;
 									
 									// Mark receipt
+									
 									eb_update_lastrx(d);
 
 									// Having received a valid packet, let's update our remote end status if we are dynamic
@@ -4997,7 +5004,7 @@ static void * eb_device_despatcher (void * device)
 											eb_debug (1, 1, "DESPATCH", "%-8s %3d     Dynamic trunk endpoint found for local port %d at host %s port %d, but failed to allocate memory for addrinfo structure!", eb_type_str(d->type), d->net, d->trunk.local_port, inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port));
 									}
 
-									if (dead) // If this trunk was dead before this packet arrived, do a bridge reset - which will also start the update process
+									if (was_dead && (packet.p.port != BRIDGE_PORT || packet.p.ctrl != BRIDGE_RESET)) // If this trunk was dead before this packet arrived, do a bridge reset - which will also start the update process - but don't do a reset if what's just turned up is a reset
 									{
 										eb_debug (0, 2, "DESPATCH", "%-8s %5d   Trunk received traffic after being dead - send bridge reset", eb_type_str(d->type), d->trunk.remote_port);
 										eb_bridge_reset(NULL);
@@ -5015,19 +5022,17 @@ static void * eb_device_despatcher (void * device)
 					else // Plaintext trunk
 					{
 
-						// Old code without encryption
-						//length = read (l_socket, &packet, ECONET_MAX_PACKET_SIZE);
-						// Copy packet from cipherpacket to packet
-
+						eb_debug (0, 3, "DESPATCH", "%-8s %5d   Plaintext trunk packet received - specified length %04x, marking receipt at %d seconds", eb_type_str(d->type), d->trunk.local_port, length, time(NULL));
 						memcpy (&packet, &d->trunk.cipherpacket, length);
 
 						if (length >= 12)
 						{
 							packetreceived = 1;
+
 							// Mark receipt
 							eb_update_lastrx(d);
 
-							if (dead) // If this trunk was dead before this packet arrived, do a bridge reset - which will also start the update process
+							if (was_dead && (packet.p.port != BRIDGE_PORT || packet.p.ctrl != BRIDGE_RESET)) // If this trunk was dead before this packet arrived, do a bridge reset - which will also start the update process - but dont do this if what we received was a reset, because there'll just be lots of resets flying around.
 							{
 								eb_debug (0, 2, "DESPATCH", "%-8s %5d   Trunk received traffic after being dead - send bridge reset", eb_type_str(d->type), d->trunk.remote_port);
 								eb_bridge_reset(NULL);
@@ -5036,6 +5041,7 @@ static void * eb_device_despatcher (void * device)
 
 					}
 				}
+
 				if (d->type == EB_DEF_WIRE)
 				{
 					length = read (l_socket, &packet, ECONET_MAX_PACKET_SIZE);
