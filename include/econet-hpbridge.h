@@ -284,6 +284,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 
 	pthread_cond_t		bridge_update_cond; // Used to wake up the bridge updater (only used on Wire/Trunk devices)
 	pthread_t		bridge_update_thread; // Bridge update thread (NB: Resets handled in main broadcast handler now)
+	pthread_t		bridge_update_thread2; // 2nd Bridge update thread (NB: Resets handled in main broadcast handler now)
 	pthread_mutex_t		bridge_update_lock; // Required for the condition above to work.
 	pthread_cond_t		bridge_reset_cond; // Ditto for bridge resetter
 	pthread_t		bridge_reset_thread; // Ditto for bridge resetter

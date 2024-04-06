@@ -1561,6 +1561,9 @@ uint8_t eb_bridge_sender_net (struct __eb_device *destnet)
  * n is either EB_CONFIG_WIRE_UPDATE_QTY or
  * EB_CONFIG_TRUNK_UPDATE_QTY depending on type of device.
  *
+ * Each device starts two of these just in case a cond signal
+ * is sent whilst the other is going back to sleep
+ *
  */
 
 static void * eb_bridge_update_watcher (void *device)
@@ -2378,11 +2381,11 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 				netlist_changed = 0;
 
 			if (source->type == EB_DEF_WIRE)
-				eb_debug (0, 2, "BRIDGE", "Wire     %3d     Received bridge %s with %s%s%s", source->net, (p->p.ctrl == 0x80 ? "reset" : "update"), (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string, 
+				eb_debug (0, 2, "BRIDGE", "Wire     %3d     Received bridge %s with %s%s%s", source->net, (p->p.ctrl == BRIDGE_RESET ? "reset" : "update"), (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string, 
 						(netlist_changed ? "" : " (Not forwarded - net list unchanged)"));
 			else
 			{
-				eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Received bridge %s from %s:%d with %s%s%s", source->trunk.local_port, (p->p.ctrl == 0x80 ? "reset" : "update"), source->trunk.hostname ? source->trunk.hostname : "(Not connected)", source->trunk.hostname ? source->trunk.remote_port : 0, (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string,
+				eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Received bridge %s from %s:%d with %s%s%s", source->trunk.local_port, (p->p.ctrl == BRIDGE_RESET ? "reset" : "update"), source->trunk.hostname ? source->trunk.hostname : "(Not connected)", source->trunk.hostname ? source->trunk.remote_port : 0, (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string,
 						(netlist_changed ? "" : " (Not forwarded - net list unchanged)"));
 			}
 
@@ -4531,6 +4534,9 @@ static void * eb_device_despatcher (void * device)
 			if (pthread_create(&d->bridge_update_thread, NULL, eb_bridge_update_watcher, d))
 				eb_debug (1, 0, "DESPATCH", "%-8s %3d     Cannot start bridge updater on this device.", "Wire", d->net);
 		
+			if (pthread_create(&d->bridge_update_thread2, NULL, eb_bridge_update_watcher, d))
+				eb_debug (1, 0, "DESPATCH", "%-8s %3d     Cannot start second bridge updater on this device.", "Wire", d->net);
+		
 			if (pthread_create(&d->bridge_reset_thread, NULL, eb_bridge_reset_watcher, d))
 				eb_debug (1, 0, "DESPATCH", "%-8s %3d     Cannot start bridge reset thread on this device.", "Wire", d->net);
 		
@@ -4727,6 +4733,9 @@ static void * eb_device_despatcher (void * device)
 	
 			if (pthread_create(&d->bridge_update_thread, NULL, eb_bridge_update_watcher, d))
 				eb_debug (1, 0, "DESPATCH", "%-8s %5d   Cannot start bridge updater on this device.", "Trunk", d->trunk.remote_port);
+		
+			if (pthread_create(&d->bridge_update_thread2, NULL, eb_bridge_update_watcher, d))
+				eb_debug (1, 0, "DESPATCH", "%-8s %5d   Cannot start second bridge updater on this device.", "Trunk", d->trunk.remote_port);
 		
 			if (pthread_create(&d->bridge_reset_thread, NULL, eb_bridge_reset_watcher, d))
 				eb_debug (1, 0, "DESPATCH", "%-8s %5d   Cannot start bridge reset thread on this device.", "Trunk", d->trunk.remote_port);
