@@ -1683,7 +1683,7 @@ static void * eb_bridge_update_watcher (void *device)
 			else
 				eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Send bridge update #%d to Trunk to %s%s", me->trunk.local_port, tx_count + 1, me->trunk.hostname, debug_string);
 
-			sleep(1);
+			if (tx_count < qty) sleep(1);
 
 		}
 
@@ -1779,7 +1779,7 @@ static void * eb_bridge_reset_watcher (void *device)
 			else
 				eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Send bridge RESET #%d to Trunk on %s", me->trunk.local_port, tx_count + 1, me->trunk.hostname);
 
-			sleep(1);
+			if (tx_count < qty) sleep(1);
 
 		}
 
