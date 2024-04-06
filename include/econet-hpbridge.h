@@ -52,7 +52,27 @@
 #define EB_DEV_CONF_DIRECT	0x01	// Passes all traffic, unqueued, unmolested (including ACK, NAK) to the destination. Otherwise deals with ACK, NAK itself.
 #define EB_DEV_CONF_AUTOACK	0x02	// When data traffic received from this station (usually AUN) send it an ACK immediately and don't bother tracking what actually got delivered or where from
 
-#define ECONET_TRACE_PORT	0x9B	// Port number used for HPB traceroute functionality
+
+/* 
+ * Bridge protocol defines.
+ *
+ * These are port & ctrl values
+ *
+ */
+
+#define BRIDGE_PORT	0x9C
+#define BRIDGE_RESET	0x80
+#define BRIDGE_UPDATE	0x81
+#define BRIDGE_WHATNET	0x82
+#define BRIDGE_ISNET	0x83
+
+/*
+ * The following are part of the HPB's bridge system
+ * but NOT part of Acorn or SJ's world.
+ *
+ */
+
+#define ECONET_TRACE_PORT		0x9B	// Port number used for HPB traceroute functionality
 #define ECONET_BRIDGE_KEEPALIVE_CTRL	0xD0	// Ctrl byte used for trunk keepalive packets
 
 struct __eb_packetqueue {
@@ -259,8 +279,15 @@ struct __eb_device { // Structure holding information about a "physical" device 
 
 	// Timeouts
 	time_t			last_rx; // Last reception on this device - used to time out dead trunks and dynamic AUN stations (when I've written that bit!)
-	time_t			last_bridge_thread_started; // When last bridge update thread started. Used in order to determine whether to start a new one.
-	pthread_mutex_t		last_bridge_thread_started_mutex; // locks last_bridge_thread_started
+
+	/* Bridge protocol-related material */
+
+	pthread_cond_t		bridge_update_cond; // Used to wake up the bridge updater (only used on Wire/Trunk devices)
+	pthread_t		bridge_update_thread; // Bridge update thread (NB: Resets handled in main broadcast handler now)
+	pthread_mutex_t		bridge_update_lock; // Required for the condition above to work.
+	pthread_cond_t		bridge_reset_cond; // Ditto for bridge resetter
+	pthread_t		bridge_reset_thread; // Ditto for bridge resetter
+	pthread_mutex_t		bridge_reset_lock; // Ditto for bridge resetter
 
 	// Per device type information
 	union {
