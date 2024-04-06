@@ -1830,11 +1830,11 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 	while (dev)
 	{
 
-		/* If trigger is null (internal reset), or trigger != dev, do reset/update as need be */
+		/* If trigger is null (internal reset), or it's an update, or (in which case it's a reset) trigger != dev, do reset/update as need be */
 
 		if (
 			(dev->type == EB_DEF_WIRE)
-		&&	 (!trigger || (dev != trigger))
+		&&	 (!trigger || ctrl == BRIDGE_UPDATE || (dev != trigger))
 		)
 		{
 			if (ctrl == BRIDGE_RESET)
@@ -1858,7 +1858,7 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 
 		if (
 			(dev->type == EB_DEF_TRUNK)
-		&&	 (!trigger || (dev != trigger))
+		&&	 (!trigger || ctrl == BRIDGE_UPDATE || (dev != trigger))
 		)
 		{
 			if (ctrl == BRIDGE_RESET)
