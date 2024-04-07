@@ -4999,7 +4999,7 @@ static void * eb_device_despatcher (void * device)
 													if (getnameinfo((struct sockaddr *) d->trunk.remote_host->ai_addr, sizeof (struct sockaddr_in), d->trunk.hostname, HOST_NAME_MAX, NULL, 0, 0) != 0) // = is success and we'll have the hostname in d->trunk.hostname; otherwise put numeric in there
 														strncpy (d->trunk.hostname, inet_ntoa(src_addr.sin_addr), 19);
 
-													eb_debug (0, 1, "DESPATCH", "%-8s %3d     Dynamic trunk endpoint found for local port %d at host %s port %d (addr_len = %d, family = %d)", eb_type_str(d->type), d->net, d->trunk.local_port, d->trunk.hostname, ntohs(src_addr.sin_port), addr_len, src_addr.sin_family);
+													eb_debug (0, 1, "DESPATCH", "%-8s %5d   Dynamic trunk endpoint found at host %s port %d (addr_len = %d, family = %d)", eb_type_str(d->type), d->trunk.local_port, d->trunk.hostname, ntohs(src_addr.sin_port), addr_len, src_addr.sin_family);
 
 													// Do a bridge reset
 
