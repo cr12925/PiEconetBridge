@@ -164,15 +164,16 @@ void eb_exit_cleanup(void)
 
 }
 
-void eb_signal_handler (int signal)
+void eb_signal_handler (int sig)
 {
 
-	switch (signal)
+	switch (sig)
 	{
 
 		case SIGINT:
 			eb_exit_cleanup();
-			exit (EXIT_SUCCESS);
+			signal(SIGINT, SIG_DFL);
+			raise(SIGINT);
 			break;
 		default: // Do nothing
 			break;
@@ -4718,10 +4719,10 @@ static void * eb_device_despatcher (void * device)
 			// Set up keepalive thread
 
 			if ((err = pthread_create(&(d->trunk.keepalive_thread), NULL, eb_trunk_keepalive, d)))
-				eb_debug (1, 0, "DESPATCH", "%-8s         Unable to create trunk keepalive thread");
+				eb_debug (1, 0, "DESPATCH", "%-8s         Unable to create trunk keepalive thread", "Trunk");
 			else
 			{
-				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk keepalive thread started");
+				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk keepalive thread started", "Trunk");
 				pthread_detach (d->trunk.keepalive_thread);
 				eb_thread_started();
 			}
