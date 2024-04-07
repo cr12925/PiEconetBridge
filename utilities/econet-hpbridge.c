@@ -8197,7 +8197,11 @@ int eb_readconfig(char *f)
 				search = bridge_fw;
 
 				while (search)
+				{
+					if (!(search->next))
+						break;
 					search = search->next;
+				}
 
 				if (!search)
 					bridge_fw = entry;
@@ -9090,6 +9094,32 @@ int main (int argc, char **argv)
 			fprintf (stderr, "\n");
 		}
 		
+		if (bridge_fw) // Dump firewall rules
+		{
+			struct __eb_fw	*f;
+			int		counter;
+
+			f = bridge_fw;
+
+			fprintf (stderr, "\nBridge firewall rules\n\n");
+
+			counter = 1;
+
+			while (f)
+			{
+				fprintf (stderr, "%7d %-6s %3d.%-3d <--> %3d.%-3d\n", counter++,
+						(f->action == EB_FW_ACCEPT) ? "Accept" : "Drop",
+						f->srcnet, f->srcstn,
+						f->dstnet, f->dststn
+					);
+
+				f = f->next;
+			}
+
+			fprintf (stderr, "Default %-6s\n\n", (EB_FW_DEFAULT == EB_FW_ACCEPT) ? "Accept" : "Drop");
+
+		}
+
 	}
 	
 	// Map check on sample config
