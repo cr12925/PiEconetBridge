@@ -1772,9 +1772,11 @@ static void * eb_bridge_reset_watcher (void *device)
 			update->p.dstnet = 0xff;
 			update->p.dststn = 0xff;
 			
+			update->p.data[0] = sender_net;
+
 			/* Send the reset */
 
-			eb_enqueue_input (me, update, 0);
+			eb_enqueue_input (me, update, 1);
 
 			pthread_cond_signal (&(me->qwake));
 	
