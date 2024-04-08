@@ -8212,7 +8212,7 @@ int eb_readconfig(char *f)
 					search->next = entry; // Put on tail
 
 			}
-			else if (!regexec(&r_netclock, line, 5, matches, 0))
+			else if (!regexec(&r_netclock, line, 6, matches, 0))
 			{
 				double	period;
 				int	mark;
@@ -8220,12 +8220,12 @@ int eb_readconfig(char *f)
 
 				net = atoi(eb_getstring(line, &matches[1]));	
 				period = atof(eb_getstring(line, &matches[2]));
-				mark = atoi(eb_getstring(line, &matches[4]));
+				mark = atoi(eb_getstring(line, &matches[5]));
 
-				if (period > 5.5 || period < 3)
+				if (period > 15.5 || period < 3)
 					eb_debug (1, 0, "CONFIG", "Bad network clock period in line %s", line);
 
-				if (mark > 2)
+				if (mark > 3)
 					eb_debug (1, 0, "CONFIG", "Bad network clock mark in line %s", line);
 
 				if (!networks[net])
