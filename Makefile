@@ -61,7 +61,7 @@ eeprom-general:
 eeprom-v1: eeprom-general
 	@cat v2eeprom/v1warning.txt
 	@read a
-	cp dts/econet-gpio-v1.dtbo /boot/overlays
+	sudo cp dts/econet-gpio-v1.dtbo /boot/overlays
 	@echo Now add "dtoverlay=econet-gpio-v1" to your config.txt
 
 eep: eeprom-general
