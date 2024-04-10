@@ -8678,9 +8678,9 @@ int main (int argc, char **argv)
 	EB_CONFIG_TRUNK_KEEPALIVE_CTRL = 0xD0; // Default keepalive packet ctrl byte
 	EB_CONFIG_TRUNK_DEAD_INTERVAL = EB_CONFIG_TRUNK_KEEPALIVE_INTERVAL * 2.5; // Default trunk dead interval
 	EB_CONFIG_POOL_DEAD_INTERVAL = 1800; // 30 minutes to dead
-	EB_CONFIG_TRUNK_RESET_QTY = 2; // UDP trunks are fairly reliable
+	EB_CONFIG_TRUNK_RESET_QTY = 1; // UDP trunks are fairly reliable
 	EB_CONFIG_TRUNK_UPDATE_QTY = 2; // UDP trunks are fairly reliable
-	EB_CONFIG_WIRE_RESET_QTY = 2; // Same as Acorn / SJ Bridges
+	EB_CONFIG_WIRE_RESET_QTY = 1; // Same as Acorn / SJ Bridges
 	EB_CONFIG_WIRE_UPDATE_QTY = 10; // Same as Acorn / SJ Bridges - avoids clashing with resets
 	EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL = 2000; // 2s between responses to WhatNet / IsNet to a particular station
 	EB_CONFIG_EXTRALOGS = 0; // Extra kernel logging
