@@ -278,8 +278,20 @@ operate. You need only do this once for each physical board.
 
 		First, ensure your EEPROM's write enable solder bridge is made.
 See instructions with your Bridge board or contact supplier if you don't know
-how. @KenLowe's revision 4d boards (and onwards) have a DIP switch to set
-the EEPROM to be write-enabled - it's SW1; set it EAST (ON). Then:
+how. Check the revision number of your board (it'll be printed on the board):
+
+	- Revision 1 boards do not have an EEPROM at all (see (A) above)
+
+	- All revisions up to and including rev. 4c have a solder bridge
+	  on the underside of the board labelled JP1. This will be unmade 
+	  when supplied. It must be made (linked with solder) to write 
+	  to the EEPROM.
+
+	- From rev 4d onwards, SW1 of the DIP switches enables and 	
+	  disables the EEPROM write protect. Set it EAST (ON) to enable
+	  writing to the EEPROM.
+
+	Then:
 
 		make eep 
                 make eeprom-v2
