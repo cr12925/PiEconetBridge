@@ -1262,7 +1262,7 @@ void econet_irq_read(void)
 		else if (sr2 & ECONET_GPIO_S2_OVERRUN) // Receiver overrun
 			printk (KERN_INFO "econet-gpio: econet_irq_read(): RX Overrun at ptr = 0x%02x (SR1 = 0x%02X, SR2 = 0x%02X)\n", econet_pkt_rx.ptr, sr1, sr2);
 		else if (sr2 & ECONET_GPIO_S2_ERR) // Checksum error
-			printk (KERN_INFO "econet-gpio: CRC Error (SR1 = 0x%02X, SR2 = 0x%02X\n", sr1, sr2);
+			printk (KERN_INFO "econet-gpio: CRC Error (SR1 = 0x%02X, SR2 = 0x%02X)\n", sr1, sr2);
 
 		/* 
 		 * If CRC error, that suggests something is badly wrong. 
@@ -2841,7 +2841,7 @@ void econet_set_pwm(uint8_t period, uint8_t mark)
 		return;
 	}
 
-	printk (KERN_INFO "econet-gpio: Econet clock set: period/mark = %d/%d ns\n", mark * 250, period * 250);
+	printk (KERN_INFO "econet-gpio: Econet clock set: period/mark = %d/%d ns\n", period * 250, mark * 250);
 
 }
 
