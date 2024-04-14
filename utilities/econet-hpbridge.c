@@ -8212,20 +8212,20 @@ int eb_readconfig(char *f)
 					search->next = entry; // Put on tail
 
 			}
-			else if (!regexec(&r_netclock, line, 5, matches, 0))
+			else if (!regexec(&r_netclock, line, 6, matches, 0))
 			{
 				double	period;
-				int	mark;
+				double	mark;
 				uint8_t	net;
 
 				net = atoi(eb_getstring(line, &matches[1]));	
 				period = atof(eb_getstring(line, &matches[2]));
-				mark = atoi(eb_getstring(line, &matches[4]));
+				mark = atof(eb_getstring(line, &matches[5]));
 
-				if (period > 5.5 || period < 3)
+				if (period > 15.5 || period < 3)
 					eb_debug (1, 0, "CONFIG", "Bad network clock period in line %s", line);
 
-				if (mark > 2)
+				if (mark > 3)
 					eb_debug (1, 0, "CONFIG", "Bad network clock mark in line %s", line);
 
 				if (!networks[net])
@@ -8234,7 +8234,7 @@ int eb_readconfig(char *f)
 				if (networks[net]->type != EB_DEF_WIRE)
 					eb_debug (1, 0, "CONFIG", "Cannot set network clock on net %d - not defined as Econet", net);
 
-				//fprintf (stderr, "Configuring net %d with period %f (%f) and mark %d (%d - '%s')\n", net, period, (period * 4), mark, (mark * 4), eb_getstring(line, &matches[3]));
+				//fprintf (stderr, "Configuring net %d with period %f (%f) and mark %f (%f - '%s')\n", net, period, (period * 4), mark, (mark * 4), eb_getstring(line, &matches[5]));
 				networks[net]->wire.period = period * 4;
 				networks[net]->wire.mark = mark * 4;
 					
