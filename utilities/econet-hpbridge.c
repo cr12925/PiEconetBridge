@@ -5023,10 +5023,10 @@ static void * eb_device_despatcher (void * device)
 									}
 								}
 								else
-									eb_debug (0, 2, "DESPATCH", "%-8s %3d     Decrypted trunk packet too small (data length = %04x) - discarded", eb_type_str(d->type), d->net, datalength);
+									eb_debug (0, 2, "DESPATCH", "%-8s %5d   Decrypted trunk packet too small (data length = %04x) - discarded", eb_type_str(d->type), d->trunk.local_port, datalength);
 							}
 							else
-								eb_debug (0, 2, "DESPATCH", "%-8s %3d     DecryptFinal of trunk packet failed - decrypted length before call was %04x", eb_type_str(d->type), d->net, d->trunk.encrypted_length);
+								eb_debug (0, 2, "DESPATCH", "%-8s %5d   DecryptFinal of trunk packet failed - decrypted length before call was %04x", eb_type_str(d->type), d->trunk.local_port, d->trunk.encrypted_length);
 						}
 
 						EVP_CIPHER_CTX_free(d->trunk.ctx_dec);
