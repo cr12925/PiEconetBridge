@@ -572,7 +572,7 @@ struct __eb_config {
 #define EB_CFG_TRUNK_NAT "^\\s*TRUNK\\s+PORT\\s+([[:digit:]]{2,5})\\s+XLATE\\s+DISTANT\\s+NET\\s+([[:digit:]]{1,3})\\s+TO\\s+LOCAL\\s+NET\\s+([[:digit:]]{1,3})\\s*$"
 #define EB_CFG_BRIDGE_NET_FILTER "^\\s*BRIDGE\\s+(DROP|ALLOW)\\s+NET\\s+(\\*|[[:digit:]]{1,3})\\s+(INBOUND|OUTBOUND)\\s+ON\\s+(WIRE\\s+NET\\s+[[:digit:]]{1,3}|TRUNK\\s+PORT\\s+[[:digit:]]{2,5})\\s*$"
 #define EB_CFG_BRIDGE_TRAFFIC_FILTER "^\\s*BRIDGE\\s+(DROP|ALLOW)\\s+TRAFFIC\\s+BETWEEN\\s+(\\*|[[:digit:]]{1,3})\\.(\\*|[[:digit:]]{1,3})\\s+AND\\s+(\\*|[[:digit:]]{1,3})\\.(\\*|[[:digit:]]{1,3})\\s*$"
-#define EB_CFG_CLOCK "^\\s*SET\\s+NETWORK\\s+CLOCK\\s+ON\\s+NET\\s+([[:digit:]]{1,3})\\s+PERIOD\\s+([345](\\.[5])?)\\s+MARK\\s+([123])\\s*$"
+#define EB_CFG_CLOCK "^\\s*SET\\s+NETWORK\\s+CLOCK\\s+ON\\s+NET\\s+([[:digit:]]{1,3})\\s+PERIOD\\s+(([3-9]|1[0-5])(\\.(25|50?|75))?)\\s+MARK\\s+([123])\\s*$"
 #define EB_CFG_BINDTO "^\\s*TRUNK\\s+BIND\\s+TO\\s+(.+)\\s*$"
 // Pool system
 #define EB_CFG_NEW_POOL "^\\s*POOL\\s+([A-Z0-9]{1,10})\\s+NETS\\s+([0-9\\,]+)\\s*$"

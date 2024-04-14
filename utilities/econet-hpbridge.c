@@ -4568,7 +4568,7 @@ static void * eb_device_despatcher (void * device)
 			if (d->wire.period) // Clock speed to set
 			{
 				ioctl(d->wire.socket, ECONETGPIO_IOC_NETCLOCK, (d->wire.period << 16) | d->wire.mark);
-				eb_debug (0, 2, "DESPATCH", "%-8s %3d     Network clock configured", "Wire", d->net);
+				eb_debug (0, 2, "DESPATCH", "%-8s %3d     Network clock configured %.2f period / %.2f mark us", "Wire", d->net, (float) d->wire.period / 4, (float) d->wire.mark / 4);
 			}
 
 			eb_debug (0, 2, "DESPATCH", "%-8s %3d     Econet device %s opened successfully (fd %d)", "Wire", d->net, (EB_CONFIG_LOCAL ? "/dev/null" : d->wire.device), d->wire.socket);	
@@ -8212,7 +8212,7 @@ int eb_readconfig(char *f)
 					search->next = entry; // Put on tail
 
 			}
-			else if (!regexec(&r_netclock, line, 6, matches, 0))
+			else if (!regexec(&r_netclock, line, 7, matches, 0))
 			{
 				double	period;
 				double	mark;
@@ -8220,7 +8220,7 @@ int eb_readconfig(char *f)
 
 				net = atoi(eb_getstring(line, &matches[1]));	
 				period = atof(eb_getstring(line, &matches[2]));
-				mark = atof(eb_getstring(line, &matches[5]));
+				mark = atof(eb_getstring(line, &matches[6]));
 
 				if (period > 15.5 || period < 3)
 					eb_debug (1, 0, "CONFIG", "Bad network clock period in line %s", line);
