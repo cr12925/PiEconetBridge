@@ -1838,12 +1838,16 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 
 		/* If trigger is null (internal reset), or it's an update, or (in which case it's a reset) trigger != dev, do reset/update as need be */
 
+		/* If it's a reset and the dev is not the trigger, send a reset to dev. Otherwise, send an update to dev (because either
+		 * we received an update, or we got a reset from the trigger and we need to reply with an update.
+		 */
+
 		if (
 			(dev->type == EB_DEF_WIRE)
-		&&	 (!trigger || ctrl == BRIDGE_UPDATE || (dev != trigger))
+		//&&	 (!trigger || ctrl == BRIDGE_UPDATE || (dev != trigger))
 		)
 		{
-			if (ctrl == BRIDGE_RESET)
+			if ((ctrl == BRIDGE_RESET) && (dev != trigger))
 				pthread_cond_signal(&(dev->bridge_reset_cond));
 			else
 				pthread_cond_signal(&(dev->bridge_update_cond));
@@ -1864,10 +1868,10 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 
 		if (
 			(dev->type == EB_DEF_TRUNK)
-		&&	 (!trigger || ctrl == BRIDGE_UPDATE || (dev != trigger))
+		//&&	 (!trigger || ctrl == BRIDGE_UPDATE || (dev != trigger))
 		)
 		{
-			if (ctrl == BRIDGE_RESET)
+			if ((ctrl == BRIDGE_RESET) && (dev != trigger))
 				pthread_cond_signal(&(dev->bridge_reset_cond));
 			else
 				pthread_cond_signal(&(dev->bridge_update_cond));
@@ -1876,6 +1880,7 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 
 		dev = dev->next;
 	}
+
 }
 
 /* 
@@ -1937,9 +1942,6 @@ void eb_bridge_reset (struct __eb_device *trigger)
 	// Send bridge reset onwards to sources other than trigger - use eb_bridge_update with correct ctrl byte
 
 	eb_bridge_update (trigger, BRIDGE_RESET); // Reset
-
-	if (trigger) // If there was a trigger for the reset, send it an update
-		pthread_cond_signal(&(trigger->bridge_update_cond));
 
 }
 
