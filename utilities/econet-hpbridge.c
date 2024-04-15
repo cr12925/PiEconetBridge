@@ -1938,6 +1938,9 @@ void eb_bridge_reset (struct __eb_device *trigger)
 
 	eb_bridge_update (trigger, BRIDGE_RESET); // Reset
 
+	if (trigger) // If there was a trigger for the reset, send it an update
+		pthread_cond_signal(&(trigger->bridge_update_cond));
+
 }
 
 /* 
