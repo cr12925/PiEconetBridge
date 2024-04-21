@@ -1083,6 +1083,8 @@ void fs_copy_to_cr(unsigned char *dest, unsigned char *src, unsigned short len)
 	}
 
 	*(dest+count) = '\0';	
+
+	while (strrchr(dest, ' ')) *(strrchr(dest, ' ')) = '\0'; // Get rid of trailing spaces
 }
 
 int fs_aun_send(struct __econet_packet_udp *p, int server, int len, unsigned short net, unsigned short stn)
@@ -9330,7 +9332,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 						fs_copy_to_cr(params, param, 255);
 
-						if (sscanf(params, "%10s %80s", username, dir) == 2)
+						if (strchr(params, ' ') && sscanf(params, "%10s %80s", username, dir) == 2)
 						{
 							fs_debug (0, 1, "%12sfrom %3d.%3d Set Home dir for user %s to %s", "", net, stn, username, dir);
 							uid = fs_get_uid(server, username);
