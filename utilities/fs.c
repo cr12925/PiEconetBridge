@@ -9721,29 +9721,31 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							sprintf(homepath, "%s/%1x%s/%s", fs_stations[server].directory, 0, fs_discs[server][0].name, username);
 							sprintf(acorn_homepath, ":%s.$.%s", fs_discs[server][0].name, username);
 
-							if ((ftype = fs_exists(server, active_id, acorn_homepath)) == FS_FTYPE_NOTFOUND && mkdir((const char *) homepath, 0770) != 0)
-								fs_error(server, reply_port, net, stn, 0xff, "Unable to create home directory");
+							ftype = fs_exists(server, active_id, acorn_homepath);
+
+							if (ftype == FS_FTYPE_NOTFOUND)
+							{
+								if (mkdir((const char *) homepath, 0770) != 0)
+									fs_error(server, reply_port, net, stn, 0xff, "Unable to create home directory");
+								else
+									ftype = FS_FTYPE_DIR; // Successfully created the dir
+							}
+
+							if (ftype != FS_FTYPE_DIR)
+							{
+								fs_debug (0, 1, "%12sfrom %3d.%3d New user %s's home path exists and is not a directory - fs_exists() returned %d", "", net, stn, username, ftype);
+								fs_error(server, reply_port, net, stn, 0xff, "Home path exists and is wrong type");
+							}
 							else
 							{
-								if (ftype != FS_FTYPE_NOTFOUND)
-								{
-									fs_debug (0, 1, "%12sfrom %3d.%3d New user %s's home director exists - fs_exists() returned %d", "", net, stn, username, ftype);
-									fs_error(server, reply_port, net, stn, 0xff, "Home path exists. Unable to create home directory");
-								}
-
-								else
-								{
-									users[server][id].priv = FS_PRIV_USER;
-									fs_write_xattr(homepath, id, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0, id, server); // Set home ownership. Is there a mortgage?
-								
-									fs_write_user(server, id, (unsigned char *) &(users[server][id]));
-									if (id >= fs_stations[server].total_users) fs_stations[server].total_users = id+1;
-									fs_reply_ok(server, reply_port, net, stn);
-									fs_debug (0, 1, "%12sfrom %3d.%3d New User %s, id = %d, total users = %d", "", net, stn, username, id, fs_stations[server].total_users);
-								}
+								users[server][id].priv = FS_PRIV_USER;
+								fs_write_xattr(homepath, id, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0, id, server); // Set home ownership. Is there a mortgage?
 							
+								fs_write_user(server, id, (unsigned char *) &(users[server][id]));
+								if (id >= fs_stations[server].total_users) fs_stations[server].total_users = id+1;
+								fs_reply_ok(server, reply_port, net, stn);
+								fs_debug (0, 1, "%12sfrom %3d.%3d New User %s, id = %d, total users = %d", "", net, stn, username, id, fs_stations[server].total_users);
 							}
-							
 						}
 					}
 
