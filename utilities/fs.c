@@ -2755,6 +2755,31 @@ int fs_normalize_path(int server, int user, unsigned char *path, short relative_
 		return fs_normalize_path_wildcard(server, user, path, relative_to, result, 0);
 }
 
+
+/*
+ * fs_exists()
+ *
+ * Check whether a given acorn path on a given server for a given active_id
+ * exists. Return one of the FS_FTYPE_* constants, or 0 for not exist
+ *
+ */
+
+uint8_t fs_exists(int server, int active_id, unsigned char *path)
+{
+
+	struct path 	p;
+	uint8_t		fsnp;
+
+	fsnp = fs_normalize_path(server, active_id, path, -1, &p);
+
+	//fprintf (stderr, "fs_normalize_path for %s returned %d, result->ftype = %d\n", path, fsnp, p.ftype);
+	if (fsnp == 0 || p.ftype == FS_FTYPE_NOTFOUND)
+		return FS_FTYPE_NOTFOUND;
+	else
+		return p.ftype;
+
+}
+
 void fs_write_user(int server, int user, unsigned char *d) // Writes the 256 bytes at d to the user's record in the relevant password file
 {
 
@@ -9672,6 +9697,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					else
 					{
 						int id;
+						uint8_t	ftype;
 
 						id = fs_find_new_user(server);
 		
@@ -9680,6 +9706,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						else
 						{
 							char homepath[300];
+							char acorn_homepath[300];
 
 							snprintf((char * ) users[server][id].username, 11, "%-10s", username);
 							snprintf((char * ) users[server][id].password, 11, "%-10s", "");
@@ -9689,23 +9716,33 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							snprintf((char * ) users[server][id].home, 97, "$.%s", username);
 							snprintf((char * ) users[server][id].lib, 97, "$.%s", "Library");
 							users[server][id].home_disc = 0;
-							users[server][id].priv = 0;
+							users[server][id].priv = 0; // Inactive unless we succeed
 							
 							sprintf(homepath, "%s/%1x%s/%s", fs_stations[server].directory, 0, fs_discs[server][0].name, username);
-							if (mkdir((const char *) homepath, 0770) != 0)
+							sprintf(acorn_homepath, ":%s.$.%s", fs_discs[server][0].name, username);
+
+							if ((ftype = fs_exists(server, active_id, acorn_homepath)) == FS_FTYPE_NOTFOUND && mkdir((const char *) homepath, 0770) != 0)
 								fs_error(server, reply_port, net, stn, 0xff, "Unable to create home directory");
 							else
 							{
-								users[server][id].priv = FS_PRIV_USER;
-								fs_write_xattr(homepath, id, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0, id, server); // Set home ownership. Is there a mortgage?
-							
-								fs_write_user(server, id, (unsigned char *) &(users[server][id]));
-								if (id >= fs_stations[server].total_users) fs_stations[server].total_users = id+1;
-								fs_reply_ok(server, reply_port, net, stn);
-								fs_debug (0, 1, "%12sfrom %3d.%3d New User %s, id = %d, total users = %d", "", net, stn, username, id, fs_stations[server].total_users);
+								if (ftype != FS_FTYPE_NOTFOUND)
+								{
+									fs_debug (0, 1, "%12sfrom %3d.%3d New user %s's home director exists - fs_exists() returned %d", "", net, stn, username, ftype);
+									fs_error(server, reply_port, net, stn, 0xff, "Home path exists. Unable to create home directory");
+								}
+
+								else
+								{
+									users[server][id].priv = FS_PRIV_USER;
+									fs_write_xattr(homepath, id, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0, id, server); // Set home ownership. Is there a mortgage?
+								
+									fs_write_user(server, id, (unsigned char *) &(users[server][id]));
+									if (id >= fs_stations[server].total_users) fs_stations[server].total_users = id+1;
+									fs_reply_ok(server, reply_port, net, stn);
+									fs_debug (0, 1, "%12sfrom %3d.%3d New User %s, id = %d, total users = %d", "", net, stn, username, id, fs_stations[server].total_users);
+								}
 							
 							}
-							
 							
 						}
 					}
