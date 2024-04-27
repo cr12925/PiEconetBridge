@@ -2027,7 +2027,7 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 		if (
 			(ctrl == BRIDGE_WHATNET && (timediffmsec(&(source->wire.last_bridge_whatnet[stn]), &now) > EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL))
 		||	
-			(ctrl == BRIDGE_ISNET && (timediffmsec(&(source->wire.last_bridge_isnet[stn]), &now) > EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL))
+			(ctrl == BRIDGE_ISNET /* this is wrong! && (timediffmsec(&(source->wire.last_bridge_isnet[stn]), &now) > EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL) */)
 		)
 		{
 			//usleep (5 * 1000 * farside); // Delay
