@@ -24,6 +24,8 @@ econet-remote: econet-remote.o econet-pipe.o
 
 econet-fslist: econet-fslist.o econet-pipe.o
 
+econet-isnets: econet-isnets.o econet-pipe.o
+
 econet-servers: econet-servers.o econet-pipe.o
 
 econet-ipgw: econet-ipgw.o econet-pipe.o
@@ -53,6 +55,8 @@ econet-notify.o: econet-notify.c econet-pipe.c ../include/econet-gpio-consumer.h
 econet-remote.o: econet-remote.c econet-pipe.c ../include/econet-gpio-consumer.h
 
 econet-fslist.o: econet-fslist.c econet-pipe.c ../include/econet-gpio-consumer.h
+
+econet-isnets.o: econet-isnets.c econet-pipe.c ../include/econet-gpio-consumer.h
 
 econet-servers.o: econet-servers.c econet-pipe.c ../include/econet-gpio-consumer.h
 
