@@ -1574,6 +1574,30 @@ only for users with SYST privileges. They are as follows:
 %CONFIG		Readable FS config for this FS (e.g. will show you
 		the current settings of each of the NETCONFIG variables)
 
+SPECIAL CHARACTERS
+------------------
+
+Where a filename presented by a client begins with one of the following
+special characters (whether alone, or with a path following it), the FS
+will infer that the user wants to address a relative pathname as follows:
+
+@	User working directory
+&	User home/root directory
+%	User library directory
+
+For example, cataloging as follows is the equivalent of *LCAT on ANFS:
+
+	*.%
+
+The following will open a file underneath the URD:
+
+	X = OPENIN("&.SUBDIR.FILE")
+
+And if the user's working directory is $.USER.WORK and they execute
+the following command, it is equivalent to "*.$.USER.WORK.SUBDIR"
+
+	*.@.SUBDIR
+
 
 *FAST 
 -----
