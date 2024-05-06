@@ -1983,11 +1983,13 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		strcpy(path, active[server][user].fhandles[relative_to].acornfullpath);
 	else if (relative_to != -1 && (path[0] != ':' && path[0] != '$') /* && path[0] != '&' */)
 	{
-		unsigned char	temp_path[1048];
+		unsigned char	temp_path[2096];
 
 		// 20240506 sprintf(path, "%s.%s", active[server][user].fhandles[relative_to].acornfullpath, received_path);
-		snprintf(temp_path, 1023, "%s.%s", active[server][user].fhandles[relative_to].acornfullpath, path);
-		strcpy(path, temp_path);
+		snprintf(temp_path, 2095, "%s.%s", active[server][user].fhandles[relative_to].acornfullpath, path);
+		// Copy & truncate if need be
+		memcpy (path, temp_path, 1024);
+		path[1025] = '\0';
 	}
 
 	if (normalize_debug && relative_to != -1) fs_debug (0, 1, "Path provided: '%s', relative to '%s'", received_path, active[server][user].fhandles[relative_to].acornfullpath);
