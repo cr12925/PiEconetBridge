@@ -9662,13 +9662,45 @@ static void * eb_statistics (void *nothing)
 
 		fprintf (output, "#Pi Econet Bridge Statistics Socket\n");
 
+		/* Dump trunk info first */
+
+		device = trunks;
+
+		while (device)
+		{
+
+			pthread_mutex_lock (&(device->statsmutex));
+
+			if (difftime(time(NULL), device->last_rx) > EB_CONFIG_TRUNK_DEAD_INTERVAL) // Trunk never used
+				fprintf (output, "999|000|Trunk|Local %d to %s:%d|%" PRIu64 "|%" PRIu64 "|Dead|\n",	(device->trunk.local_port), (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), (device->trunk.hostname ? device->trunk.remote_port : 0), device->b_in, device->b_out);
+			else
+				fprintf (output, "999|000|Trunk|Local %d to %s:%d|%" PRIu64 "|%" PRIu64 "|%.0f|\n",	(device->trunk.local_port), (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), (device->trunk.hostname ? device->trunk.remote_port : 0), device->b_in, device->b_out, difftime(time(NULL), device->last_rx));
+		
+			pthread_mutex_unlock (&(device->statsmutex));
+
+			device = device->next;
+		}
+
+
+/*
 		device = devices;
 
 		while (device)
 		{
+*/
+
+		/* Count through the nets instead of devices */
+
+		for (net = 1; net < 255; net++)
+		{
+
 			char 	trunkdest[256];
 
 			strcpy (trunkdest, "");
+
+			device = eb_get_network(net);
+
+			if (!device) continue;
 
 			switch (device->type)
 			{
@@ -9690,7 +9722,7 @@ static void * eb_statistics (void *nothing)
 						
 			pthread_mutex_lock (&(device->statsmutex));
 
-			fprintf (output, "%03d|000|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	device->net, eb_type_str(device->type), 
+			fprintf (output, "%03d|000|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	net, eb_type_str(device->type), 
 				trunkdest,
 				device->b_in, device->b_out);
 		
@@ -9698,11 +9730,11 @@ static void * eb_statistics (void *nothing)
 
 			if (device->type == EB_DEF_POOL) // Dump live pool connections
 			{
-				uint8_t		net;
+				//uint8_t		net;
 				struct __eb_pool_host	*hostlist;
 				char		dest[128];
 
-				net = device->net;
+				//net = device->net;
 
 				pthread_mutex_lock(&(device->pool.data->updatemutex));
 
@@ -9733,7 +9765,7 @@ static void * eb_statistics (void *nothing)
 								(hostlist->is_static ? "(static) " : ""));
 	
 						pthread_mutex_lock (&(hostlist->statsmutex));
-						fprintf (output, "%03d|%03d|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	device->net, hostlist->stn, "Pool", dest, hostlist->b_in, hostlist->b_out);
+						fprintf (output, "%03d|%03d|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	net, hostlist->stn, "Pool", dest, hostlist->b_in, hostlist->b_out);
 						pthread_mutex_unlock (&(hostlist->statsmutex));
 					}
 
@@ -9744,8 +9776,8 @@ static void * eb_statistics (void *nothing)
 
 			}
 
-			if (device->type == EB_DEF_NULL || device->type == EB_DEF_WIRE)
-			{
+			if ((net == device->net) && (device->type == EB_DEF_NULL || device->type == EB_DEF_WIRE))
+			{	
 
 				for (uint8_t stn = 1; stn < 255; stn++)
 				{
@@ -9789,30 +9821,16 @@ static void * eb_statistics (void *nothing)
 				}						
 			}
 
-			device = device->next;
+			/* device = device->next; */
 
 		}
 
-		device = trunks;
-
-		while (device)
-		{
-
-			pthread_mutex_lock (&(device->statsmutex));
-
-			if (difftime(time(NULL), device->last_rx) > EB_CONFIG_TRUNK_DEAD_INTERVAL) // Trunk never used
-				fprintf (output, "999|000|Trunk|Local %d to %s:%d|%" PRIu64 "|%" PRIu64 "|Dead|\n",	(device->trunk.local_port), (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), (device->trunk.hostname ? device->trunk.remote_port : 0), device->b_in, device->b_out);
-			else
-				fprintf (output, "999|000|Trunk|Local %d to %s:%d|%" PRIu64 "|%" PRIu64 "|%.0f|\n",	(device->trunk.local_port), (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), (device->trunk.hostname ? device->trunk.remote_port : 0), device->b_in, device->b_out, difftime(time(NULL), device->last_rx));
-		
-			pthread_mutex_unlock (&(device->statsmutex));
-
-			device = device->next;
-		}
+		/* Now done above */
 
 		// And now the rest of the networks which are via other devices
 
-		for (net = 1; net < 255; net++)
+		//for (net = 1; net < 255; net++)
+		if (0)
 		{
 			struct __eb_device *device;
 
@@ -9909,6 +9927,7 @@ static void * eb_statistics (void *nothing)
 				}
 			}
 		}
+
 
 		fclose(output);
 		
