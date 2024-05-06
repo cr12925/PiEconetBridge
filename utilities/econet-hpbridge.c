@@ -1,5 +1,5 @@
 /*
-  (c) 2022 Chris Royle
+  (c) 2024 Chris Royle
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
@@ -14,6 +14,8 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 */
+
+// #define IPV6_TRUNKS
 
 #define _GNU_SOURCE
 
@@ -85,6 +87,9 @@ extern uint8_t fs_set_syst_bridgepriv;
 // Some globals
 
 in_addr_t 	bindhost = 0; // IP to bind to if specified. Only used for trunks at the moment.
+#ifdef IPV6_TRUNKS
+struct addrinfo	*trunk_bindhosts; // For when we entertain IPv6
+#endif
 
 struct __eb_fw *bridge_fw; // Bridge-wide firewall policy
 
@@ -1901,6 +1906,8 @@ void eb_bridge_reset (struct __eb_device *trigger)
 
 	char 	info[20];
 	struct __eb_device	*dev;
+	uint8_t	pipe_stations[8192]; // Flag currently active pipes and reactivate them on the station reset
+	uint16_t	pipe_counter;
 
 	if (trigger)
 		snprintf (info, 19, "net %d", trigger->net);
@@ -1918,11 +1925,39 @@ void eb_bridge_reset (struct __eb_device *trigger)
 			eb_set_exposures_inactive(n);
 
 	memcpy (&networks, &networks_initial, sizeof(networks));
+	
+	/* Find active pipe devices
+	 * so that we can re-activate them after we re-set the
+	 * station map to the startup value, below
+	 *
+	 * ** Known potential issue: the skt_write value on
+	 * a pipe might be changing while we look at it here.
+	 * It probably needs a lock.
+	 *
+	 */
+
+	memset (pipe_stations, 0, sizeof(pipe_stations));
+
+	dev = devices;
+
+	while (dev)
+	{
+
+		if ((dev->type == EB_DEF_PIPE) && (dev->pipe.skt_write != -1)) // Active pipe
+		{
+			ECONET_SET_STATION(pipe_stations, dev->net, dev->pipe.stn);
+		}
+
+		dev = dev->next;
+
+	}
+
 	pthread_mutex_unlock (&networks_update);
 
 	eb_debug (0, 2, "BRIDGE", "%-8s         Networks list reset", (trigger ? eb_type_str(trigger->type) : "Internal"));
 
 	// Reset station map to defaults on each wire net as well
+	// Re-uses dev
 
 	dev = devices;
 
@@ -1931,6 +1966,12 @@ void eb_bridge_reset (struct __eb_device *trigger)
 		if (dev->type == EB_DEF_WIRE)
 		{
 			memcpy (&(dev->wire.stations), &(dev->wire.stations_initial), sizeof (dev->wire.stations));
+
+			/* Copy active pipe stations into the MAP */
+
+			for (pipe_counter = 0; pipe_counter < sizeof(pipe_stations); pipe_counter++)
+				dev->wire.stations[pipe_counter] |= pipe_stations[pipe_counter];
+
 			ioctl (dev->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(dev->wire.stations));
 			eb_debug (0, 2, "BRIDGE", "%-8s         Station set reset on wire network %d", (trigger ? eb_type_str(trigger->type) : "Internal"), dev->net);
 		}
@@ -2017,6 +2058,13 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 		}
 	}
 
+	/*
+	 * On IsNet, only reply if:
+	 * (i) we know the network
+	 * (ii) it isn't a network on this source device (i.e. local or known by another bridge on the device)
+	 *
+	 */
+	
 	if ((ctrl == BRIDGE_ISNET && networks[query_net] && networks[query_net] != source) || (ctrl == BRIDGE_WHATNET))
 	{
 		
@@ -7165,7 +7213,13 @@ int eb_readconfig(char *f)
 {
 
 	FILE 	*cfg;
+
+#ifdef IPV6_TRUNKS
+	int	getaddrerr;
 	
+	struct addrinfo	hints;
+#endif
+
 	regex_t	r_comment,
 		r_empty,
 		r_wire,
@@ -7273,6 +7327,55 @@ int eb_readconfig(char *f)
 
 	if (regcomp(&r_pool_net_wire, EB_CFG_NET_POOL_WIRE, REG_EXTENDED | REG_ICASE) != 0)
 		eb_debug(1, 0, "CONFIG", "Cannot compile wire net pool regex");
+
+#ifdef IPV6_TRUNKS
+
+	/* Set up default trunk bind hosts - NB this is not used yet... */
+
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_DGRAM;
+	hints.ai_protocol = 0;
+	hints.ai_flags = AI_PASSIVE;
+
+	if ((getaddrerr = getaddrinfo(NULL, "32768", &hints, &trunk_bindhosts)))
+	{
+		eb_debug(1, 0, "CONFIG", "Cannot getaddrinfo(any): %s", gai_strerror(getaddrerr));
+	}
+	else
+	{
+		struct addrinfo	*a;
+		/*
+		 * NB, if user has TRUNK BIND in their config, we'll need to
+		 * free the *res list with freeaddrinfo()
+		 */
+
+		a = trunk_bindhosts;
+
+		while (a)
+		{
+			char 	addr_str[40];
+
+			switch (a->ai_family)
+			{
+				case AF_INET:
+					inet_ntop(AF_INET, &(((struct sockaddr_in *)a->ai_addr)->sin_addr), addr_str, a->ai_addrlen);
+					break;
+				case AF_INET6:
+					inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)a->ai_addr)->sin6_addr), addr_str, a->ai_addrlen);
+					break;
+
+				default: strcpy(addr_str, "Unknown family"); break;
+			}
+
+			eb_debug (0, 1, "CONFIG", "'Any' address includes %s", addr_str);
+
+			a = a->ai_next;
+		}
+
+
+
+	}
+#endif // IPV6_TRUNKS
 
 	/* Open config
 	*/
@@ -8250,6 +8353,31 @@ int eb_readconfig(char *f)
 				struct hostent	*h;
 
 				strncpy (host, eb_getstring(line, &matches[1]), 254);
+
+				/* TODO
+				 *
+				 * Change to getaddrinfo() and change bindhost to be
+				 * struct addrinfo * - the res parameter on
+				 * getaddrinfo(). Then change the trunks to be able
+				 * to open both IPv4 and IPv6 sockets (there will need
+				 * to be an array of sockets...), poll them all, and
+				 * deal with what happens if the host at the other end
+				 * is multi-homed.
+				 * If there's no bindhost list, the trunks should open
+				 * INADDR_ANY / IPv6 equivalent sockets on all 
+				 * addresses. 
+				 *
+				 * The poll() calls can just deal with the first one
+				 * they find with traffic, and the others will flag
+				 * POLLIN on the next poll() anyway.
+				 *
+				 * The trunks will also want changing to understand IPv6
+				 * traffic from an unknown source.
+				 *
+				 * No point doing IPv6 for AUN because no true AUN
+				 * devices actually use it.
+				 *
+				 */
 
 				h = gethostbyname2(host, AF_INET); // IPv4 only
 
@@ -9650,7 +9778,11 @@ static void * eb_statistics (void *nothing)
 	
 						pthread_mutex_lock (&(divert->statsmutex));
 
-						fprintf (output, "%03d|%03d|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	divert->net, stn, eb_type_str(divert->type), info, divert->b_in, divert->b_out);
+						/*
+						 * Don't bother outputting inactive AUN
+						 */
+
+						if (divert->type != EB_DEF_AUN || divert->aun->port != -1) fprintf (output, "%03d|%03d|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	divert->net, stn, eb_type_str(divert->type), info, divert->b_in, divert->b_out);
 		
 						pthread_mutex_unlock (&(divert->statsmutex));
 					}

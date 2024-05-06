@@ -1802,6 +1802,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	int parent_owner = 0;
 	short found;
 	unsigned char path[1030];
+	uint8_t	special_path; // Set to 1 below if user is selecting a filename beginning %, @, &
 
 	unsigned short homeof_found = 0; // Non-zero if we traverse a known home directory
 
@@ -1810,6 +1811,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	DIR *dir;
 	//struct dirent *d;
 	short count;
+
+	special_path = 0;
 
 	userid = FS_ACTIVE_UID(server, user); // Converts 'user' (which is an index into active[]) into the underlying userid
 
@@ -1928,6 +1931,45 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	else
 		strcpy(path, received_path);
 
+	/* First, fudge 'relative_to' if filename is any of &, @, %
+	 */
+
+	/* Check for the three specials, and make sure they are either followed by '.' or end of line */
+
+	if ((path[0] == '&' || path[0] == '@' || path[0] == '%') && (path[1] == '\0' || path[1] == '.'))
+	{
+
+		unsigned char	temp_path[1048];
+
+		special_path++; // Will already be 1 if this was a path below [%&@] - e.g. %.LIBRARY, this adds another one so that we skip the '.'. Otherwise we're just skipping the [%&@] because there will be a null at the end of it, which we then detect as a 0 length string in the ajuster else {} block below.
+
+		if (path[1] == '.')
+			special_path++; // Skip the .
+
+		switch (path[0])
+		{
+			case '&':	relative_to = active[server][user].root; break;
+			case '@':	relative_to = active[server][user].current; break;
+			case '%':	relative_to = active[server][user].lib; break;
+		}
+
+		if (normalize_debug)
+		{
+			fs_debug (0, 1, "Special character detected '%c': User id = %d, active id = %d, special_path = %d, new relative_to = %d", path[0], active[server][user].userid, user, special_path, relative_to);
+		}
+
+		// Pretend we were given the bit after the special character
+
+		strcpy (temp_path, (path + special_path));
+		strcpy (path, temp_path);
+
+		if (normalize_debug)
+		{
+			fs_debug (0, 1, "User id = %d, active id = %d, new relative path = '%s'", active[server][user].userid, user, path);
+		}
+
+	}
+
 	if (normalize_debug) fs_debug(0,1, "path=%s, received_path=%s, relative to %d, wildcard = %d, server %d, user %d, active user fhandle.handle = %d, acornfullpath = %s", path, received_path, relative_to, wildcard, server, user, active[server][user].fhandles[relative_to].handle, active[server][user].fhandles[relative_to].acornfullpath);
 
 	// If the handle we have for 'relative to' is invalid, then return directory error
@@ -1939,8 +1981,14 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	// Cope with null path relative to dir on another disc
 	if (strlen(path) == 0 && relative_to != -1)
 		strcpy(path, active[server][user].fhandles[relative_to].acornfullpath);
-	else if (relative_to != -1 && (path[0] != ':' && path[0] != '$') && path[0] != '&')
-		sprintf(path, "%s.%s", active[server][user].fhandles[relative_to].acornfullpath, received_path);
+	else if (relative_to != -1 && (path[0] != ':' && path[0] != '$') /* && path[0] != '&' */)
+	{
+		unsigned char	temp_path[1048];
+
+		// 20240506 sprintf(path, "%s.%s", active[server][user].fhandles[relative_to].acornfullpath, received_path);
+		snprintf(temp_path, 1023, "%s.%s", active[server][user].fhandles[relative_to].acornfullpath, path);
+		strcpy(path, temp_path);
+	}
 
 	if (normalize_debug && relative_to != -1) fs_debug (0, 1, "Path provided: '%s', relative to '%s'", received_path, active[server][user].fhandles[relative_to].acornfullpath);
 	else if (normalize_debug) fs_debug (0, 1, "Path provided: '%s', relative to nowhere", received_path);
@@ -2033,6 +2081,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 	// This probably now redundant given the relative adjustment at the head of this routine, but might be relevant if relative_path == -1;
 
+
 	if (path_internal[0] == '$') // Absolute path given
 	{
 		if (normalize_debug) fs_debug (0, 1, "Found $ specifier with %02x as next character", path_internal[1]);
@@ -2045,22 +2094,24 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		// Set up 'adjusted' accordingly
 		strcpy(adjusted, path_internal + ptr);
 	}
-/* This section fails because for some reason active[server][user].root is garbage! - it is intended to let NFS clients (as opposed to ANFS) use the &.XXX path nomenclature
+	/* Commented - doesn't work - we'll fudge this another way - see above
 	else if (path_internal[0] == '&') // Append home directory
 	{
 		if (normalize_debug) fs_debug (0, 1, "Found & specifier with %02x as next character\n", path_internal[1]);
 		switch (path_internal[1])
 		{
 			case '.': ptr = 2; break;
+			case '\0': ptr = 1; break;
 			default: result->error = FS_PATH_ERR_FORMAT; return 0; break; // Must have a . after & in a path
 		}
 		if (normalize_debug)
 		{
-			fs_debug (0, 1, "User id = %d, active id = %d, root handle = %d, full acorn path = %s\n", active[server][user].userid, user, active[server][user].root, active[server][user].fhandles[active[server][user].root].acornfullpath);
+			fs_debug (0, 1, "User id = %d, active id = %d, root handle = %d, full acorn path = %s", active[server][user].userid, user, active[server][user].root, active[server][user].fhandles[active[server][user].root].acornfullpath);
 		}
-		snprintf (adjusted, 1000, ":%s.%s.%s", fs_discs[server][users[server][active[server][user].userid].home_disc].name, active[server][user].fhandles[active[server][user].root].acornfullpath, path_internal + ptr);	
+		if (ptr == 2) snprintf (adjusted, 1046, "%s.%s", active[server][user].fhandles[active[server][user].root].acornfullpath, path_internal + ptr);	
+		else snprintf (adjusted, 1046, "%s", active[server][user].fhandles[active[server][user].root].acornfullpath);
 	}
-*/
+	*/
 	else // relative path given - so give it relative to the relevant handle
 	{
 		unsigned short fp_ptr = 0;
@@ -2084,8 +2135,12 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			else	strcpy(adjusted, "");
 		}
 
-		strcat(adjusted, path_internal);
+		strcat(adjusted, path_internal); 
 
+		if (normalize_debug)
+		{
+			fs_debug (0, 1, "User id = %d, active id = %d, adjusted acorn path = %s", active[server][user].userid, user, adjusted);
+		}
 	}
 	
 	if (result->disc == -1)
