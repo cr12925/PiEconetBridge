@@ -249,7 +249,7 @@ When rebooted, log back in over SSH and install the bridge software
 
 	git clone https://github.com/cr12925/PiEconetBridge 
         cd PiEconetBridge
-        make
+        make install
 
 The software should compile cleanly.
 
@@ -1253,7 +1253,7 @@ above with the sample commands below, whilst logged in as (or sudo'd to) root:
 
 	chown -R pi /econet
 
-(The default 'make' install will put a hierarchy like that in your home 
+(The default 'make install' will put a hierarchy like that in your home 
 directory ready - but you can move it where you like in the filesystem, or
 create a complete new one. Or several if you are implementing several
 fileservers!)

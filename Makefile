@@ -1,4 +1,4 @@
-all:		install-hp
+all:		build-module build-utilities
 
 install:	install-hp
 
@@ -6,15 +6,17 @@ install-mkgroup:
 	-sudo groupadd econet
 	-sudo usermod -a -G econet `whoami`
 
-install-module:	install-mkgroup
+build-module:
 	[ -e /lib/modules/`uname -r`/build ] || sudo ln -s /usr/src/linux-headers-`uname -r` /lib/modules/`uname -r`/build
 	[ -f include/econet-gpio-kernel-mode.h ] || touch include/econet-gpio-kernel-mode.h
 	cd module ; make clean ; make
+
+install-module:	install-mkgroup build-module
 	[ -f /etc/udev/rules.d/90-econet.rules ] || sudo cp udev/90-econet.rules /etc/udev/rules.d/90-seconet.rules
 	sudo cp module/econet-gpio.ko /lib/modules/`uname -r`/kernel/drivers/net
 	sudo /usr/sbin/depmod
 
-utilities: install-mkgroup
+build-utilities: install-mkgroup
 	-sudo systemctl stop econet-hpbridge
 	cd utilities ; make
 
