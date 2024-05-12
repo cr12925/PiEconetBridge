@@ -467,6 +467,7 @@ struct __eb_config {
 	uint8_t		wire_update_qty; // Number of bridge update copies to send on Econet wires
 	uint32_t		wire_bridge_query_interval; // Gap between successive IsNet or WhatNet responses to a given station on the wire (ms)
 	uint8_t		wire_extralogs; // Turn extra kernel logging on to dmesg
+	uint8_t		nokeepalivedebug; // Stops the bridge logging trunk keepalives (or at least anything on port &9C, ctrl &D0)
 };
 
 /* Global debug vars */
@@ -514,6 +515,7 @@ struct __eb_config {
 #define EB_CONFIG_WIRE_UPDATE_QTY	(config.wire_update_qty)
 #define EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL	(config.wire_bridge_query_interval)
 #define EB_CONFIG_EXTRALOGS	(config.wire_extralogs)
+#define EB_CONFIG_NOKEEPALIVEDEBUG	(config.nokeepalivedebug)
 
 // Printer status
 

@@ -841,6 +841,9 @@ void eb_dump_packet (struct __eb_device *source, char dir, struct __econet_packe
 	if (!(EB_CONFIG_PKT_DUMP_OPTS & dir))
 		return;
 
+	if (EB_CONFIG_NOKEEPALIVEDEBUG && p->p.port == 0x9C && p->p.ctrl == 0xD0) // Trunk keepalive - exit if filtered
+		return;
+
 	sprintf (dumpstring, "%-8s %3d.%3d from %3d.%3d P:&%02X C:&%02X (%c) Type %3s Seq 0x%08X Length 0x%04X addr %p",
 		eb_type_str(source->type),
 		p->p.dstnet,
@@ -1651,17 +1654,17 @@ static void * eb_bridge_update_watcher (void *device)
 			{
 	
 				uint8_t		is_filtered = 0;
-	
+
 				if (me->type == EB_DEF_WIRE)
 					is_filtered = me->wire.filter_out[net_count];
 				else	is_filtered = me->trunk.filter_out[net_count];
 	
 				if (!is_filtered && networks[net_count] && networks[net_count] != me) // Don't send to trigger, and don't trombone
 				{
-					char netstr[5];
+					char netstr[10];
 	
 					update->p.data[numnets++] = net_count;
-					snprintf (netstr, 5, "%3d ", net_count);
+					snprintf (netstr, 6, "%3d ", net_count);
 					strcat (debug_string, netstr);
 				}
 			}
@@ -8704,6 +8707,7 @@ Bridge protocol tuning:\n\
 --trunk-reset-qty n\tNumber of bridge resets to send on UDP trunks (Current %d)\n\
 --trunk-update_qty n\tNumber of bridge update packets to send on UDP trunks (Current %d)\n\
 --bridge-query-interval n\tMinimum time between bridge query responses sent to a given station on the Econet (ms) (Current %d)\n\
+--no-keepalive-debug\tFilter packet dumps for port &9C ctrl &D0 (bridge keepalives)\n\
 \n\
 Statistics port control:\n\
 \n\
@@ -8817,6 +8821,7 @@ int main (int argc, char **argv)
 	EB_CONFIG_WIRE_UPDATE_QTY = 10; // Same as Acorn / SJ Bridges - avoids clashing with resets
 	EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL = 2000; // 2s between responses to WhatNet / IsNet to a particular station
 	EB_CONFIG_EXTRALOGS = 0; // Extra kernel logging
+	EB_CONFIG_NOKEEPALIVEDEBUG = 0; // Log keepalives on trunks as normal (1 means filter it)
 
 	strcpy (config_path, "/etc/econet-gpio/econet-hpbridge.cfg");
 	/* Clear networks[] table */
@@ -8863,6 +8868,7 @@ int main (int argc, char **argv)
 		{"trunk-reset-qty",	required_argument,	0,	0},
 		{"trunk-update-qty",	required_argument,	0,	0},
 		{"bridge-query-interval",	required_argument,	0,	0},
+		{"no-keepalive-debug",	0,			0,	0},
 		{0, 			0,			0,	0 }
 	};
 
@@ -8899,6 +8905,7 @@ int main (int argc, char **argv)
 					case 20:	EB_CONFIG_TRUNK_RESET_QTY = atoi(optarg); break;
 					case 21:	EB_CONFIG_TRUNK_UPDATE_QTY = atoi(optarg); break;
 					case 22:	EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL = atoi(optarg); break;
+					case 23: 	EB_CONFIG_NOKEEPALIVEDEBUG = 1; break;
 				}
 			} break;
 			case 'c':	strncpy(config_path, optarg, 1023); break;
