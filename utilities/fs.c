@@ -1087,7 +1087,7 @@ void fs_copy_to_cr(unsigned char *dest, unsigned char *src, unsigned short len)
 	// This bit's broken
 	//while (strrchr(dest, ' ')) *(strrchr(dest, ' ')) = '\0'; // Get rid of trailing spaces
 	
-	while (dest[strlen(dest)-1] == ' ') dest[strlen(dest)-1] = '\0';
+	while ((strlen(dest) > 0) && (dest[strlen(dest)-1] == ' ')) dest[strlen(dest)-1] = '\0';
 
 }
 
