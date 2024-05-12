@@ -1,6 +1,6 @@
-all:		build-module build-utilities
+all:		build-module build-utilities 
 
-install:	install-hp
+install:	all install-hp
 
 install-mkgroup:
 	-sudo groupadd econet
