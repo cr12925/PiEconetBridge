@@ -9438,7 +9438,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								users[server][uid].home[1] = '.';
 								users[server][uid].home[2] = '\0';
 							}
-							else	strcpy(users[server][uid].home, "");
+							else	strcpy(users[server][uid].home, "$");
 	
 							strncat((char * ) users[server][uid].home, (const char * ) p.path_from_root, 79);
 							users[server][uid].home_disc = p.disc;
