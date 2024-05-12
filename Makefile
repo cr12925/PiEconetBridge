@@ -20,7 +20,7 @@ build-utilities: install-mkgroup
 	-sudo systemctl stop econet-hpbridge
 	cd utilities ; make
 
-install-utilities:	install-mkgroup utilities
+install-utilities:	install-mkgroup build-utilities
 	[ -d /etc/econet-gpio ] || sudo mkdir -p /etc/econet-gpio
 	[ -d /etc/econet-gpio/printers ] || sudo cp -r printers /etc/econet-gpio
 	[ -d /home/`whoami`/econetfs ] || mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00 || mkdir -p /home/`whoami`/econetfs/1STORAGE
