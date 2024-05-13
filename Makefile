@@ -16,8 +16,7 @@ install-module:	install-mkgroup build-module
 	sudo cp module/econet-gpio.ko /lib/modules/`uname -r`/kernel/drivers/net
 	sudo /usr/sbin/depmod
 
-build-utilities: install-mkgroup
-	-sudo systemctl stop econet-hpbridge
+build-utilities:
 	cd utilities ; make
 
 install-utilities:	install-mkgroup build-utilities
