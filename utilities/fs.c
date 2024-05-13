@@ -9754,6 +9754,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			
 					username[ptr] = '\0';
 
+					fs_toupper(username);
+
 					ptr++; // Now points to full name
 
 					if (fs_user_exists(server, username) >= 0)
@@ -9772,6 +9774,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							char homepath[300];
 							char acorn_homepath[300];
 
+							
 							snprintf((char * ) users[server][id].username, 11, "%-10s", username);
 							snprintf((char * ) users[server][id].password, 11, "%-10s", "");
 							snprintf((char * ) users[server][id].fullname, 25, "%-24s", &(username[ptr]));
@@ -9848,7 +9851,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							if (uid < 0)
 								fs_error(server, reply_port, net, stn, 0xbc, "User not found");
 
-							if (command[0] == 'P')
+
+							if ((command[0] & 0xdf) == 'P')
 								priv = param[count];	
 							else	priv = 'D'; // This was REMUSER not PRIV, so we pick 'D' for delete
 
@@ -9908,34 +9912,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 							if (priv_byte != 0xff) // Valid change
 							{
-								/* Old code - uid now found above 
-								unsigned short found = 0;
-								count = 0;
-								char username_padded[11];
-			
-								// Find user
-		
-								snprintf(username_padded, 11, "%-10s", username);
-								
-
-								while ((count < ECONET_MAX_FS_USERS) && !found)
-								{
-									if (!strncasecmp((const char *) users[server][count].username, username_padded, 10) && users[server][count].priv != FS_PRIV_INVALID)
-									{
-										users[server][count].priv = priv_byte;
-										fs_write_user(server, count, (unsigned char *) &(users[server][count]));
-										fs_reply_ok(server, reply_port, net, stn);
-										found = 1;
-									}
-									count++;
-								}
-								
-								fs_debug (0, 1, "%12sfrom %3d.%3d Attempt to change privilege for %s to %02x (%s)", "", net, stn, username, priv_byte, found ? "Success" : "Failed");
-								if (count == ECONET_MAX_FS_USERS) 
-								{
-									fs_error(server, reply_port, net, stn, 0xbc, "User not found");
-								}
-								*/
 								users[server][uid].priv = priv_byte;
 								users[server][uid].priv2 = priv2_byte;
 								fs_write_user(server, uid, (unsigned char *) &(users[server][uid]));
