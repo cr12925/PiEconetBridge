@@ -1548,6 +1548,10 @@ Privileged commands:
 	- What this actually does is emulate *PRIV <username> D
 	- It does NOT remove the home directory, since they can be shared
 
+*RENUSER <old username> <new username>
+	- Renames the user named 'old username' to 'new username'
+	- Will not allow renaming of the logged-in user
+
 *SETHOME (<username>) <directory>
 	- Permanently set replacement home directory (effective next login)
 	- If <username> omitted, works for the calling user.

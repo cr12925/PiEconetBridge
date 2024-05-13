@@ -9921,6 +9921,46 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						}
 					}
 				}
+				else if (fs_parse_cmd(command, "RENUSER", 4, &param))
+				{
+					char username[11], new_name[11];
+					int	uid;
+					uint8_t	count;
+
+					if (sscanf(param, "%10s %10s", username, new_name) == 2)
+					{
+
+						fs_toupper(username);
+						uid = fs_get_uid(server, username);
+
+						if (uid < 0)
+							fs_error(server, reply_port, net, stn, 0xbc, "User not found");
+						else
+						{
+							if (uid == active[server][active_id].userid)
+								fs_error(server, reply_port, net, stn, 0xfe, "Cannot rename self while logged in");
+							else
+							{
+								fs_toupper(new_name);
+
+								new_name[10] = '\0';
+								count = 1;
+								while (new_name[count] != '\0') count++;
+								while (count < 10) new_name[count++] = ' '; // Pad
+								memcpy(users[server][uid].username, new_name, 10);
+								fs_write_user(server, uid, (unsigned char *) &(users[server][uid]));
+	
+								fs_debug (0, 1, "%12sfrom %3d.%3d Rename user %s to %s (uid %d)", "", net, stn, username, new_name, uid);
+								fs_reply_ok(server, reply_port, net, stn);
+							}
+						}
+
+					}
+					else
+						fs_error(server, reply_port, net, stn, 0xfe, "Bad command");
+					
+				}
+
 				else // Unknown command
 				{
 
