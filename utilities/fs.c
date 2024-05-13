@@ -9784,6 +9784,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							snprintf((char * ) users[server][id].lib, 97, "$.%s", "Library");
 							users[server][id].home_disc = 0;
 							users[server][id].priv = 0; // Inactive unless we succeed
+							users[server][id].priv2 = 0; // clear priv2 byte
 							
 							sprintf(homepath, "%s/%1x%s/%s", fs_stations[server].directory, 0, fs_discs[server][0].name, username);
 							sprintf(acorn_homepath, ":%s.$.%s", fs_discs[server][0].name, username);
