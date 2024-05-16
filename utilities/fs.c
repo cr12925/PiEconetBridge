@@ -315,6 +315,8 @@ struct objattr {
 #define FS_PERM_OWN_W 0x02 // Write by owner
 #define FS_PERM_OWN_R 0x01 // Read by owner
 
+#define FS_PERM_PRESERVE 0xff00 // Special 16-bit value fed to fs_setxattr() to stop it overwriting perms
+
 struct path_entry {
 	short ftype;
 	int owner, parent_owner;
@@ -1436,7 +1438,16 @@ void fs_read_xattr(unsigned char *path, struct objattr *r, int server)
 
 }
 
-void fs_write_xattr(unsigned char *path, uint16_t owner, uint8_t perm, uint32_t load, uint32_t exec, uint16_t homeof, int server)
+/*
+ * Set xattr on a file/dir.
+ *
+ * Note that perm is uint16_t even though it is really 8 bit.
+ * This is to allow the upper 8 bits (if any are set) to mean
+ * "leave existing perm in place" so that we do not change
+ * permissions when overwriting a file.
+ */
+
+void fs_write_xattr(unsigned char *path, uint16_t owner, uint16_t perm, uint32_t load, uint32_t exec, uint16_t homeof, int server)
 {
 	char *dotfile=pathname_to_dotfile(path, fs_config[server].fs_infcolon);
 	int dotexists=access(dotfile, F_OK);
@@ -1450,9 +1461,12 @@ void fs_write_xattr(unsigned char *path, uint16_t owner, uint8_t perm, uint32_t 
 
 	unsigned char attrbuf[20];
 
-	sprintf ((char * ) attrbuf, "%02X", perm);
-	if (setxattr((const char *) path, "user.econet_perm", (const void *) attrbuf, 2, 0)) // Flags = 0 means create if not exist, replace if does
-		fs_debug (0, 1, "Failed to set permission on %s\n", path);
+	if (!(perm & 0xff00)) // Only do this if top 8 bits unset - any of them set means don't overwrite perms
+	{
+		sprintf ((char * ) attrbuf, "%02X", (perm & 0xff));
+		if (setxattr((const char *) path, "user.econet_perm", (const void *) attrbuf, 2, 0)) // Flags = 0 means create if not exist, replace if does
+			fs_debug (0, 1, "Failed to set permission on %s\n", path);
+	}
 
 	sprintf((char * ) attrbuf, "%04X", owner);
 	if (setxattr((const char *) path, "user.econet_owner", (const void *) attrbuf, 4, 0))
@@ -2103,7 +2117,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	/* Commented - doesn't work - we'll fudge this another way - see above
 	else if (path_internal[0] == '&') // Append home directory
 	{
-		if (normalize_debug) fs_debug (0, 1, "Found & specifier with %02x as next character\n", path_internal[1]);
+		if (normalize_debug) fs_debug (0, 1, "Found & specifier with %02x as next character", path_internal[1]);
 		switch (path_internal[1])
 		{
 			case '.': ptr = 2; break;
@@ -2153,19 +2167,19 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	{
 		result->disc = active[server][user].current_disc; // Replace the rogue if we are not selecting a specific disc
 		strcpy ((char * ) result->discname, (const char * ) fs_discs[server][result->disc].name);
-		if (normalize_debug) fs_debug (0, 1, "No disc specified, choosing current disc: %d (%d) on server %d - %s (%s)\n", active[server][user].current_disc, result->disc, server, fs_discs[server][result->disc].name, result->discname);
+		if (normalize_debug) fs_debug (0, 1, "No disc specified, choosing current disc: %d (%d) on server %d - %s (%s)", active[server][user].current_disc, result->disc, server, fs_discs[server][result->disc].name, result->discname);
 	}
 
-	if (normalize_debug) fs_debug (0, 1, "Disc selected = %d, %s\n", result->disc, (result->disc != -1) ? (char *) fs_discs[server][result->disc].name : (char *) "");
-	if (normalize_debug) fs_debug (0, 1, "path_internal = %s (len %d)\n", path_internal, (int) strlen(path_internal));
+	if (normalize_debug) fs_debug (0, 1, "Disc selected = %d, %s", result->disc, (result->disc != -1) ? (char *) fs_discs[server][result->disc].name : (char *) "");
+	if (normalize_debug) fs_debug (0, 1, "path_internal = %s (len %d)", path_internal, (int) strlen(path_internal));
 
 	sprintf (result->acornfullpath, ":%s.$", fs_discs[server][result->disc].name);
 
-	if (normalize_debug) fs_debug (0, 1, "Adjusted = %s / ptr = %d / path_internal = %s\n", adjusted, ptr, path_internal);
+	if (normalize_debug) fs_debug (0, 1, "Adjusted = %s / ptr = %d / path_internal = %s", adjusted, ptr, path_internal);
 
 	strcpy ((char * ) result->path_from_root, (const char * ) adjusted);
 
-	// if (normalize_debug) fs_debug (0, 1, "Adjusted = %s\n", adjusted);
+	// if (normalize_debug) fs_debug (0, 1, "Adjusted = %s", adjusted);
 
 	ptr = 0;
 
@@ -2227,8 +2241,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		strcpy (result->unixpath, active[server][user].urd_unix_path); // Force $ to be home dir
 	}
 
-	if (normalize_debug) fs_debug (0, 1, "Unix dir: %s\n", result->unixpath);
-	if (normalize_debug) fs_debug (0, 1,  "npath = %d\n", result->npath);
+	if (normalize_debug) fs_debug (0, 1, "Unix dir: %s, npath = %d", result->unixpath, result->npath);
 
 	// Iterate through each directory looking for the next part of the path in a case insensitive matter, and if any of them lack extended attributes then add them in as we go (if the thing exists!)
 	// Also do the conversion from '/' in an Acorn path to ':' in a unix filename ...
@@ -2259,7 +2272,12 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			if (normalize_debug) fs_debug (0, 1, "chroot home directory %s for user %d and on home disc", result->unixpath, active[server][user].userid);
 			result->homeof = attr.homeof;
 			result->owner = result->parent_owner = attr.owner;
-			result->my_perm = result->parent_perm = result->perm = attr.perm;
+			result->parent_perm = result->perm = attr.perm;
+			result->my_perm = (attr.owner == active[server][user].userid) ? (attr.perm & 0x0f) : ((attr.perm & 0xf0) >> 4);
+			if (users[server][active[server][user].userid].priv & FS_PRIV_SYSTEM)
+				result->my_perm = (result->my_perm | (FS_PERM_OWN_R | FS_PERM_OWN_W));
+
+			if (normalize_debug) fs_debug (0, 1, "chroot results for root dir %s for user %d are homeof=%04X, owner=%04X, parent_owner=%04X, parent_perm = %02X, perm = %02X, my_perm = %02X", result->unixpath, active[server][user].userid, result->homeof, result->owner, result->parent_owner, result->parent_perm, result->perm, result->my_perm);
 		}
 		else
 		{
@@ -2308,7 +2326,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		char acorn_path[ECONET_ABS_MAX_FILENAME_LENGTH+10];
 		struct path_entry *p; // Pointer for debug
 
-		if (normalize_debug) fs_debug (0, 1, "Processing wildcard path with %d elements\n", result->npath);
+		if (normalize_debug) fs_debug (0, 1, "Processing wildcard path with %d elements", result->npath);
 
 		// Re-set path_from_root bceause we'll need to update it with the real acorn names
 		strcpy(result->path_from_root, "");
@@ -2317,7 +2335,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		{
 
 			strcpy(acorn_path, result->path[count]); // Preserve result->path[count] as is, otherwise fs_get_wildcard_entries will convert it to unix, which we don't want
-			if (normalize_debug) fs_debug (0, 1, "Processing path element %d - %s (Acorn: %s) in directory %s\n", count, result->path[count], acorn_path, result->unixpath);
+			if (normalize_debug) fs_debug (0, 1, "Processing path element %d - %s (Acorn: %s) in directory %s", count, result->path[count], acorn_path, result->unixpath);
 
 			num_entries = fs_get_wildcard_entries(server, active[server][user].userid, result->unixpath, // Current search dir
 					acorn_path, // Current segment in Acorn format (which the function will convert)
@@ -2325,11 +2343,11 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 			if (normalize_debug)
 			{
-				fs_debug (0, 1, "Wildcard search returned %d entries (result->paths = %8p):\n", num_entries, result->paths);
+				fs_debug (0, 1, "Wildcard search returned %d entries (result->paths = %8p):", num_entries, result->paths);
 				p = result->paths;
 				while (p != NULL)
 				{
-					fs_debug (0, 1, "Type %02x Owner %04x Parent owner %04x Owner %10s Perm %02x Parent Perm %02x My Perm %02x Load %08lX Exec %08lX Homeof %04x Length %08lX Int name %06lX Unixpath %s Unix fname %s Acorn Name %s Date %02d/%02d/%02d\n",
+					fs_debug (0, 1, "Type %02x Owner %04x Parent owner %04x Owner %10s Perm %02x Parent Perm %02x My Perm %02x Load %08lX Exec %08lX Homeof %04x Length %08lX Int name %06lX Unixpath %s Unix fname %s Acorn Name %s Date %02d/%02d/%02d",
 						p->ftype, p->owner, p->parent_owner, p->ownername,
 						p->perm, p->parent_perm, p->my_perm,
 						p->load, p->exec, p->homeof, p->length, p->internal,
@@ -2374,13 +2392,13 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 				// searched for wasn't there so that it can be written to. Obviously if it did contain wildcards then it can't be so we
 				// return 0
 
-				if (normalize_debug) fs_debug (0, 1, "Work out whether to return 1 or 0 when nothing found: num_entries returned %d, count = %d, result->npath-1=%d, search for wildcards is %s\n", num_entries, count, result->npath-1, (strchr(result->path[count], '*') == NULL && strchr(result->path[count], '#') == NULL) ? "in vain" : "successful");
+				if (normalize_debug) fs_debug (0, 1, "Work out whether to return 1 or 0 when nothing found: num_entries returned %d, count = %d, result->npath-1=%d, search for wildcards is %s", num_entries, count, result->npath-1, (strchr(result->path[count], '*') == NULL && strchr(result->path[count], '#') == NULL) ? "in vain" : "successful");
 				if ((count == result->npath-1) && (num_entries != -1) // Soft error if on last path entry unless we got an error from the wildcard search
 					// && ((strchr(result->path[count], '*') == NULL) && (strchr(result->path[count], '#') == NULL))
 				) // Only give a hard fail if we are not in last path segment
 					return 1;
 
-				if (normalize_debug) fs_debug (0, 1, "Signal a hard fail\n");
+				if (normalize_debug) fs_debug (0, 1, "Signal a hard fail");
 				result->error = FS_PATH_ERR_NODIR;
 				return 0; // If not on last segment, this is a hard fail.
 			}
@@ -2479,10 +2497,20 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 /* OLD - CAUSED NON-SYST USERS NOT TO BE ABLE TO READ $
 	result->my_perm = result->perm = result->parent_perm = 0; // Clear down
 */
+
+	/* 20240516 Commented - all this is collected up above now
 	result->my_perm = result->perm;
 	result->parent_perm = result->perm;
 	if (!( (active[server][user].priv & FS_PRIV_SYSTEM) || (active[server][user].userid == result->owner) ))
 		result->my_perm = (result->my_perm & ~(FS_PERM_OWN_R | FS_PERM_OWN_W)) | ((result->my_perm & (FS_PERM_OTH_R | FS_PERM_OTH_W)) >> 4);
+		*/
+
+	/* If in chroot mode, set initial value of local variable parent_owner to owner of current dir because otherwise it is initialized to 0 (for root dir) */
+
+	if (users[server][FS_ACTIVE_UID(server,user)].priv2 & FS_PRIV2_CHROOT)
+		parent_owner = result->parent_owner; // Set above correctly in chroot mode.
+
+	if (normalize_debug) fs_debug (0, 1, "non-wildcard initial results for root dir %s for user %d are homeof=%04X, owner=%04X, parent_owner=%04X, parent_perm = %02X, perm = %02X, my_perm = %02X", result->unixpath, active[server][user].userid, result->homeof, result->owner, result->parent_owner, result->parent_perm, result->perm, result->my_perm);
 
 	while ((result->npath > 0) && count < result->npath)
 	{
@@ -2494,7 +2522,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 		found = 0;
 
-		if (normalize_debug) fs_debug (0, 1, "Examining %s\n", result->unixpath);
+		if (normalize_debug) fs_debug (0, 1, "Loop %d - Examining %s", count, result->unixpath);
 
 		// Convert pathname so that / -> :
 
@@ -2524,7 +2552,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 		// if we are looking for last element in path (i.e. result->unixpath currently contains parent directory name)
 
-		if (normalize_debug) fs_debug (0, 1, "Calling fs_check_dir(..., %s, ...)\n", path_segment);
+		if (normalize_debug) fs_debug (0, 1, "Loop %d - Calling fs_check_dir(..., %s, ...)", count, path_segment);
 
 		// If path_segment is found in dir, then it puts the unix name for that file in unix_segment
 		found = fs_check_dir (dir, path_segment, unix_segment);
@@ -2557,7 +2585,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			)
 			&& !found) 
 		{
-			if (normalize_debug) fs_debug (0, 1, "This user cannot read dir %s\n", result->unixpath);
+			if (normalize_debug) fs_debug (0, 1, "This user cannot read dir %s", result->unixpath);
 			result->ftype = FS_FTYPE_NOTFOUND;
 			return 0; // Was 1. Needs to be a hard failure if the user can't read the directory we're looking in
 		}
@@ -2588,7 +2616,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 					// Populate the acorn name we were looking for so that things like fs_save() can easily return it
 					strcpy(result->acornname, path_segment);
 					result->parent_owner = parent_owner; // Otherwise this doesn't get properly updated
-					if (normalize_debug) fs_debug (0, 1, "Non-Wildcard file (%s, unix %s) not found in dir %s - returning unixpath %s, acornname %s, parent_owner %04X\n", path_segment, unix_segment, result->unixpath, result->unixpath, result->acornname, result->parent_owner);
+					if (normalize_debug) fs_debug (0, 1, "Non-Wildcard file (%s, unix %s) not found in dir %s - returning unixpath %s, acornname %s, parent_owner %04X", path_segment, unix_segment, result->unixpath, result->unixpath, result->acornname, result->parent_owner);
 					return 1;
 				}
 				else	
@@ -2599,7 +2627,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			}
 		}
 
-		if (normalize_debug) fs_debug (0, 1, "Found path segment %s in unix world = %s\n", path_segment, unix_segment);
+		if (normalize_debug) fs_debug (0, 1, "Found path segment %s in unix world = %s", path_segment, unix_segment);
 		strcat(result->unixpath, "/");
 		strcat(result->unixpath, unix_segment);
 
@@ -2607,7 +2635,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		strcat(result->acornfullpath, ".");
 		strcat(result->acornfullpath, path_segment);
 
-		if (normalize_debug) fs_debug (0, 1, "Attempting to stat %s\n", result->unixpath);
+		if (normalize_debug) fs_debug (0, 1, "Attempting to stat %s", result->unixpath);
 
 		if (!stat(result->unixpath, &s)) // Successful stat
 		{
@@ -2615,21 +2643,21 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			//int owner;
 			char dirname[1024];
 
-			if (normalize_debug) fs_debug (0, 1, "stat(%s) succeeded\n", result->unixpath);
+			if (normalize_debug) fs_debug (0, 1, "stat(%s) succeeded", result->unixpath);
 			if (!S_ISDIR(s.st_mode) && (count < (result->npath - 1))) // stat() follows symlinks so the first bit works across links; the second condition is because we only insist on directories for that part of the path except the last element, which might legitimately be FILE or DIR
 			{
 				result->ftype = FS_FTYPE_NOTFOUND; // Because something we encountered before end of path could not be a directory
 				return 1;
 			}
 
-			if (normalize_debug) fs_debug (0, 1, "Non-leaf node %s confirmed to be a directory\n", result->unixpath);
+			if (normalize_debug) fs_debug (0, 1, "Non-leaf node %s is%s a directory", result->unixpath, (S_ISDIR(s.st_mode) ? "" : " NOT"));
 			if ((S_ISDIR(s.st_mode) == 0) && (S_ISREG(s.st_mode) == 0)) // Soemthing is wrong
 			{
 				result->error = FS_PATH_ERR_TYPE;
 				return 0; // Should either be file or directory - not block device etc.
 			}
 
-			if (normalize_debug) fs_debug (0, 1, "Proceeding to look at attributes on %s\n", result->unixpath);
+			if (normalize_debug) fs_debug (0, 1, "Proceeding to look at attributes on %s", result->unixpath);
 			// Next, set internal name from inode number
 
 			result->internal = s.st_ino; // Internal name = Inode number
@@ -2642,14 +2670,14 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 			fs_read_xattr(dirname, &attr, server);
 
-			if (normalize_debug) fs_debug (0, 1, "fs_read_xattr yielded: Owner %04X, Load %08lX, Exec %08lX, Home Of %04X, Perm %02X\n", attr.owner, attr.load, attr.exec, attr.homeof, attr.perm);
+			if (normalize_debug) fs_debug (0, 1, "fs_read_xattr yielded: Owner %04X, Load %08lX, Exec %08lX, Home Of %04X, Perm %02X", attr.owner, attr.load, attr.exec, attr.homeof, attr.perm);
 
 			// If it's a directory with 0 permissions and we own it, set permissions to RW/
 
-			if (normalize_debug) fs_debug (0, 1, "Looking to see if this user (id %04X) is the owner (%04X), if this is a dir and if perms (%02X) are &00\n", active[server][user].userid, attr.owner, attr.perm);
+			if (normalize_debug) fs_debug (0, 1, "Looking to see if this user (id %04X) is the owner (%04X), if this is a dir and if perms (%02X) are &00", active[server][user].userid, attr.owner, attr.perm);
 			if ((active[server][user].userid == attr.owner) && S_ISDIR(s.st_mode) && ((attr.perm & ~FS_PERM_L) == 0))
 			{
-				if (normalize_debug) fs_debug (0, 1, "Is a directory owned by the user with perm = 0 - setting permissions to WR/\n");
+				if (normalize_debug) fs_debug (0, 1, "Is a directory owned by the user with perm = 0 - setting permissions to WR/");
 				attr.perm |= FS_PERM_OWN_W | FS_PERM_OWN_R;
 			}
 		
@@ -2676,7 +2704,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 			parent_owner = result->owner; // Ready for next loop
 
-			if (normalize_debug) fs_debug (0, 1, "Setting parent_owner = %04x, this object owned by %04x\n", result->parent_owner, result->owner);
+			if (normalize_debug) fs_debug (0, 1, "Setting parent_owner = %04x, this object owned by %04x", result->parent_owner, result->owner);
 
 			// Are we on the last entry? If so, this is the leaf we're looking for
 
@@ -4971,7 +4999,7 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 						fs_error(server, reply_port, net, stn, 0xFF, "FS Error"); // File didn't open when it should
 					else
 					{
-						fs_write_xattr(p.unixpath, active[server][active_id].userid, FS_PERM_OWN_R | FS_PERM_OWN_W, load, exec, 0, server);  // homeof = 0 because it's a file
+						fs_write_xattr(p.unixpath, active[server][active_id].userid, FS_PERM_PRESERVE, load, exec, 0, server);  // homeof = 0 because it's a file
 
 						r.p.port = reply_port;
 						r.p.ctrl = rx_ctrl; // Copy from request
@@ -5037,7 +5065,11 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 						}
 					}
 				}
-				else fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
+				else
+		  		{
+					fs_debug (0, 2, "%12sfrom %3d.%3d %s %s ftype=%02X, parent_perm=%02X, my_perm=%02X, parent_owner=%04X, uid=%04X", "", net, stn, (create_only ? "CREATE" : "SAVE"), filename, p.ftype, p.parent_perm, p.my_perm, p.parent_owner, active[server][active_id].userid);
+				        fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
+			 	}
 
 
 			}
@@ -5351,7 +5383,10 @@ short fs_open_interlock(int server, unsigned char *path, unsigned short mode, un
 			else		fs_files[server][count].writers = 1;
 
 			if (mode == 3) // Take ownereship on OPENOUT
-				fs_write_xattr(path, userid, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0, 0, server);
+			{
+				// 20240516 - modified - line below preserves existing permissions fs_write_xattr(path, userid, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0, 0, server);
+				fs_write_xattr(path, userid, FS_PERM_PRESERVE, 0, 0, 0, server);
+			}
 	
 			fs_debug (0, 2, "%12sInterlock opened internal handle %d, mode %d. Readers = %d, Writers = %d, path %s", "", count, mode, fs_files[server][count].readers, fs_files[server][count].writers, fs_files[server][count].name);
 			return count;
