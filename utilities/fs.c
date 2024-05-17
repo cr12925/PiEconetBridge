@@ -4637,7 +4637,7 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 		fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 	else if (command != 1 && command != 4 && (p.perm & FS_PERM_L)) // Locked
 	{
-		fs_error(server, reply_port, net, stn, 0xC3, "Locked");
+		fs_error(server, reply_port, net, stn, 0xC3, "Entry Locked");
 	}
 	else
 	{
@@ -4961,13 +4961,11 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 		{
 			// Path found
 	
-/* This is an error. PERM_L just stops you deleting it.
 			if (p.perm & FS_PERM_L) // Locked - cannot write
 			{
-				fs_error(server, reply_port, net, stn, 0xC3, "Locked");
+				fs_error(server, reply_port, net, stn, 0xC3, "Entry Locked");
 			}
-			else */
-			if (p.ftype != FS_FTYPE_FILE && p.ftype != FS_FTYPE_NOTFOUND) // Not a file!
+			else if (p.ftype != FS_FTYPE_FILE && p.ftype != FS_FTYPE_NOTFOUND) // Not a file!
 				fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 			else
 			{
@@ -5305,7 +5303,7 @@ void fs_chown(int server, unsigned short reply_port, int active_id, unsigned cha
 
 		if (p.perm & FS_PERM_L) // Locked
 		{
-			fs_error(server, reply_port, net, stn, 0xC3, "Locked");
+			fs_error(server, reply_port, net, stn, 0xC3, "Entry Locked");
 			return;
 		}
 
@@ -6019,7 +6017,7 @@ void fs_rename(int server, unsigned short reply_port, int active_id, unsigned ch
 
 	if (p_from.perm & FS_PERM_L) // Source locked
 	{
-		fs_error(server, reply_port, net, stn, 0xC3, "Entry locked");
+		fs_error(server, reply_port, net, stn, 0xC3, "Entry Locked");
 		return;
 	}
 	
@@ -6178,7 +6176,7 @@ void fs_delete(int server, unsigned short reply_port, int active_id, unsigned ch
 			else if ((e->perm & FS_PERM_L))
 			{
 				fs_free_wildcard_list(&p);
-				fs_error(server, reply_port, net, stn, 0xC3, "Entry locked");
+				fs_error(server, reply_port, net, stn, 0xC3, "Entry Locked");
 				return;
 			}
 			else if (
@@ -8153,6 +8151,11 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 	{
 		fs_free_wildcard_list(&p);
 		fs_error(server, reply_port, net, stn, 0xbd, "Insufficient access");
+	}
+	else if ((p.ftype == FS_FTYPE_FILE) && !readonly && ((p.perm & FS_PERM_L)))
+	{
+		fs_free_wildcard_list(&p);
+		fs_error(server, reply_port, net, stn, 0xC3, "Entry Locked");
 	}
 	else if (!readonly && (p.ftype == FS_FTYPE_NOTFOUND) && 
 		(	(p.parent_owner != active[server][active_id].userid && ((p.parent_perm & FS_PERM_OTH_W) == 0)) ||
