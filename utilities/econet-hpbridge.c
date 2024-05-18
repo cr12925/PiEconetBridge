@@ -5044,7 +5044,7 @@ static void * eb_device_despatcher (void * device)
 
 												// Is it the same host as we had before?
 
-												if (memcmp(&src_addr, d->trunk.remote_host->ai_addr, sizeof(struct sockaddr_in))) // Not equal - host has changed
+												if (was_dead || memcmp(&src_addr, d->trunk.remote_host->ai_addr, sizeof(struct sockaddr_in))) // Not equal - host has changed
 												{
 													d->trunk.remote_host->ai_family = AF_INET;
 													d->trunk.remote_host->ai_next = NULL;
