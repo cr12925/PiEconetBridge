@@ -5036,7 +5036,7 @@ static void * eb_device_despatcher (void * device)
 									if (d->trunk.is_dynamic)
 									{
 
-										if (d->trunk.remote_host || (!d->trunk.remote_host && (d->trunk.remote_host = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk remote_host structure", sizeof(struct addrinfo)))))
+										if (d->trunk.remote_host || (!d->trunk.remote_host && (d->trunk.remote_host = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk remote_host structure", sizeof(struct addrinfo))) && (d->trunk.remote_host->ai_addr = NULL)))
 										{
 
 											if ((d->trunk.remote_host->ai_addr || (d->trunk.remote_host->ai_addr = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk remote_host->ai_addr structure", sizeof(struct sockaddr_in)))) && (d->trunk.hostname || (d->trunk.hostname = eb_malloc(__FILE__, __LINE__, "TRUNK", "Create trunk hostname space", HOST_NAME_MAX)))) // 20 because for now it'll just be an IP address
