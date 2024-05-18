@@ -4753,7 +4753,7 @@ static void * eb_device_despatcher (void * device)
 				hints.ai_protocol = 0;
 
 				if ((s = getaddrinfo(d->trunk.hostname, portname, &hints, &(d->trunk.remote_host))) != 0)
-					eb_debug (1, 0, "DESPATCH", "%-8s         Unable to resolve hostname %s: %s", d->trunk.hostname, gai_strerror(s));
+					eb_debug (1, 0, "DESPATCH", "%-8s         Unable to resolve hostname %s: %s", "", d->trunk.hostname, gai_strerror(s));
 
 			}
 			else if (d->trunk.is_dynamic) // Dynamic
