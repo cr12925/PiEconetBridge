@@ -115,9 +115,9 @@ void fs_bye(int, unsigned char, unsigned char, unsigned char, unsigned short);
 uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 
 #ifndef BRIDGE_V2
-	#define FS_VERSION_STRING "PiEconetBridge FS 2.1"
+	#define FS_VERSION_STRING "PiEconetBridge FS 2.10"
 #else
-	#define FS_VERSION_STRING "Pi Econet HP Bridge FS 2.1"
+	#define FS_VERSION_STRING "Pi Econet HP Bridge FS 2.10"
 #endif
 
 #define FS_DEFAULT_NAMELEN 10
