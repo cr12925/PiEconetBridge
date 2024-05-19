@@ -4923,6 +4923,12 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 
 	}
 
+	if (command == 65) // Not yet implemented
+	{
+		fs_error(server, reply_port, net, stn, 0x85, "FS Error");
+		return;
+	}
+
 	fs_aun_send(&r, server, replylen, net, stn);
 		
 }
