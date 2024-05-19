@@ -1008,6 +1008,8 @@ struct __eb_device * eb_device_init (uint8_t net, uint16_t type, uint8_t config)
 		if (pthread_mutex_init(&(p->updatemutex), NULL) == -1)
 			eb_debug (1, 0, "CONFIG", "Cannot initialize update mutex for net %d", net);
 
+		p->all_nets_pooled = 0; // Starting point
+
 		p->self = p;
 	
 		p->next = NULL;
@@ -1837,6 +1839,14 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 	int				err;
 	*/
 
+	// If ALL nets on trigger are pooled, don't bother sending reset or updates onwards - nothing will change
+	
+	if (trigger && trigger->all_nets_pooled && !EB_CONFIG_POOL_RESET_FWD)
+	{
+		eb_debug (0, 2, "BRIDGE", "%-8s %-7d Bridge %s not forwarded (all nets pooled)", eb_type_str(trigger->type), (trigger->type == EB_DEF_TRUNK ? trigger->trunk.local_port : trigger->net), (ctrl == BRIDGE_RESET) ? "reset" : "update");
+		return;
+	}
+
 	// Send to all but trigger. If trigger is NULL, this was an internally forced reset/update - send everywhere
 
 	dev = devices;
@@ -2350,7 +2360,13 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 
 			pthread_mutex_unlock (&networks_update);
 
-			if (p->p.ctrl == 0x80) eb_reset_tables(); // Reset if need be
+			if (p->p.ctrl == 0x80
+			&& (
+				!(source->all_nets_pooled) // Don't reset if all nets on this device are pooled - no point
+			   ||	EB_CONFIG_POOL_RESET_FWD 	// Unless we want to
+			   )
+			) 
+				eb_reset_tables(); // Reset if need be. 
 
 			// Go through the data and update our networks table
 
@@ -2411,8 +2427,10 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 					{
 						if (networks[in_adv]->type == EB_DEF_WIRE)
 							eb_debug (0, 2, "BRIDGE", "%-8s %3d     Ignored incoming bridge update for net %d: already known on wire net %d", eb_type_str(source->type), source->net, in_adv, networks[in_adv]->net);
-						else
+						else if (networks[in_adv]->type == EB_DEF_TRUNK)
 							eb_debug (0, 2, "BRIDGE", "%-8s         Ignored incoming bridge update for net %d (%s): already known on trunk to %s:%d", eb_type_str(source->type), in_adv, (in_adv != old_in_adv ? "translated" : "untranslated"), networks[in_adv]->trunk.hostname, networks[in_adv]->trunk.remote_port);
+						else 
+							eb_debug (0, 2, "BRIDGE", "%-8s         Ignored incoming bridge update for net %d (%s): already known on %s net %d", eb_type_str(source->type), in_adv, (in_adv != old_in_adv ? "translated" : "untranslated"), eb_type_str(networks[in_adv]->type), networks[in_adv]->net);
 
 						strcat (net_string, "I"); // Ignored
 					}
@@ -8610,6 +8628,9 @@ int eb_readconfig(char *f)
 				if (!first_net)
 					eb_debug (1, 0, "Bad net list in pool deployment %s", eb_getstring(line, &matches[0]));
 
+				if (!strcmp(eb_getstring(line, &matches[4]), "*"))
+					source->all_nets_pooled = 1; // Flag for reset purposes
+
 				if (variant == TRUNK)
 				{
 					source->trunk.pool = pool;
@@ -8689,25 +8710,28 @@ Queuing management options (usually need not be adjusted):\n\
 --wire-imm-wait n\tMaximum time (ms) to wait for an immediate reply destined for the wire (current %d)\n\
 --aun-max-tx n\t\tMaximum number of retransmis for AUN packets (current: %d)\n\
 --aun-interval n\tMinimum wait before AUN retransmission of unacknowledged packet (ms) (current: %d)\n\
---aun-nak-tolerance n\tNumber of AUN NAKs to tolerate before dumping packet. (Current: %d)\n\
+--aun-nak-tolerance n\tNumber of AUN NAKs to tolerate before dumping packet. (current: %d)\n\
+--immediate-timeout n\tNumber of ms to wait before cancelling flag fill when immediate query received (current:%d)\n\
 --max-sockets n\t\tMaximum numbers of sockets that can be open (increase if system cannot do AUN listens)\n\
 \t\t\t(Minimum 1. Used because sometimes RiscOS isn't listening when it should be!)\n\
---flashtime n\t\tTime in ms to flash each activity LED off to show activity. (Current: %d)\n\
---led-blink-on\t\tActivity LEDs are off by default, and blink on for activity (Current: ON and blink OFF)\n\
+--flashtime n\t\tTime in ms to flash each activity LED off to show activity. (current: %d)\n\
+--led-blink-on\t\tActivity LEDs are off by default, and blink on for activity (current: ON and blink OFF)\n\
 --leds-off\t\tTurn the activity LEDs off and leave them off\n\
 --trunk-keepalive-interval n\tSeconds between trunk keepalive packets\n\
 --trunk-dead-interval n\tSeconds without reception before trunk considered dead\n\
---pool-dead-interval n\tSeconds before a dynamic pool entry times out as idle (Current %d)\n\
---enable-syst-fast\tEnable bridge control privilege for SYST on all fileservers (Once only)\n\
+--pool-dead-interval n\tSeconds before a dynamic pool entry times out as idle (current %d)\n\
+--enable-syst-fast\tEnable bridge control privilege for SYST on all fileservers (once only)\n\
 \n\
 Bridge protocol tuning:\n\
 \n\
---wire-reset-qty n\tNumber of bridge resets to send on Econet wires (Current %d)\n\
---wire-update-qty n\tNumber of bridge update packets to send on Econet wires (Current %d)\n\
---trunk-reset-qty n\tNumber of bridge resets to send on UDP trunks (Current %d)\n\
---trunk-update_qty n\tNumber of bridge update packets to send on UDP trunks (Current %d)\n\
---bridge-query-interval n\tMinimum time between bridge query responses sent to a given station on the Econet (ms) (Current %d)\n\
+--wire-reset-qty n\tNumber of bridge resets to send on Econet wires (current %d)\n\
+--wire-update-qty n\tNumber of bridge update packets to send on Econet wires (current %d)\n\
+--trunk-reset-qty n\tNumber of bridge resets to send on UDP trunks (current %d)\n\
+--trunk-update_qty n\tNumber of bridge update packets to send on UDP trunks (current %d)\n\
+--bridge-query-interval n\tMinimum time between bridge query responses sent to a given station on the Econet (ms) (current %d)\n\
 --no-keepalive-debug\tFilter packet dumps for port &9C ctrl &D0 (bridge keepalives)\n\
+--bridge-loop-detect n\t1 or 0 - (en/dis)ables bridge loop detection (current: %s) (** not yet implemented **)\n\
+--pool-reset n\t\t1 or 0 - (en/dis)ables forwarding of bridge resets & updates from trunks/wires where all nets are pooled (current: %s)\n\
 \n\
 Statistics port control:\n\
 \n\
@@ -8731,13 +8755,18 @@ Deep-level debugging options:\n\
 	EB_CONFIG_AUN_RETRIES,
 	EB_CONFIG_AUN_RETX,
 	EB_CONFIG_AUN_NAKTOLERANCE,
+	EB_CONFIG_WIRE_IMM_WAIT,
 	EB_CONFIG_FLASHTIME, 
 	EB_CONFIG_POOL_DEAD_INTERVAL,
 	EB_CONFIG_WIRE_RESET_QTY,
 	EB_CONFIG_WIRE_UPDATE_QTY,
 	EB_CONFIG_TRUNK_RESET_QTY,
 	EB_CONFIG_TRUNK_UPDATE_QTY,
-	EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL);
+	EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL,
+	EB_CONFIG_BRIDGE_LOOP_DETECT ? "ON" : "OFF",
+	EB_CONFIG_POOL_RESET_FWD ? "ON" : "OFF"
+					    
+					    );
 
 
 }
@@ -8798,7 +8827,7 @@ int main (int argc, char **argv)
 	EB_CONFIG_WIRE_RETX = 10; // Reduced 20231226 to see if !Machines performance improves
 	EB_CONFIG_AUN_RETX = 1000;  // BeebEm Seems to need quite a while - and does not like another packet turning up before it's ACKd the last one. Long timeout. If the ACK turns up, the inbound AUN listener wakes the queue anyway, so it should be fine.
 	EB_CONFIG_WIRE_RETRIES = 10;
-	EB_CONFIG_WIRE_IMM_WAIT = 1000; // Wait 1s before resetting ADLC from flag fill - assume immediate reply not turning up for transmission on to wire
+	EB_CONFIG_WIRE_IMM_WAIT = 1000; // Wait 1s before resetting ADLC from flag fill - assume immediate reply not turning up for transmission on to wire - TODO - Implemennt command line variable
 	EB_CONFIG_AUN_RETRIES = 5;
 	EB_CONFIG_AUN_NAKTOLERANCE = 2; // How many NAKs we tolerate before we dump the packet off an AUN outq. Used to appease RiscOS, which sometimes isn't listening when it should be
 	EB_CONFIG_WIRE_INTERPACKETGAP = 25; // Make sure some stations are listening // Not used any more
@@ -8822,6 +8851,8 @@ int main (int argc, char **argv)
 	EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL = 2000; // 2s between responses to WhatNet / IsNet to a particular station
 	EB_CONFIG_EXTRALOGS = 0; // Extra kernel logging
 	EB_CONFIG_NOKEEPALIVEDEBUG = 0; // Log keepalives on trunks as normal (1 means filter it)
+	EB_CONFIG_POOL_RESET_FWD = 0; // Don't forward resets when all nets on device are pooled
+	EB_CONFIG_BRIDGE_LOOP_DETECT = 1; // Enable bridge loop detection & trunk/wire shutdown. (Only ignores traffic on the wire which is not destined for a local emulator on this bridge, so they can still talk to local fileservers etc.)
 
 	strcpy (config_path, "/etc/econet-gpio/econet-hpbridge.cfg");
 	/* Clear networks[] table */
@@ -8869,6 +8900,9 @@ int main (int argc, char **argv)
 		{"trunk-update-qty",	required_argument,	0,	0},
 		{"bridge-query-interval",	required_argument,	0,	0},
 		{"no-keepalive-debug",	0,			0,	0},
+		{"immediate-timeout", 	required_argument, 	0, 	0},
+		{"bridge-loop-detect",	required_argument,	0,	0},
+		{"pool-reset",		required_argument,	0,	0},
 		{0, 			0,			0,	0 }
 	};
 
@@ -8906,6 +8940,9 @@ int main (int argc, char **argv)
 					case 21:	EB_CONFIG_TRUNK_UPDATE_QTY = atoi(optarg); break;
 					case 22:	EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL = atoi(optarg); break;
 					case 23: 	EB_CONFIG_NOKEEPALIVEDEBUG = 1; break;
+					case 24:	EB_CONFIG_WIRE_IMM_WAIT = atoi(optarg); break;
+					case 25:	EB_CONFIG_BRIDGE_LOOP_DETECT = (atoi(optarg) ? 1 : 0); break;
+					case 26:	EB_CONFIG_POOL_RESET_FWD = (atoi(optarg) ? 1 : 0); break;
 				}
 			} break;
 			case 'c':	strncpy(config_path, optarg, 1023); break;

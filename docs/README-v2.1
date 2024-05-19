@@ -747,6 +747,21 @@ The next few switches ought not to be needed but just in case:
 --flashtime <n>		Number of milliseconds to flash each of the activity
                         LEDs (read, write) *off* to signal activity on the Econet.
 
+--immediate-timeout <n>	Number of milliseconds of flag fill after the bridge receives
+			an immediate query for a non-local host before it will 
+			decide that the remote host is not going to respond and
+			will therefore drop the flag fill. The flag fill will
+			busy out the network, so on congested networks shortening
+			this to as little as possible will speed things up if there
+			is a lot of traffic (e.g. from !Machines) which is probing
+			to see if lots of non-local hosts are actually there or
+			not (e.g. with MachinePeek queries). Since the bridge has
+			no way of knowing if those remote hosts /are/ there, it must
+			flag fill (in case the machine is present and wants to 
+			reply). This timeout is how long the bridge waits to decide
+			that such a machine is not going to respond and un-busy 
+			the local Econet.
+
 --led-blink-on		Read/write LEDs (on more recent boards) will blink ON
                         for activity instead of OFF.
 
@@ -778,7 +793,7 @@ Bridge protocol tunables
 			Econet wires
 			Default 10 - same as Acorn and SJ bridges
 
---bridge-querry-interval <n>	Minimum time between responses to IsNet or
+--bridge-query-interval <n>	Minimum time between responses to IsNet or
 			WhatNet queries from any given station on the wire
 			in ms. Calculated separately for each type of query,
 			but the minimum time from this parameter is applied
@@ -788,6 +803,22 @@ Bridge protocol tunables
 --no-keepalive-debug	Filters packet dumps (if turned on) for packets
 			with port &9C and ctrl &D0 (trunk keepalives)
 
+--pool-reset <1/0>	Whether the bridge will forward bridge resets and
+			updates from a trunk or Econet wire where /all/
+			networks on that device are subject to pool nat.
+			Default is 0 (no forwarding). In general, if all
+			networks (as opposed to just some) are pooled, then
+			no downstream net list will change as a result 
+			of the reset or update, so they are no longer
+			forwarded. Setting this to 1 will cause the
+			resets and (to the extent they change a net list)
+			updates to propagate.
+
+--bridge-loop-detect <1/0>	Not yet implemented. Will turn on/off 
+			bridge loop detection (which, when written, will
+			disable all but local traffic on a device which
+			appears to deliver looped traffic back to the
+			source bridge).
 
 The Configuration File 
 ----------------------

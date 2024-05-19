@@ -74,6 +74,7 @@
 
 #define ECONET_TRACE_PORT		0x9B	// Port number used for HPB traceroute functionality
 #define ECONET_BRIDGE_KEEPALIVE_CTRL	0xD0	// Ctrl byte used for trunk keepalive packets
+#define ECONET_BRIDGE_LOOP_PROBE	0xCF	// Used to for loop probes to see if we need to shut a device down
 
 struct __eb_packetqueue {
 	struct __econet_packet_aun 	*p;
@@ -289,6 +290,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 	pthread_cond_t		bridge_reset_cond; // Ditto for bridge resetter
 	pthread_t		bridge_reset_thread; // Ditto for bridge resetter
 	pthread_mutex_t		bridge_reset_lock; // Ditto for bridge resetter
+	uint8_t			all_nets_pooled; // Used to work out whether not to forward resets on this device (only relevant for wire or trunk)
 
 	// Per device type information
 	union {
@@ -467,6 +469,8 @@ struct __eb_config {
 	uint8_t		wire_update_qty; // Number of bridge update copies to send on Econet wires
 	uint32_t		wire_bridge_query_interval; // Gap between successive IsNet or WhatNet responses to a given station on the wire (ms)
 	uint8_t		wire_extralogs; // Turn extra kernel logging on to dmesg
+	uint8_t		pool_reset_forward; // (Default is to) stop bridge forwarding bridge resets received from trunks & wires where all networks are pooled. (Reply updates still sent)
+	uint8_t		bridge_loop_detect; // (Default is to) periodically send broadcast packets with port &9C port &CF with a random number in them to see if they come back. If they come back, we'll ignore traffic on that trunk except a reset, and after a reset we send another loop detect probe
 	uint8_t		nokeepalivedebug; // Stops the bridge logging trunk keepalives (or at least anything on port &9C, ctrl &D0)
 };
 
@@ -516,6 +520,8 @@ struct __eb_config {
 #define EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL	(config.wire_bridge_query_interval)
 #define EB_CONFIG_EXTRALOGS	(config.wire_extralogs)
 #define EB_CONFIG_NOKEEPALIVEDEBUG	(config.nokeepalivedebug)
+#define EB_CONFIG_POOL_RESET_FWD	(config.pool_reset_forward)
+#define EB_CONFIG_BRIDGE_LOOP_DETECT	(config.bridge_loop_detect)
 
 // Printer status
 
