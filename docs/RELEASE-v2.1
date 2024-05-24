@@ -74,9 +74,6 @@ Roadmap to v2.2
   collecting the data phase of the 4-way handshake, which is needed to build the
   AUN type packets used for AUN stations / trunks.
 
-- Fix displayed directory privileges when the FS is in 'Acorn Directory' mode
-  (i.e. display 'D/' or 'DL/' only instead of the full privileges.
-
 - Improve MDFS password file functionality, hopefully including writing to it.
 
 - Move to a threaded fileserver
@@ -98,6 +95,46 @@ Roadmap to v2.2
   catch all wire traffic - only that which goes through the bridge.)
 
 - Implement signals for increasing / decreasing debug (SIGUSR1/2?)
+
+- Implement PiEconetBridge-specific AUN packet type "Immediate NAK"
+  (INK) which is sent from a destination bridge to a source bridge
+  when a 2-way immediate is received but the destination machine
+  is locally accessible but doesn't respond. This will only work on
+  Wire, Local and Pipe devices because the bridge cannot tell when
+  an AUN destination isn't going to respond. The purpose is to 
+  give as timeous indication as possible to the source bridge that
+  the ultimate destination simply is not going to respond. That
+  enables the source bridge to drop its pro-active flag fill 
+  on receipt of an immediate request which presently will just
+  time out after 1s (tunable).
+
+- Make FS permissions mirror L3 plus extra directory permissions.
+  Add NETCONF tunable to imply WR/r on all directories and 
+  mask the visible display of the same (so unlocked directories
+  simply appear as "D/" as they do in L3).
+
+- Add facilities for E permission in FS (execute only)
+
+- Implement loop detection system for trunks which
+  - Sends a port &9C packet (with distinct ctrl byte) containing
+    a random number
+  - Detects if a packet with that random number comes back
+  - Disables the device on which the packet reappeared as follows:
+    - If a trunk, ignore all but bridge reset packets
+    - If a wire, ignore all but bridge reset packets and
+      access to local final destinations (emulation, pipe, 
+      and AUN clients)
+  - On a bridge reset, do a standard bridge reset and 
+    enable all devices again, but immediately send the next 
+    loop probe so that a device on the receiving end of that 
+    loop probe will be disabled promptly promptly
+  - Since a trunk going dead will trigger a bridge reset, this
+    will work a bit like spanning tree and disable a loop
+    interface, but if the bridge topology changes because a
+    bridge resets or a link does down then a reset will get
+    generated and the topology will sort itself out. That
+    enables some redundancy in the network not possible in
+    Acorn topologies.
 
 CR
 May 2024
