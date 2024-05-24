@@ -734,6 +734,11 @@ static void *eb_pool_garbage_collector(void *ignored)
 
 						new_h = h->next_net;
 
+						// First update the prev_net pointer in new_h, if new_h exists
+						
+						if (new_h)
+							new_h->prev_net = h->prev_net;
+
 						// Splice out of list
 						
 						if (h->prev_net == NULL)
