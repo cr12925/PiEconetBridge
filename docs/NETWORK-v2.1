@@ -22,9 +22,15 @@ We will create a new network, 192.168.140.0/24 that is local to the Pi.
 This can be done in /etc/rc.local so it is created at boot time.  It needs to
 be done _before_ the bridge code starts.
 
-    BASE=192.168.140 INT=lo
+    ip address add 192.168.140.0/24 dev lo
 
-    for a in {2..254} do ip address add $BASE.$a/24 dev $INT done
+(To my surprise, adding the .0 address means the all IP addresses in
+the subnet are effectively added to the interface.)
+
+If you need to expose many networks, you might want to use a Class B
+network (or /16 in the modern CIDR notation), e.g.
+
+    ip address add 172.17.0.0/16 dev lo
 
 You can verify these addresses exist
 
