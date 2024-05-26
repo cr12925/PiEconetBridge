@@ -1534,17 +1534,19 @@ Privileged commands:
 *PRIV <user> <priv>
 	- Set user privilege. 
 
+          Those marked '+' can be prefixed + or - to turn on/off
+
           Applicable privileges are: 
 
           D - Deleted - user cannot log in, password entry will be reused 
-          L - Locked user - cannot log in 
+        + L - Locked user - cannot log in (- variant returns to U)
           N - Unlocked (normal) user, but cannot change password 
-          S - System user 
+        + S - System user (- variant returns to U)
           U - Unlocked (normal) user 
 
        - Set user functionality 
 
-          C - ("chroot") - user's home directory will appear to them as $ 
+        + C - ("chroot") - user's home directory will appear to them as $ 
               If using this, any library or other directories the user needs 
               to see will need to be copied or linked (see *LINK) into their 
               home directory or they will not be accessible. This will only  
@@ -1555,14 +1557,14 @@ Privileged commands:
           R - ("normal Root") - undoes 'C' - user will see disc root 
               directory as $ 
 
-          H - Hide other users in user list (*USERS) Can have the ffect 
+        + H - Hide other users in user list (*USERS) Can have the ffect 
               (especially with 'C' above and *DISCMASK) of making the user 
               appear always to be the only one using the server, on the only 
               disc with only their files on it.  
 
           V - Reveal other users in user list (*USERS) 
 
-          A - Turn on ANFS name bodge. This causes the FS to spot filenames 
+        + A - Turn on ANFS name bodge. This causes the FS to spot filenames 
               beginning '[0-9].' and insert a : on the start of the name. ANFS 
               appears to strip colons in those circumstances - probably 
               deliberately but it breaks some games designed to work on DFS or 
@@ -1573,6 +1575,8 @@ Privileged commands:
               Very Great Care.  
 
           B - Turn off ANFS name bodge.
+
+	+ O - Prevent user from changing boot option
 		
 *REMUSER <username>
 	- Removes the user specified. 
@@ -1591,6 +1595,20 @@ Privileged commands:
 
 *SETLIB (<username>) <directory>
 	- See above. System users may specify the optional username.
+
+*SETOPT <username> <option>
+	- Set specific user's boot option. <option> is a digit.
+	- This will change the option immediately, but will only
+	  take effect at next user logon. Further, since logged
+	  on stations cache the option they were given at login,
+	  catalogue headers from a user who is logged in when
+	  this command is used will *not* change the visible
+	  "Option xx (Off/Exec/etc.)" text. However, the option
+	  will have changed. (The reason the option changes
+	  when the user does *OPT4,X is that the local machine
+	  updates its cache. It has no means of doing so
+	  when *SETOPT is used, because the station is not
+	  notified that the option has changed.)
 
 *SETPASS <username> <password>
 	- Set password for another user

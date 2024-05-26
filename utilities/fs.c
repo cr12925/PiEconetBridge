@@ -1,5 +1,5 @@
 /*
-  (c) 2021 Chris Royle
+  (c) 2024 Chris Royle
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
@@ -161,6 +161,7 @@ uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 #define FS_PRIV2_CHROOT 0x02 /* Make user home dir appear as root */
 #define FS_PRIV2_HIDEOTHERS 0x04 /* Don't show other users in fs_users() */
 #define FS_PRIV2_ANFSNAMEBODGE 0x08 /* ANFS strips the colon off the start of a filename if it appears to be a disc number instead of a disc name. This privilege causes the normalizer to spot [0-9].$ and replace with :[0-9].$ in filenames. This is a per user priv because it can break filenames! */
+#define FS_PRIV2_FIXOPT 0x01 /* User cannot change boot option */
 
 // MDFS privilege bits in MDFS format
 #define MDFS_PRIV_PWUNLOCKED 0x01
@@ -197,8 +198,11 @@ struct {
 	uint8_t fs_infcolon; // Uses :inf for alternative to xattrs instead of .inf, and maps Acorn / to Unix . instead of Unix :
 	uint8_t fs_manyhandle; // Enables user handles > 8, and presents them as 8-bit integers rather than handle n presented as 2^n (which is what FS 3 does with its limit of 8 handles)
 	uint8_t fs_mdfsinfo; // Enables longer output from *INFO akin to MDFS
-	uint8_t pad[247]; // Spare spare in the config
+	uint8_t fs_pifsperms; // Enables WR/r to be set on directories and will include them in FS replies. 0x00 means this has never been set - so PiFS will set it ON when it sees that. 0x80 means OFF (Acorn dir display/permissions), 0xff means ON (PiFS extras enabled)
+	uint8_t pad[246]; // Spare spare in the config
 } fs_config[ECONET_MAX_FS_SERVERS];
+
+#define FS_CONF_PIFSPERMS(s)	(fs_config[(s)].fs_pifsperms == 0x80 ? 0 : 1)
 
 struct fs_user {
 	unsigned char username[10];
@@ -225,6 +229,8 @@ struct fs_user {
 
 // Macro to provide a shortcut to getting a user's real ID when the caller only knows the index into active[]
 #define FS_ACTIVE_UID(s,a) (active[(s)][(a)].userid)
+// Macro to identify if we have system privileges
+#define FS_ACTIVE_SYST(s,a) (users[(s)][FS_ACTIVE_UID((s),(a))].priv & FS_PRIV_SYSTEM)
 
 struct {
 	unsigned char groupname[10]; // First character null means unused.
@@ -303,19 +309,97 @@ struct objattr {
 	unsigned short homeof;
 };
 
+// Internal file / dir result codes
+
 #define FS_FTYPE_NOTFOUND 0
 #define FS_FTYPE_FILE 1
 #define FS_FTYPE_DIR 2
 #define FS_FTYPE_SPECIAL 3 // Not sure what I'll use that for, but we'll have it anyhow
 
-#define FS_PERM_H 0x80 // Hidden - doesn't show up in directory list, but can be opened
+// PiFS file / dir permission bits
+
+#define FS_PERM_H 0x80 // Hidden - doesn't show up in directory list, but can be opened (not accessible to non-owner)
 #define FS_PERM_OTH_W 0x20 // Write by others
 #define FS_PERM_OTH_R 0x10 // Read by others
+#define FS_PERM_EXEC 0x08 // Execute only
 #define FS_PERM_L 0x04 // Locked
 #define FS_PERM_OWN_W 0x02 // Write by owner
 #define FS_PERM_OWN_R 0x01 // Read by owner
 
 #define FS_PERM_PRESERVE 0xff00 // Special 16-bit value fed to fs_setxattr() to stop it overwriting perms
+
+// Defines to test permission bits
+// p = perm byte
+// b = bit required
+
+#define FS_PERM_SET(p,b) 	(((p) & (b)) ? 1 : 0)
+#define FS_PERM_UNSET(p,b)	(((p) & (b)) ? 0 : 1)
+
+// Defines to implement file & dir access permissions
+// In each case:
+//   s = server number
+//   a = active_id
+//   p = file perms (the whole 8 bits)
+//   o = file owner
+//   pp = parent dir perms
+//   po = parent owner
+
+// The following are derived from watching what ANFS does/doesn't do when talking to a Level 4 server as both owner and non-owner 
+// of a file. It was found that SYST is just equivalent to owner
+
+// Actual owner
+#define FS_PERM_ISOWNER(s,a,o)	((FS_ACTIVE_UID((s),(a)) == (o)) ? 1 : 0)
+// Effective owner - i.e. actual owner or system priv
+#define FS_PERM_EFFOWNER(s,a,o)	((FS_ACTIVE_SYST((s),(a)) || FS_PERM_ISOWNER((s),(a),(p),(o),(pp),(po)) ? 1 : 0)
+
+// Object visible to this user - as distinct from readable - this is testing the hidden bit
+#define FS_PERM_VISIBLE(s,a,p,o)	(FS_PERM_SET((p), FS_PERM_H) && FS_PERM_EFFOWNER((s),(a),(o)))
+
+// Can create new file if it doesn't exist already
+#define FS_PERM_CREATE(s,a,p,o,pp,po)	((FS_PERM_EFFOWNER((s),(a),(po)) && (!FS_CONFIG_PIFSPERMS((s)) || FS_PERM_SET((pp), FS_PERM_OWN_W))) || (FS_CONFIG_PIFSPERMS((s)) && FS_PERM_SET((pp), FS_PERM_OTH_W) && FS_PERM_SET((pp), FS_PERM_OWN_W)))
+
+// Can SAVE - only if unlocked and we effectively own it. Non-owners cannot save unless PiFS perms enabled.
+// Even then, only if both owner & other W are set, which is similar to what happens when non-owner read is
+// requested in L4, which requires both OTH_R and OWN_R set.
+
+#define FS_PERM_SAVE(s,a,p,o,pp,po) ((FS_PERM_UNSET((p), FS_PERM_L) && (\
+		(FS_PERM_EFFOWNER((s),(a),(o))) ||\
+		(FS_CONF_PIFSPERMS((s)) && FS_PERM_SET((p), FS_PERM_OWN_W) && FS_PERM_SET((p), FS_PERM_OTH_W)) \
+		))
+// Can LOAD - note that L4 enforces both R/ and /r for a non-owner to read, so R/ is required whether owner or not
+#define FS_PERM_LOAD(s,a,p,o,pp,po) (\
+		(!FS_CONFIG_PIFSPERMS((s)) || (FS_PERM_SET_((pp), FS_PERM_OWN_R) && (FS_PERM_EFFOWNER((s), (a), (po)) || FS_PERM_SET((pp), FS_PERM_OTH_R)))) && \
+		(FS_PERM_SET((p), FS_PERM_OWN_R) && (FS_PERM_EFFOWNER((s),(a),(o)) || FS_PERM_SET((p), FS_PERM_OTH_R))) \
+		)
+
+// Can RENAME - Owner always can unless locked, non-owner never can - except if PIFS PERMS enabled, in which case they can if they have write access to the parent
+#define FS_PERM_RENAME(s,a,p,o,pp,po) (\
+		FS_PERM_UNSET((p), FS_PERM_L) && \
+		( \
+		 	( \
+			 FS_CONFIG_PIFSPERMS((s)) && \
+				(FS_PERM_SET((pp), FS_PERM_OWN_W) && (FS_PERM_EFFOWNER((s),(a),(po)) || FS_PERM_SET((pp), FS_PERM_OTH_W))) \
+			) \
+			|| \
+			(!FS_CONFIG_PIFSPERMS((s) && FS_PERM_EFFOWNER((s),(a),(o)))) \
+		))
+
+// Can OPENIN
+#define FS_PERM_OPENIN	FS_PERM_LOAD
+
+// Can OPENOUT - Level 4 forbids this on WL/ but allows it on +R or +W (wither +L or -L!) - looks like this is (+L && +R) || (+W || +R). In Acorn world, OPENOUT *always* fails for non-owner. In PIFS world, it will succeed if +W/w
+#define FS_PERM_OPENOUT(s,a,p,o,pp,po) \
+	( \
+	  (FS_PERM_EFFOWNER((s),(a),(o)) && ( (FS_PERM_SET((p), FS_PERM_L) && FS_PERM_SET((p), FS_PERM_OWN_R)) || (FS_PERM_SET((p), FS_PERM_OWN_R) || FS_PERM_SET((p), FS_PERM_OWN_W)) ) ) \
+	  || \
+	  (FS_CONFIG_PIFSPERMS((s)) && FS_PERM_SET((p), FS_PERM_OWN_W) && FS_PERM_SET((p), FS_PERM_OTH_W)) \
+	)
+
+// Can OPENUP - Level 4 does same as OPENOUT
+#define FS_PERM_OPENUP FS_PERM_OPENOUT
+
+// Can BPUT/S
+// ** TODO **
 
 struct path_entry {
 	short ftype;
@@ -910,6 +994,27 @@ short fs_get_uid(int server, char *username)
 
 }
 
+/*
+ * Return full username in *username
+ * for a given user ID.
+ *
+ * See fs_get_username() for this based on active ID
+ */
+
+void fs_get_username_base (int server, int userid, char *username)
+{
+
+	short ptr = 0;
+
+	while (ptr < 10)
+	{
+		*(username+ptr) = users[server][userid].username[ptr];
+		ptr++;
+	}
+
+	*(username+ptr) = 0; // Null terminate
+}
+
 // Fill character array with username for a given active_id on this server. Put NULL in
 // first byte if active id is invalid
 void fs_get_username (int server, int active_id, char *username)
@@ -919,6 +1024,8 @@ void fs_get_username (int server, int active_id, char *username)
 		*username = 0;
 	else
 	{
+		fs_get_username_base(server, active[server][active_id].userid, username);
+		/* OLD
 		short ptr = 0;
 
 		while (ptr < 10)
@@ -928,6 +1035,7 @@ void fs_get_username (int server, int active_id, char *username)
 		}
 
 		*(username+ptr) = 0; // Null terminate
+		*/
 
 	}
 
@@ -978,7 +1086,8 @@ unsigned char fs_perm_from_acorn(int server, unsigned char acorn_perm)
 
 	r = 0;
 
-	if (acorn_perm == 0) r = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R; // Acorn clients seem to use &00 to mean WR/r
+	// 20240520 Commented - this only applies to directories
+	// if (acorn_perm == 0) r = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R; // Acorn clients seem to use &00 to mean WR/r
 
 	if (fs_config[server].fs_sjfunc) r |= (acorn_perm & 0x40) ? FS_PERM_H : 0; // Hidden / Private. This is MDFS only really
 	r |= (acorn_perm & 0x10) ? FS_PERM_L : 0; // Locked
@@ -1648,6 +1757,7 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 	char needle_wildcard[2048];
 	struct dirent **namelist;
 	struct stat statbuf;
+	// struct statx statxbuf;
 	struct objattr oa, oa_parent;
 	struct tm ct;
 
@@ -1727,6 +1837,19 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 				continue;
 			}
 	
+			/* Commented out - no glibc wrapper yet
+			// And statx for birthday. Soon we'll just use statx() and not stat() as well
+			
+			if (statx(0, new_p->unixpath, 0, STATX_BTIME, &statxbuf) != 0) // Error
+			{
+				fs_debug (0, 2, "Unable to statx %s", new_p->unixpath);
+				free (new_p);
+				counter++;
+				continue;
+			}
+			*/
+	
+
 			//fs_debug (0, 3, "fs_get_wildcard_entries() loop counter %d of %d - ACORN:'%s', UNIX '%s'", counter+1, results, new_p->acornname, new_p->unixfname);
 	
 			p = new_p; // update p
@@ -1740,9 +1863,12 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 			p->homeof = oa.homeof;
 			p->length = statbuf.st_size;
 	
+			/* This is not approved.
+			 *
 			// If we own the object and it's a directory, and it has permissions 0, then spoof RW/
 			if ((p->owner == userid) && S_ISDIR(statbuf.st_mode) && (p->perm == 0))
 				p->perm = FS_PERM_OWN_R | FS_PERM_OWN_W;	
+				*/
 	
 			p->parent_owner = oa_parent.owner;
 			p->parent_perm = oa_parent.perm;
@@ -1774,7 +1900,7 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 			p->min = ct.tm_min;
 			p->sec = ct.tm_sec;
 	
-			// Create time
+			// Create time - This is bogus. ctime is not create time.
 			localtime_r(&(statbuf.st_ctime), &ct);
 			fs_date_to_two_bytes(ct.tm_mday, ct.tm_mon+1, ct.tm_year, &(p->c_monthyear), &(p->c_day));
 			p->c_hour = ct.tm_hour;
@@ -2274,8 +2400,10 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			result->owner = result->parent_owner = attr.owner;
 			result->parent_perm = result->perm = attr.perm;
 			result->my_perm = (attr.owner == active[server][user].userid) ? (attr.perm & 0x0f) : ((attr.perm & 0xf0) >> 4);
+			/* 20240520 I think this is wrong... SYST just treated as owner
 			if (users[server][active[server][user].userid].priv & FS_PRIV_SYSTEM)
 				result->my_perm = (result->my_perm | (FS_PERM_OWN_R | FS_PERM_OWN_W));
+				*/
 
 			if (normalize_debug) fs_debug (0, 1, "chroot results for root dir %s for user %d are homeof=%04X, owner=%04X, parent_owner=%04X, parent_perm = %02X, perm = %02X, my_perm = %02X", result->unixpath, active[server][user].userid, result->homeof, result->owner, result->parent_owner, result->parent_perm, result->perm, result->my_perm);
 		}
@@ -2482,7 +2610,18 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			result->c_sec = result->paths->c_sec;
 
 			if (count != result->npath-1) // Not last segment - free up all the path_entries because we'll be junking them.
+			{
+				if ((result->ftype == FS_FTYPE_DIR) && ((result->my_perm & FS_PERM_OWN_R) == 0) && !FS_ACTIVE_SYST(server,user))
+				{
+					// Hard fail
+					result->error = FS_PATH_ERR_NODIR;
+					result->ftype = FS_FTYPE_NOTFOUND;
+					return 0;
+				}
+
 				fs_free_wildcard_list(result);
+
+			}
 
 			count++;
 		}
@@ -3715,8 +3854,21 @@ void fs_set_bootopt(int server, unsigned char reply_port, unsigned int userid, u
 {
 
 	unsigned char new_bootopt;
+	unsigned char username[11];
+	int		active_id;
 
 	new_bootopt = *(data+5);
+
+	/* 
+	 * Check if user can change boot opt
+	 */
+
+	if (!(users[server][userid].priv & FS_PRIV_SYSTEM) && (users[server][userid].priv2 & FS_PRIV2_FIXOPT)) 
+	{
+		fs_debug (0, 2, "%12sfrom %3d.%3d Set boot option %d - prohibited", "", net, stn, new_bootopt);
+		fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
+		return;
+	}
 
 	if (new_bootopt > 7)
 	{
@@ -3724,10 +3876,29 @@ void fs_set_bootopt(int server, unsigned char reply_port, unsigned int userid, u
 		return;
 	}
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d Set boot option %d", "", net, stn, new_bootopt);
+	fs_get_username_base(server, userid, username);
+
+	fs_debug (0, 2, "%12sfrom %3d.%3d Set boot option %d for user %s", "", net, stn, new_bootopt, username);
 	
 	users[server][userid].bootopt = new_bootopt;
-	active[server][fs_stn_logged_in(server,net,stn)].bootopt = new_bootopt;
+
+	/* See if the user is logged in. If the user is calling this, 
+	 * then net, stn will be where they are. But they (a) may be logged
+	 * in more than once, and (b) this function can be called by the
+	 * System command SETOPT, so the user might not be logged in at all.
+	 */
+
+	// OLD active[server][fs_stn_logged_in(server,net,stn)].bootopt = new_bootopt;
+	
+	for (active_id = 0; active_id < ECONET_MAX_FS_USERS; active_id++)
+	{
+		if (active[server][active_id].userid == userid
+		&&  active[server][active_id].net
+		&&  active[server][active_id].stn
+		)
+			active[server][active_id].bootopt = new_bootopt;
+	}
+
 	fs_write_user(server, userid, (char *) &(users[server][userid]));
 
 	fs_reply_success(server, reply_port, net, stn, 0, 0);
@@ -3929,6 +4100,12 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
 				}
 					
+				if ((p.owner == active[server][usercount].userid && (p.perm & FS_PERM_OWN_R) == 0) && ((p.perm & FS_PERM_OTH_R) == 0)) // Unreadable directory
+				{
+					fs_error (server, reply_port, net, stn, 0xA8, "Unreadable root directory.");
+					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
+				}
+
 				active[server][usercount].current_disc = p.disc; // Updated here once we know where the URD is for definite.
 
 				if (fs_config[server].fs_acorn_home)
@@ -4032,6 +4209,14 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
 				}
 					
+				/* Don't need to do this for lib - only URD
+				if ((p.owner == active[server][usercount].userid && (p.perm & FS_PERM_OWN_R) == 0) && ((p.perm & FS_PERM_OTH_R) == 0)) // Unreadable directory
+				{
+					fs_error (server, reply_port, net, stn, 0xA8, "Unreadable lib directory.");
+					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
+				}
+				*/
+
 				internal_handle = fs_open_interlock(server, p.unixpath, 1, active[server][usercount].userid);
 
 				if ((active[server][usercount].lib = fs_allocate_user_dir_channel(server, usercount, internal_handle)) == 0) // Can't allocate
@@ -4297,7 +4482,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 	{	
 		//fs_debug (0, 3, "Examining '%s'", e->acornname);
 
-		if ((e->perm & FS_PERM_H) == 0 || (e->owner == active[server][active_id].userid)) // not hidden or we are the owner
+		if (FS_ACTIVE_SYST(server, active_id) || (e->perm & FS_PERM_H) == 0 || (e->owner == active[server][active_id].userid)) // not hidden or we are the owner
 		{
 			switch (arg)
 			{
@@ -4344,6 +4529,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 				{
 					unsigned char tmp[256];
 					unsigned char permstring_l[10], permstring_r[10];
+					unsigned char permstring_both[20];
 					unsigned char hr_fmt_string[80];
 	
 					sprintf(permstring_l, "%s%s%s%s",
@@ -4356,13 +4542,15 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 						((e->perm & FS_PERM_OTH_W) ? "W" : ""),
 						((e->perm & FS_PERM_OTH_R) ? "R" : "") );
 
-					sprintf (hr_fmt_string, "%%-%ds %%08lX %%08lX   %%06lX   %%4s/%%-2s     %%02d/%%02d/%%02d %%06lX", ECONET_MAX_FILENAME_LENGTH);
+					sprintf(permstring_both, "%s/%s", permstring_l, permstring_r);
+
+					sprintf (hr_fmt_string, "%%-%ds %%08lX %%08lX   %%06lX   %%-7s     %%02d/%%02d/%%02d %%06lX", ECONET_MAX_FILENAME_LENGTH);
 
 					//sprintf (tmp, "%-10s %08lX %08lX   %06lX   %4s/%-2s     %02d/%02d/%02d %06lX", 
 					sprintf (tmp, hr_fmt_string, 
 						e->acornname,
 						e->load, e->exec, e->length,
-						permstring_l, permstring_r,
+						permstring_both,
 						fs_day_from_two_bytes(e->day, e->monthyear),
 						fs_month_from_two_bytes(e->day, e->monthyear),
 						fs_year_from_two_bytes(e->day, e->monthyear),
@@ -4392,6 +4580,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 				{
 					char tmp[256];
 					char permstring_l[10], permstring_r[10];
+
 					//unsigned char hr_fmt_string[20];
 
 					sprintf(permstring_l, "%s%s%s%s",
@@ -4408,6 +4597,8 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 					//sprintf (tmp, hr_fmt_string, e->acornname,
 
 					//if (strlen(e->acornname) > 10) e->acornname[10] = 0; // Limit to 10 chars
+					//
+
 					sprintf (tmp, "%-10s %4s/%-2s", e->acornname,
 						permstring_l, permstring_r
 					);
@@ -4630,7 +4821,7 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 	
 	if (!fs_normalize_path(server, active_id, path, relative_to, &p) || p.ftype == FS_FTYPE_NOTFOUND)
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
-	else if (((active[server][active_id].priv & FS_PRIV_SYSTEM) == 0) && 
+	else if (((!FS_ACTIVE_SYST(server, active_id))) && 
 			(p.owner != active[server][active_id].userid) &&
 			(p.parent_owner != active[server][active_id].userid)
 		)
@@ -4657,7 +4848,15 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 				attr.load = (*(data+6)) + (*(data+7) << 8) + (*(data+8) << 16) + (*(data+9) << 24);
 				attr.exec = (*(data+10)) + (*(data+11) << 8) + (*(data+12) << 16) + (*(data+13) << 24);
 				// We need to make sure our bitwise stuff corresponds with Acorns before we do this...
-				attr.perm = fs_perm_from_acorn(server, *(data+14)) | ((*(data+14) & 0x0c) == 0) ? (FS_PERM_OWN_W | FS_PERM_OWN_R) : 0;
+				// 20240520 Altered
+				//attr.perm = fs_perm_from_acorn(server, *(data+14)) | ((*(data+14) & 0x0c) == 0) ? (FS_PERM_OWN_W | FS_PERM_OWN_R) : 0;
+				attr.perm = fs_perm_from_acorn(server, *(data+14));
+
+				// If it's a directory whose attributes we're setting, add in WR/r if no attributes are specified
+
+				if ((p.ftype == FS_FTYPE_DIR) && ((*(data+14) & 0xff) == 0))
+					attr.perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); 
+
 				break;
 			
 			case 2: // Set load address
@@ -4670,7 +4869,15 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 	
 			case 4: // Set attributes only
 				// Need to convert acorn to PiFS
-				attr.perm = fs_perm_from_acorn(server, *(data+6)) | (((*(data+6) & 0x0c) == 0) ? (FS_PERM_OWN_W | FS_PERM_OWN_R) : 0);
+				// 20240520 Altered
+				//attr.perm = fs_perm_from_acorn(server, *(data+6)) | (((*(data+6) & 0x0c) == 0) ? (FS_PERM_OWN_W | FS_PERM_OWN_R) : 0);
+				attr.perm = fs_perm_from_acorn(server, *(data+14));
+
+				// If it's a directory whose attributes we're setting, add in WR/r if no attributes are specified
+
+				if ((p.ftype == FS_FTYPE_DIR) && ((*(data+14) & 0xff) == 0))
+					attr.perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); 
+
 				break;
 
 			case 5: // Set file date
@@ -4816,6 +5023,14 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 
 	}
 
+	// 20240520 Stop read of directory we cannot read
+	
+	if (p.ftype == FS_FTYPE_DIR && !((p.my_perm & FS_PERM_OWN_R) || FS_ACTIVE_SYST(server, active_id)))
+	{
+		fs_error(server, reply_port, net, stn, 0xbc, "Insufficient access");
+		return;
+	}
+
 	replylen = 0; // Reset after temporary use above
 
 	r.p.data[replylen++] = 0;
@@ -4851,7 +5066,7 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 	}
 
 	if (command == 4 || command == 5) // arg 4 doesn't request ownership - but the RISC OS PRM says it does, so we'll put this back
-		r.p.data[replylen++] = (active[server][active_id].userid == p.owner) ? 0x00 : 0xff; 
+		r.p.data[replylen++] = ((FS_ACTIVE_UID(server,active_id) == p.owner) || FS_ACTIVE_SYST(server,active_id)) ? 0x00 : 0xff; 
 
 	if (command == 6)
 	{
@@ -4969,7 +5184,7 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 	
 			if (p.perm & FS_PERM_L) // Locked - cannot write
 			{
-				fs_error(server, reply_port, net, stn, 0xC3, "Entry Locked");
+				fs_error(server, reply_port, net, stn, 0xC0, "Entry Locked");
 			}
 			else if (p.ftype != FS_FTYPE_FILE && p.ftype != FS_FTYPE_NOTFOUND) // Not a file!
 				fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
@@ -4980,12 +5195,13 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 						p.ftype == FS_FTYPE_NOTFOUND && 
 						(	(	(p.parent_perm & FS_PERM_OWN_W) && 
 								(
-									(p.parent_owner == active[server][active_id].userid) || (active[server][active_id].priv & FS_PRIV_SYSTEM)
+									(p.parent_owner == active[server][active_id].userid) || (FS_ACTIVE_SYST(server,active_id))
 								)
 							) ||
 							(p.parent_perm & FS_PERM_OTH_W)
 						)
 					)
+					|| FS_ACTIVE_SYST(server, active_id)
 				)
 				{
 					short internal_handle;
@@ -5188,7 +5404,7 @@ void fs_owner(int server, unsigned short reply_port, int active_id, unsigned cha
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
 	else
 	{
-		if (!((active[server][active_id].priv & FS_PRIV_SYSTEM) || (p.owner == active[server][active_id].userid) || (p.parent_owner == active[server][active_id].userid))) // Not system user, and doesn't own parent directory
+		if (!((FS_ACTIVE_SYST(server, active_id)) || (p.owner == active[server][active_id].userid) || (p.parent_owner == active[server][active_id].userid))) // Not system user, and doesn't own parent directory
 		{
 			fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 			return;
@@ -5269,7 +5485,7 @@ void fs_chown(int server, unsigned short reply_port, int active_id, unsigned cha
 	
 	fs_debug (0, 1, "%12sfrom %3d.%3d Change ownership on %s to '%s'", "", net, stn, path, (char *) (ptr_owner ? (char *) username : (char *) "self"));
 
-	if ((!(active[server][active_id].priv & FS_PRIV_SYSTEM)) && (ptr_owner != 0)) // Ordinary user tring to change ownership to someone other than themselves
+	if ((!(FS_ACTIVE_SYST(server, active_id))) && (ptr_owner != 0)) // Ordinary user tring to change ownership to someone other than themselves
 	{
 		fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 		return;
@@ -5314,7 +5530,7 @@ void fs_chown(int server, unsigned short reply_port, int active_id, unsigned cha
 		}
 
 		if (
-			!(active[server][active_id].priv & FS_PRIV_SYSTEM) &&
+			!(FS_ACTIVE_SYST(server, active_id)) &&
 			(p.parent_owner == userid && !(p.parent_perm & FS_PERM_OWN_W)) &&
 			!(p.owner == userid && (p.perm & FS_PERM_OWN_W))
 		   ) // Not system user, no write access to parent directory
@@ -6027,7 +6243,7 @@ void fs_rename(int server, unsigned short reply_port, int active_id, unsigned ch
 		return;
 	}
 	
-	if ((p_from.owner != active[server][active_id].userid) && (p_from.parent_owner != active[server][active_id].userid) && ((active[server][active_id].priv & FS_PRIV_SYSTEM) == 0))
+	if ((p_from.owner != active[server][active_id].userid) && (p_from.parent_owner != active[server][active_id].userid) && (!FS_ACTIVE_SYST(server, active_id)))
 	{
 		fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 		return;
@@ -6040,13 +6256,13 @@ void fs_rename(int server, unsigned short reply_port, int active_id, unsigned ch
 		// Note, we *can* move a file into a filename inside a directory (FS_FTYPE_NOTFOUND), likewise a directory, but if the destination exists it MUST be a directory
 	}
 
-	if ((p_to.ftype == FS_FTYPE_NOTFOUND) && p_to.parent_owner != active[server][active_id].userid && ((p_to.parent_perm & FS_PERM_OTH_W) == 0) && ((active[server][active_id].priv & FS_PRIV_SYSTEM) == 0)) // Attempt to move to a directory we don't own and don't have write access to
+	if ((p_to.ftype == FS_FTYPE_NOTFOUND) && p_to.parent_owner != active[server][active_id].userid && ((p_to.parent_perm & FS_PERM_OTH_W) == 0) && (!FS_ACTIVE_SYST(server, active_id))) // Attempt to move to a directory we don't own and don't have write access to
 	{
 		fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 		return;
 	}
 
-	if ((p_to.ftype != FS_FTYPE_NOTFOUND && p_to.owner != active[server][active_id].userid && (active[server][active_id].priv & FS_PRIV_SYSTEM) == 0)) // Destination exists (so must be dir), not owned by us, and we're not system
+	if ((p_to.ftype != FS_FTYPE_NOTFOUND && p_to.owner != active[server][active_id].userid && (!FS_ACTIVE_SYST(server, active_id)))) // Destination exists (so must be dir), not owned by us, and we're not system
 	{
 		fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 		return;
@@ -6186,7 +6402,7 @@ void fs_delete(int server, unsigned short reply_port, int active_id, unsigned ch
 				return;
 			}
 			else if (
-					!(	(users[server][active[server][active_id].userid].priv & FS_PRIV_SYSTEM) || (e->owner == active[server][active_id].userid) || ((e->parent_owner == active[server][active_id].userid) && (e->parent_perm & FS_PERM_OWN_W))
+					!(	(FS_ACTIVE_SYST(server, active_id)) || (e->owner == active[server][active_id].userid) || ((e->parent_owner == active[server][active_id].userid) && (e->parent_perm & FS_PERM_OWN_W))
 				)
 			)
 			{
@@ -6247,7 +6463,7 @@ void fs_cdir(int server, unsigned short reply_port, int active_id, unsigned char
 
 		if (p.ftype != FS_FTYPE_NOTFOUND)
 			fs_error(server, reply_port, net, stn, 0xFF, "Exists");
-		else if ((p.parent_owner == active[server][active_id].userid && (p.parent_perm & FS_PERM_OWN_W)) || (users[server][active[server][active_id].userid].priv & FS_PRIV_SYSTEM)) // Must own the parent and have write access, or be system
+		else if ((p.parent_owner == active[server][active_id].userid && (p.parent_perm & FS_PERM_OWN_W)) || FS_ACTIVE_SYST(server, active_id)) // Must own the parent and have write access, or be system
 		{
 			if (!mkdir((const char *) p.unixpath, 0770))
 			{
@@ -6366,14 +6582,20 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 	if (sscanf(command, "%s %8s", path, perm_str) != 2)
 	{
 		if (sscanf(command, "%s", path) == 1)
-			perm = FS_PERM_OWN_R | FS_PERM_OWN_W | FS_PERM_OTH_R;
+		{
+			// 20240520 Changed
+			//perm = FS_PERM_OWN_R | FS_PERM_OWN_W | FS_PERM_OTH_R;
+			strcpy (perm_str, "");
+		}
 		else
 		{
 			fs_error(server, reply_port, net, stn, 0xFF, "Bad parameters");
 			return;
 		}	
 	}
-	else
+
+	// 20240520 Removed from main if()
+	//else
 	{
 
 		perm = 0;
@@ -6524,7 +6746,7 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 	// First, check we have permission on everything we need
 	while (e != NULL)
 	{
-		if (e->owner == active[server][active_id].userid || (e->parent_owner == active[server][active_id].userid && (e->parent_perm & FS_PERM_OWN_W)) || (users[server][active[server][active_id].userid].priv & FS_PRIV_SYSTEM)) // Must own the file, own the parent and have write access, or be system
+		if (e->owner == active[server][active_id].userid || (e->parent_owner == active[server][active_id].userid && (e->parent_perm & FS_PERM_OWN_W)) || FS_ACTIVE_SYST(server, active_id)) // Must own the file, own the parent and have write access, or be system
 			e = e->next;
 		else
 		{
@@ -6802,7 +7024,7 @@ void fs_cat_header(int server, unsigned short reply_port, int active_id, unsigne
 	{
 		if (p.ftype != FS_FTYPE_DIR)
 			fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
-		else if (p.my_perm & FS_PERM_OWN_R)
+		else if ((p.my_perm & FS_PERM_OWN_R) || FS_ACTIVE_SYST(server,active_id))
 		{
 			r.p.ptype = ECONET_AUN_DATA;
 			r.p.port = reply_port;
@@ -7245,7 +7467,7 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 
 	// Check permissions
 
-	if (!((active[server][active_id].priv & FS_PRIV_SYSTEM) || (p.my_perm & FS_PERM_OWN_R))) // Note: my_perm has all the relevant privilege bits in the bottom 4
+	if (!((FS_ACTIVE_SYST(server, active_id)) || (p.my_perm & FS_PERM_OWN_R))) // Note: my_perm has all the relevant privilege bits in the bottom 4
 	{
 		fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 		return;
@@ -8153,19 +8375,24 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 		fs_free_wildcard_list(&p);
 		fs_error(server, reply_port, net, stn, 0xcc, "Bad filename");
 	}
-	else if ((p.ftype == FS_FTYPE_FILE) && !readonly && ((p.my_perm & FS_PERM_OWN_W) == 0))
-	{
-		fs_free_wildcard_list(&p);
-		fs_error(server, reply_port, net, stn, 0xbd, "Insufficient access");
-	}
 	else if ((p.ftype == FS_FTYPE_FILE) && !readonly && ((p.perm & FS_PERM_L)))
 	{
 		fs_free_wildcard_list(&p);
 		fs_error(server, reply_port, net, stn, 0xC3, "Entry Locked");
 	}
-	else if (!readonly && (p.ftype == FS_FTYPE_NOTFOUND) && 
+	else if ((p.ftype == FS_FTYPE_FILE) && !readonly && ((p.my_perm & FS_PERM_OWN_W) == 0) && !FS_ACTIVE_SYST(server, active_id))
+	{
+		fs_free_wildcard_list(&p);
+		fs_error(server, reply_port, net, stn, 0xbd, "Insufficient access");
+	}
+	else if ((p.ftype == FS_FTYPE_FILE) && ((p.my_perm & FS_PERM_OWN_R) == 0) && !FS_ACTIVE_SYST(server, active_id))
+	{
+		fs_free_wildcard_list(&p);
+		fs_error(server, reply_port, net, stn, 0xbd, "Insufficient access");
+	}
+	else if (!readonly && (p.ftype == FS_FTYPE_NOTFOUND) && !FS_ACTIVE_SYST(server, active_id) &&
 		(	(p.parent_owner != active[server][active_id].userid && ((p.parent_perm & FS_PERM_OTH_W) == 0)) ||
-			(p.parent_owner == active[server][active_id].userid && ((p.parent_perm & FS_PERM_OWN_W) == 0))
+			(p.parent_owner == active[server][active_id].userid && ((p.parent_perm & FS_PERM_OWN_W) == 0)) 
 			) // FNF and we can't write to the directory
 		)
 	{
@@ -9160,7 +9387,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					if (p.disc != active[server][active_id].current_disc)
 						fs_error(server, reply_port, net, stn, 0xFF, "Not on current disc");
 					*/
-					else // BROKEN if (p.my_perm & FS_PERM_OWN_R)
+					else if ((p.my_perm & FS_PERM_OWN_R) || FS_ACTIVE_SYST(server, active_id))
 					{	
 						/* l = fs_get_dir_handle(server, active_id, p.unixpath); */
 						l = fs_open_interlock(server, p.unixpath, 1, active[server][active_id].userid);
@@ -9203,7 +9430,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						}
 						else	fs_error(server, reply_port, net, stn, 0xD6, "Dir unreadable");
 					}
-					// BROKEN else	fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
+					else	fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 				}
 				else	fs_error(server, reply_port, net, stn, 0xFE, "Not found");
 			}
@@ -9250,7 +9477,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				{
 					if (p.ftype != FS_FTYPE_DIR)
 						fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
-					else // BROKEN if (p.my_perm & FS_PERM_OWN_R)
+					else if ((p.my_perm & FS_PERM_OWN_R) || FS_ACTIVE_SYST(server, active_id))
 					{	
 						l = fs_open_interlock(server, p.unixpath, 1, active[server][active_id].userid);
 						if (l != -1) // Found
@@ -9295,7 +9522,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						}
 						else	fs_error(server, reply_port, net, stn, 0xC7, "Dir unreadable");
 					}
-					// BROKEN else fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
+					else fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 				}
 				else	fs_error(server, reply_port, net, stn, 0xFE, "Not found");
 			}
@@ -9423,6 +9650,39 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						fs_error (server, reply_port, net, stn, 0xFF, "Bad parameter");
 						return;
 					}	
+				}
+				else if (fs_parse_cmd(command, "SETOPT", 4, &param))
+				{
+					unsigned char 	params[256];
+					unsigned char 	username[11];
+					uint8_t		new_opt;
+					short		uid;
+
+					fs_copy_to_cr(params, param, 255);
+
+					if (sscanf(params, "%10s %1hhd", username, &new_opt) != 2)
+					{
+						fs_debug (0, 1, "%12sfrom %3d.%3d Set user boot option - bad parameters %s", "", net, stn, params);
+						fs_error(server, reply_port, net, stn, 0xFF, "Bad parameters");
+						return;
+					}
+					else
+					{
+						uint8_t		fake_data[6];
+
+						uid = fs_get_uid(server, username);
+						if (uid < 0)
+						{
+							fs_error(server, reply_port, net, stn, 0xFF, "No such user");
+							return;
+						}
+
+						fake_data[5] = new_opt;
+
+						fs_set_bootopt(server, reply_port, uid, net, stn, fake_data);
+
+
+					}
 				}
 				//else if (!strncasecmp("SETHOME ", (const char *) command, 8))
 				else if (fs_parse_cmd(command, "SETHOME", 4, &param))
@@ -9881,13 +10141,19 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					if (count == 0) // There wasn't a username
 						fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
 
+					command[0] &= 0xDF; // Capitalize
+
 					if ((command[0] == 'P') && count == strlen((const char *) param)) // THere was no space after the username and this was PRIV not REMUSER
 						fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
 					else
 					{
+						uint8_t setpriv = 1; // Default is to set the relevant priv
+
 						username[count] = '\0';
 						count++;
 						if (command[0] == 'P' && count == strlen((const char *) param)) // There was no priv character!
+							fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
+						else if (command[0] == 'P' && (param[count] == '+' || param[count] == '-') && (strlen((const char *) param) < count+2)) // using + or - notation and string not long enough
 							fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
 						else
 						{
@@ -9896,25 +10162,44 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							if (uid < 0)
 								fs_error(server, reply_port, net, stn, 0xbc, "User not found");
 
-
 							if ((command[0] & 0xdf) == 'P')
 								priv = param[count];	
 							else	priv = 'D'; // This was REMUSER not PRIV, so we pick 'D' for delete
+
+							if (priv == '+' || priv == '-') // New set/unset mode
+							{
+								if (priv == '-') setpriv = 0;
+								priv = param[count+1];
+							}
+
+							priv &= 0xDF; // Capitalize
 
 							priv2_byte = users[server][uid].priv2;
 
 							switch (priv) {
 								case 's': case 'S': // System user
-									priv_byte = FS_PRIV_SYSTEM;			
+									{
+										if (setpriv)
+											priv_byte = FS_PRIV_SYSTEM;
+										else 	priv_byte = FS_PRIV_USER;
+									}
 									break;
 								case 'u': case 'U': // Unlocked normal user
 									priv_byte = FS_PRIV_USER;
 									break;
 								case 'l': case 'L': // Locked normal user
-									priv_byte = FS_PRIV_LOCKED;
+									{
+										if (setpriv)
+											priv_byte = FS_PRIV_LOCKED;
+										else	priv_byte = FS_PRIV_USER;
+									}
 									break;
 								case 'n': case 'N': // Unlocked user who cannot change password
-									priv_byte = FS_PRIV_NOPASSWORDCHANGE;
+									{
+										if (setpriv)
+											priv_byte = FS_PRIV_NOPASSWORDCHANGE;
+										else	priv_byte = FS_PRIV_USER;
+									}
 									break;
 								case 'd': case 'D': // Invalidate privilege - delete the user
 									priv_byte = 0;
@@ -9922,7 +10207,9 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								case 'c': case 'C': // Chroot
 									{
 										priv_byte = users[server][uid].priv;
-										priv2_byte = users[server][uid].priv2 | FS_PRIV2_CHROOT;
+										if (setpriv)
+											priv2_byte = users[server][uid].priv2 | FS_PRIV2_CHROOT;
+										else	priv2_byte = users[server][uid].priv2 & ~FS_PRIV2_CHROOT;
 									} break;
 								case 'r': case 'R': // (Normal) root
 									{
@@ -9937,17 +10224,28 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								case 'h': case 'H': // Hide other users
 									{
 										priv_byte = users[server][uid].priv;
-										priv2_byte = users[server][uid].priv2 | FS_PRIV2_HIDEOTHERS;
+										if (setpriv)
+											priv2_byte = users[server][uid].priv2 | FS_PRIV2_HIDEOTHERS;
+										else	priv2_byte = users[server][uid].priv2 & ~FS_PRIV2_HIDEOTHERS;
 									} break;
 								case 'a': case 'A': // Turn on ANFS Name Bodge
 									{
 										priv_byte = users[server][uid].priv;
-										priv2_byte = users[server][uid].priv2 | FS_PRIV2_ANFSNAMEBODGE;
+										if (setpriv)
+											priv2_byte = users[server][uid].priv2 | FS_PRIV2_ANFSNAMEBODGE;
+										else	priv2_byte = users[server][uid].priv2 & ~FS_PRIV2_ANFSNAMEBODGE;
 									} break;
 								case 'b': case 'B': // Turn off ANFS Name Bodge
 									{
 										priv_byte = users[server][uid].priv;
 										priv2_byte = users[server][uid].priv2 & ~FS_PRIV2_ANFSNAMEBODGE;
+									} break;
+								case 'O': // Stop user changing boot opt
+									{
+										priv_byte = users[server][uid].priv;
+										if (setpriv)
+											priv2_byte = users[server][uid].priv2 | FS_PRIV2_FIXOPT;
+										else	priv2_byte = users[server][uid].priv2 & ~FS_PRIV2_FIXOPT;
 									} break;
 								default:
 									priv_byte = 0xff;
@@ -10137,7 +10435,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_cdir(server, reply_port, active_id, net, stn, *(data+3), (data+6)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x1c: // Set real time clock
-			if ((fs_stn_logged_in(server, net, stn) >= 0) && (active[server][active_id].priv & FS_PRIV_SYSTEM))
+			if ((fs_stn_logged_in(server, net, stn) >= 0) && FS_ACTIVE_SYST(server, active_id))
 			{
 				// Silently accept but ignore
 				struct __econet_packet_udp reply;
@@ -10268,7 +10566,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 				if (rw_op > 12 && rw_op != 15)
 					fs_error(server, reply_port, net, stn, 0xff, "Unsupported");
-				else if ((fs_stn_logged_in(server, net, stn) >= 0) && (rw_op & 0x01 || active[server][active_id].priv & FS_PRIV_SYSTEM))
+				else if ((fs_stn_logged_in(server, net, stn) >= 0) && (rw_op & 0x01 || FS_ACTIVE_SYST(server, active_id)))
 				{
 					switch (rw_op)
 					{

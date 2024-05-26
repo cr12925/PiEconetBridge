@@ -38,6 +38,13 @@ RELEASE NOTES FOR V2.1
 
   - Translates '/' in Acorn filenames to '.' in the underlying filesystem
 
+  - Allow system users in the FS to (i) change another user's OPT4/boot
+    setting, and (ii) stop the user from changing it. See *SETOPT and
+    *PRIV <user> <+/->O
+
+  - Some *PRIV options can now be used with + or - modifiers to turn 
+    on (+) or off (-)
+
 
 - Kernel updates
 
@@ -96,9 +103,6 @@ Roadmap to v2.2
   hosts. Redistribute AUN broadcasts to distant AUN hosts as a unicast packet.
 
 - Dynamic AUN stations to use pool addresses instead of specific network
-
-- Allow system users in the FS to (i) change another user's OPT4/boot
-  setting, and (ii) stop the user from changing it
 
 - JSON-based configuration & converter from existing to JSON. Intended to
   enable configuration by a web app.
