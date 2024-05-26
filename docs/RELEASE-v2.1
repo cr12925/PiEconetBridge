@@ -64,6 +64,16 @@ RELEASE NOTES FOR V2.1
   - Pipe client utilities which uses the IsNets broadcast to identify which
     networks are known
 
+Known bugs in v2.1
+------------------
+
+- Copying from RISC OS to PiFS occasionally appears to lose some but not all
+  file permissions. Debug shows PiFS is setting the perms to what RISC OS
+  is asking for, but it may be that RISC OS is doing some sort of server
+  level (version) determination and changing its behaviour. So it may be
+  that PiFS needs to respond to some query or other differently to get
+  RISC OS to ask for the permissions it really wants.
+
 Roadmap to v2.2 
 ---------------
 
