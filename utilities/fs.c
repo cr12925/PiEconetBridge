@@ -1003,6 +1003,7 @@ void fs_wildcard_to_regex(char *input, char *output)
 			case '-': // Fall through
 			case '(': // Fall through
 			case ')': // Fall through
+			case '?': // Fall through
 			case '+': // Escape these
 			{
 				unsigned char t[3];
