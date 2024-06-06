@@ -7237,7 +7237,7 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 
 	while (q)
 	{
-		//fs_debug (0, 2, "         Packet length %04X at %p, next at %p", q->len, q, q->next);
+		fs_debug (0, 3, "         Packet length %04X at %p, next at %p", q->len, q, q->next);
 		q = q->next;
 	}
 
