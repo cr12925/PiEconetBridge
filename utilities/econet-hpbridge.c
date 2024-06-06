@@ -6278,7 +6278,7 @@ static void * eb_device_despatcher (void * device)
 							eb_free (__FILE__, __LINE__, "BRIDGE", "Freeing PEEK reply packet", reply);
 							
 						}
-						else if (p->p->p.aun_ttype == ECONET_AUN_NAK || p->p->p.aun_ttype == ECONET_AUN_ACK) // Don't pass these to local devices
+						else if ((d->local.fs.index < 0) && (p->p->p.aun_ttype == ECONET_AUN_NAK || p->p->p.aun_ttype == ECONET_AUN_ACK)) // Don't pass these to local devices except a fileserver
 						{
 			
 						}
@@ -6796,16 +6796,18 @@ static void * eb_device_despatcher (void * device)
 								} break;
 							}
 						}
-						else if (d->local.fs.index >= 0) // Must be fileserver traffic
+						else if (d->local.fs.index >= 0) // Must be fileserver traffic - NB, this also sends ACKs & NAKs now, just in case there's a need to dequeue
 						{
 
 							pthread_mutex_lock(&fs_mutex);
 							eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
 							eb_handle_fs_traffic(d->local.fs.index, p->p, p->length);
 
+							/* No longer required - done by FS 
 							if (fs_dequeuable(d->local.fs.index))
 								fs_dequeue(d->local.fs.index); // For now. We'll adjust that to send straight out on BRIDGE_V2 later.
 							fs_garbage_collect(d->local.fs.index);
+							*/
 
 							pthread_mutex_unlock(&fs_mutex);
 							// Not effective fs_load_dequeue (d->local.fs.index, p->p->p.srcnet, p->p->p.srcstn); // Incase there was a load dequeue to do

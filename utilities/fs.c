@@ -470,6 +470,8 @@ struct load_queue {
 	unsigned queue_type; // For later use with getbytes() - but for now assume always a load
 	unsigned char internal_handle; // Internal file handle to be closed at end / abort
 	unsigned char mode; // Internal mode
+	uint32_t	ack_seq_trigger; // Sequence number for which we receive an ack which will trigger next transmission
+	time_t		last_ack_rx; // Last time we received an ACK from this station - used for garbage collection
 	struct load_queue *next;
 	struct __pq *pq_head, *pq_tail;	
 
@@ -1208,13 +1210,19 @@ void fs_copy_to_cr(unsigned char *dest, unsigned char *src, unsigned short len)
 
 }
 
-int fs_aun_send(struct __econet_packet_udp *p, int server, int len, unsigned short net, unsigned short stn)
+/* fs_aun_send_noseq()
+ *
+ * Send AUN into the bridge, but don't set the sequence number
+ * Used when a sender routine (typically the load queuer) wants to set its own
+ * sequence number so it can track it.
+ */
+
+int fs_aun_send_noseq(struct __econet_packet_udp *p, int server, int len, unsigned short net, unsigned short stn)
 {
 	struct __econet_packet_aun a;
 
 	memcpy(&(a.p.aun_ttype), p, len+8);
 	a.p.padding = 0x00;
-	a.p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
 		
 	a.p.srcnet = fs_stations[server].net;
 	a.p.srcstn = fs_stations[server].stn;
@@ -1235,6 +1243,22 @@ int fs_aun_send(struct __econet_packet_udp *p, int server, int len, unsigned sho
 	return aun_send (&a, len + 8 + 4);
 #endif
 
+}
+
+/* fs_aun_send()
+ *
+ * Send AUN into the bridge, but set the sequence number.
+ *
+ * This is the typical way of getting data out of the FS when
+ * we don't care what seq number goes in the packet.
+ *
+ */
+
+int fs_aun_send(struct __econet_packet_udp *p, int server, int len, unsigned short net, unsigned short stn)
+{
+
+	p->p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
+	return fs_aun_send_noseq(p, server, len, net, stn);
 }
 
 unsigned short fs_get_dir_handle(int server, unsigned int active_id, unsigned char *path)
@@ -7058,11 +7082,27 @@ void fs_cat_header(int server, unsigned short reply_port, int active_id, unsigne
 // load enqueue. net, stn are destinations. server parameter is to ensure queue is ordered. p & len are the packet to queue
 // Length is data portion length only, so add 8 for the header on a UDP packet, 12 for AUN
 // We do the malloc/free inside the enqueue/dequeue routines
+//
+// server - the FS instance we are creating for
+// *p - the packet to go on the queue
+// len - data? length of packet
+// net, stn - destination host
+// internal_handle - file handle we are sending from, in case we need to close it (if this is a load operation not getbytes)
+// mode - is file open for reading/writing/both - so we can close the handle properly
+// seq - sequence number to trigger next dequeue when we get an ack for that sequence number - set to 0 except on first packet, because
+//    the dequeuer sets the sequence number on each packet it sends. This seq is for the packet we sent to the station *before*
+//    the first one in the queue. If this is non-zero, it forces the routine to create a new queue just in case the station
+//    has somehow managed to do two requests at the same time...
+// qtype - 1 = Load (close file at end), 2 = getbytes (leave it open)
+//
 // RETURNS:
 // -1 Failure - malloc
 // 1 Success
 
-char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigned char net, unsigned char stn, unsigned char internal_handle, unsigned char mode)
+#define FS_ENQUEUE_LOAD 1
+#define FS_ENQUEUE_GETBYTES 2
+
+char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigned char net, unsigned char stn, unsigned char internal_handle, unsigned char mode, uint32_t seq, uint8_t qtype)
 {
 
 	struct __econet_packet_udp *u; // Packet we'll put into the queue
@@ -7114,7 +7154,7 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 
 	//fs_debug (0, 2, "Existing queue%s found at %p", (l ? "" : " not"), l);
 
-	if (!l || (l->server != server || l->net != net || l->stn != stn)) // No entry found - make a new one
+	if (seq || !l || (l->server != server || l->net != net || l->stn != stn)) // No entry found - make a new one
 	{
 
 		// Make a new load queue entry
@@ -7133,9 +7173,12 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 		n->net = net;
 		n->stn = stn;
 		n->server = server;
-		n->queue_type = 1; // 2 will be getbytes()
+		//n->queue_type = 1; // 2 will be getbytes()
+		n->queue_type = qtype; // See defines above
 		n->mode = mode;
 		n->internal_handle = internal_handle;
+		n->ack_seq_trigger = seq;
+		n->last_ack_rx = time(NULL); // Now
 		n->pq_head = NULL;
 		n->pq_tail = NULL;
 		n->next = NULL; // Applies whether there was no list at all, or we fell off the end of it. We'll fix it below if we're inserting
@@ -7214,7 +7257,7 @@ void fs_enqueue_dump(struct load_queue *l)
 	h = fs_load_queue;
 	h_parent = NULL;
 
-	if (l->queue_type == 1) // *LOAD operation
+	if (l->queue_type == FS_ENQUEUE_LOAD) // *LOAD operation
 		fs_close_interlock(l->server, l->internal_handle, l->mode); // Mode should always be one in this instance
 
 	while (h && (h != l))
@@ -7273,17 +7316,18 @@ void fs_enqueue_dump(struct load_queue *l)
 // 0 - Failure - No packet(!)
 // -1 - No ack - dumped
 
-char fs_load_dequeue(int server, unsigned char net, unsigned char stn)
+char fs_load_dequeue(int server, unsigned char net, unsigned char stn, uint32_t seq)
 {
 
 	struct load_queue *l, *l_parent; // Search variable
+	uint32_t	new_seq;
 
 	l = fs_load_queue;
 	l_parent = NULL;
 
 	fs_debug (0, 4, "to %3d.%3d from %3d.%3d de-queuing bulk transfer", net, stn, fs_stations[server].net, fs_stations[server].stn);
 
-	while (l && (l->server != server || l->net != net || l->stn != stn))
+	while (l && (l->server != server || l->net != net || l->stn != stn || l->ack_seq_trigger != seq))
 	{
 		l_parent = l;
 		l = l->next;
@@ -7305,10 +7349,16 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn)
 		return 0;
 	}
 
-	fs_debug (0, 4, "to %3d.%3d from %3d.%3d Sending packet from __pq %p, length %04X", net, stn, fs_stations[server].net, fs_stations[server].stn, l->pq_head, l->pq_head->len);
+	// Insert sequence number
+	
+	new_seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
+	l->pq_head->packet->p.seq = new_seq;
 
+	fs_debug (0, 4, "to %3d.%3d from %3d.%3d Sending packet from __pq %p, length %04X with new sequence number %08X", net, stn, fs_stations[server].net, fs_stations[server].stn, l->pq_head, l->pq_head->len, l->pq_head->packet->p.seq);
 
-	if ((fs_aun_send(l->pq_head->packet, server, l->pq_head->len, l->net, l->stn) <= 0)) // If this fails, dump the rest of the enqueued traffic
+	// Send without inserting a sequence number
+
+	if ((fs_aun_send_noseq(l->pq_head->packet, server, l->pq_head->len, l->net, l->stn) <= 0)) // If this fails, dump the rest of the enqueued traffic
 	{
 		fs_debug (0, 4, "fs_aun_send() failed in fs_load_sequeue() - dumping rest of queue");
 		fs_enqueue_dump(l); // Also closes file
@@ -7317,18 +7367,26 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn)
 	}
 	else // Tx success - just update the packet queue
 	{
-		struct __pq *p;
+		struct __pq *p, *old_p;
 
 		p = l->pq_head;
+
+		old_p = p;
 
 		l->pq_head = l->pq_head->next;
 		free(p->packet);
 		free(p);
 
+		/* Try commenting
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wuse-after-free"
-		fs_debug (0, 4, "Packet queue entry freed at %p", p);
+*/
+
+		fs_debug (0, 4, "Packet queue entry freed at %p", old_p);
+
+		/* Try commenting
 #pragma GCC diagnostic pop
+*/
 
 		if (!(l->pq_head)) // Ran out of packets
 		{
@@ -7337,12 +7395,24 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn)
 			fs_enqueue_dump(l);
 			return 2;
 		}
+		else
+		{
+			// Update sequence number to wait for
+
+			l->ack_seq_trigger = new_seq;
+
+			// Update last rx time
+			
+			l->last_ack_rx = time(NULL);
+		}
 
 	}
 
 	return 1; // Success - but still more packets to come
 }
 
+/* All deprecated now - ACK triggered.
+ 
 // Function called by the bridge when it knows there are things to dequeue
 // Dumps out one packet per bulk transfer per server->{net,stn} combo each time.
 #ifdef BRIDGE_V2
@@ -7405,6 +7475,8 @@ short fs_dequeuable(void)
 	return 0;
 }
 
+*/
+
 // Load file, & cope with 'Load as command'
 void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned char stn, unsigned int active_id, unsigned char *data, int datalen, unsigned short loadas, unsigned char rxctrl)
 {
@@ -7420,6 +7492,8 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		
 	unsigned short result;
 	short internal_handle;
+
+	uint32_t	sequence; // Used to track the seq number sent to the load enqueuer
 
 	fs_copy_to_cr(command, data+5, 256);
 
@@ -7510,8 +7584,13 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 	r.p.data[13] = p.perm;
 	r.p.data[14] = p.day;
 	r.p.data[15] = p.monthyear;
+	r.p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
 
-	if (fs_aun_send(&r, server, 16, net, stn))
+	sequence = r.p.seq; // Forces enqueuer to start new queue, and sets up the ack trigger for the packet we are about to send so that when that ACK turns up, we send the first packet in the queue.
+
+	// Use the noseq variant so we can force the load_enqueue routine to start a new queue and trigger on the right sequence number.
+	
+	if (fs_aun_send_noseq(&r, server, 16, net, stn))
 	{
 		// Send data burst
 
@@ -7527,7 +7606,7 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		{
 			collected = fread(&(r.p.data), 1, 1280, f);
 			
-			if (collected > 0) enqueue_result = fs_load_enqueue(server, &r, collected, net, stn, internal_handle, 1); else enqueue_result = 0;
+			if (collected > 0) enqueue_result = fs_load_enqueue(server, &r, collected, net, stn, internal_handle, 1, sequence, FS_ENQUEUE_LOAD); else enqueue_result = 0;
 
 			if (collected < 0 || enqueue_result < 0)
 			{
@@ -7535,6 +7614,7 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 				return; // Failed in some way
 			}
 	
+			sequence = 0; // Set to 0 so that enqueuer doesn't create a new queue.
 
 		}
 		
@@ -7544,7 +7624,7 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		r.p.port = reply_port;
 		r.p.ctrl = rxctrl;
 
-		fs_load_enqueue(server, &r, 2, net, stn, internal_handle, 1);
+		fs_load_enqueue(server, &r, 2, net, stn, internal_handle, 1, sequence, FS_ENQUEUE_LOAD);
 
 	}
 	
@@ -8828,6 +8908,7 @@ void fs_garbage_collect(int server)
 {
 
 	int count; // == Bulk port number
+	struct load_queue *l; // Load queue pointer
 
 	for (count = 1; count < 255; count++) // Start at 1 because port 0 is immediates...
 	{
@@ -8858,6 +8939,25 @@ void fs_garbage_collect(int server)
 
 		}
 
+	}
+
+	// Next look through our load queues and see if one has gone stale
+	
+	l = fs_load_queue;
+
+	while (l)
+	{
+		struct load_queue *m;
+
+		m = l->next;
+
+		if (l->server == server) // It's one of ours
+		{
+			if (l->last_ack_rx < (time(NULL) - 10)) // Hard 10s timeout for now - config later
+				fs_enqueue_dump(l);
+		}
+
+		l = m; // Move to next, use stored value in case we dumped the queue
 	}
 
 }
@@ -10808,15 +10908,49 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 void eb_handle_fs_traffic (uint8_t server, struct __econet_packet_aun *p, uint16_t length)
 {
 
-	uint8_t port;
+	switch (p->p.aun_ttype)
+	{
+		case ECONET_AUN_NAK: // If there's an extant queue and we got a NAK matching its trigger sequence, dump the queue - the station has obviously stopped wanting our stuff
+			{
+				struct load_queue *l;
 
-	port = p->p.port;
+				l = fs_load_queue;
 
-	if (port == 0x99) // Ordinary FS traffic
-		handle_fs_traffic (server, p->p.srcnet, p->p.srcstn, p->p.ctrl, (char *) &(p->p.data), length);
-	else
-		handle_fs_bulk_traffic (server, p->p.srcnet, p->p.srcstn, port, p->p.ctrl, (char *) &(p->p.data), length);
+				// See if there is a matching queue
 
+				while (l)
+				{
+					if (l->net == p->p.srcnet
+					&& l->stn == p->p.srcstn
+					&& l->server == server
+					&& l->ack_seq_trigger == p->p.seq
+					)
+					{
+						if (l->queue_type == FS_ENQUEUE_LOAD)
+							fs_close_interlock(l->server, l->internal_handle, l->mode);
+
+						fs_enqueue_dump(l);
+						break;
+					}
+					else
+						l = l->next;
+
+				}
+			}
+			break;
+		case ECONET_AUN_ACK: 
+			fs_load_dequeue(server, p->p.srcnet, p->p.srcstn, p->p.seq);
+			break;
+		case ECONET_AUN_DATA:
+			{
+				if (p->p.port == 0x99) // Ordinary FS traffic
+					handle_fs_traffic (server, p->p.srcnet, p->p.srcstn, p->p.ctrl, (char *) &(p->p.data), length);
+				else
+					handle_fs_bulk_traffic (server, p->p.srcnet, p->p.srcstn, p->p.port, p->p.ctrl, (char *) &(p->p.data), length);
+			} break;
+	}
+
+	fs_garbage_collect(server); // See what might need cleaning up
 }
 
 // Used for *FAST - NB, doesn't rename the directory: the *FAST handler has to do that.
