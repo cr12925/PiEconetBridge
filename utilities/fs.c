@@ -4902,11 +4902,11 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 				// Need to convert acorn to PiFS
 				// 20240520 Altered
 				//attr.perm = fs_perm_from_acorn(server, *(data+6)) | (((*(data+6) & 0x0c) == 0) ? (FS_PERM_OWN_W | FS_PERM_OWN_R) : 0);
-				attr.perm = fs_perm_from_acorn(server, *(data+14));
+				attr.perm = fs_perm_from_acorn(server, *(data+6));
 
 				// If it's a directory whose attributes we're setting, add in WR/r if no attributes are specified
 
-				if ((p.ftype == FS_FTYPE_DIR) && ((*(data+14) & 0xff) == 0))
+				if ((p.ftype == FS_FTYPE_DIR) && ((*(data+6) & 0xff) == 0))
 					attr.perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); 
 
 				break;
