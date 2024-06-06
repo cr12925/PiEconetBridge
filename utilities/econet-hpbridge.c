@@ -1844,11 +1844,21 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 	int				err;
 	*/
 
-	// If ALL nets on trigger are pooled, don't bother sending reset or updates onwards - nothing will change
+	// If ALL nets on trigger are pooled, don't bother sending reset or updates onwards - nothing will change - but *do* send updates if we got a reset from this source.
+	// Logic is this (for a trunk/wire which is all pooled):
+	// - When the remote bridge re-starts it will send a reset. We don't forward that as nothing will change, but we'll send it a list of our nets.
+	// - When we get an update, we don't forward it because nothing will change elsewhere either. Pooling happens independently of net announcements.
+	// - But resets & updates received *from* somewhere other than a network which is all pooled *are* forwarded so that the pooled trunk/wire
+	//   knows what is where.
 	
 	if (trigger && trigger->all_nets_pooled && !EB_CONFIG_POOL_RESET_FWD)
 	{
 		eb_debug (0, 2, "BRIDGE", "%-8s %-7d Bridge %s not forwarded (all nets pooled)", eb_type_str(trigger->type), (trigger->type == EB_DEF_TRUNK ? trigger->trunk.local_port : trigger->net), (ctrl == BRIDGE_RESET) ? "reset" : "update");
+		if (ctrl == BRIDGE_RESET)
+		{
+			eb_debug (0, 2, "BRIDGE", "%-8s %-7d Triggering bridge updates", eb_type_str(trigger->type), (trigger->type == EB_DEF_TRUNK ? trigger->trunk.local_port : trigger->net));
+			pthread_cond_signal(&(trigger->bridge_update_cond));
+		}
 		return;
 	}
 
@@ -2365,7 +2375,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 
 			pthread_mutex_unlock (&networks_update);
 
-			if (p->p.ctrl == 0x80
+			if (p->p.ctrl == BRIDGE_RESET
 			&& (
 				!(source->all_nets_pooled) // Don't reset if all nets on this device are pooled - no point
 			   ||	EB_CONFIG_POOL_RESET_FWD 	// Unless we want to
