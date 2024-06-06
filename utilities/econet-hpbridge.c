@@ -5106,8 +5106,12 @@ static void * eb_device_despatcher (void * device)
 											eb_debug (1, 1, "DESPATCH", "%-8s %3d     Dynamic trunk endpoint found for local port %d at host %s port %d, but failed to allocate memory for addrinfo structure!", eb_type_str(d->type), d->net, d->trunk.local_port, inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port));
 									}
 
-									if (was_dead /* && (packet.p.port != BRIDGE_PORT || packet.p.ctrl != BRIDGE_RESET) */) // If this trunk was dead before this packet arrived, do a bridge reset - which will also start the update process - but don't do a reset if what's just turned up is a reset
+									if (was_dead && (packet.p.port != BRIDGE_PORT || packet.p.ctrl != BRIDGE_RESET)) // If this trunk was dead before this packet arrived, do a bridge reset - which will also start the update process - but don't do a reset if what's just turned up is a reset
 									{
+										eb_debug (0, 2, "DESPATCH", "%-8s %5d   Trunk received traffic after being dead - send bridge reset", eb_type_str(d->type), d->trunk.remote_port);
+										eb_bridge_reset(NULL);
+
+										/* Not sure about this. Go back to what we had 
 										if (packet.p.port != BRIDGE_PORT || packet.p.ctrl != BRIDGE_RESET)
 										{
 											if (d->all_nets_pooled) // Just sent this device a reset
@@ -5121,11 +5125,12 @@ static void * eb_device_despatcher (void * device)
 												eb_bridge_reset(NULL);
 											}
 										}
-										else /* It was the bridge port AND it was a reset - so send update */
+										else // It was the bridge port AND it was a reset - so send update 
 										{
 											eb_debug (0, 2, "DESPATCH", "%-8s %5d   Trunk bridge reset received traffic after being dead - send bridge updates", eb_type_str(d->type), d->trunk.remote_port);
 											pthread_cond_signal(&(d->bridge_update_cond));
 										}
+										*/
 									}
 								}
 								else
