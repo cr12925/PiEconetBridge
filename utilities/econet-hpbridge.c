@@ -5463,7 +5463,17 @@ static void * eb_device_despatcher (void * device)
 					else
 					{
 						if (((packet.p.port == ECONET_TRACE_PORT) && eb_trace_handler (d, &packet, length - 12)) || (packet.p.port != ECONET_TRACE_PORT))
-							eb_enqueue_output (d, &packet, length - 12, NULL);
+							if (!eb_enqueue_output (d, &packet, length - 12, NULL)) // Couldn't queue
+							{
+								if (d->type == EB_DEF_WIRE && packet.p.aun_ttype == ECONET_AUN_IMM) // Drop to flag fill if we couldn't queue the inbound immediate we got off the wire
+								{
+									ioctl(d->wire.socket, ECONETGPIO_IOC_READMODE);	
+									// And clear any priority flags
+									pthread_mutex_lock (&(d->priority_mutex));
+									d->p_net = d->p_stn = d->p_seq = 0;
+									pthread_mutex_unlock (&(d->priority_mutex));
+								}
+							}
 					}
 	
 					// new_output = 1; // Added when output processing moved above
