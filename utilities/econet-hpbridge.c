@@ -3763,7 +3763,8 @@ static void * eb_trunk_keepalive (void * device)
 		eb_enqueue_input (d, p, 0);
 		pthread_cond_signal(&(d->qwake));
 
-		eb_debug (0, 3, "BRIDGE", "%-8s         Trunk keepalive sent on local port %d", eb_type_str(d->type), d->trunk.local_port);
+
+		if (!EB_CONFIG_NOKEEPALIVEDEBUG) eb_debug (0, 3, "BRIDGE", "%-8s         Trunk keepalive sent on local port %d", eb_type_str(d->type), d->trunk.local_port);
 
 		// Check last_rx to see if dead
 
@@ -3786,7 +3787,7 @@ static void * eb_trunk_keepalive (void * device)
 			{
 				pthread_mutex_lock (&(d->qmutex_in));
 
-				eb_debug (0, 3, "DESPATCH", "%-8s         Trunk local port %d dead - clearing dynamic host data", eb_type_str(d->type), d->trunk.local_port);
+				if (!EB_CONFIG_NOKEEPALIVEDEBUG) eb_debug (0, 3, "DESPATCH", "%-8s         Trunk local port %d dead - clearing dynamic host data", eb_type_str(d->type), d->trunk.local_port);
 
 				if (d->trunk.remote_host && d->trunk.remote_host->ai_addr) eb_free(__FILE__, __LINE__, "TRUNK", "Freeing trunk.remote_host.ai_addr structure", d->trunk.remote_host->ai_addr);
 				if (d->trunk.remote_host) eb_free(__FILE__, __LINE__, "TRUNK", "Freeing trunk.remote_host structure", d->trunk.remote_host);
@@ -3802,7 +3803,7 @@ static void * eb_trunk_keepalive (void * device)
 
 			if (last_rx > last_reset)
 			{
-				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk local port %d dead - sending bridge reset", eb_type_str(d->type), d->trunk.local_port);
+				if (!EB_CONFIG_NOKEEPALIVEDEBUG) eb_debug (0, 2, "DESPATCH", "%-8s         Trunk local port %d dead - sending bridge reset", eb_type_str(d->type), d->trunk.local_port);
 				eb_bridge_reset(NULL);
 				last_reset = time(NULL);
 			}
