@@ -5024,7 +5024,7 @@ static void * eb_device_despatcher (void * device)
 						if (!(d->trunk.ctx_dec = EVP_CIPHER_CTX_new()))
 							eb_debug (1, 0, "DESPATCH", "%-8s         Unable to set up decryption control for local port %d", "Trunk", d->trunk.local_port);
 
-						eb_debug (0, 3, "DESPATCH", "%-8s %5d   Encrypted trunk packet received - type %d, IV bytes %02x %02x %02x ...", eb_type_str(d->type), d->trunk.local_port, d->trunk.cipherpacket[TRUNK_CIPHER_ALG], d->trunk.cipherpacket[TRUNK_CIPHER_IV], d->trunk.cipherpacket[TRUNK_CIPHER_IV+1], d->trunk.cipherpacket[TRUNK_CIPHER_IV+2]);
+						eb_debug (0, 4, "DESPATCH", "%-8s %5d   Encrypted trunk packet received - type %d, IV bytes %02x %02x %02x ...", eb_type_str(d->type), d->trunk.local_port, d->trunk.cipherpacket[TRUNK_CIPHER_ALG], d->trunk.cipherpacket[TRUNK_CIPHER_IV], d->trunk.cipherpacket[TRUNK_CIPHER_IV+1], d->trunk.cipherpacket[TRUNK_CIPHER_IV+2]);
 
 						switch (d->trunk.cipherpacket[TRUNK_CIPHER_ALG])
 						{
@@ -5050,13 +5050,13 @@ static void * eb_device_despatcher (void * device)
 
 								d->trunk.encrypted_length += tmp_len;
 
-								eb_debug (0, 3, "DESPATCH", "%-8s %5d   Trunk packet length %04x", eb_type_str(d->type), d->trunk.local_port, d->trunk.encrypted_length);
+								eb_debug (0, 4, "DESPATCH", "%-8s %5d   Trunk packet length %04x", eb_type_str(d->type), d->trunk.local_port, d->trunk.encrypted_length);
 
 								datalength = (temp_packet[0] * 256) + temp_packet[1];
 
 								if (datalength >= 12) // Valid packet size received
 								{
-									eb_debug (0, 3, "DESPATCH", "%-8s %5d   Encrypted trunk packet validly received - specified length %04x, decrypted length %04x, marking receipt at %d seconds", eb_type_str(d->type), d->trunk.local_port, datalength, d->trunk.encrypted_length, time(NULL));
+									eb_debug (0, 4, "DESPATCH", "%-8s %5d   Encrypted trunk packet validly received - specified length %04x, decrypted length %04x, marking receipt at %d seconds", eb_type_str(d->type), d->trunk.local_port, datalength, d->trunk.encrypted_length, time(NULL));
 									memcpy(&packet, &(temp_packet[2]), datalength); // data length always ignores the ECONET part of the data
 									length = datalength;
 									packetreceived = 1;
@@ -5968,7 +5968,7 @@ static void * eb_device_despatcher (void * device)
 									d->trunk.encrypted_length += tmp_len;
 	
 									result = sendto (d->trunk.socket, (unsigned char *) &(d->trunk.cipherpacket), TRUNK_CIPHER_DATA + d->trunk.encrypted_length, MSG_DONTWAIT, d->trunk.remote_host->ai_addr, d->trunk.remote_host->ai_addrlen);
-									eb_debug (0, 3, "DESPATCH", "Trunk            Encryption succeeded: cleartext length %04x, encrypted length %04x", (p->length + 12 + 2), d->trunk.encrypted_length);
+									eb_debug (0, 4, "DESPATCH", "Trunk            Encryption succeeded: cleartext length %04x, encrypted length %04x", (p->length + 12 + 2), d->trunk.encrypted_length);
 								}	
 	
 								EVP_CIPHER_CTX_free(d->trunk.ctx_enc);
