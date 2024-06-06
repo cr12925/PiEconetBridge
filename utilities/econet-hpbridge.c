@@ -2845,19 +2845,34 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 		return 0;
 	}
 
-	// If we get an INK matching our priority list on a wire device, drop flag fill and dump the packet (next if() does the dump)
-	
+	/* See if this was an INK reply to a priority packet, and drop flag fill if it was. */
+
 	pthread_mutex_lock (&(dest->priority_mutex));
 
-	if (dest->type == EB_DEF_WIRE && dest->p_net == packet->p.dstnet && dest->p_stn == packet->p.dststn && dest->p_seq == packet->p.seq && packet->p.aun_ttype == ECONET_AUN_INK)
+	if (dest->type == EB_DEF_WIRE)
 	{
-		ioctl(dest->wire.socket, ECONETGPIO_IOC_READGENTLE);
-		dest->p_net = dest->p_stn = dest->p_seq = 0;
+		eb_debug (0, 3, "WIRE", "%-8s %3d     Checking priority markers net (%3d = %3d), stn (%3d = %3d), seq (%08X = %08X), type (%02X = %02X)",
+			"", dest->net, 
+			dest->p_net, packet->p.srcnet, 
+			dest->p_stn, packet->p.srcstn,
+			dest->p_seq, packet->p.seq,
+			ECONET_AUN_INK, packet->p.aun_ttype);
+
+		if (dest->p_net == packet->p.srcnet && dest->p_stn == packet->p.srcstn && dest->p_seq == packet->p.seq && packet->p.aun_ttype == ECONET_AUN_INK)
+		{
+			// Remove priority markers
+	
+			dest->p_net = dest->p_stn = dest->p_seq = 0;
+	
+			ioctl(dest->wire.socket, ECONETGPIO_IOC_READGENTLE);
+	
+			eb_debug (0, 3, "WIRE", "%-8s %3d    Dropping flag fill on failed immedaite", "", dest->net);
+		}
 	}
 
 	pthread_mutex_unlock (&(dest->priority_mutex));
 
-	if (dest->type == EB_DEF_WIRE && (packet->p.aun_ttype == ECONET_AUN_ACK || packet->p.aun_ttype == ECONET_AUN_NAK || packet->p.aun_ttype == ECONET_AUN_INK)) // Don't queue these
+	if (dest->type == EB_DEF_WIRE && (packet->p.aun_ttype == ECONET_AUN_ACK || packet->p.aun_ttype == ECONET_AUN_NAK || packet->p.aun_ttype == ECONET_AUN_INK)) // Don't queue these 
 	{
 		
 		eb_free (__FILE__, __LINE__, "Q-IN", "Freeing inbound ACK/NAK/INK to wire - not queued", packet);
@@ -2907,7 +2922,10 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 
 		// Trunk NAT (outbound) here - TODO
 
-		if (!dest->in || (dest->type == EB_DEF_WIRE && dest->p_net == packet->p.dstnet && dest->p_stn == packet->p.dststn && dest->p_seq == packet->p.seq))
+		// Prioritize replies to our priority flags - this will include IMMREP packets.
+
+		// 20240606 Changed - looks like we have had the src/dst mapping wrong here for years! if (!dest->in || (dest->type == EB_DEF_WIRE && dest->p_net == packet->p.dstnet && dest->p_stn == packet->p.dststn && dest->p_seq == packet->p.seq))
+		if (!dest->in || (dest->type == EB_DEF_WIRE && dest->p_net == packet->p.srcnet && dest->p_stn == packet->p.srcstn && dest->p_seq == packet->p.seq))
 		{
 			q->n = dest->in;
 			dest->in = q;
