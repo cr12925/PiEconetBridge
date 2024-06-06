@@ -5068,7 +5068,7 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 	r.p.data[replylen++] = 0;
 	r.p.data[replylen++] = p.ftype;
 
-	if (command == 2 || command == 5)
+	if (command == 2 || command == 5 || command == 96)
 	{
 		r.p.data[replylen++] = (p.load & 0xff);
 		r.p.data[replylen++] = (p.load & 0xff00) >> 8;
@@ -5080,23 +5080,23 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		r.p.data[replylen++] = (p.exec & 0xff000000) >> 24;
 	}
 
-	if (command == 3 || command == 5)
+	if (command == 3 || command == 5 || command == 96)
 	{
 		r.p.data[replylen++] = (p.length & 0xff);
 		r.p.data[replylen++] = (p.length & 0xff00) >> 8;
 		r.p.data[replylen++] = (p.length & 0xff0000) >> 16;
 	}
 
-	if (command == 4 || command == 5)
+	if (command == 4 || command == 5 || command == 96)
 		r.p.data[replylen++] = fs_perm_to_acorn(server, p.perm, p.ftype);
 
-	if (command == 1 || command == 5)
+	if (command == 1 || command == 5 || command == 96)
 	{
 		r.p.data[replylen++] = p.day;
 		r.p.data[replylen++] = p.monthyear;
 	}
 
-	if (command == 4 || command == 5) // arg 4 doesn't request ownership - but the RISC OS PRM says it does, so we'll put this back
+	if (command == 4 || command == 5 || command == 96) // arg 4 doesn't request ownership - but the RISC OS PRM says it does, so we'll put this back
 		r.p.data[replylen++] = ((FS_ACTIVE_UID(server,active_id) == p.owner) || FS_ACTIVE_SYST(server,active_id)) ? 0x00 : 0xff; 
 
 	if (command == 6)
@@ -5173,6 +5173,12 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 	{
 		fs_error(server, reply_port, net, stn, 0x85, "FS Error");
 		return;
+	}
+
+	if (command == 96) // PiFS canonicalize object name function
+	{
+		memcpy(&(r.p.data[replylen]), p.acornname, strlen(p.acornfullpath));
+		replylen += strlen(p.acornfullpath);
 	}
 
 	fs_aun_send(&r, server, replylen, net, stn);
