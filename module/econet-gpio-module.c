@@ -980,10 +980,10 @@ void econet_finish_tx(void)
  *
  */
 
-static inline void econet_aun_setidle_txstatus(int aunstate)
+static inline void econet_aun_setidle_txstatus(int txstate)
 {
 	econet_pkt_tx.length = 0;
-	econet_set_tx_status(aunstate);
+	econet_set_tx_status(txstate);
 	econet_set_aunstate(EA_IDLE);
 	econet_set_read_mode();
 }
@@ -2019,7 +2019,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 #ifdef ECONET_GPIO_DEBUG_LINEIDLE
 		printk (KERN_INFO "econet-gpio: econet_irq(): Line idle IRQ waiting for final ACK - Handshake failed. aun state = %d, chip state = %d, tx_status = 0x%02x, rx ptr=%02X, sr1=0x%02X, sr2=%02X\n", aun_state, chip_state, tx_status, econet_pkt_rx.ptr, sr1, sr2);	
 #endif
-
+		econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
 		econet_set_read_mode();
 	}
 
@@ -2035,7 +2035,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 #ifdef ECONET_GPIO_DEBUG_LINEIDLE
 		if (econet_data->aun_mode && aun_state != EA_IDLE)	
-			printk (KERN_INFO "econet-gpio: econet_irq(): Line idle IRQ waiting for final ACK - Handshake failed. aun state = %d, chip state = %d, tx_status = 0x%02x, rx ptr=%02X, sr1=0x%02X, sr2=%02X\n", aun_state, chip_state, tx_status, econet_pkt_rx.ptr, sr1, sr2);	
+			printk (KERN_INFO "econet-gpio: econet_irq(): Line idle IRQ waiting for reply - Handshake failed. aun state = %d, chip state = %d, tx_status = 0x%02x, rx ptr=%02X, sr1=0x%02X, sr2=%02X\n", aun_state, chip_state, tx_status, econet_pkt_rx.ptr, sr1, sr2);	
 		else if ((!econet_data->aun_mode) && (chip_state != EM_TEST && chip_state != EM_IDLE && chip_state != EM_IDLEINIT))
 			printk (KERN_INFO "econet-gpio: econet_irq(): Line idle IRQ - chip state = %d\n",  chip_state);
 #endif
@@ -2060,28 +2060,31 @@ irqreturn_t econet_irq(int irq, void *ident)
 				switch (aun_state)
 				{
 					case EA_W_WRITEBCAST:
-						econet_set_tx_status(ECONET_TX_NOTSTART);
+						//econet_set_tx_status(ECONET_TX_NOTSTART);
+						econet_aun_setidle_txstatus(ECONET_TX_NOTSTART);
 						break;
 					case EA_W_READFIRSTACK:
 					case EA_I_READREPLY:
-						econet_set_tx_status(ECONET_TX_NECOUTEZPAS);
+						econet_aun_setidle_txstatus(ECONET_TX_NECOUTEZPAS);
 						break;
 					case EA_R_READDATA:
 					case EA_R_WRITEFIRSTACK:
 					case EA_R_WRITEFINALACK:
 					case EA_W_READFINALACK:
-						econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
+						econet_aun_setidle_txstatus(ECONET_TX_HANDSHAKEFAIL);
 						break;
 
 				}
 
-				econet_set_aunstate(EA_IDLE);
+				//econet_set_aunstate(EA_IDLE);
 
 			}
+			else
+				econet_set_read_mode();
 
 		}
-
-		econet_set_read_mode();
+		else
+			econet_set_read_mode();
 	}
 
 	/* 
@@ -2167,7 +2170,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 				{
 					econet_set_aunstate(EA_I_READREPLY);
 					// Because this is an immediate, we need to flag transmit success to the tx user space
-					econet_set_tx_status(ECONET_TX_SUCCESS);
+					// 20240606 No, don't do this - we want to detect line idle IRQ
+					// econet_set_tx_status(ECONET_TX_SUCCESS);
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "econet-gpio: econet_irq(): AUN: Written immediate query. Signal TX success but move to READREPLY\n");
 #endif
@@ -2270,7 +2274,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 	 */
 
 	spin_unlock_irqrestore(&econet_irq_spin, flags);
-
 
 	/* Return */
 
@@ -3200,11 +3203,15 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 		 */
 
 		case ECONETGPIO_IOC_TXERR:
+			{
+				uint8_t s;
 
+				s = econet_get_tx_status();
 #ifdef ECONET_GPIO_DEBUG_IOCTL
-			printk (KERN_INFO "econet-gpio: ioctl(get last tx error) called - current status %02x\n", econet_get_tx_status());
+			printk (KERN_INFO "econet-gpio: ioctl(get last tx error) called - current status %02x\n", s);
 #endif
-			return (econet_get_tx_status());
+			return ((long) s);
+			}
 			break;
 
 		/* 
