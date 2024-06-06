@@ -7109,7 +7109,7 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 	struct __pq *q; // Queue entry within a host
 	struct load_queue *l, *l_parent, *n; // l_ used for searching, n is a new entry if we need one
 
-	fs_debug (0, 4, "to %3d.%3d              Enqueue packet length %04X type %d", net, stn, len, p->p.ptype);
+	fs_debug (0, 3, "to %3d.%3d              Enqueue packet length %04X type %d", net, stn, len, p->p.ptype);
 
 	u = malloc(len + 8);
 	memcpy(u, p, len + 8); // Copy the packet data off
@@ -7183,7 +7183,7 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 		n->pq_tail = NULL;
 		n->next = NULL; // Applies whether there was no list at all, or we fell off the end of it. We'll fix it below if we're inserting
 
-		fs_debug (0, 4, " - fs_load_queue = %p, l = %p ", fs_load_queue, l);
+		fs_debug (0, 3, " - new fs_load_queue = %p, l = %p ", fs_load_queue, l);
 
 		if (!fs_load_queue) // There was no queue at all
 		{
@@ -7194,7 +7194,7 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 		{
 			if (!l) // We fell off the end
 			{
-				fs_debug (0, 4, " - on the end of the existing queue");
+				fs_debug (0, 3, " - on the end of the existing queue");
 				l_parent->next = n;
 			}
 			else // Inserting in the middle or at queue head
@@ -7202,13 +7202,13 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 				if (!l_parent)
 				{
 					n->next = fs_load_queue;
-					fs_debug (0, 4, " - by inserting at queue head");
+					fs_debug (0, 3, " - by inserting at queue head");
 					fs_load_queue = n;
 					
 				}
 				else
 				{
-					fs_debug (0, 4, " - by splice at %p", l_parent->next);
+					fs_debug (0, 3, " - by splice at %p", l_parent->next);
 					n->next = l_parent->next; // Splice this one in
 					l_parent->next = n;
 				}
@@ -7232,9 +7232,7 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 		n->pq_tail = q;
 	}
 
-/*
-	fs_debug (0, 2, "Queue state for %d to %3d.%3d: Load queue head at %p", server, net, stn, n);
-*/
+	fs_debug (0, 3, "Queue state for %d to %3d.%3d trigger seq %08X: Load queue head at %p", server, net, stn, n->ack_seq_trigger , n);
 	q = n->pq_head;
 
 	while (q)
@@ -7278,10 +7276,10 @@ void fs_enqueue_dump(struct load_queue *l)
 		p_next = p->next;
 		if (p->packet) 
 		{
-			fs_debug (0, 4, "Freeing bulk transfer packet at %p", p->packet);
+			fs_debug (0, 3, "Freeing bulk transfer packet at %p", p->packet);
 			free (p->packet); // Check it is not null, just in case...
 		}
-		fs_debug (0, 4, "Freeing bulk transfer queue entry at %p", p);
+		fs_debug (0, 3, "Freeing bulk transfer queue entry at %p", p);
 		free(p);
 		p = p_next;
 
@@ -7289,16 +7287,16 @@ void fs_enqueue_dump(struct load_queue *l)
 	
 	if (h_parent) // Mid chain, not at start
 	{
-		fs_debug (0, 4, "Freed structure was not at head of chain. Spliced between %p and %p", h_parent, h->next);
+		fs_debug (0, 3, "Freed structure was not at head of chain. Spliced between %p and %p", h_parent, h->next);
 		h_parent->next = h->next; // Drop this one out of the chain
 	}
 	else
 	{
-		fs_debug (0, 4, "Freed structure was at head of chain. fs_load_queue now %p", h->next);
+		fs_debug (0, 3, "Freed structure was at head of chain. fs_load_queue now %p", h->next);
 		fs_load_queue = h->next; // Drop this one off the beginning of the chain
 	}
 
-	fs_debug (0, 4, "Freeing bulk transfer transaction queue head at %p", h);
+	fs_debug (0, 3, "Freeing bulk transfer transaction queue head at %p", h);
 
 	free(h); // Free up this struct
 
@@ -7325,7 +7323,8 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn, uint32_t 
 	l = fs_load_queue;
 	l_parent = NULL;
 
-	fs_debug (0, 4, "to %3d.%3d from %3d.%3d de-queuing bulk transfer", net, stn, fs_stations[server].net, fs_stations[server].stn);
+
+	// fs_debug (0, 3, "to %3d.%3d from %3d.%3d de-queuing bulk transfer", net, stn, fs_stations[server].net, fs_stations[server].stn);
 
 	while (l && (l->server != server || l->net != net || l->stn != stn || l->ack_seq_trigger != seq))
 	{
@@ -7335,7 +7334,7 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn, uint32_t 
 
 	if (!l) return 0; // Nothing found
 
-	fs_debug (0, 4, "to %3d.%3d from %3d.%3d queue head found at %p", net, stn, fs_stations[server].net, fs_stations[server].stn, l);
+	fs_debug (0, 3, "to %3d.%3d from %3d.%3d bulk transfer queue head found at %p for trigger sequence %08X", net, stn, fs_stations[server].net, fs_stations[server].stn, l, l->ack_seq_trigger);
 
 	if (!(l->pq_head)) // There was an entry, but it had no packets in it!
 	{
@@ -7354,13 +7353,13 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn, uint32_t 
 	new_seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
 	l->pq_head->packet->p.seq = new_seq;
 
-	fs_debug (0, 4, "to %3d.%3d from %3d.%3d Sending packet from __pq %p, length %04X with new sequence number %08X", net, stn, fs_stations[server].net, fs_stations[server].stn, l->pq_head, l->pq_head->len, l->pq_head->packet->p.seq);
+	fs_debug (0, 3, "to %3d.%3d from %3d.%3d Sending packet from __pq %p, length %04X with new sequence number %08X", net, stn, fs_stations[server].net, fs_stations[server].stn, l->pq_head, l->pq_head->len, l->pq_head->packet->p.seq);
 
 	// Send without inserting a sequence number
 
 	if ((fs_aun_send_noseq(l->pq_head->packet, server, l->pq_head->len, l->net, l->stn) <= 0)) // If this fails, dump the rest of the enqueued traffic
 	{
-		fs_debug (0, 4, "fs_aun_send() failed in fs_load_sequeue() - dumping rest of queue");
+		fs_debug (0, 3, "fs_aun_send() failed in fs_load_sequeue() - dumping rest of queue");
 		fs_enqueue_dump(l); // Also closes file
 		return -1;
 
@@ -7382,7 +7381,7 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn, uint32_t 
 #pragma GCC diagnostic ignored "-Wuse-after-free"
 */
 
-		fs_debug (0, 4, "Packet queue entry freed at %p", old_p);
+		fs_debug (0, 3, "Packet queue entry freed at %p", old_p);
 
 		/* Try commenting
 #pragma GCC diagnostic pop
@@ -7390,7 +7389,7 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn, uint32_t 
 
 		if (!(l->pq_head)) // Ran out of packets
 		{
-			fs_debug (0, 4, "End of packet queue - dumping queue head at %p", l);
+			fs_debug (0, 3, "End of packet queue - dumping queue head at %p", l);
 			l->pq_tail = NULL;
 			fs_enqueue_dump(l);
 			return 2;
@@ -8011,6 +8010,8 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 	unsigned char readbuffer[FS_MAX_BULK_SIZE];
 
+	uint32_t	seq;
+
 	struct __econet_packet_udp r;
 
 	txport = *(data+2);
@@ -8074,7 +8075,13 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	r.p.ctrl = ctrl; // Repeat the ctrl byte back to the station - MDFS does this
 	r.p.data[0] = r.p.data[1] = 0;
 
-	fs_aun_send(&r, server, 2, net, stn);
+	// Set the sequence number so we can trigger on it
+	
+	seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
+
+	r.p.seq = seq;
+
+	fs_aun_send_noseq(&r, server, 2, net, stn);
 
 	fserroronread = 0;
 	sent = 0;
@@ -8138,8 +8145,12 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 		// The real FS pads a short packet to the length requested, but then sends a completion message (below) indicating how many bytes were actually valid
 
-		fs_aun_send(&r, server, readlen, net, stn);
+		// Now put them on a load queue
+		//fs_aun_send(&r, server, readlen, net, stn);
 
+		fs_load_enqueue(server, &(r), readlen, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES);
+
+		seq = 0; // seq != 0 means start a new load queue, so always set to 0 here to add to same queue
 		sent += readlen;
 		total_received += received;
 		
@@ -8167,7 +8178,9 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 		r.p.data[4] = ((total_received & 0xff00) >> 8);
 		r.p.data[5] = ((total_received & 0xff0000) >> 16);
 
-		fs_aun_send(&r, server, 6, net, stn);
+		// Now goes on a load queue
+		//fs_aun_send(&r, server, 6, net, stn);
+		fs_load_enqueue(server, &(r), 6, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES);
 	}
 	
 }
