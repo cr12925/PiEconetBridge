@@ -398,8 +398,14 @@ struct objattr {
 // Can OPENUP - Level 4 does same as OPENOUT
 #define FS_PERM_OPENUP FS_PERM_OPENOUT
 
-// Can BPUT/S
-// ** TODO **
+// Can BPUT/S - Owner: requires +R,+W,-L. Other requires +W/+W and -L
+#define FS_PERM_WRITE(s,a,p,o,pp,po) \
+	( FS_PERM_UNSET((p), FS_PERM_L) && \
+	  (FS_PERM_EFFOWNER((s),(a),(o)) ? \
+	   (FS_PERM_SET((p), FS_PERM_OWN_R) && FS_PERM_SET((p), FS_PERM_OWN_W)) \
+	 : (FS_PERM_SET((p), FS_PERM_OWN_W) && FS_PERM_SET((p), FS_PERM OTH(W))) \
+	 ) \
+	 )
 
 struct path_entry {
 	short ftype;
@@ -1659,6 +1665,7 @@ void fs_wildcard_to_regex(char *input, char *output, uint8_t infcolon)
 			case '-': // Fall through
 			case '(': // Fall through
 			case ')': // Fall through
+			case '?': // Fall through
 			case '+': // Escape these
 			{
 				unsigned char t[3];
@@ -5370,7 +5377,7 @@ void fs_free(int server, unsigned short reply_port, unsigned char net, unsigned 
 	
 }
 // Return error specifying who owns a file
-void fs_owner(int server, unsigned short reply_port, int active_id, unsigned char net, unsigned char stn, unsigned char *command)
+void fs_owner(int server, unsigned short reply_port, int active_id, uint8_t relative_to, unsigned char net, unsigned char stn, unsigned char *command)
 {
 
 	struct path p;
@@ -5400,7 +5407,8 @@ void fs_owner(int server, unsigned short reply_port, int active_id, unsigned cha
 
 	strncpy((char * ) path, (const char * ) &(command[ptr_file]), 255);
 
-	if (!fs_normalize_path(server, active_id, path, active[server][active_id].current, &p) || p.ftype == FS_FTYPE_NOTFOUND)
+	//if (!fs_normalize_path(server, active_id, path, active[server][active_id].current, &p) || p.ftype == FS_FTYPE_NOTFOUND)
+	if (!fs_normalize_path(server, active_id, path, relative_to, &p) || p.ftype == FS_FTYPE_NOTFOUND)
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
 	else
 	{
@@ -9331,7 +9339,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				fs_chown(server, reply_port, active_id, net, stn, param);
 			//else if (!strncasecmp("OWNER ", (const char *) command, 6))
 			else if (fs_parse_cmd(command, "OWNER", 3, &param))
-				fs_owner(server, reply_port, active_id, net, stn, param);
+				fs_owner(server, reply_port, active_id, *(data+3), net, stn, param);
 			//else if (!strncasecmp("ACCESS ", (const char *) command, 7))
 			else if (fs_parse_cmd(command, "ACCESS", 3, &param))
 				fs_access(server, reply_port, active_id, net, stn, param);
