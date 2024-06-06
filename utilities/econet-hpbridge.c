@@ -2649,6 +2649,8 @@ uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_au
 			{
 				eb_debug (0, 2, "QUEUE", "%-8s %3d.%3d from %3d.%3d Seq 0x%08X Attempting to queue traffic when destination device cannot be found", eb_type_str(source->type), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, p->p.seq);
 
+				/* TODO: Send INK back to source here if it was an immediate and the host doesn't exist */
+
 				eb_free (__FILE__, __LINE__, "Q-OUT", "Free packet after dest device unknown", p);
 				eb_free (__FILE__, __LINE__, "Q-OUT", "Free packetq after dest device unknown", packetq);
 				eb_free (__FILE__, __LINE__, "Q-OUT", "Free outq after dest device unknown", outq);
@@ -2842,10 +2844,22 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 		return 0;
 	}
 
-	if (dest->type == EB_DEF_WIRE && (packet->p.aun_ttype == ECONET_AUN_ACK || packet->p.aun_ttype == ECONET_AUN_NAK)) // Don't queue these
+	// If we get an INK matching our priority list on a wire device, drop flag fill and dump the packet (next if() does the dump)
+	
+	pthread_mutex_lock (&(dest->priority_mutex));
+
+	if (dest->type == EB_DEF_WIRE && dest->p_net == packet->p.dstnet && dest->p_stn == packet->p.dststn && dest->p_seq == packet->p.seq && packet->p.aun_ttype == ECONET_AUN_INK)
+	{
+		ioctl(dest->wire.socket, ECONETGPIO_IOC_READGENTLE);
+		dest->p_net = dest->p_stn = dest->p_seq = 0;
+	}
+
+	pthread_mutex_unlock (&(dest->priority_mutex));
+
+	if (dest->type == EB_DEF_WIRE && (packet->p.aun_ttype == ECONET_AUN_ACK || packet->p.aun_ttype == ECONET_AUN_NAK || packet->p.aun_ttype == ECONET_AUN_INK)) // Don't queue these
 	{
 		
-		eb_free (__FILE__, __LINE__, "Q-IN", "Freeing inbound ACK/NAK to wire - not queued", packet);
+		eb_free (__FILE__, __LINE__, "Q-IN", "Freeing inbound ACK/NAK/INK to wire - not queued", packet);
 
 		return 1;
 
@@ -6118,7 +6132,21 @@ static void * eb_device_despatcher (void * device)
 										wire_output_pending++;
 
 										if (p->errors > 3 && (err == ECONET_TX_NECOUTEZPAS))
+										{
 											remove = 1; // Dump it - lots of errors on this
+											// Send NAK if DAT packet got not listening, or our internal-special "INK" for an immediate not listening - so a source can tell that's what happened
+											if (tx.p.aun_ttype == ECONET_AUN_DATA)
+											{
+												ack.p.aun_ttype = ECONET_AUN_NAK;
+												eb_enqueue_output (d, &ack, 0, NULL);
+											}
+											else if (tx.p.aun_ttype == ECONET_AUN_IMM)
+											{
+												ack.p.aun_ttype = ECONET_AUN_INK;
+												eb_enqueue_output (d, &ack, 0, NULL);
+											}
+											
+										}
 									}
 								}
 								else // Wrong length - try again - repeat of code above
