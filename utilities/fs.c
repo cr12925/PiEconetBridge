@@ -9864,7 +9864,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				{
 					unsigned char	username[11], password[11];
 					unsigned char 	parameters[255];
-					uint8_t		count, s_ptr;
+					uint16_t		count, s_ptr;
 
 					fs_copy_to_cr (parameters, param, 21);
 
