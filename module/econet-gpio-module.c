@@ -2722,6 +2722,27 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	if (econet_data->aun_mode)
 	{
 		memcpy (&aun_tx, &econet_pkt, len); // Puts the four src/dst bytes into aun_tx. Line the rest up later.
+
+		/* Do nothing and quit unless it's a packet we can actually transmit */
+
+		if (	aun_tx.d.p.aun_ttype != ECONET_AUN_DATA 
+		&&	aun_tx.d.p.aun_ttype != ECONET_AUN_BCAST
+		&&	aun_tx.d.p.aun_ttype != ECONET_AUN_IMM
+		&&	aun_tx.d.p.aun_ttype != ECONET_AUN_IMMREP
+		)
+		{
+
+			econet_pkt.ptr = econet_pkt.length = 0; // Empty the packet 
+			printk (KERN_ERR "econet-gpio: econet_writefd() - attempt to transmit AUN packet of type which cannot go on an Econet - type %02X", aun_tx.d.p.aun_ttype);
+			econet_set_tx_status(ECONET_TX_INVALID);
+			econet_set_read_mode();
+			spin_unlock(&econet_irqstate_spin);
+			mutex_unlock(&econet_writefd_mutex);
+			econet_irq_mode(1);
+			return  -1;
+
+		}
+
 		aun_tx.length = len;
 		econet_aun_tx_statemachine(); // Sets up econet_pkt_tx_prepare
 #ifdef ECONET_GPIO_DEBUG_AUN

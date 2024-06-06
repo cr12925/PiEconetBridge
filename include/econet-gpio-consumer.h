@@ -59,6 +59,8 @@ struct __econet_packet {
 /* Check to see if a station has its bit set in the bitmap */
 #define ECONET_DEV_STATION(m,y,x)		((m)[((y)*32)+(((x)/8))] & (1 << (x)%8))
 
+/* Packets as they come off the wire - used in RAW made */
+
 struct __econet_packet_wire {
 	union {
 		unsigned char data[ECONET_MAX_PACKET_SIZE];
@@ -74,6 +76,42 @@ struct __econet_packet_wire {
 	};
 };
 
+/* 'Plain' format packet - very much like a raw mode packet, but has some additional fields so that
+ * userspace can convert it to AUN. Used in 'Plain' mode because the kernel works faster then and
+ * hopefully we get fewer underruns / overruns
+ */
+
+struct __econet_packet_plain {
+	unsigned char	txmode; // See defines below - when receiving a packet, this will be set to indicate how it was received
+	unsigned char	scoutbytes; // Number of data bytes that came/to be sent with the scout
+	// These four are the original bytes received off the wire - the actual destination. No need to set on transmission - module will do it for you.
+	// They are held separately (and copied from the union below when a valid packet we're interested in is received) because when an
+	// ACK (on transmit) or data packet (on receive) arrives, it'll get stored in the struct below, and then compared - and at that stage it will be backwards!
+	// So we store them the other way round here so that we can do a straight memcmp() at when byte 4 received and abort reception if need be
+	unsigned char	r_srcstn; 
+	unsigned char	r_srcnet;
+	unsigned char	r_dststn; 
+	unsigned char	r_dstnet; 
+	union {
+		unsigned char alldata[ECONET_MAX_PACKET_SIZE];
+		struct {
+			unsigned char dststn;
+			unsigned char dstnet;
+			unsigned char srcstn;
+			unsigned char srcnet;
+			unsigned char ctrl; // Ctrl & Port are the other way round on the wire from an AUN packet
+			unsigned char port;
+			unsigned char data[ECONET_MAX_PACKET_SIZE-6];
+		};
+	};
+};
+
+/* Defines for plain packet use */
+
+#define ECONET_PLAIN_ONESHOT 0xff	// E.g. broadcasts - no flag fill at end
+#define ECONET_PLAIN_FOURWAY 0x01	// Full four-way handshake, and if we're in resilience mode, then put the extra wait phase in
+#define ECONET_PLAIN_ONEFLAG 0x02	// Oneshot, but if we received then we are now flag filling (e.g. certain immediates)
+
 /* AUN Packet Types */
 
 #define ECONET_AUN_BCAST 0x01
@@ -82,6 +120,7 @@ struct __econet_packet_wire {
 #define ECONET_AUN_NAK 0x04
 #define ECONET_AUN_IMM 0x05
 #define ECONET_AUN_IMMREP 0x06
+#define ECONET_AUN_INK 0x07 // econet-hpbridge only: This is an "Immediate NAK". It's sent by a wire device which gets a 'Not listening' when it tried to send a 2-way immediate. Assuming it gets back to the source machine, if the source machine was also a wire when it will enable to source device to drop its flag fill early. This is also sent by a bridge where a destination device just doesn't exist and what was transmitted was an immediate. Aim is to drop flag fill on the local network quickly where there is going to be no reply, so that utilities like !Machines and *STATIONS can progress more quickly without the timeout
 
 /* Data structure for passing AUN packets userspace<->kernel via /dev/econet-gpio, and within the kernel
  * NB: This does NOT match what they look like on the wire, even within the UDP data portion because the
@@ -204,6 +243,7 @@ struct __econet_packet_pipe {
 #define ECONET_TX_NOCOPY 0x53 // Coulndn't copy from userspace
 #define ECONET_TX_NOTSTART 0x54 // TX start timed out - we never got a result back from the IRQ routine
 #define ECONET_TX_COLLISION 0x55 // CTS went high during transmit - try again
+#define ECONET_TX_INVALID 0xfc // Attempt to transmit packet which cannot go on a wire - e.g. ACK, NAK, INK
 #define ECONET_TX_DATAPROGRESS 0xfd // Flags the fact that we got an ack to the Scout
 #define ECONET_TX_INPROGRESS 0xfe
 #define ECONET_TX_STARTWAIT 0xff
