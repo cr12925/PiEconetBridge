@@ -422,20 +422,31 @@ void eb_set_network (uint8_t net, struct __eb_device *dev)
 uint8_t eb_pool_get_dynamic (struct __eb_pool *pool, uint8_t *net, uint8_t *stn)
 {
 
-	uint8_t	net_search, net_start;
+	uint8_t	net_search, net_start, net_loop;
 
 	*net = *stn = 0; // Rogue. We fill these in on success
+
+	//eb_debug (0, 2, "POOL", "%-16s eb_pool_get_dynamic() called for pool %p", "", pool);
 
 	if (!pool) return 0; // Bad pool
 
 	net_start = pool->last_net + 1; // Works because initial rogue is 0
 
-	for (net_search = net_start; ((net_search + 1) & 0xff) != net_start; (net_search = ((net_search+1) & 0xff)))
+	/* If net_start is not in the pool, loop round until we find one that is. Since net_start is uint8_t this should be fine */
+
+	while (!pool->networks[net_start++]);
+
+	//eb_debug (0, 2, "POOL", "%-16s eb_pool_get_dynamic() called for pool %p net_start = %d", "", pool, net_start);
+	
+	for (net_loop = 0; net_loop <= 255; net_loop++)
 	{
 		uint8_t	stations[32]; // Bitmap, 1 bit per host
 		uint8_t	stn_count;
 
 		struct __eb_pool_host *host;
+
+		net_search = (net_start + net_loop) & 0xff;
+		//eb_debug (0, 2, "POOL", "eb_pool_get_dynamic - searching net %3d", net_search);
 
 		if (net_search == 0 || net_search == 255)
 			continue;
@@ -443,28 +454,40 @@ uint8_t eb_pool_get_dynamic (struct __eb_pool *pool, uint8_t *net, uint8_t *stn)
 		memset(&stations, 0, sizeof(stations));
 
 		if (!(pool->networks[net_search]))
+		{
+
+			//eb_debug (0, 2, "POOL", "eb_pool_get_dynamic - searching net %3d - not in pool", net_search);
+
 			continue; //  Network is not in this pool
+		}
+
+		eb_debug (0, 2, "POOL", "eb_pool_get_dynamic - searching net %3d (deep search)", net_search);
 
 		host = pool->hosts_net[net_search];
 
 		while (host)
 		{
+			//eb_debug (0, 2, "POOL", "eb_pool_get_dynamic - searching net %3d - flag stn %3d as in use", net_search, host->stn);
 			EB_POOL_SET_STN_MAP(stations, host->stn);
 			host = host->next_net;
 		}
 
 		for (stn_count = 1; stn_count < 255; stn_count++)
 		{
+			//eb_debug (0, 2, "POOL", "eb_pool_get_dynamic - searching net %3d - examining stn %3d to see if in use", net_search, stn_count);
 			if (!(EB_POOL_IS_MAPPED(stations, stn_count))) // This station wasn't found
 			{
+				//eb_debug (0, 2, "POOL", "eb_pool_get_dynamic - searching net %3d - allocating stn %3d as free", net_search, stn_count);
 				*net = net_search;
 				*stn = stn_count;
 				pool->last_net = net_search;
 				return 1;
 			}
+			//else
+				//eb_debug (0, 2, "POOL", "eb_pool_get_dynamic - searching net %3d - flagging stn %3d as NOT free", net_search, stn_count);
 		}
 	}
-
+	//eb_debug (0, 2, "POOL", "eb_pool_get_dynamic - nothing free");
 	return 0;
 }
 
@@ -619,6 +642,11 @@ struct __eb_pool_host *eb_find_make_pool_host (struct __eb_device *source,
 	}
 	else // Find a vacant station number
 	{
+		eb_debug (0, 2, "POOL", "%-8s %3d.%3d Searching for new translation for %s %d",
+			"Pool",
+			s_net, s_stn,
+			eb_type_str(source->type),
+			(source->type == EB_DEF_TRUNK ? source->trunk.local_port : source->net));
 		if (!eb_pool_get_dynamic(pool, &new_net, &new_stn))
 		{
 			pthread_mutex_unlock(&(pool->updatemutex));
