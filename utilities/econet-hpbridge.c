@@ -867,8 +867,9 @@ void eb_dump_packet (struct __eb_device *source, char dir, struct __econet_packe
 			(p->p.aun_ttype == ECONET_AUN_IMMREP ? "IRP" :
 			(p->p.aun_ttype == ECONET_AUN_IMM ? "IQU" :
 			(p->p.aun_ttype == ECONET_AUN_ACK ? "ACK" :
+			(p->p.aun_ttype == ECONET_AUN_INK ? "INK" :
 			(p->p.aun_ttype == ECONET_AUN_NAK ? "NAK" : "UNK")
-		))))),
+			)))))),
 		p->p.seq,
 		datalength,
 		p);
@@ -6095,13 +6096,13 @@ static void * eb_device_despatcher (void * device)
 										//eb_debug (0, 4, "DESPATCH", "%-8s %3d     while() loop progressing for packet at pq %p, packet at %p, after %d ms err = 0x%02X", eb_type_str(d->type), d->net, p, p->p, timediffmsec(&start, &now), err);
 									}
 		
-									eb_debug (0, 4, "DESPATCH", "%-8s %3d     while() loop ended for packet at pq %p, packet at %p after %d ms", eb_type_str(d->type), d->net, p, p->p, timediffmsec(&start, &now));
+									eb_debug (0, 4, "DESPATCH", "%-8s %3d     while() loop ended for packet at pq %p, packet at %p after %d ms (result = %02X)", eb_type_str(d->type), d->net, p, p->p, timediffmsec(&start, &now), err);
 
 									if (err == ECONET_TX_SUCCESS)
 									{
 										remove = 1;
 		
-	//									eb_debug (0, 1, "DEBUG", "Attempting to send ACK from %3d.%3d to %3d.%3d port &%02X seq 0x%08X", ack.p.dstnet, ack.p.dststn, ack.p.srcnet, ack.p.srcstn, ack.p.port, ack.p.seq);
+										eb_debug (0, 4, "DEBUG", "                 Attempting to send ACK to %3d.%3d from %3d.%3d port &%02X seq 0x%08X", ack.p.dstnet, ack.p.dststn, ack.p.srcnet, ack.p.srcstn, ack.p.port, ack.p.seq);
 	
 										if (tx.p.aun_ttype == ECONET_AUN_IMM) // Record the sequence number & destination so we can match the sequence number on a reply
 										{
