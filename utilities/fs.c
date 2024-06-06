@@ -3215,7 +3215,7 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 
 	if (!fs_netconf_regex_initialized)
 	{
-		if (regcomp(&fs_netconf_regex_one, FS_NETCONF_REGEX_ONE, REG_EXTENDED) != 0)
+		if (regcomp(&fs_netconf_regex_one, FS_NETCONF_REGEX_ONE, REG_EXTENDED | REG_ICASE) != 0)
 			fs_debug (1, 0, "Unable to compile netconf regex.");
 		fs_netconf_regex_initialized = 1;
 	}
