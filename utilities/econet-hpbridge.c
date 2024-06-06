@@ -5041,7 +5041,7 @@ static void * eb_device_despatcher (void * device)
 
 							int	tmp_len;
 
-							eb_debug (0, 3, "DESPATCH", "%-8s %5d   Encryption type in encrypted is valid - %02x; encrypted data length %04x", eb_type_str(d->type), d->trunk.local_port, d->trunk.cipherpacket[TRUNK_CIPHER_ALG], (length - TRUNK_CIPHER_DATA));
+							eb_debug (0, 4, "DESPATCH", "%-8s %5d   Encryption type in encrypted is valid - %02x; encrypted data length %04x", eb_type_str(d->type), d->trunk.local_port, d->trunk.cipherpacket[TRUNK_CIPHER_ALG], (length - TRUNK_CIPHER_DATA));
 
 							if ((!EVP_DecryptUpdate(d->trunk.ctx_dec, temp_packet, &(d->trunk.encrypted_length), (unsigned char *) &(d->trunk.cipherpacket[TRUNK_CIPHER_DATA]), length - TRUNK_CIPHER_DATA)))
 								eb_debug (0, 2, "DESPATCH", "%-8s %3d     DecryptUpdate of trunk packet failed", eb_type_str(d->type), d->net);
