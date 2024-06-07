@@ -6207,7 +6207,7 @@ static void * eb_device_despatcher (void * device)
 										{
 											// Sleep for a short time and check the status again to see if it was still success - it might be not have been listening!)
 
-											usleep(10);
+											// usleep(10); // Read the error again and see if not listening
 
 											err = ioctl(d->wire.socket, ECONETGPIO_IOC_TXERR);
 
@@ -6218,7 +6218,7 @@ static void * eb_device_despatcher (void * device)
 												eb_enqueue_output (d, &ack, 0, NULL);
 												new_output = 1;
 											}
-											else // Record the seq and destination so we can match the sequence number on reply
+											/* else */ // Record the seq and destination so we can match the sequence number on reply
 											{
 												eb_debug (0, 2, "IMMED", "                 Tracking immediate sent: %3d.%3d seq %08X", tx.p.dstnet, tx.p.dststn, tx.p.seq);
 												d->wire.last_imm_dest_net = tx.p.dstnet;
