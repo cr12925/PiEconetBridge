@@ -422,7 +422,8 @@ void eb_set_network (uint8_t net, struct __eb_device *dev)
 uint8_t eb_pool_get_dynamic (struct __eb_pool *pool, uint8_t *net, uint8_t *stn)
 {
 
-	uint8_t	net_search, net_start, net_loop;
+	uint8_t	net_search, net_start;
+	uint16_t net_loop; // Needs 16 bits otherwise the for() loop goes bonkers
 
 	*net = *stn = 0; // Rogue. We fill these in on success
 
