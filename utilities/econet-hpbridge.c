@@ -1614,7 +1614,7 @@ uint8_t eb_bridge_sender_net (struct __eb_device *destnet)
 static void * eb_bridge_update_watcher (void *device)
 {
 	struct __eb_device	*me;
-	uint8_t			qty;
+	uint8_t			qty, real_qty;
 	char			debug_string[1024];
 	uint8_t			old_update[255]; /* Data portion of previous update */
 	uint8_t			old_numnets; 	/* number of valid bytes in old_update */
@@ -1670,7 +1670,13 @@ static void * eb_bridge_update_watcher (void *device)
 			continue;
 		}
 
-		for (tx_count = 0; tx_count < qty; tx_count++)
+		// Just send a single update (two, since there's two threads) if we're on a trunk and the cond wait timed out.
+
+		if (me->type == EB_DEF_TRUNK && result == ETIMEDOUT)
+			real_qty = 1;
+		else	real_qty = qty;
+
+		for (tx_count = 0; tx_count < real_qty; tx_count++)
 		{
 
 			/* Allocate packet to send */
