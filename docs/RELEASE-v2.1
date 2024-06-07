@@ -55,7 +55,7 @@ RELEASE NOTES FOR V2.1
     for accessing GPIO Clock and PWM function (for the ADLC clock and Network
     clock respectively). It continues to write directly to the GPIO hardware for
     speed, having attempted to use the official calls for that purpose without
-    success.
+    success. NB there is a problem with Pi3 and PiZero2W - see below.
 
 - Core bridge functionality
 
@@ -65,6 +65,15 @@ RELEASE NOTES FOR V2.1
   - Bridge now has pool address translation enabled to facilitate trunking of a
     significantly larger number of networks together where most stations are
     clients rather than servers
+
+  - Bridge now implements a PiBridge-unique AUN type "INK" to signal when
+    an immediate query is unroutable over a trunk, or the local wire station
+    has done the immediate equivalent of "Not Listening" (i.e. line idle
+    on tx of a two-way immedaite). This signals to a distant bridge that
+    it can drop its flag fill on its local wire (where the sender of
+    the immedaite it) so that the network can do something else. This
+    considerably speeds up the operation of, for example, *STATIONS and
+    !Machines.
 
 - econet-isnets added
 
@@ -81,6 +90,10 @@ Known bugs in v2.1
   that PiFS needs to respond to some query or other differently to get
   RISC OS to ask for the permissions it really wants.
 
+- FS Load and Getbytes operations can cause 'no reply' errors on lossy
+  trunks. This has been improved prior to release but is still not 
+  perfect.
+
 Roadmap to v2.2 
 ---------------
 
@@ -92,8 +105,6 @@ Roadmap to v2.2
   AUN type packets used for AUN stations / trunks.
 
 - Improve MDFS password file functionality, hopefully including writing to it.
-
-- Move to a threaded fileserver
 
 - Trunk ports which support multiple endpoints, and IPv6. (Existing trunk
   ports will not be IPv6 enabled, only the ones which support multiple
@@ -113,24 +124,17 @@ Roadmap to v2.2
 
 - Implement signals for increasing / decreasing debug (SIGUSR1/2?)
 
-- Implement PiEconetBridge-specific AUN packet type "Immediate NAK"
-  (INK) which is sent from a destination bridge to a source bridge
-  when a 2-way immediate is received but the destination machine
-  is locally accessible but doesn't respond. This will only work on
-  Wire, Local and Pipe devices because the bridge cannot tell when
-  an AUN destination isn't going to respond. The purpose is to 
-  give as timeous indication as possible to the source bridge that
-  the ultimate destination simply is not going to respond. That
-  enables the source bridge to drop its pro-active flag fill 
-  on receipt of an immediate request which presently will just
-  time out after 1s (tunable).
-
 - Make FS permissions mirror L3 plus extra directory permissions.
   Add NETCONF tunable to imply WR/r on all directories and 
   mask the visible display of the same (so unlocked directories
   simply appear as "D/" as they do in L3).
 
 - Add facilities for E permission in FS (execute only)
+
+Roadmap to v2.3
+---------------
+
+- Move to a threaded fileserver
 
 - Implement loop detection system for trunks which
   - Sends a port &9C packet (with distinct ctrl byte) containing
@@ -154,4 +158,4 @@ Roadmap to v2.2
     Acorn topologies.
 
 CR
-May 2024
+June 2024
