@@ -4628,6 +4628,61 @@ fast_handler_reset:
 
 }
 
+/* 
+ * Notify logger for local emulation devices
+ *
+ */
+
+static void * eb_notify_watcher (void * device)
+{
+	struct __eb_device		*d = device;
+	struct __eb_notify		*l, *parent, *n;
+
+	while (1)
+	{
+		sleep (2);
+
+		pthread_mutex_lock (&(d->local.notify_mutex));
+
+		/* Scan the list & print */
+
+		parent = NULL;
+		l = d->local.notify;
+
+		while (l)
+		{
+			time_t	t;
+
+			t = time(NULL);
+
+			n = l->next;
+
+			if ((t - l->last_rx) > 2) // 2 second timeout to display
+			{
+				eb_debug (0, 1, "NOTIFY", "%-8s %3d.%3d from %3d.%3d NOTIFY: %s", "Local", l->net, l->stn, d->net, d->local.stn, l->msg);
+
+				/* Splice out */
+
+				if (!parent)
+					d->local.notify = l->next;
+				else
+					parent->next = l->next;
+
+				eb_free (__FILE__, __LINE__, "NOTIFY", "Free notify structure", l);
+
+			}
+			else	parent = l;
+
+			l = n;
+		}
+
+		pthread_mutex_unlock (&(d->local.notify_mutex));
+
+	}
+
+	return NULL;
+}
+
 /* Generic inter-device transmission loop
  */
 
@@ -4836,6 +4891,20 @@ static void * eb_device_despatcher (void * device)
 					eb_debug(1, 0, "DESPATCH", "Cannot start *FAST IO handler thread for station %d.%d", d->net, d->local.stn);
 				pthread_detach(d->local.fast_io_handler);
 			}
+
+			// Initialize the notify list & mutex
+
+			d->local.notify = NULL;
+
+			if (pthread_mutex_init(&(d->local.notify_mutex), NULL) == -1)
+				eb_debug (1, 0, "NOTIFY", "Cannot initialize notify mutex");
+
+			// Start the notify thread
+
+			if (pthread_create(&d->local.notify_thread, NULL, eb_notify_watcher, d))
+				eb_debug (1, 0, "DESPATCH", "%-8s %3d.%3d Cannot start notify watcher on this device.", "Local", d->net, d->local.stn);
+		
+
 
 		} break;
 
@@ -6200,6 +6269,43 @@ static void * eb_device_despatcher (void * device)
 							eb_debug (0, 4, "LOCAL", "%-8s %3d.%3d from %3d.%3d attempting to send ACK from local amulator, P: &%02X, C: &%02X, Seq: 0x%08X", "Local", ack.p.dstnet, ack.p.dststn, ack.p.srcnet, ack.p.srcstn, ack.p.port, ack.p.ctrl, ack.p.seq);
 							eb_enqueue_output (d, &ack, 0, NULL); // No data on this packet
 							new_output = 1;
+						}
+
+						if (p->p->p.aun_ttype == ECONET_AUN_DATA && p->p->p.port == 0x00 && p->p->p.ctrl == 0x85 && p->p->p.data[0] == 0x00)
+						{
+							struct __eb_notify 	*l;
+
+							pthread_mutex_lock (&(d->local.notify_mutex));
+
+							l = d->local.notify;
+
+							while (l && (l->net != p->p->p.srcnet || l->stn != p->p->p.srcstn))
+								l = l->next;
+
+							if (!l) // No structure - make one
+							{
+								l = eb_malloc (__FILE__, __LINE__, "NOTIFY", "New notify receipt structure", sizeof(struct __eb_notify));
+								if (!l)
+									eb_debug (1, 0, "NOTIFY", "Unable to malloc notify receipt structure");
+								l->net = p->p->p.srcnet;
+								l->stn = p->p->p.srcstn;
+								l->next = d->local.notify;
+								l->msg[0] = 0;
+								l->len = 0;
+								d->local.notify = l;
+							}
+
+							if (l->len < 255)
+							{
+								l->msg[l->len] = p->p->p.data[4];
+								l->msg[l->len + 1] = 0;
+								l->len++;
+								time (&(l->last_rx));
+								eb_debug (0, 3, "NOTIFY", "%-8s %3d.%3d from %3d.%3d Notify string currently '%s'", "Local", l->net, l->stn, p->p->p.srcnet, p->p->p.srcstn, l->msg);
+							}
+
+							pthread_mutex_unlock (&(d->local.notify_mutex));
+
 						}
 
 						// Invite a queue for a single station if the FS has had an ACK from it
