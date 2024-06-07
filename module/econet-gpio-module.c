@@ -2171,7 +2171,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 					econet_set_aunstate(EA_I_READREPLY);
 					// Because this is an immediate, we need to flag transmit success to the tx user space
 					// 20240606 No, don't do this - we want to detect line idle IRQ
-					// econet_set_tx_status(ECONET_TX_SUCCESS);
+					// 20240607 Reinstated. Userspace will need to wait a few ms after a succes to see if it got line idle / not listening status
+					econet_set_tx_status(ECONET_TX_SUCCESS);
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "econet-gpio: econet_irq(): AUN: Written immediate query. Signal TX success but move to READREPLY\n");
 #endif

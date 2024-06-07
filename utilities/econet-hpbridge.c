@@ -5167,31 +5167,17 @@ static void * eb_device_despatcher (void * device)
 											eb_debug (1, 1, "DESPATCH", "%-8s %3d     Dynamic trunk endpoint found for local port %d at host %s port %d, but failed to allocate memory for addrinfo structure!", eb_type_str(d->type), d->net, d->trunk.local_port, inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port));
 									}
 
-									if (was_dead && (packet.p.port != BRIDGE_PORT || packet.p.ctrl != BRIDGE_RESET)) // If this trunk was dead before this packet arrived, do a bridge reset - which will also start the update process - but don't do a reset if what's just turned up is a reset
+									if (was_dead && d->all_nets_pooled) // It needs some updates, just in case it has restarted and we missed its reset
+									{
+										eb_debug (0, 2, "DESPATCH", "%-8s %5d   Trunk received traffic after being dead - all nets pooled - send bridge updates", eb_type_str(d->type), d->trunk.remote_port);
+										pthread_cond_signal(&(d->bridge_update_cond));
+
+									}
+									else if (was_dead && (packet.p.port != BRIDGE_PORT || packet.p.ctrl != BRIDGE_RESET)) // If this trunk was dead before this packet arrived, do a bridge reset - which will also start the update process - but don't do a reset if what's just turned up is a reset
 									{
 										eb_debug (0, 2, "DESPATCH", "%-8s %5d   Trunk received traffic after being dead - send bridge reset", eb_type_str(d->type), d->trunk.remote_port);
 										eb_bridge_reset(NULL);
 
-										/* Not sure about this. Go back to what we had 
-										if (packet.p.port != BRIDGE_PORT || packet.p.ctrl != BRIDGE_RESET)
-										{
-											if (d->all_nets_pooled) // Just sent this device a reset
-											{
-												eb_debug (0, 2, "DESPATCH", "%-8s %5d   Trunk received traffic after being dead - all nets pooled - send bridge reset to this device only", eb_type_str(d->type), d->trunk.remote_port);
-												pthread_cond_signal(&(d->bridge_reset_cond));
-											}
-											else
-											{
-												eb_debug (0, 2, "DESPATCH", "%-8s %5d   Trunk received traffic after being dead - send bridge reset", eb_type_str(d->type), d->trunk.remote_port);
-												eb_bridge_reset(NULL);
-											}
-										}
-										else // It was the bridge port AND it was a reset - so send update 
-										{
-											eb_debug (0, 2, "DESPATCH", "%-8s %5d   Trunk bridge reset received traffic after being dead - send bridge updates", eb_type_str(d->type), d->trunk.remote_port);
-											pthread_cond_signal(&(d->bridge_update_cond));
-										}
-										*/
 									}
 								}
 								else
@@ -5501,6 +5487,27 @@ static void * eb_device_despatcher (void * device)
 									d->p_net = d->p_stn = d->p_seq = 0;
 									pthread_mutex_unlock (&(d->priority_mutex));
 								}
+
+								if (d->type == EB_DEF_TRUNK && packet.p.aun_ttype == ECONET_AUN_IMM) // An unroutable immediate - send an INK back to source
+								{
+									struct __econet_packet_aun 	*ack;
+
+									if ((ack = eb_malloc(__FILE__, __LINE__, "DESPATCH", "Trunk Immediate NAK packet", 12)))
+									{
+										ack->p.aun_ttype = ECONET_AUN_INK;
+										ack->p.seq = packet.p.seq;
+										ack->p.dststn = packet.p.srcstn;
+										ack->p.dstnet = packet.p.srcnet;
+										ack->p.srcstn = packet.p.dststn;
+										ack->p.srcnet = packet.p.dstnet;
+
+										// How to inject this reply?
+										// I *think* we can safely put it on our own input queue
+
+										eb_enqueue_input(d, ack, 0); // Data len 0
+									}
+
+								}
 							}
 					}
 	
@@ -5530,104 +5537,6 @@ static void * eb_device_despatcher (void * device)
 			// uint8_t			processable;
 			
 			pthread_mutex_lock (&(d->qmutex_out));
-
-/* This section made little or no performance difference
-
-			o_parent = NULL;
-
-			o = d->out;
-
-			// Loop through output queues looking for wire traffic. If found, 
-			// put it on input queues one packet per destination at a time
-			// to even out performance. (If this isn't here, then what happens
-			// is an entire destcombo's output queue goes on the wire input
-			// queue in one hit, so that stations with higher numbered
-			// station numbers end up with lower priority. When there's lots
-			// of bulk transfers going on, that means that stations have to
-			// really fight to get any response, and will often think they
-			// have 'no reply'.)
-		
-			// Since the loop below will remove empty output queues etc, we
-			// can skip this bit on this run. We do need to skip destination
-			// devices which have gone away. (The loop below gets rid of such
-			// queues for us too.)
-
-			processable = 1; // Always do one loop through (probably 2!)
-
-			while (o && processable)
-			{
-
-				struct __eb_packetqueue 	*this;
-				struct __eb_outq		*this_o;
-
-				if (o == d->out) // Head of queue - reset processable flag, see if it gets set on the traverse
-					processable = 0; 
-
-				eb_debug (0, 4, "DESPATCH", "%-8s %3d     Looking at queue entry at %p - looking for wire traffic", eb_type_str(d->type), d->net, o);
-
-				this_o = o;
-
-				if (o->destdevice && o->destdevice->type == EB_DEF_WIRE && o->p) // NB Opposite of in the loop below - we are just looking for process-able traffic - existing destdevice of type wire with traffic on this output queue
-				{
-
-					this = o->p;
-
-					// Take it off the queue, and free it if it was ACK or NAK that we've dropped
-
-					o->p = this->n;
-
-					// Move it and wake the in queue
-
-					if ((this->p->p.aun_ttype == ECONET_AUN_ACK || this->p->p.aun_ttype == ECONET_AUN_NAK))
-					{
-						eb_debug (0, 4, "DESPATCH", "%-8s %3d     Dropping packet data at %p because it is an ACK/NAK and input device %p is %s", eb_type_str(d->type), d->net, this->p, o->destdevice, eb_type_str(o->destdevice->type));
-						eb_free (__FILE__, __LINE__, "Q-OUT", "Freeing packet data for ACK/NAK destined for wire destination", this->p);
-					}
-					else
-					{
-						eb_debug (0, 4, "DESPATCH", "%-8s %3d     Moving packetqueue (%) packet at %p to destination input device %p (%s)", eb_type_str(d->type), d->net, this, this->p, o->destdevice, eb_type_str(o->destdevice->type));
-
-						eb_enqueue_input (o->destdevice, this->p, this->length);
-					}
-
-					eb_debug (0, 4, "DESPATCH", "%-8s %3d     Freeing packetqueue at %p after move to destination input device %p (%s) (or being dropped because ACK/NAK)", eb_type_str(d->type), d->net, this, o->destdevice, eb_type_str(o->destdevice->type));
-					eb_free (__FILE__, __LINE__, "Q-OUT", "Freeing packetqueue structure after transfer to wire input queue (or dropped if ACK/NAK)", this);
-
-					if (this_o->p) // More traffic for this dest on the outq
-						 processable++;
-					else // Splice out this outq entry
-					{
-						// Splice out the parent here
-			
-						if (o_parent)
-							o_parent->next = this_o->next;
-						else	d->out = this_o->next;
-
-						eb_debug (0, 4, "DESPATCH", "%-8s %3d     Freeing empty outq at %p for destcombo 0x%04X after move to destination input device %p (%s)", eb_type_str(d->type), d->net, this_o, this_o->destcombo, this_o->destdevice, eb_type_str(this_o->destdevice->type));
-						eb_free (__FILE__, __LINE__, "Q-OUT", "Freeing empty outq after wire traffic search", this_o);
-
-						this_o = NULL;
-
-						if (o_parent)
-							o = o_parent->next;
-						else	o = d->out;
-					}
-				}
-
-				// Move to next packet
-
-
-				// If the outq got spliced out above, the parent will have stayed the same and o will have been updated
-				// and this_o will be NULL.
-
-				if (this_o) // If set to NULL above, the outq was spliced, so the pointer will have been moved on for us
-				{
-					o_parent = this_o;
-					o = this_o->next;
-				}
-			}
-
- --- END OF THE ADJUSTMENT THAT MADE LITTLE OR NO DIFFERENCE */
 
 			o_parent = NULL;
 
@@ -6158,17 +6067,26 @@ static void * eb_device_despatcher (void * device)
 									{
 										remove = 1;
 		
-										eb_debug (0, 4, "DEBUG", "                 Attempting to send ACK to %3d.%3d from %3d.%3d port &%02X seq 0x%08X", ack.p.dstnet, ack.p.dststn, ack.p.srcnet, ack.p.srcstn, ack.p.port, ack.p.seq);
-	
 										if (tx.p.aun_ttype == ECONET_AUN_IMM) // Record the sequence number & destination so we can match the sequence number on a reply
 										{
-											d->wire.last_imm_dest_net = tx.p.dstnet;
-											d->wire.last_imm_dest_stn = tx.p.dststn;
-											d->wire.last_imm_seq = tx.p.seq;
+											// Sleep for a short time and check the status again to see if it was still success - it might be not have been listening!)
+
+											usleep(500);
+
+											err = ioctl(d->wire.socket, ECONETGPIO_IOC_TXERR);
+
+											if (err == ECONET_TX_NECOUTEZPAS) // Not listening
+											{
+												eb_debug (0, 4, "DEBUG", "                 Line idle after immediate tx - sending INK to %3d.%3d from %3d.%3d seq 0x%08X", ack.p.dstnet, ack.p.dststn, ack.p.srcnet, ack.p.srcstn, ack.p.seq);
+												ack.p.aun_ttype = ECONET_AUN_INK;
+												eb_enqueue_output (d, &ack, 0, NULL);
+												new_output = 1;
+											}
 										}
 
 										if (tx.p.aun_ttype == ECONET_AUN_DATA)
 										{
+											eb_debug (0, 4, "DEBUG", "                 Attempting to send ACK to %3d.%3d from %3d.%3d port &%02X seq 0x%08X", ack.p.dstnet, ack.p.dststn, ack.p.srcnet, ack.p.srcstn, ack.p.port, ack.p.seq);
 											eb_enqueue_output (d, &ack, 0, NULL);			
 											new_output = 1;
 										}
