@@ -6213,7 +6213,8 @@ static void * eb_device_despatcher (void * device)
 												eb_enqueue_output (d, &ack, 0, NULL);
 												new_output = 1;
 											}
-											else // Record the seq and destination so we can match the sequence number on reply
+											
+											/* else */ // Record the seq and destination so we can match the sequence number on reply
 											{
 												d->wire.last_imm_dest_net = tx.p.dstnet;
 												d->wire.last_imm_dest_stn = tx.p.dststn;
