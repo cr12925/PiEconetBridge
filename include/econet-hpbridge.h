@@ -239,6 +239,20 @@ struct __eb_pool {
 	struct __eb_pool	*next; // In master pools list, below
 };
 
+/* __eb_notify
+ *
+ * Struct for holding incoming notify characters for local stations
+ *
+ */
+
+struct __eb_notify {
+	uint8_t			net, stn; // Source of characters
+	time_t			last_rx; // Last reception - used to work out when to display
+	unsigned char		msg[256];
+	uint8_t			len; // Length of msg[] to save strlen() calls
+	struct __eb_notify	*next;
+};
+
 /* __eb_device
 
    Holds common and per-driver information about devices on which we might send/receive packets.
@@ -254,6 +268,7 @@ struct __eb_pool {
    250, containing a pointer to the __eb_device structure for the pipe host.
 
 */
+
 struct __eb_device { // Structure holding information about a "physical" device to which we might send packets to / receive packets from.
 
 
@@ -378,6 +393,9 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			uint8_t			fast_reset; // Set to 1 when we get a new connection
 			uint8_t			fast_client_ready; // Set to 1 when client indicates it will receive more output to display - happens when we get the USRPROC call. If there is output, we send it. If not, this will get set to 1 so that the fast handler knows it can send it instead
 			pthread_cond_t		fast_wake;
+			struct __eb_notify	*notify; // List of stuff received via *notify to a local server
+			pthread_mutex_t		notify_mutex; // Mutex to lock the notify list
+			pthread_t		notify_thread; // Notify watcher thread for this device
 		} local;
 
 		struct __eb_aun_remote *aun; // Address of struct in the list of remote AUN stations, kept in order of s_addr
