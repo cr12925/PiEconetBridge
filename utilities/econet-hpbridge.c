@@ -5365,7 +5365,7 @@ static void * eb_device_despatcher (void * device)
 
 						packet.p.seq = (d->wire.seq[packet.p.srcnet][packet.p.srcstn] += 4);
 
-						eb_debug (0, 2, "IMMED", "                 Checking for immediate match: %3d.%3d vs %3d.%3d seq %08X v %08X", d->wire.last_imm_dest_net, d->wire.last_imm_dest_stn, packet.p.srcnet, packet.p.srcstn, packet.p.seq, d->wire.last_imm_seq);
+						eb_debug (0, 4, "IMMED", "                 Checking for immediate match: %3d.%3d vs %3d.%3d seq %08X v %08X", d->wire.last_imm_dest_net, d->wire.last_imm_dest_stn, packet.p.srcnet, packet.p.srcstn, packet.p.seq, d->wire.last_imm_seq);
 
 						// Make the Sequence Number match if this was an immediate reply we were expecting
 						if (	(packet.p.aun_ttype == ECONET_AUN_IMMREP)
@@ -5373,7 +5373,7 @@ static void * eb_device_despatcher (void * device)
 						&&	(packet.p.srcstn == d->wire.last_imm_dest_stn)
 						)
 						{
-							eb_debug (0, 2, "IMMED", "                 Found immediate match: %3d.%3d seq %08X", d->wire.last_imm_dest_net, d->wire.last_imm_dest_stn, d->wire.last_imm_seq);
+							eb_debug (0, 4, "IMMED", "                 Found immediate match: %3d.%3d seq %08X", d->wire.last_imm_dest_net, d->wire.last_imm_dest_stn, d->wire.last_imm_seq);
 							packet.p.seq = d->wire.last_imm_seq;
 						}
 
@@ -6220,7 +6220,7 @@ static void * eb_device_despatcher (void * device)
 											}
 											else // Record the seq and destination so we can match the sequence number on reply
 											{
-												eb_debug (0, 2, "IMMED", "                 Tracking immediate sent: %3d.%3d seq %08X", tx.p.dstnet, tx.p.dststn, tx.p.seq);
+												eb_debug (0, 4, "IMMED", "                 Tracking immediate sent: %3d.%3d seq %08X", tx.p.dstnet, tx.p.dststn, tx.p.seq);
 												d->wire.last_imm_dest_net = tx.p.dstnet;
 												d->wire.last_imm_dest_stn = tx.p.dststn;
 												d->wire.last_imm_seq = tx.p.seq;
