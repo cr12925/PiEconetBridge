@@ -426,7 +426,7 @@ uint8_t eb_pool_get_dynamic (struct __eb_pool *pool, uint8_t *net, uint8_t *stn)
 
 	*net = *stn = 0; // Rogue. We fill these in on success
 
-	//eb_debug (0, 2, "POOL", "%-16s eb_pool_get_dynamic() called for pool %p", "", pool);
+	eb_debug (0, 3, "POOL", "%-16s eb_pool_get_dynamic() called for pool %p", "", pool);
 
 	if (!pool) return 0; // Bad pool
 
@@ -436,7 +436,7 @@ uint8_t eb_pool_get_dynamic (struct __eb_pool *pool, uint8_t *net, uint8_t *stn)
 
 	while (!pool->networks[net_start++]);
 
-	//eb_debug (0, 2, "POOL", "%-16s eb_pool_get_dynamic() called for pool %p net_start = %d", "", pool, net_start);
+	eb_debug (0, 3, "POOL", "%-16s eb_pool_get_dynamic() called for pool %p net_start = %d", "", pool, net_start);
 	
 	for (net_loop = 0; net_loop <= 255; net_loop++)
 	{
@@ -461,7 +461,7 @@ uint8_t eb_pool_get_dynamic (struct __eb_pool *pool, uint8_t *net, uint8_t *stn)
 			continue; //  Network is not in this pool
 		}
 
-		eb_debug (0, 2, "POOL", "eb_pool_get_dynamic - searching net %3d (deep search)", net_search);
+		eb_debug (0, 3, "POOL", "eb_pool_get_dynamic - searching net %3d (deep search)", net_search);
 
 		host = pool->hosts_net[net_search];
 
