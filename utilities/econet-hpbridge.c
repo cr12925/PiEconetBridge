@@ -2697,8 +2697,9 @@ uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_au
 			{
 				eb_debug (0, 2, "QUEUE", "%-8s %3d.%3d from %3d.%3d Seq 0x%08X Attempting to queue traffic when destination device cannot be found", eb_type_str(source->type), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, p->p.seq);
 
-				/* TODO: Send INK back to source here if it was an immediate and the host doesn't exist */
+				/* Send INK back to source here if it was an immediate and the host doesn't exist */
 
+				/* Commented out - may well be causing problems 
 				if ((source->type == EB_DEF_TRUNK || source->type == EB_DEF_POOL) && p->p.aun_ttype == ECONET_AUN_IMM) // An unroutable immediate - send an INK back to source
 				{
 					struct __econet_packet_aun 	*ack;
@@ -2719,6 +2720,8 @@ uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_au
 					}
 
 				}
+
+				*/
 
 				eb_free (__FILE__, __LINE__, "Q-OUT", "Free packet after dest device unknown", p);
 				eb_free (__FILE__, __LINE__, "Q-OUT", "Free packetq after dest device unknown", packetq);
