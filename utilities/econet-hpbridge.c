@@ -1621,6 +1621,8 @@ static void * eb_bridge_update_watcher (void *device)
 	uint8_t			numnets, net_count;
 	uint8_t			sender_net; /* Src net num used for transmission of broadcast */
 	uint8_t			tx_count;
+	struct timespec		wait_timeout;
+	int			update_delay = 30;
 
 	struct __econet_packet_aun	* update; 
 
@@ -1635,7 +1637,18 @@ static void * eb_bridge_update_watcher (void *device)
 	while (1)
 	{
 
-		pthread_cond_wait(&(me->bridge_update_cond), &(me->bridge_update_lock));
+		int	result;
+
+		/* Establish a delay between automatic updates if we are on a trunk, just in case the other end is all pooled */
+
+		clock_gettime(CLOCK_REALTIME, &wait_timeout);
+
+		wait_timeout.tv_sec += update_delay;
+
+		if (me->type == EB_DEF_TRUNK) // Send period announcements all the time
+			result = pthread_cond_timedwait(&(me->bridge_update_cond), &(me->bridge_update_lock), &wait_timeout);
+		else
+			result = pthread_cond_wait(&(me->bridge_update_cond), &(me->bridge_update_lock));
 
 		if (me->type == EB_DEF_TRUNK && !me->trunk.hostname) // Unconnected trunk
 			continue;
