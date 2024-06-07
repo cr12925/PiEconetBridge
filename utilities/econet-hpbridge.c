@@ -2699,7 +2699,7 @@ uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_au
 
 				/* TODO: Send INK back to source here if it was an immediate and the host doesn't exist */
 
-				if (source->type == EB_DEF_TRUNK && p->p.aun_ttype == ECONET_AUN_IMM) // An unroutable immediate - send an INK back to source
+				if ((source->type == EB_DEF_TRUNK || source->type == EB_DEF_POOL) && p->p.aun_ttype == ECONET_AUN_IMM) // An unroutable immediate - send an INK back to source
 				{
 					struct __econet_packet_aun 	*ack;
 
@@ -5675,7 +5675,7 @@ static void * eb_device_despatcher (void * device)
 									p->p->p.ctrl &= 0x7f; // Strip high bit from ctrl 
 
 
-									if (!((o->destdevice->config & EB_DEV_CONF_AUTOACK) && (p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK))) // Don't send ACK / NAK to AUTOACK stations because they'll already have had one
+									if ((!((o->destdevice->config & EB_DEV_CONF_AUTOACK) && (p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK))) && (p->p->p.aun_ttype != ECONET_AUN_INK)) // Don't send ACK / NAK to AUTOACK stations because they'll already have had one ; and NEVER send INK packets to AUN stations, because they won't understand them
 									{
 										eb_dump_packet (o->destdevice, EB_PKT_DUMP_POST_O, p->p, p->length);
 	
