@@ -2699,6 +2699,27 @@ uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_au
 
 				/* TODO: Send INK back to source here if it was an immediate and the host doesn't exist */
 
+				if (source->type == EB_DEF_TRUNK && p->p.aun_ttype == ECONET_AUN_IMM) // An unroutable immediate - send an INK back to source
+				{
+					struct __econet_packet_aun 	*ack;
+
+					if ((ack = eb_malloc(__FILE__, __LINE__, "Q-OUT", "Trunk Immediate NAK packet", 12)))
+					{
+						ack->p.aun_ttype = ECONET_AUN_INK;
+						ack->p.seq = p->p.seq;
+						ack->p.dststn = p->p.srcstn;
+						ack->p.dstnet = p->p.srcnet;
+						ack->p.srcstn = p->p.dststn;
+						ack->p.srcnet = p->p.dstnet;
+
+						// How to inject this reply?
+						// I *think* we can safely put it on our own input queue
+
+						eb_enqueue_input(source, ack, 0); // Data len 0
+					}
+
+				}
+
 				eb_free (__FILE__, __LINE__, "Q-OUT", "Free packet after dest device unknown", p);
 				eb_free (__FILE__, __LINE__, "Q-OUT", "Free packetq after dest device unknown", packetq);
 				eb_free (__FILE__, __LINE__, "Q-OUT", "Free outq after dest device unknown", outq);
@@ -5507,26 +5528,6 @@ static void * eb_device_despatcher (void * device)
 									pthread_mutex_unlock (&(d->priority_mutex));
 								}
 
-								if (d->type == EB_DEF_TRUNK && packet.p.aun_ttype == ECONET_AUN_IMM) // An unroutable immediate - send an INK back to source
-								{
-									struct __econet_packet_aun 	*ack;
-
-									if ((ack = eb_malloc(__FILE__, __LINE__, "DESPATCH", "Trunk Immediate NAK packet", 12)))
-									{
-										ack->p.aun_ttype = ECONET_AUN_INK;
-										ack->p.seq = packet.p.seq;
-										ack->p.dststn = packet.p.srcstn;
-										ack->p.dstnet = packet.p.srcnet;
-										ack->p.srcstn = packet.p.dststn;
-										ack->p.srcnet = packet.p.dstnet;
-
-										// How to inject this reply?
-										// I *think* we can safely put it on our own input queue
-
-										eb_enqueue_input(d, ack, 0); // Data len 0
-									}
-
-								}
 							}
 					}
 	
