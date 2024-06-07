@@ -4961,7 +4961,11 @@ static void * eb_device_despatcher (void * device)
 				hints.ai_protocol = 0;
 
 				if ((s = getaddrinfo(d->trunk.hostname, portname, &hints, &(d->trunk.remote_host))) != 0)
-					eb_debug (1, 0, "DESPATCH", "%-8s         Unable to resolve hostname %s: %s", "", d->trunk.hostname, gai_strerror(s));
+				{
+					// 20240607 eb_debug (1, 0, "DESPATCH", "%-8s         Unable to resolve hostname %s: %s", "", d->trunk.hostname, gai_strerror(s));
+					eb_debug (0, 1, "DESPATCH", "%-8s         Unable to resolve hostname %s: %s - leaving inactive", "", d->trunk.hostname, gai_strerror(s));
+					d->trunk.remote_host = NULL; // Flag inactive
+				}
 
 			}
 			else if (d->trunk.is_dynamic) // Dynamic
@@ -4990,7 +4994,7 @@ static void * eb_device_despatcher (void * device)
 			{
 				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk keepalive thread started", "Trunk");
 				pthread_detach (d->trunk.keepalive_thread);
-				eb_thread_started();
+				eb_thread_started(); // Is this neeed? We aren't counting the keepalive thread...
 			}
 			
 			if (!(d->trunk.is_dynamic))
@@ -5007,6 +5011,12 @@ static void * eb_device_despatcher (void * device)
 			if (pthread_create(&d->bridge_reset_thread, NULL, eb_bridge_reset_watcher, d))
 				eb_debug (1, 0, "DESPATCH", "%-8s %5d   Cannot start bridge reset thread on this device.", "Trunk", d->trunk.remote_port);
 		
+			// Added 20240607
+			
+			pthread_detach (d->bridge_update_thread);
+			pthread_detach (d->bridge_update_thread2);
+			pthread_detach (d->bridge_reset_thread);
+
 		} break;
 
 		case EB_DEF_NULL:
@@ -6024,6 +6034,34 @@ static void * eb_device_despatcher (void * device)
 
 						ap = eb_malloc(__FILE__, __LINE__, "DESPATCH", "Trunk send packet copy", p->length+12 + 6);
 
+						if (!(d->trunk.is_dynamic) && !(d->trunk.remote_host)) // We have an unresolved static trunk
+						{
+							char			portname[6];
+							struct addrinfo		hints;
+							int			s;
+
+							snprintf(portname, 6, "%d", d->trunk.remote_port);
+	
+							memset (&hints, 0, sizeof(struct addrinfo));
+
+							hints.ai_family = AF_INET;
+							hints.ai_socktype = SOCK_DGRAM;
+							hints.ai_flags = 0;
+							hints.ai_protocol = 0;
+
+							if ((s = getaddrinfo(d->trunk.hostname, portname, &hints, &(d->trunk.remote_host))) != 0)
+								d->trunk.remote_host = NULL;
+							else	
+							{
+								eb_debug (0, 1, "TRUNK", "%-8s %5d   Trunk endpoint address %s resolved. Trunk now active.", "Trunk", d->trunk.local_port, d->trunk.hostname);
+
+								// Trigger a reset
+								//
+
+								pthread_cond_signal (&(d->bridge_reset_cond));
+							}
+						}
+
 						if (ap && (d->trunk.remote_host)) // And if !ap, just remove, below. If remote_host is NULL, this is a dynamic trunk with no remote endpoint yet
 						{
 
@@ -6083,7 +6121,7 @@ static void * eb_device_despatcher (void * device)
 						}
 
 						if (ap && !(d->trunk.remote_host))
-							eb_debug (0, 3, "DESPATCH", "Trunk            Packet transmission on trunk port %d failed - dynamic remote endpoint not established", d->trunk.local_port); 
+							eb_debug (0, 3, "DESPATCH", "Trunk            Packet transmission on trunk port %d failed - dynamic (or unresolved static) remote endpoint not established", d->trunk.local_port); 
 
 						remove = 1;
 					} break;
