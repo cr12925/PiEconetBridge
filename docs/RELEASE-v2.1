@@ -77,6 +77,11 @@ RELEASE NOTES FOR V2.1
     considerably speeds up the operation of, for example, *STATIONS and
     !Machines.
 
+  - Trunks whose DNS does not resolve now will not stop the bridge starting.
+    The trunk will start but will send no traffic until DNS works. When
+    the name of the far end of the trunk can be resolved, a debug message
+    is output and the trunk will come into full operation.
+
 - econet-isnets added
 
   - Pipe client utilities which uses the IsNets broadcast to identify which
