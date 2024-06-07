@@ -4998,7 +4998,7 @@ static void * eb_device_despatcher (void * device)
 			}
 			
 			if (!(d->trunk.is_dynamic))
-				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk initialized between port %d and %s:%d with key %s", "Trunk", d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0, d->trunk.sharedkey);
+				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk initialized (%s) between port %d and %s:%d with key %s", "Trunk", (d->trunk.remote_host ? "active" : "inactive until DNS resolves"), d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0, d->trunk.sharedkey);
 			else
 				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk initialized between port %d and dynamic remote host with key %s", "Trunk", d->trunk.local_port, d->trunk.sharedkey);
 	
