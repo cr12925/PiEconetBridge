@@ -10960,6 +10960,11 @@ void eb_handle_fs_traffic (uint8_t server, struct __econet_packet_aun *p, uint16
 		case ECONET_AUN_ACK: 
 			fs_load_dequeue(server, p->p.srcnet, p->p.srcstn, p->p.seq);
 			break;
+		case ECONET_AUN_BCAST:
+			{
+				if (p->p.port == 0x99) // Ordinary FS traffic
+					handle_fs_traffic (server, p->p.srcnet, p->p.srcstn, p->p.ctrl, (char *) &(p->p.data), length);
+			} break;
 		case ECONET_AUN_DATA:
 			{
 				if (p->p.port == 0x99) // Ordinary FS traffic
