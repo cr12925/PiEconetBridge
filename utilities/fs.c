@@ -1529,7 +1529,7 @@ void fs_read_xattr(unsigned char *path, struct objattr *r, int server)
 	r->owner=0; // syst
 	r->load=0;
 	r->exec=0;
-	r->perm=FS_PERM_OWN_R | FS_PERM_OWN_W | FS_PERM_OTH_R;
+	r->perm=FS_PERM_OWN_R | FS_PERM_OWN_W; // Default now doesn't include PERM_OTH_R | FS_PERM_OTH_R;
 	r->homeof=0;
 
 	char *dotfile=pathname_to_dotfile(path, server);
