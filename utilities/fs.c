@@ -5219,10 +5219,12 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 		{
 			// Path found
 	
-			if (p.perm & FS_PERM_L) // Locked - cannot write
+			if (p.ftype == FS_FTYPE_FILE && p.perm & FS_PERM_L) // Locked - cannot write
 			{
 				fs_error(server, reply_port, net, stn, 0xC0, "Entry Locked");
 			}
+			else if (p.ftype == FS_FTYPE_DIR)
+				fs_error(server, reply_port, net, stn, 0xFF, "Wrong object type");
 			else if (p.ftype != FS_FTYPE_FILE && p.ftype != FS_FTYPE_NOTFOUND) // Not a file!
 				fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 			else
@@ -9738,7 +9740,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					fs_reply_ok(server, reply_port, net, stn);
 
 				}
-				else if (fs_parse_cmd(command, "FNLENGTH", 8, &param))
+				else if (fs_parse_cmd(command, "FNLENGTH", 8, &param) || fs_parse_cmd(command, "FSFNLENGTH", 6, &param))
 				{
 					int new_length;
 					char params[256];
@@ -9888,13 +9890,13 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					}
 				}
 				//else if (!strncasecmp("LINK ", (const char *) command, 5))
-				else if (fs_parse_cmd(command, "LINK", 4, &param))
+				else if (fs_parse_cmd(command, "LINK", 4, &param) || fs_parse_cmd(command, "MKLINK", 4, &param))
 					fs_link(server, reply_port, active_id, net, stn, param);
 				//else if (!strncasecmp("UNLINK ", (const char *) command, 7))
 				else if (fs_parse_cmd(command, "UNLINK", 3, &param))
 					fs_unlink(server, reply_port, active_id, net, stn, param);
 				//else if (!strncasecmp("FLOG ", (const char *) command, 5)) // Force log user off
-				else if (fs_parse_cmd(command, "FLOG", 3, &param))
+				else if (fs_parse_cmd(command, "FLOG", 3, &param) || fs_parse_cmd(command, "LOGOFF", 5, &param))
 				{
 					char parameter[20];
 					unsigned short l_net, l_stn;
@@ -10062,7 +10064,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					}
 
 				}
-				else if (fs_parse_cmd(command, "DISCMASK", 5, &param))
+				else if (fs_parse_cmd(command, "DISCMASK", 5, &param) || fs_parse_cmd(command, "DISKMASK", 5, &param))
 				{
 					char		parameters[255];
 					char		username[20], discs[10];
