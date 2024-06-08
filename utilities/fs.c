@@ -350,7 +350,7 @@ struct objattr {
 // Actual owner
 #define FS_PERM_ISOWNER(s,a,o)	((FS_ACTIVE_UID((s),(a)) == (o)) ? 1 : 0)
 // Effective owner - i.e. actual owner or system priv
-#define FS_PERM_EFFOWNER(s,a,o)	((FS_ACTIVE_SYST((s),(a)) || FS_PERM_ISOWNER((s),(a),(p),(o),(pp),(po)) ? 1 : 0)
+#define FS_PERM_EFFOWNER(s,a,o)	(FS_ACTIVE_SYST((s),(a)) || FS_PERM_ISOWNER((s),(a),(o)) ? 1 : 0)
 
 // Object visible to this user - as distinct from readable - this is testing the hidden bit
 #define FS_PERM_VISIBLE(s,a,p,o)	(FS_PERM_SET((p), FS_PERM_H) && FS_PERM_EFFOWNER((s),(a),(o)))
@@ -2642,7 +2642,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 			if (count != result->npath-1) // Not last segment - free up all the path_entries because we'll be junking them.
 			{
-				if ((result->ftype == FS_FTYPE_DIR) && ((result->my_perm & FS_PERM_OWN_R) == 0) && !FS_ACTIVE_SYST(server,user))
+				if ((result->ftype == FS_FTYPE_DIR) && (!(FS_PERM_EFFOWNER(server,user,result->owner)) && !(result->perm & FS_PERM_OTH_R))) // Owner & SYST can always read a directory // (result->my_perm & FS_PERM_OWN_R) == 0) && !FS_ACTIVE_SYST(server,user))
 				{
 					// Hard fail
 					result->error = FS_PATH_ERR_NODIR;
@@ -4427,10 +4427,28 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 	fs_debug (0, 2, "%12sfrom %3d.%3d Examine %s relative to %d, start %d, extent %d, arg = %d", "", net, stn, path,
 		relative_to, start, n, arg);
 
+	replylen = 0;
+
+	r.p.ptype = ECONET_AUN_DATA;
+	r.p.port = reply_port;
+	r.p.ctrl = 0x80;
+
+	r.p.data[replylen++] = 0;
+	r.p.data[replylen++] = 0;
+	
+	examined = r.p.data[replylen++] = 0; // Repopulate data[2] at end
+	dirsize = r.p.data[replylen++] = 0; // Dir size (but this might be wrong). Repopulate later if correct
+
 	if (!fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1) || p.ftype == FS_FTYPE_NOTFOUND)
 	{
 
-		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
+		if (arg == 0)
+		{
+			r.p.data[replylen++] = 0x80;
+			fs_aun_send(&r, server, replylen, net, stn);
+		}
+		else
+			fs_error(server, reply_port, net, stn, 0xD6, "Not found");
 		return;
 
 /*
@@ -4462,17 +4480,6 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 		return;
 	}
 
-	replylen = 0;
-
-	r.p.ptype = ECONET_AUN_DATA;
-	r.p.port = reply_port;
-	r.p.ctrl = 0x80;
-
-	r.p.data[replylen++] = 0;
-	r.p.data[replylen++] = 0;
-	
-	examined = r.p.data[replylen++] = 0; // Repopulate data[2] at end
-	dirsize = r.p.data[replylen++] = 0; // Dir size (but this might be wrong). Repopulate later if correct
 
 	// Wildcard code
 	strcpy(acornpathfromroot, path);
@@ -4482,6 +4489,12 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 	// Wildcard renormalize - THE LONG FILENAMES MODS CAUSE THIS TO RETURN NOT FOUND ON AN EMPTY DIRECTORY
 	if (!fs_normalize_path_wildcard(server, active_id, acornpathfromroot, relative_to, &p, 1)) // || p.ftype == FS_FTYPE_NOTFOUND)
 	{
+		if (arg == 0)
+		{
+			r.p.data[replylen++] = 0x80;
+			fs_aun_send(&r, server, replylen, net, stn);
+		}
+		else
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
 		return;
 	}
@@ -4562,16 +4575,19 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 					unsigned char permstring_l[10], permstring_r[10];
 					unsigned char permstring_both[20];
 					unsigned char hr_fmt_string[80];
+					uint8_t		is_owner;
+
+					is_owner = FS_PERM_EFFOWNER(server, active_id, e->owner);
 	
 					sprintf(permstring_l, "%s%s%s%s",
 						(e->ftype == FS_FTYPE_DIR ? "D" : e->ftype == FS_FTYPE_SPECIAL ? "S" : ""),
 						((e->perm & FS_PERM_L) ? "L" : ""),
-						((e->perm & FS_PERM_OWN_W) ? "W" : ""),
-						((e->perm & FS_PERM_OWN_R) ? "R" : "") );
+						((e->perm & FS_PERM_OWN_W) ? (is_owner ? "W" : fs_config[server].fs_mdfsinfo ? "w": "W") : ""),
+						((e->perm & FS_PERM_OWN_R) ? (is_owner ? "R" : fs_config[server].fs_mdfsinfo ? "r" : "R") : "") );
 
 					sprintf(permstring_r, "%s%s", 
-						((e->perm & FS_PERM_OTH_W) ? "W" : ""),
-						((e->perm & FS_PERM_OTH_R) ? "R" : "") );
+						((e->perm & FS_PERM_OTH_W) ? (fs_config[server].fs_mdfsinfo ? (is_owner ? "w" : "W") : "W") : ""),
+						((e->perm & FS_PERM_OTH_R) ? (fs_config[server].fs_mdfsinfo ? (is_owner ? "r" : "R") : "R") : "") );
 
 					sprintf(permstring_both, "%s/%s", permstring_l, permstring_r);
 
@@ -4611,18 +4627,25 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 				{
 					char tmp[256];
 					char permstring_l[10], permstring_r[10];
+					uint8_t		is_owner;
+
+					is_owner = FS_PERM_EFFOWNER(server, active_id, e->owner);
 
 					//unsigned char hr_fmt_string[20];
 
 					sprintf(permstring_l, "%s%s%s%s",
 						(e->ftype == FS_FTYPE_DIR ? "D" : e->ftype == FS_FTYPE_SPECIAL ? "S" : ""),
 						((e->perm & FS_PERM_L) ? "L" : ""),
-						((e->perm & FS_PERM_OWN_W) ? "W" : ""),
-						((e->perm & FS_PERM_OWN_R) ? "R" : "") );
+						((e->perm & FS_PERM_OWN_W) ? (is_owner ? "W" : fs_config[server].fs_mdfsinfo ? "w": "W") : ""),
+						((e->perm & FS_PERM_OWN_R) ? (is_owner ? "R" : fs_config[server].fs_mdfsinfo ? "r" : "R") : "") );
+						//((e->perm & FS_PERM_OWN_W) ? "W" : ""),
+						//((e->perm & FS_PERM_OWN_R) ? "R" : "") );
 
 					sprintf(permstring_r, "%s%s", 
-						((e->perm & FS_PERM_OTH_W) ? "W" : ""),
-						((e->perm & FS_PERM_OTH_R) ? "R" : "") );
+						((e->perm & FS_PERM_OTH_W) ? (fs_config[server].fs_mdfsinfo ? (is_owner ? "w" : "W") : "W") : ""),
+						((e->perm & FS_PERM_OTH_R) ? (fs_config[server].fs_mdfsinfo ? (is_owner ? "r" : "R") : "R") : "") );
+						//((e->perm & FS_PERM_OTH_W) ? "W" : ""),
+						//((e->perm & FS_PERM_OTH_R) ? "R" : "") );
 
 					//sprintf (hr_fmt_string, "%%-%ds %%4s/%%-2s", ECONET_MAX_FILENAME_LENGTH);
 					//sprintf (tmp, hr_fmt_string, e->acornname,
@@ -5056,7 +5079,8 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 
 	// 20240520 Stop read of directory we cannot read
 	
-	if (p.ftype == FS_FTYPE_DIR && !((p.my_perm & FS_PERM_OWN_R) || FS_ACTIVE_SYST(server, active_id)))
+	//if (p.ftype == FS_FTYPE_DIR && !((p.my_perm & FS_PERM_OWN_R) || FS_ACTIVE_SYST(server, active_id)))
+	if (p.ftype == FS_FTYPE_DIR && !((FS_PERM_EFFOWNER(server, active_id, p.owner) && (p.perm & FS_PERM_OWN_R)) || (p.perm & FS_PERM_OTH_R) || FS_ACTIVE_SYST(server, active_id)))
 	{
 		fs_error(server, reply_port, net, stn, 0xbc, "Insufficient access");
 		return;
@@ -5232,10 +5256,11 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 				if (	((p.ftype != FS_FTYPE_NOTFOUND) && (p.my_perm & FS_PERM_OWN_W)) || 
 					(
 						p.ftype == FS_FTYPE_NOTFOUND && 
-						(	(	(p.parent_perm & FS_PERM_OWN_W) && 
-								(
-									(p.parent_owner == active[server][active_id].userid) || (FS_ACTIVE_SYST(server,active_id))
-								)
+						(	(	FS_PERM_EFFOWNER(server, active_id, p.parent_owner) // Owner & SYST can always write to a parent directory - at least for now - stuffs up RISC OS otherwise.
+								//(p.parent_perm & FS_PERM_OWN_W) && 
+								//(
+									//(p.parent_owner == active[server][active_id].userid) || (FS_ACTIVE_SYST(server,active_id))
+								//)
 							) ||
 							(p.parent_perm & FS_PERM_OTH_W)
 						)
@@ -6559,15 +6584,20 @@ void fs_info(int server, unsigned short reply_port, int active_id, unsigned char
 		{
 			unsigned char permstring[10];
 			unsigned char hr_fmt_string[100];
+			uint8_t		is_owner = 0;
+
+			is_owner = FS_PERM_EFFOWNER(server, active_id, p.owner);
+
+			fprintf (stderr, "%s is_owner = %d\n", p.acornname, is_owner);
 
 			strcpy(permstring, "");
 		
 			if (p.perm & FS_PERM_L) strcat (permstring, "L");
-			if (p.perm & FS_PERM_OWN_W) strcat (permstring, "W");
-			if (p.perm & FS_PERM_OWN_R) strcat (permstring, "R");
+			if (p.perm & FS_PERM_OWN_W) strcat (permstring, (is_owner ? "W" : fs_config[server].fs_mdfsinfo ? "w" : "W"));
+			if (p.perm & FS_PERM_OWN_R) strcat (permstring, (is_owner ? "R" : fs_config[server].fs_mdfsinfo ? "r" : "R"));
 			strcat (permstring, "/");
-			if (p.perm & FS_PERM_OTH_W) strcat (permstring, fs_config[server].fs_mdfsinfo ? "w" : "W");
-			if (p.perm & FS_PERM_OTH_R) strcat (permstring, fs_config[server].fs_mdfsinfo ? "r" : "R");
+			if (p.perm & FS_PERM_OTH_W) strcat (permstring, (fs_config[server].fs_mdfsinfo ? (is_owner ? "w" : "W") : "W"));
+			if (p.perm & FS_PERM_OTH_R) strcat (permstring, (fs_config[server].fs_mdfsinfo ? (is_owner ? "r" : "R") : "R"));
 
 			if (fs_config[server].fs_mdfsinfo)
 			{
@@ -7073,7 +7103,8 @@ void fs_cat_header(int server, unsigned short reply_port, int active_id, unsigne
 
 // MDFS manual has 10 character path, but Acorn traffic shows pad to 11! Similarly, disc name should be 15 but Acorn traffic has 16.
 			sprintf((char * ) &(r.p.data[2]), "%-11s%c   %-16s%c%c", (char *) (p.npath == 0 ? "$" : (char *) p.path[p.npath-1]),
-				(p.owner == active[server][active_id].userid ? 'O' : 'P'),
+				FS_PERM_EFFOWNER(server, active_id, p.owner) ? 'O' : 'P',
+				//(p.owner == active[server][active_id].userid ? 'O' : 'P'),
 				fs_discs[server][active[server][active_id].current_disc].name,
 				0x0d, 0x80);
 	
@@ -9516,7 +9547,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					if (p.disc != active[server][active_id].current_disc)
 						fs_error(server, reply_port, net, stn, 0xFF, "Not on current disc");
 					*/
-					else if ((p.my_perm & FS_PERM_OWN_R) || FS_ACTIVE_SYST(server, active_id))
+					else if (FS_PERM_EFFOWNER(server, active_id, p.owner) || (p.perm & FS_PERM_OTH_R)) // Owner and SYST always have read access to directories even if the perm is not set
 					{	
 						/* l = fs_get_dir_handle(server, active_id, p.unixpath); */
 						l = fs_open_interlock(server, p.unixpath, 1, active[server][active_id].userid);
@@ -9606,7 +9637,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				{
 					if (p.ftype != FS_FTYPE_DIR)
 						fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
-					else if ((p.my_perm & FS_PERM_OWN_R) || FS_ACTIVE_SYST(server, active_id))
+					else if (FS_PERM_EFFOWNER(server, active_id, p.owner) || (p.perm & FS_PERM_OTH_R)) // Owner and SYST always have read access to directories even if the perm is not set
 					{	
 						l = fs_open_interlock(server, p.unixpath, 1, active[server][active_id].userid);
 						if (l != -1) // Found
