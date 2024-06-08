@@ -1441,6 +1441,7 @@ Privileged commands:
           down the Pi.
 
 *DISCMASK <USERNAME> <ALL | NONE | xxxx>
+*DISKMASK <USERNAME> <ALL | NONE | xxxx>
 	- Hides disc availability on the server from a particular user.
 	- The system will *never* hide the user's home disc, whatever you
 	  attempt to do with this command.
@@ -1460,6 +1461,9 @@ Privileged commands:
 	- Force log a station off
 
 *FNLENGTH <length>
+	- Synonym of *FSFNLENGTH
+
+*FSFNLENGTH <length>
 	- Change maximum filename length in the fileserver to which the command
 	  is addressed. Valid values are 10..80. 
 	- This operates immediately without a restart, and the value you set is
@@ -1478,6 +1482,12 @@ Privileged commands:
 	- Also, the file interlocks (which are implemented!) will not notice
 	  one user opening the original file for writing and another opening a
           link for writing.
+
+*LOGOFF <station>
+	- Synonym of *FLOG
+
+*MKLINK <source> <destination>
+	- Synonym of *LINK
 
 *NETCONF <+/-OPTION>
 	- (This may be disabled at present - not sure why.)
