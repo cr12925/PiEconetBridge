@@ -4908,7 +4908,7 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 
 				// If it's a directory whose attributes we're setting, add in WR/r if no attributes are specified
 
-				if ((p.ftype == FS_FTYPE_DIR) && ((*(data+14) & 0xff) == 0))
+				if ((p.ftype == FS_FTYPE_DIR) && ((*(data+14) & 0x0D) == 0)) // 0x0D is 0x08 (W/) + 0x04 (R/) + 0x01 (/r)
 					attr.perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); 
 
 				break;
@@ -4929,8 +4929,10 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 
 				// If it's a directory whose attributes we're setting, add in WR/r if no attributes are specified
 
-				if ((p.ftype == FS_FTYPE_DIR) && ((*(data+6) & 0xff) == 0))
+				if ((p.ftype == FS_FTYPE_DIR) && ((*(data+6) & 0x0D) == 0)) // 0x0D is 0x08 (W/) + 0x04 (R/) + 0x01 (/r)
 					attr.perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); 
+				//if ((p.ftype == FS_FTYPE_DIR) && ((*(data+6) & 0xff) == 0))
+					//attr.perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); 
 
 				break;
 
@@ -6830,9 +6832,17 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 
 	e = p.paths;
 
+
 	while (e != NULL)
 	{
-		fs_write_xattr(e->unixpath, e->owner, perm, e->load, e->exec, e->homeof, server); // 'perm' because that's the *new* permission
+		uint8_t		internal_perm;
+
+		internal_perm = perm;
+
+		if (e->ftype == FS_FTYPE_DIR && (perm & (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R)) == 0)
+			internal_perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); // Imply these for directories
+
+		fs_write_xattr(e->unixpath, e->owner, internal_perm, e->load, e->exec, e->homeof, server); // 'perm' because that's the *new* permission
 		e = e->next;
 	
 	}
