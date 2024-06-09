@@ -6,10 +6,10 @@ econet-hpbridge:	econet-hpbridge.o fsv2.o
 	if [ -f .noexplain ]; then cc -g -o econet-hpbridge econet-hpbridge.o fsv2.o -lpthread -lssl -lcrypto; else cc -g -o econet-hpbridge econet-hpbridge.o fsv2.o -lpthread -lssl -lcrypto -lexplain; fi
 	-chgrp econet econet-hpbridge
 
-econet-hpbridge.o:	econet-hpbridge.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-pserv.h
+econet-hpbridge.o:	Makefile econet-hpbridge.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-pserv.h
 	cc -g -DGIT_VERSION=\"$(GIT_VERSION)\" -c econet-hpbridge.c -Wall
 
-fsv2.o: fs.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
+fsv2.o: Makefile fs.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
 	cc -DGIT_VERSION=\"$(GIT_VERSION)\" -D BRIDGE_V2 -g -c fs.c -o fsv2.o -Wall -Wno-pointer-sign
 
 econet-monitor: econet-monitor.o
