@@ -1,4 +1,4 @@
-GIT_VERSION := "$(shell git branch) $(shell git rev-parse HEAD)"
+GIT_VERSION := "$(shell git branch) $(shell git rev-parse --short HEAD)"
 
 all:	econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers econet-poke econet-isnets
 
