@@ -9497,7 +9497,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			else if (fs_parse_cmd(command, "PASS", 4, &param))
 				fs_change_pw(server, reply_port, userid, net, stn, param);
 			//else if (!strncasecmp("CHOWN ", (const char *) command, 6))
-			else if (fs_parse_cmd(command, "CHOWN", 3, &param))
+			else if (fs_parse_cmd(command, "CHOWN", 3, &param) || fs_parse_cmd(command, "SETOWNER", 5, &param))
 				fs_chown(server, reply_port, active_id, net, stn, param);
 			//else if (!strncasecmp("OWNER ", (const char *) command, 6))
 			else if (fs_parse_cmd(command, "OWNER", 3, &param))
