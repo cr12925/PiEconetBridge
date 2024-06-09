@@ -7415,26 +7415,17 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn, uint32_t 
 	}
 	else // Tx success - just update the packet queue
 	{
-		struct __pq *p, *old_p;
+		struct __pq *p;
+		unsigned char		debug_str_tmp[128];
 
 		p = l->pq_head;
 
-		old_p = p;
-
 		l->pq_head = l->pq_head->next;
 		free(p->packet);
+		sprintf (debug_str_tmp, "Packet queue entry freed at %p", p);
 		free(p);
 
-		/* Try commenting
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wuse-after-free"
-*/
-
-		fs_debug (0, 3, "Packet queue entry freed at %p", old_p);
-
-		/* Try commenting
-#pragma GCC diagnostic pop
-*/
+		fs_debug (0, 3, debug_str_tmp);
 
 		if (!(l->pq_head)) // Ran out of packets
 		{
