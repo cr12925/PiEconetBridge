@@ -1368,9 +1368,10 @@ Non-privileged commands:
 *CDIR <dirname>
 	- Create new directory
 
-*CHOWN <filename>
+*CHOWN <filename> (<user>)
 	- Take ownership of <filename> if you own the directory it's in or are
 	  a system user
+	- System users can choose the username that will own the file
 
 *COPY <source> <destination>
 	- Source can be wildcard. If it resolves to more than one file, then
@@ -1629,6 +1630,9 @@ Privileged commands:
 	  updates its cache. It has no means of doing so
 	  when *SETOPT is used, because the station is not
 	  notified that the option has changed.)
+
+*SETOWNER <filename> (<user>)
+	- Alias for *CHOWN
 
 *SETPASS <username> <password>
 	- Set password for another user
