@@ -7006,6 +7006,7 @@ static void * eb_device_despatcher (void * device)
 
 							pthread_mutex_lock(&fs_mutex);
 							eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
+							// if (p->p->p.port == 0x99 && p->p->p.data[1] == 0x19) fprintf (stderr, "\n\n%3d.%3d FS VERSION QUERY RECEIVED ****\n\n", d->net, d->local.stn);
 							eb_handle_fs_traffic(d->local.fs.index, p->p, p->length);
 
 							/* No longer required - done by FS 
@@ -8906,9 +8907,11 @@ void eb_help(char *name)
 {
 
 	fprintf (stderr, "\n\
-Copyright (c) 2022 Chris Royle\n\
+Copyright (c) 2024 Chris Royle\n\
 This program comes with ABSOLUTELY NO WARRANTY; for details see\n\
 the GPL v3.0 licence at https://www.gnu.org/licences/ \n\
+\n\
+GIT repository version: "GIT_VERSION"\n\
 \n\
 Usage: %s [options] \n\
 Version: %d.%d\n\

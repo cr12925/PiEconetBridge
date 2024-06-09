@@ -1,3 +1,5 @@
+GIT_VERSION := "$(git describe --abbrev=4 --dirty --always --tags)"
+
 all:	econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers econet-poke econet-isnets
 
 econet-hpbridge:	econet-hpbridge.o fsv2.o 
@@ -5,10 +7,10 @@ econet-hpbridge:	econet-hpbridge.o fsv2.o
 	-chgrp econet econet-hpbridge
 
 econet-hpbridge.o:	econet-hpbridge.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-pserv.h
-	cc -g -c econet-hpbridge.c -Wall
+	cc -g -DGIT_VERSION=\"$(GIT_VERSION)\" -c econet-hpbridge.c -Wall
 
 fsv2.o: fs.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
-	cc -D BRIDGE_V2 -g -c fs.c -o fsv2.o -Wall -Wno-pointer-sign
+	cc -DGIT_VERSION=\"$(GIT_VERSION)\" -D BRIDGE_V2 -g -c fs.c -o fsv2.o -Wall -Wno-pointer-sign
 
 econet-monitor: econet-monitor.o
 
