@@ -1,4 +1,5 @@
-GIT_VERSION := "$(git describe --abbrev=4 --dirty --always --tags)"
+#GIT_VERSION := "$(shell git describe --abbrev=4 --dirty --always --tags)"
+GIT_VERSION := "CR Build tree"
 
 all:	econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers econet-poke econet-isnets
 
