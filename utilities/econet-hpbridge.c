@@ -6251,17 +6251,20 @@ static void * eb_device_despatcher (void * device)
 
 										if (p->errors > 3 && (err == ECONET_TX_NECOUTEZPAS))
 										{
-											remove = 1; // Dump it - lots of errors on this
+											remove = 1; // Dump it - lots of errors on this - TODO - Suspect this line is wrong too.
 											// Send NAK if DAT packet got not listening, or our internal-special "INK" for an immediate not listening - so a source can tell that's what happened
+											// TODO - THIS IS WRONG - It's only done after full packet retries, below. But leave the immediate INK bit in because that doesn't require retries.
+											/* This code in error - is done before after several retries for RISC OS
 											if (tx.p.aun_ttype == ECONET_AUN_DATA)
 											{
 												ack.p.aun_ttype = ECONET_AUN_NAK;
 												eb_enqueue_output (d, &ack, 0, NULL);
 											}
-											else if (tx.p.aun_ttype == ECONET_AUN_IMM)
+											else */ if (tx.p.aun_ttype == ECONET_AUN_IMM)
 											{
 												ack.p.aun_ttype = ECONET_AUN_INK;
 												eb_enqueue_output (d, &ack, 0, NULL);
+												new_output = 1;
 											}
 											
 										}
