@@ -1749,10 +1749,13 @@ static void * eb_bridge_update_watcher (void *device)
 
 			pthread_cond_signal (&(me->qwake));
 	
-			if (me->type == EB_DEF_WIRE)
-				eb_debug (0, 2, "BRIDGE", "Wire     %3d     Send bridge update #%d %s", me->net, tx_count + 1, debug_string);
-			else
-				eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Send bridge update #%d to Trunk to %s%s", me->trunk.local_port, tx_count + 1, me->trunk.hostname, debug_string);
+			if (!EB_CONFIG_NOBRIDGEANNOUNCEDEBUG)
+			{
+				if (me->type == EB_DEF_WIRE)
+					eb_debug (0, 2, "BRIDGE", "Wire     %3d     Send bridge update #%d %s", me->net, tx_count + 1, debug_string);
+				else
+					eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Send bridge update #%d to Trunk to %s%s", me->trunk.local_port, tx_count + 1, me->trunk.hostname, debug_string);
+			}
 
 			if (tx_count < qty) sleep(1);
 
@@ -1847,10 +1850,13 @@ static void * eb_bridge_reset_watcher (void *device)
 
 			pthread_cond_signal (&(me->qwake));
 	
-			if (me->type == EB_DEF_WIRE)
-				eb_debug (0, 2, "BRIDGE", "Wire     %3d     Send bridge RESET #%d", me->net, tx_count + 1);
-			else
-				eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Send bridge RESET #%d to Trunk on %s", me->trunk.local_port, tx_count + 1, me->trunk.hostname);
+			if (!EB_CONFIG_NOBRIDGEANNOUNCEDEBUG)
+			{
+				if (me->type == EB_DEF_WIRE)
+					eb_debug (0, 2, "BRIDGE", "Wire     %3d     Send bridge RESET #%d", me->net, tx_count + 1);
+				else
+					eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Send bridge RESET #%d to Trunk on %s", me->trunk.local_port, tx_count + 1, me->trunk.hostname);
+			}
 
 			if (tx_count < qty) sleep(1);
 
@@ -1994,7 +2000,8 @@ void eb_bridge_reset (struct __eb_device *trigger)
 	else
 		strcpy (info, "internal");
 
-	eb_debug (0, 2, "BRIDGE", "%-8s         Bridge reset from %s", (trigger ? eb_type_str(trigger->type) : "Internal"), info);
+	if (!EB_CONFIG_NOBRIDGEANNOUNCEDEBUG)
+		eb_debug (0, 2, "BRIDGE", "%-8s         Bridge reset from %s", (trigger ? eb_type_str(trigger->type) : "Internal"), info);
 
 	// Put our networks structure back to the start
 
@@ -2523,15 +2530,19 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 
 			if (p->p.ctrl == BRIDGE_UPDATE && !memcmp(&(networks), &(old_networks), sizeof(networks)))
 				netlist_changed = 0;
-
-			if (source->type == EB_DEF_WIRE)
-				eb_debug (0, 2, "BRIDGE", "Wire     %3d     Received bridge %s with %s%s%s", source->net, (p->p.ctrl == BRIDGE_RESET ? "reset" : "update"), (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string, 
-						(netlist_changed ? "" : " (Not forwarded - net list unchanged)"));
-			else
+	
+			if (!EB_CONFIG_NOBRIDGEANNOUNCEDEBUG)
 			{
-				eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Received bridge %s from %s:%d with %s%s%s", source->trunk.local_port, (p->p.ctrl == BRIDGE_RESET ? "reset" : "update"), source->trunk.hostname ? source->trunk.hostname : "(Not connected)", source->trunk.hostname ? source->trunk.remote_port : 0, (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string,
-						(netlist_changed ? "" : " (Not forwarded - net list unchanged)"));
+				if (source->type == EB_DEF_WIRE)
+					eb_debug (0, 2, "BRIDGE", "Wire     %3d     Received bridge %s with %s%s%s", source->net, (p->p.ctrl == BRIDGE_RESET ? "reset" : "update"), (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string, 
+							(netlist_changed ? "" : " (Not forwarded - net list unchanged)"));
+				else
+				{
+					eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Received bridge %s from %s:%d with %s%s%s", source->trunk.local_port, (p->p.ctrl == BRIDGE_RESET ? "reset" : "update"), source->trunk.hostname ? source->trunk.hostname : "(Not connected)", source->trunk.hostname ? source->trunk.remote_port : 0, (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string,
+							(netlist_changed ? "" : " (Not forwarded - net list unchanged)"));
+				}
 			}
+
 
 			if (netlist_changed)
 				eb_bridge_update (source, p->p.ctrl);
@@ -5295,13 +5306,15 @@ static void * eb_device_despatcher (void * device)
 
 									if (was_dead && d->all_nets_pooled) // It needs some updates, just in case it has restarted and we missed its reset
 									{
-										eb_debug (0, 2, "DESPATCH", "%-8s %5d   Trunk received traffic after being dead - all nets pooled - send bridge updates", eb_type_str(d->type), d->trunk.remote_port);
+										if (!EB_CONFIG_NOBRIDGEANNOUNCEDEBUG)
+											eb_debug (0, 2, "DESPATCH", "%-8s %5d   Trunk received traffic after being dead - all nets pooled - send bridge updates", eb_type_str(d->type), d->trunk.remote_port);
 										pthread_cond_signal(&(d->bridge_update_cond));
 
 									}
 									else if (was_dead && (packet.p.port != BRIDGE_PORT || packet.p.ctrl != BRIDGE_RESET)) // If this trunk was dead before this packet arrived, do a bridge reset - which will also start the update process - but don't do a reset if what's just turned up is a reset
 									{
-										eb_debug (0, 2, "DESPATCH", "%-8s %5d   Trunk received traffic after being dead - send bridge reset", eb_type_str(d->type), d->trunk.remote_port);
+										if (!EB_CONFIG_NOBRIDGEANNOUNCEDEBUG)
+											eb_debug (0, 2, "DESPATCH", "%-8s %5d   Trunk received traffic after being dead - send bridge reset", eb_type_str(d->type), d->trunk.remote_port);
 										eb_bridge_reset(NULL);
 
 									}
