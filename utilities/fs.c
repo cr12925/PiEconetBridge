@@ -1544,13 +1544,37 @@ void fs_write_attr_to_file(unsigned char *path, int owner, short perm, unsigned 
 	return;
 }
 
+/* fs_isdir(path)
+ * Return true if file in filesystem is a dir
+ */
+
+uint8_t fs_isdir(char *path)
+{
+	struct stat	s;
+	int		r;
+
+	r = stat(path, &s);
+
+	if (r == -1)
+		fs_debug (0, 1, "PERMS", "%12s Permissions system cannot stat %s to see if it's a directory", "", path);
+	else if ((s.st_mode & S_IFMT) == S_IFDIR)
+		return 1;
+
+	return 0; // Returns 0 if stat failed or is a file.
+
+}
+
 void fs_read_xattr(unsigned char *path, struct objattr *r, int server)
 {
 	// Default values
 	r->owner=0; // syst
 	r->load=0;
 	r->exec=0;
-	r->perm=FS_PERM_OWN_R | FS_PERM_OWN_W; // Default now doesn't include PERM_OTH_R | FS_PERM_OTH_R;
+	//r->perm=FS_PERM_OWN_R | FS_PERM_OWN_W; // Default now doesn't include PERM_OTH_R | FS_PERM_OTH_R;
+	if (fs_isdir(path))
+		r->perm = FS_CONF_DEFAULT_DIR_PERM(server);
+	else	r->perm = FS_CONF_DEFAULT_FILE_PERM(server);
+
 	r->homeof=0;
 
 	char *dotfile=pathname_to_dotfile(path, server);
@@ -1588,6 +1612,7 @@ void fs_read_xattr(unsigned char *path, struct objattr *r, int server)
 		attrbuf[2] = '\0';
 		r->perm = strtoul((const char * ) attrbuf, NULL, 16);
 	}
+
 	if (getxattr((const char *) path, "user.econet_homeof", attrbuf, 4) >= 0) // Attribute found
 	{
 		attrbuf[4] = '\0';
@@ -1595,26 +1620,6 @@ void fs_read_xattr(unsigned char *path, struct objattr *r, int server)
 	}
 
 	return;
-
-}
-
-/* fs_isdir(path)
- * Return true if file in filesystem is a dir
- */
-
-uint8_t fs_isdir(char *path)
-{
-	struct stat	s;
-	int		r;
-
-	r = stat(path, &s);
-
-	if (r == -1)
-		fs_debug (0, 1, "PERMS", "%12s Permissions system cannot stat %s to see if it's a directory", "", path);
-	else if ((s.st_mode & S_IFMT) == S_IFDIR)
-		return 1;
-
-	return 0; // Returns 0 if stat failed or is a file.
 
 }
 
@@ -1629,9 +1634,15 @@ uint8_t fs_isdir(char *path)
 
 void fs_write_xattr(unsigned char *path, uint16_t owner, uint16_t perm, uint32_t load, uint32_t exec, uint16_t homeof, int server)
 {
+	struct objattr existing;
 	char *dotfile=pathname_to_dotfile(path, fs_config[server].fs_infcolon);
 	int dotexists=access(dotfile, F_OK);
 	free(dotfile);
+
+	fs_read_xattr(path, &existing, server);
+
+	if (perm & 0xff00)
+		perm = existing.perm;
 
 	if (((perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == 0) && fs_isdir(path))
 		perm |= FS_CONF_DEFAULT_DIR_PERM(server); // imply default if dir perm given as 'no perms'
@@ -1639,18 +1650,18 @@ void fs_write_xattr(unsigned char *path, uint16_t owner, uint16_t perm, uint32_t
 
 	if (!use_xattr || dotexists==0)
 	{
-		fs_write_attr_to_file(path, owner, perm, load, exec, homeof, server);
+		fs_write_attr_to_file(path, owner, perm & 0xFF, load, exec, homeof, server);
 		return;
 	}
 
 	unsigned char attrbuf[20];
 
-	if (!(perm & 0xff00)) // Only do this if top 8 bits unset - any of them set means don't overwrite perms
-	{
+	//if (!(perm & 0xff00)) // Only do this if top 8 bits unset - any of them set means don't overwrite perms
+	//{
 		sprintf ((char * ) attrbuf, "%02X", (perm & 0xff));
 		if (setxattr((const char *) path, "user.econet_perm", (const void *) attrbuf, 2, 0)) // Flags = 0 means create if not exist, replace if does
 			fs_debug (0, 1, "Failed to set permission on %s\n", path);
-	}
+	//}
 
 	sprintf((char * ) attrbuf, "%04X", owner);
 	if (setxattr((const char *) path, "user.econet_owner", (const void *) attrbuf, 4, 0))
@@ -4975,14 +4986,19 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 
 				// If it's a directory whose attributes we're setting, add in WR/r if no attributes are specified
 
-				if ((p.ftype == FS_FTYPE_DIR) && ((*(data+14) & 0x0F) == 0))
-					attr.perm |= FS_ACORN_DIR_MASK;
+				if (((*(data+14) & 0x0F) == 0))
+				{
+					if (p.ftype == FS_FTYPE_DIR)
+						attr.perm |= FS_CONF_DEFAULT_DIR_PERM(server);
+					else	attr.perm |= FS_CONF_DEFAULT_FILE_PERM(server);
+				}
+
 					//attr.perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); 
 
 				// It would appear RISC PCs will send Acorn attrib &05 (r/r) when the user selects WR/r
 
-				if ((p.ftype == FS_FTYPE_DIR)) // It would appear Owner Write and World Read are always implied on dirs
-					attr.perm |= FS_PERM_OWN_W | FS_PERM_OTH_R;
+				if ((p.ftype == FS_FTYPE_DIR)) // It would appear Owner Write and World Read are always implied on dirs from RISC OS
+					attr.perm |= FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R;
 
 				break;
 			
@@ -5002,15 +5018,16 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 
 				// If it's a directory whose attributes we're setting, add in WR/r if no attributes are specified
 
-				if ((p.ftype == FS_FTYPE_DIR) && ((*(data+6) & 0x0F) == 0)) 
-					attr.perm |= FS_ACORN_DIR_MASK;
+				if (((*(data+6) & 0x0F) == 0))
+				{
+					if (p.ftype == FS_FTYPE_DIR)
+						attr.perm |= FS_CONF_DEFAULT_DIR_PERM(server);
+					else	attr.perm |= FS_CONF_DEFAULT_FILE_PERM(server);
+				}
 
-				if ((p.ftype == FS_FTYPE_DIR)) // It would appear Owner Write and World Read are always implied on dirs
-					attr.perm |= FS_PERM_OWN_W | FS_PERM_OTH_R;
+				if ((p.ftype == FS_FTYPE_DIR)) // It would appear Owner Write and World Read are always implied on dirs from RISC OS
+					attr.perm |= FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R;
 
-					//attr.perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); 
-				//if ((p.ftype == FS_FTYPE_DIR) && ((*(data+6) & 0xff) == 0))
-					//attr.perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); 
 
 				break;
 
@@ -5365,6 +5382,7 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 						fs_error(server, reply_port, net, stn, 0xFF, "FS Error"); // File didn't open when it should
 					else
 					{
+
 						fs_write_xattr(p.unixpath, active[server][active_id].userid, FS_PERM_PRESERVE, load, exec, 0, server);  // homeof = 0 because it's a file
 
 						r.p.port = reply_port;
@@ -6614,7 +6632,7 @@ void fs_cdir(int server, unsigned short reply_port, int active_id, unsigned char
 		{
 			if (!mkdir((const char *) p.unixpath, 0770))
 			{
-				fs_write_xattr(p.unixpath, active[server][active_id].userid, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0, 0, server);
+				fs_write_xattr(p.unixpath, active[server][active_id].userid, FS_CONF_DEFAULT_DIR_PERM(server), 0, 0, 0, server);
 				fs_reply_success(server, reply_port, net, stn, 0, 0);
 			}
 			else	fs_error(server, reply_port, net, stn, 0xFF, "Unable to make directory");
@@ -6762,6 +6780,7 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 			{
 				case 'w': case 'W': perm |= FS_PERM_OWN_W; break;
 				case 'r': case 'R': perm |= FS_PERM_OWN_R; break;
+				case 'p': case 'P': perm |= FS_PERM_H; break; // Alternative to H for hidden
 				case 'h': case 'H': perm |= FS_PERM_H; break; // Hidden from directory listings
 				case 'l': case 'L': perm |= FS_PERM_L; break; // Locked
 				default:
@@ -6922,8 +6941,8 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 
 		internal_perm = perm;
 
-		if (e->ftype == FS_FTYPE_DIR && (perm & (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R)) == 0)
-			internal_perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); // Imply these for directories
+		if (e->ftype == FS_FTYPE_DIR && (perm & (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R | FS_PERM_OTH_W)) == 0)
+			internal_perm |= FS_CONF_DEFAULT_DIR_PERM(server);
 
 		fs_write_xattr(e->unixpath, e->owner, internal_perm, e->load, e->exec, e->homeof, server); // 'perm' because that's the *new* permission
 		e = e->next;
@@ -9869,7 +9888,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					fs_copy_to_cr(params, param, 10);
 					
 					while (counter < strlen(params))
-						params[counter] &= 0x20;  // Make caps - but will turn '/' into 0x0f
+						params[counter++] &= ~(0x20);  // Make caps - but will turn '/' into 0x0f
 
 					counter = 0;
 
@@ -9882,6 +9901,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					// Before the /
 					while ((counter < strlen(params) && params[counter] != 0x0f)) // 0x0f is what ('/' & 0x20) becomes
 					{
+
+						//fprintf (stderr, "FSDEFPERMS - counter = %d, character = '%c' (%d), length = %d\n", counter, params[counter], params[counter], strlen(params));
 
 						switch (params[counter])
 						{
@@ -9904,6 +9925,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 					while (counter < strlen(params))
 					{
+						//fprintf (stderr, "FSDEFPERMS(other) - counter = %d, character = '%c' (%d), length = %d\n", counter, params[counter], params[counter], strlen(params));
+
 						switch (params[counter])
 						{
 							case 'R': perm |= FS_PERM_OTH_R; break;
@@ -9921,10 +9944,10 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 					if ((perm & (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_W | FS_PERM_OTH_R)) == 0)
 					{
+						perm |= FS_PERM_OWN_W | FS_PERM_OWN_R;
+
 						if (is_dir)
-							perm |= FS_CONF_DEFAULT_DIR_PERM(server);
-						else
-							perm |= FS_CONF_DEFAULT_FILE_PERM(server);
+							perm |= FS_PERM_OTH_R;
 					}
 
 					// Set the config
@@ -9934,6 +9957,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					else
 						FS_CONF_DEFAULT_FILE_PERM(server) = perm;
 
+					sprintf(configfile, "%s/Configuration", fs_stations[server].directory);
+		
 					config = fopen(configfile, "w+");
 
 					if (!config)

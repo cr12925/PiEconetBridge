@@ -1488,6 +1488,11 @@ Privileged commands:
 		*FSDEFPERM DR/R
 		*FSDEFPERM WR/R
 		*FSDEFPERM WR/
+	- Please Note! This all works fine on 8 bit clients. However,
+	  RISC OS's GUI and Task Window both use the FS "Set Object Info"
+	  call which, from the GUI, implies WR/R on all directories it seems.
+	  So this command will NOT do what is expected on RISC OS. This 
+	  cannot be helped, it seems!
 
 *FSFNLENGTH <length>
 	- Change maximum filename length in the fileserver to which the command
