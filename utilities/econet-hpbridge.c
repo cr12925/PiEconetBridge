@@ -9139,7 +9139,7 @@ int main (int argc, char **argv)
 		{"bridge-loop-detect",	required_argument,	0,	0},
 		{"pool-reset",		required_argument,	0,	0},
 		{"wire-max-not-listening", required_argument,	0, 	0},
-		{"no-bridge-announce-debug", required_argument,	0, 	0},
+		{"no-bridge-announce-debug", 0,	0, 	0},
 		{0, 			0,			0,	0 }
 	};
 
