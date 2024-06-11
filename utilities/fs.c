@@ -198,11 +198,17 @@ struct {
 	uint8_t fs_infcolon; // Uses :inf for alternative to xattrs instead of .inf, and maps Acorn / to Unix . instead of Unix :
 	uint8_t fs_manyhandle; // Enables user handles > 8, and presents them as 8-bit integers rather than handle n presented as 2^n (which is what FS 3 does with its limit of 8 handles)
 	uint8_t fs_mdfsinfo; // Enables longer output from *INFO akin to MDFS
-	uint8_t fs_pifsperms; // Enables WR/r to be set on directories and will include them in FS replies. 0x00 means this has never been set - so PiFS will set it ON when it sees that. 0x80 means OFF (Acorn dir display/permissions), 0xff means ON (PiFS extras enabled)
-	uint8_t pad[246]; // Spare spare in the config
+	uint8_t fs_pifsperms; // Enables more flexible permissions on directories and enforces them
+	uint8_t fs_default_dir_perm; // Default permission to apply to a directory when created / if no xattr file. Will pick wr/r if config file exists (existing fileserver), or wr/ otherwise (for level3-alikeness)
+	uint8_t fs_default_file_perm; // Ditto for files. If the config file exists, it'll pick wr/r for backward compat; otherwise wr/ for level3-alikeness
+	uint8_t fs_mask_dir_wrr; // Whether to mask off the wr/r bits on a directory in human and non-human-readable output. These are implied if a client sets perms on a directory to &00 anyway. Won't mask if ((perms & wr/r) != wr/r) so that manually set permissions are shown/returned.
+	uint8_t pad[243]; // Spare spare in the config
 } fs_config[ECONET_MAX_FS_SERVERS];
 
 #define FS_CONF_PIFSPERMS(s)	(fs_config[(s)].fs_pifsperms == 0x80 ? 0 : 1)
+#define FS_CONF_DEFAULT_DIR_PERM(s)	(fs_config[(s)].fs_default_dir_perm)
+#define FS_CONF_DEFAULT_FILE_PERM(s)	(fs_config[(s)].fs_default_file_perm)
+#define FS_ACORN_DIR_MASK	(FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R)
 
 struct fs_user {
 	unsigned char username[10];
@@ -542,6 +548,8 @@ void fs_get_parameters (uint8_t server, uint32_t *params, uint8_t *fnlength)
 {
 
 	*params = fs_config[server].fs_fnamelen << 24;
+	*params |= (fs_config[server].fs_default_dir_perm) << 16;
+	*params |= (fs_config[server].fs_default_file_perm) << 8;
 	
 	if (fs_config[server].fs_acorn_home)	*params |= FS_CONFIG_ACORNHOME;
 	if (fs_config[server].fs_sjfunc)	*params |= FS_CONFIG_SJFUNC;
@@ -549,6 +557,8 @@ void fs_get_parameters (uint8_t server, uint32_t *params, uint8_t *fnlength)
 	if (fs_config[server].fs_infcolon)	*params |= FS_CONFIG_INFCOLON;
 	if (fs_config[server].fs_manyhandle)	*params |= FS_CONFIG_MANYHANDLE;
 	if (fs_config[server].fs_mdfsinfo)	*params |= FS_CONFIG_MDFSINFO;
+	if (fs_config[server].fs_pifsperms)	*params |= FS_CONFIG_PIFSPERMS;
+	if (fs_config[server].fs_mask_dir_wrr)	*params |= FS_CONFIG_MASKDIRWRR;
 }
 
 void fs_set_parameters (uint8_t server, uint32_t params)
@@ -556,9 +566,11 @@ void fs_set_parameters (uint8_t server, uint32_t params)
 
 	unsigned char		regex[1024], configfile[512];
 	FILE *			config;
-	uint8_t			fnlength;
+	uint8_t			fnlength, default_dir_perm, default_file_perm;
 
 	fnlength = (params & 0xff000000) >> 24;
+	default_dir_perm = (params & 0x00ff0000) >> 16;
+	default_file_perm = (params & 0x0000ff00) >> 8;
 
 	fs_config[server].fs_acorn_home = (params & FS_CONFIG_ACORNHOME) ? 1 : 0;
 	fs_config[server].fs_sjfunc = (params & FS_CONFIG_SJFUNC) ? 1 : 0;
@@ -566,6 +578,8 @@ void fs_set_parameters (uint8_t server, uint32_t params)
 	fs_config[server].fs_infcolon = (params & FS_CONFIG_INFCOLON) ? 1 : 0;
 	fs_config[server].fs_manyhandle = (params & FS_CONFIG_MANYHANDLE) ? 1 : 0;
 	fs_config[server].fs_mdfsinfo = (params & FS_CONFIG_MDFSINFO) ? 1 : 0;
+	fs_config[server].fs_pifsperms = (params & FS_CONFIG_PIFSPERMS) ? 1 : 0;
+	fs_config[server].fs_mask_dir_wrr = (params & FS_CONFIG_MASKDIRWRR) ? 1 : 0;
 
 	if (fnlength != fs_config[server].fs_fnamelen)
 	{
@@ -578,6 +592,9 @@ void fs_set_parameters (uint8_t server, uint32_t params)
 	}
 
 	sprintf(configfile, "%s/Configuration", fs_stations[server].directory);
+
+	fs_config[server].fs_default_dir_perm = default_dir_perm;
+	fs_config[server].fs_default_file_perm = default_file_perm;
 
 	config = fopen(configfile, "w+");
 
@@ -1080,6 +1097,9 @@ unsigned char fs_perm_to_acorn(int server, unsigned char fs_perm, unsigned char 
 	r |= ((fs_perm & (FS_PERM_OWN_R | FS_PERM_OWN_W)) << 2);
 	r |= ((fs_perm & (FS_PERM_OTH_R | FS_PERM_OTH_W)) >> 4);
 	
+	if (ftype == FS_FTYPE_DIR && fs_config[server].fs_mask_dir_wrr && ((fs_perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == FS_ACORN_DIR_MASK)) // (OTH_W) added here because we want to provide full real perms if OTH_W is set
+		r &= 0xF2;  // Acorn OWN_W, OWN_R, OTH_R bits (inverse of) 
+
 	//if (!fs_quiet) fprintf (stderr, "Converted perms %02X (ftype %02d) to Acorn %02X\n", fs_perm, ftype, r);
 	// fs_debug (0, 1, "Converted perms %02X (ftype %02d) to Acorn %02X", fs_perm, ftype, r);
 	return r;
@@ -1094,6 +1114,7 @@ unsigned char fs_perm_from_acorn(int server, unsigned char acorn_perm)
 
 	r = 0;
 
+	// We don't try and do the Acorn WR/R mask for directories here because we don't know if it's a directory. It's done in the normalize routine instead
 	// 20240520 Commented - this only applies to directories
 	// if (acorn_perm == 0) r = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R; // Acorn clients seem to use &00 to mean WR/r
 
@@ -1577,6 +1598,26 @@ void fs_read_xattr(unsigned char *path, struct objattr *r, int server)
 
 }
 
+/* fs_isdir(path)
+ * Return true if file in filesystem is a dir
+ */
+
+uint8_t fs_isdir(char *path)
+{
+	struct stat	s;
+	int		r;
+
+	r = stat(path, &s);
+
+	if (r == -1)
+		fs_debug (0, 1, "PERMS", "%12s Permissions system cannot stat %s to see if it's a directory", "", path);
+	else if ((s.st_mode & S_IFMT) == S_IFDIR)
+		return 1;
+
+	return 0; // Returns 0 if stat failed or is a file.
+
+}
+
 /*
  * Set xattr on a file/dir.
  *
@@ -1591,6 +1632,10 @@ void fs_write_xattr(unsigned char *path, uint16_t owner, uint16_t perm, uint32_t
 	char *dotfile=pathname_to_dotfile(path, fs_config[server].fs_infcolon);
 	int dotexists=access(dotfile, F_OK);
 	free(dotfile);
+
+	if (((perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == 0) && fs_isdir(path))
+		perm |= FS_CONF_DEFAULT_DIR_PERM(server); // imply default if dir perm given as 'no perms'
+		// No equivalent for files, because can justifiably set to, e.g. "/"
 
 	if (!use_xattr || dotexists==0)
 	{
@@ -2010,7 +2055,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 		final_path[0] = '\0';
 
-		if ((strlen(received_path) >= 10) && !strcasecmp(received_path + strlen(received_path)-10, "%PASSWORDS"))
+		if (fs_config[server].fs_sjfunc && (strlen(received_path) >= 10) && !strcasecmp(received_path + strlen(received_path)-10, "%PASSWORDS"))
 		{
 			if (normalize_debug) fs_debug (0, 1, "Found request for special file %PASSWORDS");
 			strcpy(final_path, "MDFSPasswords");
@@ -3264,6 +3309,10 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 		fs_config[fs_count].fs_sjfunc = 1;
 		fs_config[fs_count].fs_pwtenchar = 1;
 		fs_config[fs_count].fs_fnamelen = FS_DEFAULT_NAMELEN;
+		fs_config[fs_count].fs_mask_dir_wrr = 1;
+		
+		FS_CONF_DEFAULT_DIR_PERM(fs_count) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R;
+		FS_CONF_DEFAULT_FILE_PERM(fs_count) = FS_PERM_OWN_W | FS_PERM_OWN_R;
 
 		sprintf(passwordfile, "%s/Configuration", fs_stations[fs_count].directory);
 		cfgfile = fopen(passwordfile, "r+");
@@ -3293,6 +3342,17 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 				fs_debug (0, 2, "Configuration file loaded");
 			}
 
+			// Install some defaults if they need setting
+			if (FS_CONF_DEFAULT_DIR_PERM(fs_count) == 0x00) 
+				FS_CONF_DEFAULT_DIR_PERM(fs_count) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R;
+
+			if (FS_CONF_DEFAULT_FILE_PERM(fs_count) == 0x00)
+				FS_CONF_DEFAULT_FILE_PERM(fs_count) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R; // NB OTH_R added here for backward compatibility. If this is a server where this default was unconfigured, we configure it to match what PiFS v2.0 did
+
+			rewind(cfgfile);
+			// Write copy in case we've updated it
+			fwrite(&(fs_config[fs_count]), 256, 1, cfgfile);
+			
 			fs_write_readable_config(fs_count);
 		}
 
@@ -3409,7 +3469,8 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 
 				// Make MDFS password file
 
-				fs_make_mdfs_pw_file(fs_count); // Causing problems in the directory build
+				if (fs_config[fs_count].fs_sjfunc)
+					fs_make_mdfs_pw_file(fs_count); // Causing problems in the directory build
 
 				// Now load up the discs. These are named 0XXX, 1XXX ... FXXXX for discs 0-15
 				while ((entry = readdir(d)) && discs_found < ECONET_MAX_FS_DISCS)
@@ -4579,6 +4640,9 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 
 					is_owner = FS_PERM_EFFOWNER(server, active_id, e->owner);
 	
+					if (fs_config[server].fs_mask_dir_wrr && e->ftype == FS_FTYPE_DIR && (e->perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == FS_ACORN_DIR_MASK)
+						e->perm &= ~(FS_ACORN_DIR_MASK);
+
 					sprintf(permstring_l, "%s%s%s%s",
 						(e->ftype == FS_FTYPE_DIR ? "D" : e->ftype == FS_FTYPE_SPECIAL ? "S" : ""),
 						((e->perm & FS_PERM_L) ? "L" : ""),
@@ -4632,6 +4696,9 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 					is_owner = FS_PERM_EFFOWNER(server, active_id, e->owner);
 
 					//unsigned char hr_fmt_string[20];
+
+					if (fs_config[server].fs_mask_dir_wrr && e->ftype == FS_FTYPE_DIR && (e->perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == FS_ACORN_DIR_MASK)
+						e->perm &= ~(FS_ACORN_DIR_MASK);
 
 					sprintf(permstring_l, "%s%s%s%s",
 						(e->ftype == FS_FTYPE_DIR ? "D" : e->ftype == FS_FTYPE_SPECIAL ? "S" : ""),
@@ -4908,8 +4975,14 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 
 				// If it's a directory whose attributes we're setting, add in WR/r if no attributes are specified
 
-				if ((p.ftype == FS_FTYPE_DIR) && ((*(data+14) & 0x0D) == 0)) // 0x0D is 0x08 (W/) + 0x04 (R/) + 0x01 (/r)
-					attr.perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); 
+				if ((p.ftype == FS_FTYPE_DIR) && ((*(data+14) & 0x0F) == 0))
+					attr.perm |= FS_ACORN_DIR_MASK;
+					//attr.perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); 
+
+				// It would appear RISC PCs will send Acorn attrib &05 (r/r) when the user selects WR/r
+
+				if ((p.ftype == FS_FTYPE_DIR)) // It would appear Owner Write and World Read are always implied on dirs
+					attr.perm |= FS_PERM_OWN_W | FS_PERM_OTH_R;
 
 				break;
 			
@@ -4929,8 +5002,13 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 
 				// If it's a directory whose attributes we're setting, add in WR/r if no attributes are specified
 
-				if ((p.ftype == FS_FTYPE_DIR) && ((*(data+6) & 0x0D) == 0)) // 0x0D is 0x08 (W/) + 0x04 (R/) + 0x01 (/r)
-					attr.perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); 
+				if ((p.ftype == FS_FTYPE_DIR) && ((*(data+6) & 0x0F) == 0)) 
+					attr.perm |= FS_ACORN_DIR_MASK;
+
+				if ((p.ftype == FS_FTYPE_DIR)) // It would appear Owner Write and World Read are always implied on dirs
+					attr.perm |= FS_PERM_OWN_W | FS_PERM_OTH_R;
+
+					//attr.perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); 
 				//if ((p.ftype == FS_FTYPE_DIR) && ((*(data+6) & 0xff) == 0))
 					//attr.perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); 
 
@@ -5114,7 +5192,9 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 	}
 
 	if (command == 4 || command == 5 || command == 96)
+	{
 		r.p.data[replylen++] = fs_perm_to_acorn(server, p.perm, p.ftype);
+	}
 
 	if (command == 1 || command == 5 || command == 96)
 	{
@@ -6590,10 +6670,13 @@ void fs_info(int server, unsigned short reply_port, int active_id, unsigned char
 
 			is_owner = FS_PERM_EFFOWNER(server, active_id, p.owner);
 
-			fprintf (stderr, "%s is_owner = %d\n", p.acornname, is_owner);
+			//fprintf (stderr, "%s is_owner = %d\n", p.acornname, is_owner);
 
 			strcpy(permstring, "");
 		
+			if (fs_config[server].fs_mask_dir_wrr && p.ftype == FS_FTYPE_DIR && (p.perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == FS_ACORN_DIR_MASK)
+				p.perm &= ~(FS_ACORN_DIR_MASK);
+
 			if (p.perm & FS_PERM_L) strcat (permstring, "L");
 			if (p.perm & FS_PERM_OWN_W) strcat (permstring, (is_owner ? "W" : fs_config[server].fs_mdfsinfo ? "w" : "W"));
 			if (p.perm & FS_PERM_OWN_R) strcat (permstring, (is_owner ? "R" : fs_config[server].fs_mdfsinfo ? "r" : "R"));
@@ -8905,7 +8988,7 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 				fs_close_interlock(server, fs_bulk_ports[server][port].handle, 3); // We don't close on a putbytes - file stays open!
 
 				r.p.data[0] = 3; // This appears to be what FS3 does!
-				r.p.data[2] = fs_perm_to_acorn(server, FS_PERM_OWN_R | FS_PERM_OWN_W, FS_FTYPE_FILE);
+				r.p.data[2] = fs_perm_to_acorn(server, fs_config[server].fs_default_file_perm, FS_FTYPE_FILE);
 				r.p.data[3] = day;
 				r.p.data[4] = monthyear;
 
@@ -9748,6 +9831,10 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						fs_config[server].fs_manyhandle = (operator == '+' ? 1 : 0);
 					else if (!strcasecmp("MDFSINFO", configitem))
 						fs_config[server].fs_mdfsinfo = (operator == '+' ? 1 : 0);
+					else if (!strcasecmp("ACORNDIR", configitem))
+						fs_config[server].fs_mask_dir_wrr = (operator == '+' ? 1 : 0);
+					else if (!strcasecmp("PIFSPERMS", configitem))
+						fs_config[server].fs_pifsperms = (operator == '+' ? 1 : 0);
 					else
 					{
 						fs_error(server, reply_port, net, stn, 0xFF, "Bad configuration entry name"); return;
@@ -9755,6 +9842,98 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					
 					sprintf(configfile, "%s/Configuration", fs_stations[server].directory);
 	
+					config = fopen(configfile, "w+");
+
+					if (!config)
+					{
+						fs_error(server, reply_port, net, stn, 0xFF, "Unable to write to FS Configuration"); return;
+						fs_debug (0, 1, "Unable to write config file!");
+					}
+					else
+					{
+						fwrite(&(fs_config[server]), 256, 1, config);
+						fclose(config);
+						fs_write_readable_config(server);
+					}
+					
+					fs_reply_ok(server, reply_port, net, stn);
+
+				}
+				else if (fs_parse_cmd(command, "FSDEFPERM", 6, &param))
+				{
+					char params[11];
+					uint8_t	counter = 0, is_dir = 0, perm = 0;
+					FILE *	config;
+					char configfile[300];
+
+					fs_copy_to_cr(params, param, 10);
+					
+					while (counter < strlen(params))
+						params[counter] &= 0x20;  // Make caps - but will turn '/' into 0x0f
+
+					counter = 0;
+
+					if ((strlen(params) >= 1) && params[0] == 'D')
+					{
+						is_dir = 1;
+						counter++;
+					}
+
+					// Before the /
+					while ((counter < strlen(params) && params[counter] != 0x0f)) // 0x0f is what ('/' & 0x20) becomes
+					{
+
+						switch (params[counter])
+						{
+							case 'L': perm |= FS_PERM_L; break;
+							case 'P': perm |= FS_PERM_H; break;
+							case 'H': perm |= FS_PERM_H; break;
+							case 'R': perm |= FS_PERM_OWN_R; break;
+							case 'W': perm |= FS_PERM_OWN_W; break;
+							default:
+							{
+								fs_error(server, reply_port, net, stn, 0xFF, "Bad attribute"); return;
+							} break;
+						}
+
+						counter++;
+
+					}
+
+					if ((counter < strlen(params)) && params[counter] == 0x0f)	counter++; // Skip the slash
+
+					while (counter < strlen(params))
+					{
+						switch (params[counter])
+						{
+							case 'R': perm |= FS_PERM_OTH_R; break;
+							case 'W': perm |= FS_PERM_OTH_W; break;
+							default:
+							{
+								fs_error(server, reply_port, net, stn, 0xFF, "Bad attribute"); return;
+							} break;
+						}
+
+						counter++;
+					}
+
+					// Impose defaults even in setting the defaults!
+
+					if ((perm & (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_W | FS_PERM_OTH_R)) == 0)
+					{
+						if (is_dir)
+							perm |= FS_CONF_DEFAULT_DIR_PERM(server);
+						else
+							perm |= FS_CONF_DEFAULT_FILE_PERM(server);
+					}
+
+					// Set the config
+
+					if (is_dir)
+						FS_CONF_DEFAULT_DIR_PERM(server) = perm;
+					else
+						FS_CONF_DEFAULT_FILE_PERM(server) = perm;
+
 					config = fopen(configfile, "w+");
 
 					if (!config)
