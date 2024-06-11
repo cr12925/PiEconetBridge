@@ -464,6 +464,7 @@ struct __eb_config {
 	uint16_t	aun_max_retries; // Maximum number of retries before we get ACK / IMMREP from distant station
 	uint16_t	wire_retx_interval; // Milliseconds
 	uint16_t	wire_max_retries; // Maximum number of times we'll try sending a packet on an Econet wire
+	uint16_t	wire_max_notlistening; // Max number of 4-way not listenings to ignore (to cope with RISC OS not listening when it should be sometimes - e.g. during data bursts
 	uint16_t	wire_interpacket_gap; // Minimum time between transmissions on the wire. Tries to avoid some not listening errors
 	uint8_t		aun_nak_tolerance; // How many AUN NAKs we will tolerate from remote AUN before we dump the packet. Used to appease RiscOS, which sometimes isn't listening when it should be
 	uint16_t	packet_timeout; // Milliseconds - max time a packet can sit on an out queue before we dump it and everything behind it for same destination - this will also be the maximum time a device scheduler waits on its condition
@@ -490,6 +491,7 @@ struct __eb_config {
 	uint8_t		pool_reset_forward; // (Default is to) stop bridge forwarding bridge resets received from trunks & wires where all networks are pooled. (Reply updates still sent)
 	uint8_t		bridge_loop_detect; // (Default is to) periodically send broadcast packets with port &9C port &CF with a random number in them to see if they come back. If they come back, we'll ignore traffic on that trunk except a reset, and after a reset we send another loop detect probe
 	uint8_t		nokeepalivedebug; // Stops the bridge logging trunk keepalives (or at least anything on port &9C, ctrl &D0)
+	uint8_t		nobridgeannouncedebug; // Stops bridge logging bridge reset/updates - anything withn port 9C including keepalives
 };
 
 /* Global debug vars */
@@ -505,6 +507,7 @@ struct __eb_config {
 #define EB_CONFIG_AUN_RETRIES	(config.aun_max_retries)
 #define EB_CONFIG_WIRE_RETX	(config.wire_retx_interval)
 #define EB_CONFIG_WIRE_RETRIES	(config.wire_max_retries)
+#define EB_CONFIG_WIRE_MAX_NOTLISTENING (config.wire_max_notlistening)
 #define EB_CONFIG_WIRE_INTERPACKETGAP	(config.wire_interpacket_gap)
 #define EB_CONFIG_WIRE_IMM_WAIT	(config.wire_imm_wait)
 #define EB_START_SEC		(config.start.tv_sec)
@@ -540,6 +543,7 @@ struct __eb_config {
 #define EB_CONFIG_NOKEEPALIVEDEBUG	(config.nokeepalivedebug)
 #define EB_CONFIG_POOL_RESET_FWD	(config.pool_reset_forward)
 #define EB_CONFIG_BRIDGE_LOOP_DETECT	(config.bridge_loop_detect)
+#define EB_CONFIG_NOBRIDGEANNOUNCEDEBUG	(config.nobridgeannouncedebug)
 
 // Printer status
 

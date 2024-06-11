@@ -714,6 +714,13 @@ The next few switches ought not to be needed but just in case:
                         the Econet before giving up. If you have RISC OS machines, 
                         this should be at least 3. It defaults to 10.
 
+--wire-max-not-listening <n>	Number of 'Not listening' errors to tolerate
+			on an Econet when transmitting a 4-way handshake. 
+			This is implemented because sometimes RISC OS is not
+			listening when it said it would be - notably when
+			it is supposed to be waiting for an incoming data burst
+			series of packets on *LOAD or FS GetBytes.
+
 --wire-interval <n>	Milliseconds between retransmit attempts. Default 50.
 
 --wire-imm-wait <n>	Milliseconds to wait before putting the Econet module
@@ -812,6 +819,11 @@ Bridge protocol tunables
 
 --no-keepalive-debug	Filters packet dumps (if turned on) for packets
 			with port &9C and ctrl &D0 (trunk keepalives)
+
+--no-bridge-announce-debug	Filters packet dumps (if turned on) for
+			all port &9C packets (trunk net reset/update and
+			keepalive). This option turns on 
+			--no-keepalive-debug as well.
 
 --pool-reset <1/0>	Whether the bridge will forward bridge resets and
 			updates from a trunk or Econet wire where /all/
@@ -1464,6 +1476,19 @@ Privileged commands:
 *FNLENGTH <length>
 	- Synonym of *FSFNLENGTH
 
+*FSDEFPERM <access>
+	- Sets fileserver-wide default permissions for new files and those
+	  which have no stored permission on the underlying filesystem.
+	- If the first character of <access> is D, then sets default directory
+	  permission, otherwise default file permission.
+	- All access bytes can be set, though setting H (Hidden, which has a 
+	  synonym P) or L(ocked) may be highly unwise.
+	- Examples:
+		*FSDEFPERM DWR/R
+		*FSDEFPERM DR/R
+		*FSDEFPERM WR/R
+		*FSDEFPERM WR/
+
 *FSFNLENGTH <length>
 	- Change maximum filename length in the fileserver to which the command
 	  is addressed. Valid values are 10..80. 
@@ -1535,6 +1560,30 @@ Privileged commands:
              Turns on longer *INFO output - essentially includes the date of 
              last status change (there being no create date in the statbuf, 
              in addition to modification date and time.
+
+	 *NETCONF +ACORNDIR / *NETCONF -ACORNDIR
+
+	     The fileserver will always treat nil permissions sent by a station
+             to set on a directory as WR/R - this appears to be stock Acorn
+	     behaviour. This NETCONF option causes the server to mask those 
+	     permissions out of permission bytes and displays sent to a station.
+
+	     Without this set, PiFS will always display & send permission data 
+	     to clients which reflects the actual permissions it has stored.
+
+	     This with this set, a directory which in fact has permissions WR/R
+  	     will be seen in directory listings as "D/" as a level 3 server
+	     would display it. If any other combination is set, the actual set
+	     value will be displayed, since PiFS allows a user to set permissions
+	     other than WR/R on directories.
+	
+	     Examples (directory actual permission on left, display on right if
+	     this option is set)
+
+	     DWR/R         D/
+	     DLWR/R        DL/
+             DR/R          DR/R
+             DWR/WR        DWR/WR
 
 *NEWUSER <username>
 	- Create new user.

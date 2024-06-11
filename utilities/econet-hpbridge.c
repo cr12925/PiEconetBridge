@@ -878,6 +878,9 @@ void eb_dump_packet (struct __eb_device *source, char dir, struct __econet_packe
 	if (EB_CONFIG_NOKEEPALIVEDEBUG && p->p.port == 0x9C && p->p.ctrl == 0xD0) // Trunk keepalive - exit if filtered
 		return;
 
+	if (EB_CONFIG_NOBRIDGEANNOUNCEDEBUG && p->p.port == 0x9C) // Trunk traffic generally - exit if filtered
+		return;
+
 	sprintf (dumpstring, "%-8s %3d.%3d from %3d.%3d P:&%02X C:&%02X (%c) Type %3s Seq 0x%08X Length 0x%04X addr %p",
 		eb_type_str(source->type),
 		p->p.dstnet,
@@ -6249,7 +6252,7 @@ static void * eb_device_despatcher (void * device)
 										p->errors++;	
 										wire_output_pending++;
 
-										if (p->errors > 3 && (err == ECONET_TX_NECOUTEZPAS))
+										if (p->errors > /* 3 */ EB_CONFIG_WIRE_MAX_NOTLISTENING && (err == ECONET_TX_NECOUTEZPAS))
 										{
 											remove = 1; // Dump it - lots of errors on this - TODO - Suspect this line is wrong too.
 											// Send NAK if DAT packet got not listening, or our internal-special "INK" for an immediate not listening - so a source can tell that's what happened
@@ -6260,7 +6263,7 @@ static void * eb_device_despatcher (void * device)
 												ack.p.aun_ttype = ECONET_AUN_NAK;
 												eb_enqueue_output (d, &ack, 0, NULL);
 											}
-											else */ if (tx.p.aun_ttype == ECONET_AUN_IMM)
+											else */ if (tx.p.aun_ttype == ECONET_AUN_IMM) /* TODO: Is there any reason this needs to have p->errors > XX - can't it just fail on the first one? */
 											{
 												ack.p.aun_ttype = ECONET_AUN_INK;
 												eb_enqueue_output (d, &ack, 0, NULL);
@@ -6280,7 +6283,7 @@ static void * eb_device_despatcher (void * device)
 									p->errors++;	
 									wire_output_pending++;
 
-									if (p->errors > 3 && (err == ECONET_TX_NECOUTEZPAS))
+									/* TODO */ if (p->errors > 3 && (err == ECONET_TX_NECOUTEZPAS))
 										remove = 1; // Dump it - lots of errors on this
 
 
@@ -8934,9 +8937,10 @@ Options:\n\
 Queuing management options (usually need not be adjusted):\n\
 \n\
 --wire-max-tx n\t\tMaximum number of retransmits for wire packets (current: %d)\n\
+--wire-max-not-listening n\tMaximum number of 'Not listening' errors to ignore (current: %d)\n\
 --wire-interval n\tMinimum wait before wire retransmission of failed packet (ms) (current: %d)\n\
 --wire-imm-wait n\tMaximum time (ms) to wait for an immediate reply destined for the wire (current %d)\n\
---aun-max-tx n\t\tMaximum number of retransmis for AUN packets (current: %d)\n\
+--aun-max-tx n\t\tMaximum number of retransmits for AUN packets (current: %d)\n\
 --aun-interval n\tMinimum wait before AUN retransmission of unacknowledged packet (ms) (current: %d)\n\
 --aun-nak-tolerance n\tNumber of AUN NAKs to tolerate before dumping packet. (current: %d)\n\
 --immediate-timeout n\tNumber of ms to wait before cancelling flag fill when immediate query received (current:%d)\n\
@@ -8958,6 +8962,7 @@ Bridge protocol tuning:\n\
 --trunk-update_qty n\tNumber of bridge update packets to send on UDP trunks (current %d)\n\
 --bridge-query-interval n\tMinimum time between bridge query responses sent to a given station on the Econet (ms) (current %d)\n\
 --no-keepalive-debug\tFilter packet dumps for port &9C ctrl &D0 (bridge keepalives)\n\
+--no-bridge-announce-debug\tFilter packet dumps for all port &9C traffic (bridge net resets, updates, keepalives (also sets --no-keepalive-debug))\n\
 --bridge-loop-detect n\t1 or 0 - (en/dis)ables bridge loop detection (current: %s) (** not yet implemented **)\n\
 --pool-reset n\t\t1 or 0 - (en/dis)ables forwarding of bridge resets & updates from trunks/wires where all nets are pooled (current: %s)\n\
 \n\
@@ -8978,6 +8983,7 @@ Deep-level debugging options:\n\
 	(EB_VERSION & 0xf0) >> 4,
 	(EB_VERSION & 0x0f),
 	EB_CONFIG_WIRE_RETRIES,
+	EB_CONFIG_WIRE_MAX_NOTLISTENING,
 	EB_CONFIG_WIRE_RETX,
 	EB_CONFIG_WIRE_IMM_WAIT,
 	EB_CONFIG_AUN_RETRIES,
@@ -9055,6 +9061,7 @@ int main (int argc, char **argv)
 	EB_CONFIG_WIRE_RETX = 10; // Reduced 20231226 to see if !Machines performance improves
 	EB_CONFIG_AUN_RETX = 1000;  // BeebEm Seems to need quite a while - and does not like another packet turning up before it's ACKd the last one. Long timeout. If the ACK turns up, the inbound AUN listener wakes the queue anyway, so it should be fine.
 	EB_CONFIG_WIRE_RETRIES = 10;
+	EB_CONFIG_WIRE_MAX_NOTLISTENING = 5; // Number of not listenings to treat as non-fatal on transmission of a 4-way (to cope with RISC OS bug where it sometimes isn't listening for a data burst on getbytes/load 
 	EB_CONFIG_WIRE_IMM_WAIT = 1000; // Wait 1s before resetting ADLC from flag fill - assume immediate reply not turning up for transmission on to wire - TODO - Implemennt command line variable
 	EB_CONFIG_AUN_RETRIES = 5;
 	EB_CONFIG_AUN_NAKTOLERANCE = 2; // How many NAKs we tolerate before we dump the packet off an AUN outq. Used to appease RiscOS, which sometimes isn't listening when it should be
@@ -9131,6 +9138,8 @@ int main (int argc, char **argv)
 		{"immediate-timeout", 	required_argument, 	0, 	0},
 		{"bridge-loop-detect",	required_argument,	0,	0},
 		{"pool-reset",		required_argument,	0,	0},
+		{"wire-max-not-listening", required_argument,	0, 	0},
+		{"no-bridge-announce-debug", required_argument,	0, 	0},
 		{0, 			0,			0,	0 }
 	};
 
@@ -9171,6 +9180,8 @@ int main (int argc, char **argv)
 					case 24:	EB_CONFIG_WIRE_IMM_WAIT = atoi(optarg); break;
 					case 25:	EB_CONFIG_BRIDGE_LOOP_DETECT = (atoi(optarg) ? 1 : 0); break;
 					case 26:	EB_CONFIG_POOL_RESET_FWD = (atoi(optarg) ? 1 : 0); break;
+					case 27:	EB_CONFIG_WIRE_MAX_NOTLISTENING = (atoi(optarg) ? 1 : 0); break;
+					case 28:	EB_CONFIG_NOBRIDGEANNOUNCEDEBUG = 1; EB_CONFIG_NOKEEPALIVEDEBUG = 1; break;
 				}
 			} break;
 			case 'c':	strncpy(config_path, optarg, 1023); break;
