@@ -3855,7 +3855,7 @@ int fs_stn_logged_in(int server, unsigned char net, unsigned char stn)
 
 	while (!found && (count < ECONET_MAX_FS_USERS))
 	{
-		if (	(active[server][count].net == net) &&
+		if (	(active[server][count].net == (net == 0 ? fs_stations[server].net : net)) &&
 			(active[server][count].stn == stn) )
 			return count;
 		count++;
