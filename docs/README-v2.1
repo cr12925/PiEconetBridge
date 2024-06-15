@@ -689,6 +689,9 @@ traces per packet. Example reasons are:
                 (ie. produces logs of activity) Two is equivalent to the old 
                 'noisy'.
 
+		SIGNALS: Sending the bridge process SIGUSR1 will increase
+		debug level by 1; SIGUSR2 will decrease by 1.
+
 --disable-7bitbodge	Turns off the Acorn '7 bit bodge' required to enable
                 Y2K compliant dates in fileserver traffic. This is on by default. 
                 This command line switch turns it off for *all* fileservers 
