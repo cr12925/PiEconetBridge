@@ -66,7 +66,7 @@
 #define FSACORNREGEX    "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 #define FSREGEX    "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 #define FSDOTREGEX "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;\\.[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
-#define FS_NETCONF_REGEX_ONE "^NETCONF\\s+([\\+\\-][A-Z]+)\\s*"
+#define FS_NETCONF_REGEX_ONE "^NETCONF(IG)?\\s+([\\+\\-][A-Z]+)\\s*"
 
 #define FS_DIVHANDLE(x)	((fs_config[server].fs_manyhandle == 0) ? (  (  ((x) == 128) ? 8 : ((x) == 64) ? 7 : ((x) == 32) ? 6 : ((x) == 16) ? 5 : ((x) == 8) ? 4 : ((x) == 4) ? 3 : ((x) == 2) ? 2 : ((x) == 1) ? 1 : (x))) : (x))
 #define FS_MULHANDLE(x) ((fs_config[server].fs_manyhandle != 0) ? (x) : (1 << ((x) - 1)))
@@ -9898,7 +9898,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 				// Wonder why the regexec was commented out?
 				//if (0)
-				if (regexec(&fs_netconf_regex_one, command, 2, matches, 0) == 0) // Found a NETCONF
+				if (regexec(&fs_netconf_regex_one, command, 3, matches, 0) == 0) // Found a NETCONF
 				{
 					char configitem[100];
 					int length;
@@ -9908,14 +9908,14 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 					// temp use of length - will point to the operator character
 
-					operator = command[matches[1].rm_so];
+					operator = command[matches[2].rm_so];
 
-					length = matches[1].rm_eo - matches[1].rm_so - 1;
+					length = matches[2].rm_eo - matches[2].rm_so - 1;
 					configitem[length] = 0;
 
 					while (length > 0)
 					{
-						configitem[length-1] = command[matches[1].rm_so + length];
+						configitem[length-1] = command[matches[2].rm_so + length];
 						length--;
 					}
 

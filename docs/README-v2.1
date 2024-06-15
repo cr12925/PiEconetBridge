@@ -1523,25 +1523,27 @@ Privileged commands:
 *MKLINK <source> <destination>
 	- Synonym of *LINK
 
-*NETCONF <+/-OPTION>
-	- (This may be disabled at present - not sure why.)
+*NETCONFIG <+/-OPTION>
+
+	- Alias *NETCONF
+
 	- Turns FS options on/off. These persist across restarts.
 
 	- The list is:
 	
-	*NETCONF +ACORNHOME / *NETCONF -ACORNHOME 
+	*NETCONFIG +ACORNHOME / *NETCONF -ACORNHOME 
 
             Turns Acorn home directory semantics on/off When on, a user will 
             be treated as owning everything in and below their home directory 
             and everything below it regardless of how ownership is actually 
             set in the permissions.
 
-        *NETCONF +MDFS / *NETCONF -MDFS 
+        *NETCONFIG +MDFS / *NETCONF -MDFS 
 
             Turns SJ MDFS functionality on off.  (Previously this was global 
             across all fileservers running on a particular bridge.)
 	
-        *NETCONF +COLONMAP / *NETCONF -COLONMAP 
+        *NETCONFIG +COLONMAP / *NETCONF -COLONMAP 
 
             Maps '/' in Acorn filenames to '.' in Unix instead of the default 
             ':'. Inf files (which are used in place of xattrs if they are 
@@ -1554,7 +1556,7 @@ Privileged commands:
 
             cd <path to fileserver root directory> find . -type f -name \*.inf -exec <path to repo/utilities/dot_to_colon {} \;
 
-        *NETCONF +BIGHANDLES / *NETCONF -BIGHANDLES 
+        *NETCONFIG +BIGHANDLES / *NETCONF -BIGHANDLES 
 
             Turns on client handles other than the 8 which only a single bit 
             set in the byte. The default (off) is compatible with NFS3 on 
@@ -1563,13 +1565,13 @@ Privileged commands:
             to the bridge. ADFS (on any platform) should be fine with BIGHANDLES 
             enabled.
 
-         *NETCONF +MDFSINFO / *NETCONF -MDFSINFO 
+         *NETCONFIG +MDFSINFO / *NETCONF -MDFSINFO 
 
              Turns on longer *INFO output - essentially includes the date of 
              last status change (there being no create date in the statbuf, 
              in addition to modification date and time.
 
-	 *NETCONF +ACORNDIR / *NETCONF -ACORNDIR
+	 *NETCONFIG +ACORNDIR / *NETCONF -ACORNDIR
 
 	     The fileserver will always treat nil permissions sent by a station
              to set on a directory as WR/R - this appears to be stock Acorn
