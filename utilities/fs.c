@@ -1309,7 +1309,7 @@ void fs_dump_handle_list(FILE *out, int fsnumber)
 
 	for (c = 0 ; c < ECONET_MAX_FS_USERS; c++)
 	{
-		if (active[fsnumber][c].stn != 0) // Active
+		if (active[fsnumber][c].net != 0 && active[fsnumber][c].stn != 0) // Active
 		{
 			found++;
 			fprintf (out, "\n\n    %04X %s\n\n", active[fsnumber][c].userid, users[fsnumber][active[fsnumber][c].userid].username);
@@ -4202,7 +4202,7 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 				if (fs_stn_logged_in(server, net, stn) != -1) // do a bye first
 					fs_bye(server, reply_port, net, stn, 0);
 
-				active[server][usercount].net = net;
+				active[server][usercount].net = (net == 0 ? fs_stations[server].net : net);
 				active[server][usercount].stn = stn;
 				active[server][usercount].printer = 0xff; // No current printer selected
 				active[server][usercount].userid = counter;
