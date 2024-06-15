@@ -1324,7 +1324,7 @@ void fs_dump_handle_list(FILE *out, int fsnumber)
 			username[10] = 0;
 
 			found++;
-			fprintf (out, "\n\n    %04X %s\n\n", active[fsnumber][c].userid, username);
+			fprintf (out, "\n\n    %04X %s %d.%d\n\n", active[fsnumber][c].userid, username, active[fsnumber][c].net, active[fsnumber][c].stn);
 			fprintf (out, "       URD: %2d (internal %3d) %s\n", active[fsnumber][c].root, active[fsnumber][c].fhandles[active[fsnumber][c].root].handle, active[fsnumber][c].fhandles[active[fsnumber][c].root].acornfullpath);
 			fprintf (out, "       CWD: %2d (internal %3d) %s\n", active[fsnumber][c].current, active[fsnumber][c].fhandles[active[fsnumber][c].current].handle, active[fsnumber][c].fhandles[active[fsnumber][c].current].acornfullpath);
 			fprintf (out, "       LIB: %2d (internal %3d) %s\n\n", active[fsnumber][c].lib, active[fsnumber][c].fhandles[active[fsnumber][c].lib].handle, active[fsnumber][c].fhandles[active[fsnumber][c].lib].acornfullpath);
