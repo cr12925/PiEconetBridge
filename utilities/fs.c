@@ -1355,14 +1355,24 @@ void fs_dump_handle_list(FILE *out, int fsnumber)
 	if (!found) fprintf (out, "None\n\n");
 	else fprintf (out, "\n");
 
-	fprintf (out, "  Files and directories open:\n\n");
+	fprintf (out, "  Files and directories open: ");
+
+	found = 0;
 
 	for (c = 0; c < ECONET_MAX_FS_FILES; c++)
 	{
 		if (fs_files[fsnumber][c].handle)
-			fprintf (out, "    %3d R: %3d W: %3d %s\n", c, fs_files[fsnumber][c].readers, fs_files[fsnumber][c].writers, fs_files[fsnumber][c].name);
+		{
+			if (!found) fprintf (out, "\n");
+
+			fprintf (out, "\n    %3d R: %3d W: %3d %s", c, fs_files[fsnumber][c].readers, fs_files[fsnumber][c].writers, fs_files[fsnumber][c].name);
+			found++;
+		}
 	}
 
+	if (!found) fprintf (out, "None");
+
+	fprintf (out, "\n");
 	return;	
 
 }
