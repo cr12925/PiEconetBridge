@@ -1303,7 +1303,14 @@ void fs_dump_handle_list(FILE *out, int fsnumber)
 		return;
 
 	fprintf (out, "  Station %d.%d\n  Root directory: %s\n  Total discs: %d\n", fs_stations[fsnumber].net, fs_stations[fsnumber].stn, fs_stations[fsnumber].directory, fs_stations[fsnumber].total_discs);
-	fprintf (out, "  Currently logged in users: ");
+
+	for (c = 0; c < ECONET_MAX_FS_DISCS; c++)
+	{
+		if (fs_discs[fsnumber][c].name[0])
+			fprintf (out, "    %2d %s\n", c, fs_discs[fsnumber][c].name);
+	}
+
+	fprintf (out, "\n  Currently logged in users: ");
 
 	found = 0;
 
@@ -1311,8 +1318,13 @@ void fs_dump_handle_list(FILE *out, int fsnumber)
 	{
 		if (active[fsnumber][c].net != 0 && active[fsnumber][c].stn != 0) // Active
 		{
+			char	username[11];
+
+			memcpy (username, users[fsnumber][active[fsnumber][c].userid].username, 10);
+			username[10] = 0;
+
 			found++;
-			fprintf (out, "\n\n    %04X %s\n\n", active[fsnumber][c].userid, users[fsnumber][active[fsnumber][c].userid].username);
+			fprintf (out, "\n\n    %04X %s\n\n", active[fsnumber][c].userid, username);
 			fprintf (out, "         URD: %2d (internal %3d) %s\n", active[fsnumber][c].root, active[fsnumber][c].fhandles[active[fsnumber][c].root].handle, active[fsnumber][c].fhandles[active[fsnumber][c].root].acornfullpath);
 			fprintf (out, "         CWD: %2d (internal %3d) %s\n", active[fsnumber][c].current, active[fsnumber][c].fhandles[active[fsnumber][c].current].handle, active[fsnumber][c].fhandles[active[fsnumber][c].current].acornfullpath);
 			fprintf (out, "         LIB: %2d (internal %3d) %s\n\n", active[fsnumber][c].lib, active[fsnumber][c].fhandles[active[fsnumber][c].lib].handle, active[fsnumber][c].fhandles[active[fsnumber][c].lib].acornfullpath);
@@ -1326,13 +1338,15 @@ void fs_dump_handle_list(FILE *out, int fsnumber)
 				{
 					if (active[fsnumber][c].fhandles[f].handle != -1)
 					{
-						fprintf (out, "        %2d (internal %3d) %s\n", f, active[fsnumber][c].fhandles[f].handle, active[fsnumber][c].fhandles[f].acornfullpath);
+						fprintf (out, "\n        %2d (internal %3d) %s", f, active[fsnumber][c].fhandles[f].handle, active[fsnumber][c].fhandles[f].acornfullpath);
 						f2++;
 					}
 
 				}
 
-				if (!f2) fprintf (out, "None\n");
+				if (!f2) fprintf (out, "None");
+
+				fprintf (out, "\n");
 			}
 		}
 	}
