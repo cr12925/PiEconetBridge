@@ -1325,9 +1325,9 @@ void fs_dump_handle_list(FILE *out, int fsnumber)
 
 			found++;
 			fprintf (out, "\n\n    %04X %s\n\n", active[fsnumber][c].userid, username);
-			fprintf (out, "         URD: %2d (internal %3d) %s\n", active[fsnumber][c].root, active[fsnumber][c].fhandles[active[fsnumber][c].root].handle, active[fsnumber][c].fhandles[active[fsnumber][c].root].acornfullpath);
-			fprintf (out, "         CWD: %2d (internal %3d) %s\n", active[fsnumber][c].current, active[fsnumber][c].fhandles[active[fsnumber][c].current].handle, active[fsnumber][c].fhandles[active[fsnumber][c].current].acornfullpath);
-			fprintf (out, "         LIB: %2d (internal %3d) %s\n\n", active[fsnumber][c].lib, active[fsnumber][c].fhandles[active[fsnumber][c].lib].handle, active[fsnumber][c].fhandles[active[fsnumber][c].lib].acornfullpath);
+			fprintf (out, "       URD: %2d (internal %3d) %s\n", active[fsnumber][c].root, active[fsnumber][c].fhandles[active[fsnumber][c].root].handle, active[fsnumber][c].fhandles[active[fsnumber][c].root].acornfullpath);
+			fprintf (out, "       CWD: %2d (internal %3d) %s\n", active[fsnumber][c].current, active[fsnumber][c].fhandles[active[fsnumber][c].current].handle, active[fsnumber][c].fhandles[active[fsnumber][c].current].acornfullpath);
+			fprintf (out, "       LIB: %2d (internal %3d) %s\n\n", active[fsnumber][c].lib, active[fsnumber][c].fhandles[active[fsnumber][c].lib].handle, active[fsnumber][c].fhandles[active[fsnumber][c].lib].acornfullpath);
 			
 			{
 				int f, f2 = 0;
@@ -1338,6 +1338,7 @@ void fs_dump_handle_list(FILE *out, int fsnumber)
 				{
 					if (active[fsnumber][c].fhandles[f].handle != -1)
 					{
+						if (!f2) fprintf (out, "\n");
 						fprintf (out, "\n        %2d (internal %3d) %s", f, active[fsnumber][c].fhandles[f].handle, active[fsnumber][c].fhandles[f].acornfullpath);
 						f2++;
 					}
