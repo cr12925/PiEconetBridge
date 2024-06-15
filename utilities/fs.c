@@ -9674,7 +9674,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								fs_store_tail_path(active[server][active_id].fhandles[n_handle].acorntailpath, p.acornfullpath);
 								active[server][active_id].fhandles[n_handle].mode = 1;
 
-								if (old > 0 && (old != active[server][active_id].current) && (old != active[server][active_id].lib) && (old != active[server][active_id].root))
+								//if (old > 0 && (old != active[server][active_id].current) && (old != active[server][active_id].lib) && (old != active[server][active_id].root))
+								if (old > 0) // Matches what *dir does. The interlock close will not close internally if something is still using it.
 								{
 									fs_debug (0, 2, "%12sfrom %3d.%3d Closing old user handle %d allocated for internal handle %d", "", net, stn, old, active[server][active_id].fhandles[old].handle);
 									fs_close_interlock(server, active[server][active_id].fhandles[old].handle, active[server][active_id].fhandles[old].mode);
