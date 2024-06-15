@@ -1282,6 +1282,77 @@ int fs_aun_send(struct __econet_packet_udp *p, int server, int len, unsigned sho
 	return fs_aun_send_noseq(p, server, len, net, stn);
 }
 
+/* Procedure to dump all FS currently open files & directories
+ * to the file descriptor provided. 
+ * *
+ * MUST hold the FS global lock before calling
+ */
+
+void fs_dump_handle_list(FILE *out, int fsnumber)
+{
+
+	int c;
+	uint8_t found;
+
+	if (fsnumber < 0) // Bad
+		return;
+
+	fprintf (out, "\n\nServer %3d %s\n\n", fsnumber, fs_enabled[fsnumber] ? "ENABLED" : "SHUT DOWN");
+
+	if (!fs_enabled[fsnumber]) // Nothing to do
+		return;
+
+	fprintf (out, "  Station %d.%d\n  Root directory: %s\n  Total discs: %d\n", fs_stations[fsnumber].net, fs_stations[fsnumber].stn, fs_stations[fsnumber].directory, fs_stations[fsnumber].total_discs);
+	fprintf (out, "  Currently logged in users: ");
+
+	found = 0;
+
+	for (c = 0 ; c < ECONET_MAX_FS_USERS; c++)
+	{
+		if (active[fsnumber][c].net != 0 && active[fsnumber][c].stn != 0) // Active
+		{
+			found++;
+			fprintf (out, "\n\n    %04X %s\n\n", active[fsnumber][c].userid, users[fsnumber][active[fsnumber][c].userid].username);
+			fprintf (out, "         URD: %2d (internal %3d) %s\n", active[fsnumber][c].root, active[fsnumber][c].fhandles[active[fsnumber][c].root].handle, active[fsnumber][c].fhandles[active[fsnumber][c].root].acornfullpath);
+			fprintf (out, "         CWD: %2d (internal %3d) %s\n", active[fsnumber][c].current, active[fsnumber][c].fhandles[active[fsnumber][c].current].handle, active[fsnumber][c].fhandles[active[fsnumber][c].current].acornfullpath);
+			fprintf (out, "         LIB: %2d (internal %3d) %s\n\n", active[fsnumber][c].lib, active[fsnumber][c].fhandles[active[fsnumber][c].lib].handle, active[fsnumber][c].fhandles[active[fsnumber][c].lib].acornfullpath);
+			
+			{
+				int f, f2 = 0;
+
+				fprintf (out, "      Open files & directories: ");
+
+				for (f = 0; f < FS_MAX_OPEN_FILES; f++)
+				{
+					if (active[fsnumber][c].fhandles[f].handle != -1)
+					{
+						fprintf (out, "        %2d (internal %3d) %s\n", f, active[fsnumber][c].fhandles[f].handle, active[fsnumber][c].fhandles[f].acornfullpath);
+						f2++;
+					}
+
+				}
+
+				if (!f2) fprintf (out, "None\n");
+			}
+		}
+	}
+
+	if (!found) fprintf (out, "None\n\n");
+	else fprintf (out, "\n");
+
+	fprintf (out, "Files and directories open:\n\n");
+
+	for (c = 0; c < ECONET_MAX_FS_FILES; c++)
+	{
+		if (fs_files[fsnumber][c].handle)
+			fprintf (out, "  %3d R: %3d W: %3d %s\n", c, fs_files[fsnumber][c].readers, fs_files[fsnumber][c].writers, fs_files[fsnumber][c].name);
+	}
+
+	return;	
+
+}
+
+
 unsigned short fs_get_dir_handle(int server, unsigned int active_id, unsigned char *path)
 {
 	unsigned short count;

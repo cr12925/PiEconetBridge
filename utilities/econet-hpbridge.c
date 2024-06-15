@@ -146,6 +146,8 @@ void eb_reset_tables(void);
 void eb_debug (uint8_t, uint8_t, char *, char *, ...);
 uint32_t get_local_seq (unsigned char, unsigned char);
 static void * eb_statistics (void *);
+static void * eb_fs_statistics (void *);
+extern void fs_dump_handle_list (FILE *, int);
 
 unsigned char beebmem[65536];
 
@@ -179,6 +181,12 @@ void eb_signal_handler (int sig)
 			eb_exit_cleanup();
 			signal(SIGINT, SIG_DFL);
 			raise(SIGINT);
+			break;
+		case SIGUSR1:
+			EB_DEBUG_LEVEL = (EB_DEBUG_LEVEL == 5 ? 5 : EB_DEBUG_LEVEL+1);
+			break;
+		case SIGUSR2:
+			EB_DEBUG_LEVEL = (EB_DEBUG_LEVEL == 0 ? 0 : EB_DEBUG_LEVEL-1);
 			break;
 		default: // Do nothing
 			break;
@@ -8981,7 +8989,8 @@ Bridge protocol tuning:\n\
 \n\
 Statistics port control:\n\
 \n\
---stats-port n\t\tTCP port number for traffic stats burst\n\
+--stats-port n\t\tTCP port number for traffic stats burst (current: %d)\n\
+--fs-stats-port n\t\tTCP port number for FS stats output (current: %d)\n\
 \n\
 Fileserver control (global to all servers):\n\
 \n\
@@ -9011,7 +9020,9 @@ Deep-level debugging options:\n\
 	EB_CONFIG_TRUNK_UPDATE_QTY,
 	EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL,
 	EB_CONFIG_BRIDGE_LOOP_DETECT ? "ON" : "OFF",
-	EB_CONFIG_POOL_RESET_FWD ? "ON" : "OFF"
+	EB_CONFIG_POOL_RESET_FWD ? "ON" : "OFF",
+	EB_CONFIG_STATS_PORT,
+	EB_CONFIG_FS_STATS_PORT
 					    
 					    );
 
@@ -9085,6 +9096,7 @@ int main (int argc, char **argv)
 	EB_CONFIG_LOCAL = 0; // Use econet devices
 	EB_CONFIG_DYNAMIC_EXPIRY = 10; // 10 mins to expire an unused AUN station
 	EB_CONFIG_STATS_PORT = 6809; // Memories of a fire-breather
+	EB_CONFIG_FS_STATS_PORT = 6084; // Memories of an IBM
 	EB_CONFIG_FLASHTIME = 100; // 0.1s flash time on the Read/Write LEDs
 	EB_CONFIG_BLINK_ON = 0; // LEDs are on and blink off by default
 	EB_CONFIG_LEDS_OFF = 0; // Disable LEDs - turn them off at the start and don't blink them
@@ -9152,7 +9164,8 @@ int main (int argc, char **argv)
 		{"bridge-loop-detect",	required_argument,	0,	0},
 		{"pool-reset",		required_argument,	0,	0},
 		{"wire-max-not-listening", required_argument,	0, 	0},
-		{"no-bridge-announce-debug", 0,	0, 	0},
+		{"no-bridge-announce-debug", 0,			0, 	0},
+		{"fs-stats-port", 	required_argument, 	0, 	0},
 		{0, 			0,			0,	0 }
 	};
 
@@ -9195,6 +9208,7 @@ int main (int argc, char **argv)
 					case 26:	EB_CONFIG_POOL_RESET_FWD = (atoi(optarg) ? 1 : 0); break;
 					case 27:	EB_CONFIG_WIRE_MAX_NOTLISTENING = (atoi(optarg) ? 1 : 0); break;
 					case 28:	EB_CONFIG_NOBRIDGEANNOUNCEDEBUG = 1; EB_CONFIG_NOKEEPALIVEDEBUG = 1; break;
+					case 29:	EB_CONFIG_FS_STATS_PORT = atoi(optarg); break;
 				}
 			} break;
 			case 'c':	strncpy(config_path, optarg, 1023); break;
@@ -9643,10 +9657,10 @@ int main (int argc, char **argv)
 		}
 	}
 
-	{ // Start stats thread
+	{ // Start stats threads
 		
 		int err;
-		pthread_t	stats;
+		pthread_t	stats, fs_stats;
 		pthread_attr_t	attrs;
 
 		pthread_attr_init (&attrs);
@@ -9659,6 +9673,15 @@ int main (int argc, char **argv)
 
 		eb_thread_started();
 
+		pthread_attr_init (&attrs);
+		pthread_attr_setstacksize(&attrs, PTHREAD_STACK_MIN);
+	
+		if ((err = pthread_create (&fs_stats, NULL, eb_fs_statistics, NULL)))
+			eb_debug (1, 0, "MAIN", "STATS        Unable to start FS statistics thread");
+
+		pthread_detach(fs_stats);
+
+		eb_thread_started();
 	}
 
 	// Start the pool garbage collector
@@ -9728,6 +9751,8 @@ int main (int argc, char **argv)
 	/* Set up our signal handler */
 
 	signal (SIGINT, eb_signal_handler);
+	signal (SIGUSR1, eb_signal_handler);
+	signal (SIGUSR2, eb_signal_handler);
 
 	/* Now doze off */
 
@@ -9902,6 +9927,113 @@ uint8_t set_printer_info(unsigned char net, unsigned char stn, uint8_t printer_i
 	return 1;	
 
 }
+
+/* FS Statistics output via TCP connection */
+
+static void * eb_fs_statistics (void *nothing)
+{
+
+	struct sockaddr_in	server;
+
+	int			stat_socket;
+	int			optval = 1;
+
+	// TO DO: Open a TCP listener on the socket specified in the config (default 8086)
+	// When we get a connection, spit out the current stats and close.
+
+	// Initialization section
+
+	stat_socket = socket(AF_INET, SOCK_STREAM, 0); 
+
+	if (stat_socket == -1)
+		eb_debug (1, 0, "STATS", "                 Unable to open FS statistics TCP socket: %s", strerror(errno));
+
+	if (setsockopt(stat_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)) == -1)
+		eb_debug (1, 0, "STATS", "                 Unable to set SO_REUSEADDR on FS statistics TCP socket: %s", strerror(errno));
+
+	memset (&server, 0, sizeof(server));
+
+	server.sin_family = AF_INET;
+	server.sin_addr.s_addr = htonl(INADDR_ANY);
+	server.sin_port = htons(EB_CONFIG_FS_STATS_PORT);
+
+	if (bind(stat_socket, (struct sockaddr *) &server, sizeof(server)) == -1)
+		eb_debug (1, 0, "STATS", "                 Unable to bind FS statistics TCP socket: %s", strerror(errno));
+
+	if (listen(stat_socket, 5) == -1)
+		eb_debug (1, 0, "STATS", "                 Unable to listen on FS statistics TCP socket: %s", strerror(errno));
+
+	eb_thread_ready();
+
+	eb_debug (0, 2, "STATS", "                 FS Statistics listener started on port %d", EB_CONFIG_FS_STATS_PORT);
+	// Listener loop
+
+	while (1)
+	{
+		int 		connection;
+		FILE *		output;
+
+		struct __eb_device	*device;
+
+		connection = accept(stat_socket, (struct sockaddr *) NULL, NULL);
+
+		pthread_mutex_lock (&fs_mutex);
+
+		output = fdopen(connection, "w");
+
+		fprintf (output, "#Pi Econet Bridge FS Statistics Socket\n");
+
+		// Look for WIRE & NULL devices that may have local diverts with fileservers on them
+
+		device = devices;
+
+		while (device)
+		{
+			struct __eb_device	*local;
+
+			//fprintf (output, "Look at device %p (%s)\n\n", device, eb_type_str(device->type));
+
+			if (device->type == EB_DEF_WIRE || device->type == EB_DEF_NULL) // Can contain diverts
+			{
+				uint8_t	stn;
+
+				for (stn = 1; stn < 255; stn++)
+				{
+					local = NULL;
+
+					//fprintf (output, "Look at device %p (%s) net %d stn %d...", device, eb_type_str(device->type), device->net, stn);
+
+					if (device->type == EB_DEF_WIRE && device->wire.divert[stn])
+						local = device->wire.divert[stn];
+					else if (device->type == EB_DEF_NULL && device->null.divert[stn])
+						local = device->null.divert[stn];
+					//else	fprintf (output, "Not interesting.\n");
+
+					if (local && local->type == EB_DEF_LOCAL)
+					{
+						if (local->local.fs.index >= 0)
+						{
+							//fprintf (output, "Found a fileserver.\n");
+							fs_dump_handle_list (output, local->local.fs.index);
+						}
+						//else	fprintf (output, "No fileserver here.\n");
+
+					}
+				}
+			}
+
+			device = device->next;
+
+		}
+
+		pthread_mutex_unlock (&fs_mutex);
+
+		fclose(output);
+	}
+
+	return NULL;
+}
+
 
 /* Statistics output via TCP connection */
 

@@ -475,6 +475,7 @@ struct __eb_config {
 	uint16_t	wire_imm_wait; // How long the system will wait for an immediate reply to arrive for transmission on an Econet wire before it resets the associated ADLC to read mode. (Otherwise it gets stuck in flag fill and the state machine goes a bit haywire.)
 	uint32_t	dynamic_expiry; // Time in minutes to expire a dynamic AUN station
 	uint16_t	stats_port; // TCP port number for stats connections
+	uint16_t	fs_stats_port; // TCP port number for FS stats connections
 	uint16_t	flashtime; // Time in ms that we turn an LED off when there's activity
 	uint8_t		led_blink_on; // Set to 1 and the LEDs will blink ON for activity, not OFF
 	uint8_t		leds_off; // Set to 1 and the userspace code will turn the LEDs off and leave them off
@@ -527,6 +528,7 @@ struct __eb_config {
 #define EB_CONFIG_LOCAL		(config.local_only)
 #define EB_CONFIG_DYNAMIC_EXPIRY	(config.dynamic_expiry)
 #define EB_CONFIG_STATS_PORT	(config.stats_port)
+#define EB_CONFIG_FS_STATS_PORT	(config.fs_stats_port)
 #define EB_CONFIG_FLASHTIME	(config.flashtime)
 #define EB_CONFIG_BLINK_ON	(config.led_blink_on)
 #define EB_CONFIG_LEDS_OFF	(config.leds_off)
