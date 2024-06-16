@@ -48,6 +48,18 @@ RELEASE NOTES FOR V2.1
   - *NOTIFY messages received by locally emulated machines now display at
     debug level 1
 
+  - Command aliases *NETCONFIG (for *NETCONF) and *LOGOFF (for *FLOG)
+    added
+
+  - *FSDEFPERM added to set default file / directory permissions (two
+    separate tunables)
+
+  - Outbound databurst on *LOAD and FS Getbytes now waits for AUN ACKs.
+
+  - Econet retry time increased to 25ms from development branch of 2.1
+    so as to improve RISC OS Econet compatibility due to RISC OS
+    'Not listening' bug
+
 - Kernel updates
 
   - Kernel module and the bridge supports all the immediate operations which in
@@ -81,6 +93,20 @@ RELEASE NOTES FOR V2.1
     The trunk will start but will send no traffic until DNS works. When
     the name of the far end of the trunk can be resolved, a debug message
     is output and the trunk will come into full operation.
+
+  - New facilities for setting default directory & file permissions in
+    each FS. See *FSDEFPERM. Fileservers with an existing configuration 
+    file will adopt a default of WR/R for both directories and files for
+    backward compatibility. Fileservers created for the first time will
+    adopt WR/R for directories, and WR/ for files (to match Acorn servers).
+
+  - New per-FS tuneable NETCONF 'ACORNDIR' which turns on and off the masking
+    of WR/R bits on directories so that displays mirror those from Acorn
+    servers when turned on. This also affects the permissions bytes sent in
+    non-human-readable FS operations such as GetObjectAttributes. This can 
+    be enabled and disabled 'live'. Note that if any permission other than
+    WR/R is set (ignoring L and P/H bits), then the full permission will 
+    be reported to the client in both human and non-human -readable forms.
 
 - econet-isnets added
 
