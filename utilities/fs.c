@@ -9691,6 +9691,11 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			//else if (!strncasecmp("OWNER ", (const char *) command, 6))
 			else if (fs_parse_cmd(command, "OWNER", 3, &param))
 				fs_owner(server, reply_port, active_id, *(data+3), net, stn, param);
+			else if (fs_parse_cmd(command, "BRIDGEVER", 7, &param))
+			{
+				fs_error(server, reply_port, net, stn, 0xFF, "Ver " GIT_VERSION);
+				return;
+			}
 			//else if (!strncasecmp("ACCESS ", (const char *) command, 7))
 			else if (fs_parse_cmd(command, "ACCESS", 3, &param))
 				fs_access(server, reply_port, active_id, net, stn, param);
