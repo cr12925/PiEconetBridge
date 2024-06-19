@@ -1,0 +1,122 @@
+/*
+  (c) 2024 Chris Royle This program is free software: you can redistribute it
+and/or modify it under the terms of the GNU General Public License as published
+by the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version.
+
+    This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License along
+with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+*/
+
+The Pi File Server ("PiFS") implements its own FS Operation call, no. 96
+(&60). This provides access not only to fileserver information and
+configuration, but also to core bridge functionality (i.e. for the bridge
+itself, rather than an individual fileserver running on the bridge).
+
+Access to bridge functionality is available only to those fileserver users
+with 'Bridge' privileges - see the main user manual. This is *different*
+to 'System' (SYST) privileges.
+
+Access to fileserver configuration and functionality is limited to
+System privileged users.
+
+The fileserver calls can be accessed with standard OSWORD funcitons.
+
+The data block to be sent to port &99 on the FS is as follows:
+
+|------|---------------------------|
+| Byte | Content                   |
+|------|---------------------------|
+|    0 | FS Op - &60               |
+|    1 | Reply port number         |
+|    2 | URD handle                |
+|    3 | CWD handle                |
+|    4 | LIB handle                |
+|    5 | ARG (see below)           |
+| 6... | Parameters                |
+|------|---------------------------|
+
+The reply will be a standard reply block with 2 status bytes, and
+then some data depending on the ARG call used.
+
+ARG 0..15 require bridge privileges
+ARG 16..31 require system privileges
+ARG 32..64 can be used by anyone (no functionality at present)
+
+
+ARG = 0 - Return Pi Bridge build information
+- No additional parameters in transmitted data block
+- Return data is a string (terminated at end of packet) which
+  sets out the github branch & version
+
+ARG = 1 - Shut down the Pi
+- No additional parameters required
+- Providing the econet-hpbridge binary is setuid root, will
+  perform a clean shutdown of the Pi machine (i.e. all 
+  servers and services).
+
+ARG = 16 - Return user ID & 2 privilege bytes for text username
+- Parameters are username terminated by 0x0D
+- Return data bytes are:
+	0, 1		PiFS userID (LSB first)
+	2		Main privilege byte (see #defines in fs.c)
+	3		Priv2 byte (likewise)
+
+ARG = 17 - Return fileserver configuration informnation
+- No parameters supplied on transmission
+- Return information as yet unimplemented. Will return, e.g.
+  the NETCONFIG variables as a bitmap, filename length, etc.
+  and the Unix base directory for the server in question
+- Return data is:
+	0		PiFS configuration bits as follows
+			0	ACORNHOME setting
+			1	MDFS functions setting (exc. info)
+			2	BIGCHUNKS setting
+			3	INFCOLON setting
+			4	MANYHANDLE setting
+			5	MDFSINFO setting
+			6	(Reserved)
+			7	ACORNDIR setting
+	1		Default file permissions (PiFS format)
+	2		Default dir permissions (PiFS format)
+	3		Reserved
+	4		Filename length
+
+ARG = 18 - Write fileserver configuration information
+- Parameters will match the return information supplied
+  by ARG = 17, except that server base directory cannot be
+  written
+- Data supplied is to match that provided in return to
+  ARG = 17
+
+ARG = 19 - Shut down fileserver
+- No parameters required
+- Will shut down the fileserver in question. Can be restarted
+  using *FAST from another station.
+
+ARG = 20 - Log off user
+- Transmit block has secondary argument at byte 6 (SecArg)
+  and then parameters from byte 7 onwards as follows:
+
+- SecArg = 0 - Log users off by username.
+  Parameters = username terminated by 0x0D. Will log the
+  specified user off at all stations at which they are 
+  logged in.
+
+- SecArg = 1 - Log users off by UID
+  Parameters are two bytes - UID, LSB first.
+  Logs users off wherever they are logged in.
+
+- SecArg = 2 - Log user off at a given station
+  Parameters are 2 bytes (net, stn)
+  Logs that one station off.
+
+- Return data is two byte integer (LSB first) being a
+  count of how many stations were logged off as a result
+  of the call.
+

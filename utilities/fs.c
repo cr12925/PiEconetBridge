@@ -237,6 +237,8 @@ struct fs_user {
 #define FS_ACTIVE_UID(s,a) (active[(s)][(a)].userid)
 // Macro to identify if we have system privileges
 #define FS_ACTIVE_SYST(s,a) (users[(s)][FS_ACTIVE_UID((s),(a))].priv & FS_PRIV_SYSTEM)
+// Macro to identify if we have bridge privileges
+#define FS_ACTIVE_BRIDGE(s,a) (users[(s)][FS_ACTIVE_UID((s),(a))].priv2 & FS_PRIV2_BRIDGE)
 
 struct {
 	unsigned char groupname[10]; // First character null means unused.
@@ -547,9 +549,10 @@ void fs_debug (uint8_t death, uint8_t level, char *fmt, ...)
 void fs_get_parameters (uint8_t server, uint32_t *params, uint8_t *fnlength)
 {
 
-	*params = fs_config[server].fs_fnamelen << 24;
-	*params |= (fs_config[server].fs_default_dir_perm) << 16;
-	*params |= (fs_config[server].fs_default_file_perm) << 8;
+	//*params = fs_config[server].fs_fnamelen << 24;
+	*fnlength = fs_config[server].fs_fnamelen;
+	*params |= (fs_config[server].fs_default_dir_perm) << 24;
+	*params |= (fs_config[server].fs_default_file_perm) << 16;
 	
 	if (fs_config[server].fs_acorn_home)	*params |= FS_CONFIG_ACORNHOME;
 	if (fs_config[server].fs_sjfunc)	*params |= FS_CONFIG_SJFUNC;
@@ -561,16 +564,16 @@ void fs_get_parameters (uint8_t server, uint32_t *params, uint8_t *fnlength)
 	if (fs_config[server].fs_mask_dir_wrr)	*params |= FS_CONFIG_MASKDIRWRR;
 }
 
-void fs_set_parameters (uint8_t server, uint32_t params)
+void fs_set_parameters (uint8_t server, uint32_t params, uint8_t fnlength)
 {
 
 	unsigned char		regex[1024], configfile[512];
 	FILE *			config;
-	uint8_t			fnlength, default_dir_perm, default_file_perm;
+	uint8_t			/*fnlength, */default_dir_perm, default_file_perm;
 
-	fnlength = (params & 0xff000000) >> 24;
-	default_dir_perm = (params & 0x00ff0000) >> 16;
-	default_file_perm = (params & 0x0000ff00) >> 8;
+	/* fnlength = (params2 & 0xff000000) >> 24; */
+	default_dir_perm = (params & 0x00ff0000) >> 24;
+	default_file_perm = (params & 0x0000ff00) >> 16;
 
 	fs_config[server].fs_acorn_home = (params & FS_CONFIG_ACORNHOME) ? 1 : 0;
 	fs_config[server].fs_sjfunc = (params & FS_CONFIG_SJFUNC) ? 1 : 0;
@@ -3821,6 +3824,20 @@ void fs_error(int server, unsigned char reply_port, unsigned char net, unsigned 
 	fs_error_ctrl(server, reply_port, net, stn, 0x80, error, msg);
 }
 
+/*
+ * Signal OK completion to station.
+ *
+ * Wonder why this cannot just do fs_reply_success (..., 0, 0) ?
+ *
+ * Answer: looks like it can be.
+ *
+ * And then this can be fs_reply_ok_with_data (and a data len of 0)
+ *
+ * And fs_reply_success can have fs_reply_success_with_data and we'll use that instead of
+ * fs_reply_success_with_data
+ *
+ */
+
 void fs_reply_ok(int server, unsigned char reply_port, unsigned char net, unsigned char stn)
 {
 
@@ -3836,6 +3853,32 @@ void fs_reply_ok(int server, unsigned char reply_port, unsigned char net, unsign
 	reply.p.data[1] = 0x00;
 
 	fs_aun_send (&reply, server, 2, net, stn);
+}
+
+/*
+ * fs_reply_ok_with_data
+ *
+ * Send OK reply with data portion
+ *
+ * Will eventually streamline this into fs_reply_ok and fs_reply_success
+ *
+ */
+
+void fs_reply_ok_with_data(int server, unsigned char reply_port, unsigned char net, unsigned char stn, uint8_t *data, uint16_t datalen)
+{
+
+	struct __econet_packet_udp reply;
+
+	reply.p.port = reply_port;
+	reply.p.ctrl = 0x80;
+	reply.p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
+	reply.p.pad = 0x00;
+	reply.p.ptype = ECONET_AUN_DATA;
+	reply.p.data[0] = 0x00;
+	reply.p.data[1] = 0x00;
+	memcpy (&(reply.p.data[2]), data, datalen);
+
+	fs_aun_send (&reply, server, 2+datalen, net, stn);
 }
 
 void fs_toupper(char *a)
@@ -4044,6 +4087,260 @@ void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, uns
 			}
 			else	fs_error(server, reply_port, net, stn, 0xB9, "Bad password");
 		}
+	}
+
+}
+
+/* 
+ * FS Op 0x60 (96)
+ *
+ * PiBridge service call
+ *
+ * *(data+5) is arg
+ *
+ * arg = 
+ * 0 - Return PiBridge build information
+ * 16 - Return PiFS user ID & privilege bytes
+ * 17 - Read FS configuration info (Acorndir, MDFS, MDFSINFO, Unix base directory, etc.)
+ * 18 - Write FS configuration info (base directory is never writeable)
+ * 19 - Shut down fileserver
+ * 20 - Force logoff a user by name or ID
+ *
+ */
+
+void fs_pibridge (int server, uint8_t reply_port, uint16_t active_id, uint8_t net, uint8_t stn, uint8_t *data, uint16_t datalen)
+{
+
+	uint8_t 	arg;
+
+	arg = *(data+5);
+
+	/* Args 0 - 15 are Bridge Priv users only,
+	 * Args 16- 31 are Syst only,
+	 * Args 32- 64 are anyones
+	 */
+
+	if (
+			(arg < 16 && !FS_ACTIVE_BRIDGE(server, active_id))
+		||	(arg >= 16 && arg < 32 && !FS_ACTIVE_SYST(server, active_id))
+	   )
+	{
+		fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call - prohibited", "", net, stn);
+		fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
+		return;
+	}
+	switch (arg)
+	{
+
+		/* BRIDGE PRIVILEGES ONLY */
+		 
+		/* arg 0 - Return PiBridge build information - Bridge privileged users only */
+
+		case 0: 
+		{
+			char	ver[128];
+
+			fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 0 - Get GIT version", "", net, stn);
+			strcpy (ver, GIT_VERSION);
+			fs_reply_ok_with_data(server, reply_port, net, stn, ver, strlen(ver));
+
+		} break;
+
+		/* arg 1 - shutdown host system if binary is setuid */
+
+		case 1:
+		{
+			fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 1 - Pi Shutdown", "", net, stn);
+			fs_error(server, reply_port, net, stn, 0xFF, "Not yet implemented");
+			return;
+		} break;
+
+		/* SYSTEM PRIVILEGES ONLY */
+
+		/* arg 16 - Return user ID & privilege bytes for username at *(data + 6... 0x0D terminated) */
+
+		case 0x10:
+		{
+			uint8_t		info[4];
+			int16_t		uid;
+		 	unsigned char	username[11];
+
+			fs_copy_to_cr(username, (data + 6), 10);
+			uid = fs_get_uid (server, username);
+
+			fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 16 - Get UID and priv bits for %s", "", net, stn, username);
+			if (uid < 0) /* Not found */
+				fs_error(server, reply_port, net, stn, 0xFF, "Unknown user");
+			else
+			{
+				/* UID, low byte first */
+				info[0] = (uid & 0xff);
+				info[1] = (uid & 0xff00) >> 8;
+
+				/* Then privilege bytes */
+				info[2] = users[server][uid].priv;
+				info[3] = users[server][uid].priv2;
+
+				fs_reply_ok_with_data(server, reply_port, net, stn, info, 4);
+			}
+
+		} break;
+
+		/* Read fileserver parameters (ACORNDIR, MDFS, MDFSINFO, etc.) */
+
+		case 0x11: 
+		{
+			uint8_t	data[5];
+			uint32_t params;
+
+			fs_get_parameters (server, &params, &(data[5]));
+
+			fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 17 - Get FS parameters (0x%04X, filename length %d)", "", net, stn, params, data[6]);
+
+			// Shift FS params into data, LSB first
+
+			data[0] = params & 0xff;
+			data[1] = (params & 0xff00) >> 8;
+			data[2] = (params & 0xff0000) >> 16;
+			data[3] = (params & 0xff000000) >> 24;
+
+			fs_reply_ok_with_data(server, reply_port, net, stn, data, 5);
+
+		} break;
+
+		/* Write fileserver parameters (ACORNDIR, MDFS, MDFSINFO, etc.) */
+
+		case 0x12: 
+		{
+			uint32_t params;
+			uint8_t fnlength;
+
+			params = 	(*(data+6))
+				+	(*(data+7) << 8)
+				+	(*(data+8) << 16)
+				+	(*(data+9) << 24);
+			
+			fnlength = *(data+10);
+	
+			fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 18 - Set FS parameters (0x%04X, filename length %d)", "", net, stn, params, fnlength);
+
+			if (fnlength < 10 || fnlength > 79)
+			{
+				fs_error(server, reply_port, net, stn, 0xFF, "Bad filename length");
+				return;
+			}
+
+			fs_set_parameters (server, params, fnlength);
+
+		} break;
+
+		/* Shut down fileserver */
+
+		case 0x13:
+		{
+			fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 19 - Shut down fileserver", "", net, stn);
+			fs_error(server, reply_port, net, stn, 0xFF, "Not yet implemented");
+		} break;
+
+		/* Force log user off by name (arg2 = 0) or uid (arg2 = 1) or station number (arg2 = 2) */
+		case 0x14:
+		{
+			uint8_t		arg2;
+			int16_t		uid; 
+			uint8_t		l_net, l_stn;
+			unsigned char	username[11];
+			uint16_t	loggedoff = 0;
+			uint8_t		replydata[2];
+			uint16_t	count;
+
+			arg2 = *(data+6);
+
+			switch (arg2)
+			{
+				case 0: /* by username */
+				{
+					if (datalen < 9) /* One character username + 0x0D */
+					{
+						fs_error(server, reply_port, net, stn, 0xFF, "Insufficient data");
+						return;
+					}
+
+					fs_copy_to_cr (username, (data+7), 10);
+					uid = fs_get_uid(server, username);
+
+					fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 20 - Force log off by username: %s", "", net, stn, username);
+					if (uid < 0) /* Not known */
+					{
+						fs_error(server, reply_port, net, stn, 0xFF, "Unknown user");
+						return;
+					}
+				}; /* uid now has valid user number */ break;
+
+				case 1: /* by uid */
+				{
+					if (datalen < 9)
+					{
+						fs_error(server, reply_port, net, stn, 0xFF, "Insufficient data");
+						return;
+					}
+
+					uid = (*(data + 7)) + (*(data + 8) << 8);
+
+					if (users[server][uid].priv == 0) /* Deleted user */
+					{
+						fs_error(server, reply_port, net, stn, 0xFF, "Unknown user");
+						return;
+					}
+
+					fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 20 - Force log off by user id: %d", "", net, stn, uid);
+				} break;
+
+				case 2: /* by station */
+				{
+					if (datalen < 9)
+					{
+						fs_error(server, reply_port, net, stn, 0xFF, "Insufficient data");
+						return;
+					}
+
+					l_net = *(data+7);
+					l_stn = *(data+8);
+
+					fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 20 - Force log off by station: %d.%d", "", net, stn, l_net, l_stn);
+				} break;
+
+				default:
+				{
+					fs_error(server, reply_port, net, stn, 0xFF, "Bad argument");
+					return;
+				}
+			}
+
+			/* Log the relevant users off & send back a count of how many */
+	
+			for (count = 0; count < ECONET_MAX_FS_USERS; count++)
+			{
+				if (	(arg == 2 && active[server][count].net == l_net && active[server][count].stn == l_stn)
+				||	(arg < 2 && active[server][count].userid == uid) 
+				)
+				{
+					fs_bye(server, 0, active[server][count].net, active[server][count].stn, 0); // Silent bye
+					loggedoff++;
+				}
+			}
+
+			replydata[0] = loggedoff & 0xff;
+			replydata[1] = (loggedoff & 0xff00) >> 8;
+
+			fs_reply_ok_with_data(server, reply_port, net, stn, replydata, 2);
+
+		} break;
+
+		/* Catch undefined operations */
+
+		default:
+			fs_error(server, reply_port, net, stn, 0xFF, "Unsupported");
+
 	}
 
 }
@@ -11242,6 +11539,10 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 			}
 			break;
+		case 0x60: // PiBridge calls
+		{
+			fs_pibridge(server, reply_port, active_id, net, stn, data, datalen);
+		} break;
 		default: // Send error
 		{
 			fs_debug (0, 1, "to %3d.%3d FS Error - Unknown operation 0x%02x", net, stn, fsop);

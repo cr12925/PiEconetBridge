@@ -77,8 +77,8 @@ extern uint8_t fs_is_active(int);
 extern uint8_t fs_clear_syst_pw(int);
 extern uint8_t fs_writedisclist (uint8_t, unsigned char *);
 extern uint8_t fs_get_maxdiscs();
-extern void fs_get_parameters(uint8_t, uint32_t *);
-extern void fs_set_parameters(uint8_t, uint32_t);
+extern void fs_get_parameters(uint8_t, uint32_t *, uint8_t *);
+extern void fs_set_parameters(uint8_t, uint32_t, uint8_t);
 
 extern short fs_sevenbitbodge;
 extern short normalize_debug;
@@ -4330,9 +4330,10 @@ fast_handler_reset:
 					{
 						uint8_t 	finished = 0;
 						uint32_t	params;
+						uint8_t		fnlength;
 
 						pthread_mutex_lock(&fs_mutex);
-						fs_get_parameters (d->local.fs.index, &params);
+						fs_get_parameters (d->local.fs.index, &params, &fnlength);
 						pthread_mutex_unlock(&fs_mutex);
 
 						while (!finished)
@@ -4345,7 +4346,8 @@ fast_handler_reset:
 							fastprintf (d, " C: Use : for / in filesystem:  %s\r\n", (params & FS_CONFIG_INFCOLON) ? "On" : "Off");
 							fastprintf (d, " M: > 8 handles per station:    %s\r\n", (params & FS_CONFIG_MANYHANDLE) ? "On" : "Off");
 							fastprintf (d, " I: MDFS extended *INFO:        %s\r\n", (params & FS_CONFIG_MDFSINFO) ? "On" : "Off");
-							fastprintf (d, " F: Filename length:            %d\r\n", (params & 0xFF000000) >> 24);
+							fastprintf (d, " D: Acorn Directory display (D/)%s\r\n", (params & FS_CONFIG_MASKDIRWRR) ? "On" : "Off");
+							fastprintf (d, " F: Filename length:            %d\r\n", fnlength);
 
 							// Do stuff here
 							fastprintf (d, "\n Q: Quit to main menu\r\n\n Select option: ");
@@ -4359,6 +4361,7 @@ fast_handler_reset:
 								case 'C': params ^= FS_CONFIG_INFCOLON; break;
 								case 'M': params ^= FS_CONFIG_MANYHANDLE; break;
 								case 'I': params ^= FS_CONFIG_MDFSINFO; break;
+								case 'D': params ^= FS_CONFIG_MASKDIRWRR; break;
 								case 'F': 
 								  { 
 									char	newlength[3];
@@ -4375,7 +4378,7 @@ fast_handler_reset:
 										key2 = eb_fast_getkey(d);
 									}
 									else
-										params = (params & 0x00FFFFFF) | (l << 24);
+										fnlength = l;
 
 								  } break;
 								case 0xFF:
@@ -4398,7 +4401,7 @@ fast_handler_reset:
 										if ((key2 & 0xDF) == 'Y')
 										{
 											pthread_mutex_lock(&fs_mutex);
-											fs_set_parameters(d->local.fs.index, params);
+											fs_set_parameters(d->local.fs.index, params, fnlength);
 											pthread_mutex_unlock(&fs_mutex);
 										}
 
