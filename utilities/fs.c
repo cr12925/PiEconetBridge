@@ -161,7 +161,7 @@ uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 #define FS_PRIV2_CHROOT 0x02 /* Make user home dir appear as root */
 #define FS_PRIV2_HIDEOTHERS 0x04 /* Don't show other users in fs_users() */
 #define FS_PRIV2_ANFSNAMEBODGE 0x08 /* ANFS strips the colon off the start of a filename if it appears to be a disc number instead of a disc name. This privilege causes the normalizer to spot [0-9].$ and replace with :[0-9].$ in filenames. This is a per user priv because it can break filenames! */
-#define FS_PRIV2_FIXOPT 0x01 /* User cannot change boot option */
+#define FS_PRIV2_FIXOPT 0x10 /* User cannot change boot option */
 
 // MDFS privilege bits in MDFS format
 #define MDFS_PRIV_PWUNLOCKED 0x01
@@ -1734,8 +1734,11 @@ void fs_read_xattr(unsigned char *path, struct objattr *r, int server)
 void fs_write_xattr(unsigned char *path, uint16_t owner, uint16_t perm, uint32_t load, uint32_t exec, uint16_t homeof, int server)
 {
 	struct objattr existing;
+	unsigned char attrbuf[20];
+	unsigned char old_owner[10];
 	char *dotfile=pathname_to_dotfile(path, fs_config[server].fs_infcolon);
 	int dotexists=access(dotfile, F_OK);
+
 	free(dotfile);
 
 	fs_read_xattr(path, &existing, server);
@@ -1753,8 +1756,6 @@ void fs_write_xattr(unsigned char *path, uint16_t owner, uint16_t perm, uint32_t
 		return;
 	}
 
-	unsigned char attrbuf[20];
-
 	//if (!(perm & 0xff00)) // Only do this if top 8 bits unset - any of them set means don't overwrite perms
 	//{
 		sprintf ((char * ) attrbuf, "%02X", (perm & 0xff));
@@ -1762,7 +1763,15 @@ void fs_write_xattr(unsigned char *path, uint16_t owner, uint16_t perm, uint32_t
 			fs_debug (0, 1, "Failed to set permission on %s\n", path);
 	//}
 
+	
 	sprintf((char * ) attrbuf, "%04X", owner);
+	// See if owner is being changed
+	if (getxattr((const char *) path, "user.econet_owner", old_owner, 4) >= 0) // Attribute found
+	{
+		old_owner[4] = 0;
+		if (strcasecmp(old_owner, attrbuf))
+			fs_debug (0, 1, "Owner being changed from %s to %s on file %s", old_owner, attrbuf, path);	
+	}
 	if (setxattr((const char *) path, "user.econet_owner", (const void *) attrbuf, 4, 0))
 		fs_debug (0, 1, "Failed to set owner on %s", path);
 
@@ -5693,8 +5702,10 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 
 	if (command == 96) // PiFS canonicalize object name function
 	{
-		memcpy(&(r.p.data[replylen]), p.acornname, strlen(p.acornfullpath));
-		replylen += strlen(p.acornfullpath);
+		memcpy(&(r.p.data[replylen]), p.acornfullpath, strlen(p.acornfullpath));
+		r.p.data[replylen+strlen(p.acornfullpath)] = '.';
+		memcpy(&(r.p.data[replylen+strlen(p.acornfullpath)+1]), p.acornname, strlen(p.acornname));
+		replylen += strlen(p.acornfullpath) + 1 + strlen(p.acornname);
 	}
 
 	fs_aun_send(&r, server, replylen, net, stn);
