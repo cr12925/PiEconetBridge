@@ -9635,22 +9635,18 @@ int main (int argc, char **argv)
 	/* Start exposures here */
 
 	{
-		uint8_t			nets_done[32];
+		uint8_t			nets_done[255];
 
-#define NETMAP_SET(x, y)	{ (x)[(y)/32] |= (1 << ((y) & 0x07)); }
-#define NETMAP_ISSET(x, y)	((x)[(y)/32] & (1 << ((y) & 0x07)))
-#define NETMAP_RESET(x)		memset(&(x), 0, sizeof((x)))
-
-		NETMAP_RESET(nets_done);
+		memset (nets_done, 0, 255);
 
 		e = exposures;
 
 		while (e)
 		{
 
-			if (!NETMAP_ISSET(nets_done, e->net))
+			if (!nets_done[e->net])
 			{
-				NETMAP_SET(nets_done, e->net); // Flag this one as done
+				nets_done[e->net] = 1;
 				pthread_create (&(e->me), NULL, eb_aun_listener, e);
 				pthread_detach (e->me);
 				eb_thread_started();
