@@ -4151,6 +4151,8 @@ void fs_pibridge (int server, uint8_t reply_port, uint16_t active_id, uint8_t ne
 
 			fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 0 - Get GIT version", "", net, stn);
 			strcpy (ver, GIT_VERSION);
+			ver[strlen(GIT_VERSION)+1] = 0x00;
+			ver[strlen(GIT_VERSION)] = 0x0D;
 			fs_reply_ok_with_data(server, reply_port, net, stn, ver, strlen(ver));
 
 		} break;
@@ -5705,7 +5707,8 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 		memcpy(&(r.p.data[replylen]), p.acornfullpath, strlen(p.acornfullpath));
 		r.p.data[replylen+strlen(p.acornfullpath)] = '.';
 		memcpy(&(r.p.data[replylen+strlen(p.acornfullpath)+1]), p.acornname, strlen(p.acornname));
-		replylen += strlen(p.acornfullpath) + 1 + strlen(p.acornname);
+		r.p.data[replylen+strlen(p.acornfullpath)+strlen(p.acornname)+1] = 0x0D;
+		replylen += strlen(p.acornfullpath) + 1 + strlen(p.acornname) + 1;
 	}
 
 	fs_aun_send(&r, server, replylen, net, stn);
