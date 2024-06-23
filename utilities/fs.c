@@ -361,7 +361,7 @@ struct objattr {
 #define FS_PERM_EFFOWNER(s,a,o)	(FS_ACTIVE_SYST((s),(a)) || FS_PERM_ISOWNER((s),(a),(o)) ? 1 : 0)
 
 // Object visible to this user - as distinct from readable - this is testing the hidden bit
-#define FS_PERM_VISIBLE(s,a,p,o)	(FS_PERM_SET((p), FS_PERM_H) && FS_PERM_EFFOWNER((s),(a),(o)))
+#define FS_PERM_VISIBLE(s,a,p,o)	(!FS_PERM_SET((p), FS_PERM_H) || FS_PERM_EFFOWNER((s),(a),(o)))
 
 // Can create new file if it doesn't exist already
 #define FS_PERM_CREATE(s,a,p,o,pp,po)	((FS_PERM_EFFOWNER((s),(a),(po)) && (!FS_CONFIG_PIFSPERMS((s)) || FS_PERM_SET((pp), FS_PERM_OWN_W))) || (FS_CONFIG_PIFSPERMS((s)) && FS_PERM_SET((pp), FS_PERM_OTH_W) && FS_PERM_SET((pp), FS_PERM_OWN_W)))
@@ -5790,7 +5790,14 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 					else
 					{
 
-						fs_write_xattr(p.unixpath, active[server][active_id].userid, FS_PERM_PRESERVE, load, exec, 0, server);  // homeof = 0 because it's a file
+						uint16_t perm;
+
+						perm = FS_PERM_PRESERVE;
+
+						if (create_only)
+							perm = FS_CONF_DEFAULT_FILE_PERM(server);
+
+						fs_write_xattr(p.unixpath, active[server][active_id].userid, perm, load, exec, 0, server);  // homeof = 0 because it's a file
 
 						r.p.port = reply_port;
 						r.p.ctrl = rx_ctrl; // Copy from request
@@ -5833,7 +5840,8 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 							r.p.ctrl = rx_ctrl;
 							r.p.ptype = ECONET_AUN_DATA;
 							r.p.data[0] = r.p.data[1] = 0;
-							r.p.data[2] = FS_PERM_OWN_R | FS_PERM_OWN_W;
+							//r.p.data[2] = FS_PERM_OWN_R | FS_PERM_OWN_W;
+							r.p.data[2] = fs_perm_to_acorn(server, FS_CONF_DEFAULT_FILE_PERM(server), FS_FTYPE_FILE);
 							r.p.data[3] = day;
 							r.p.data[4] = monthyear;
 
@@ -8855,6 +8863,7 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 		r.p.ctrl = ctrl;
 		r.p.ptype = ECONET_AUN_DATA;
 		r.p.data[0] = r.p.data[1] = 0;
+		// WRONG - Why are we returning fixed permissions here?
 		r.p.data[2] = FS_PERM_OWN_R | FS_PERM_OWN_W;
 		r.p.data[3] = day;
 		r.p.data[4] = monthyear;
