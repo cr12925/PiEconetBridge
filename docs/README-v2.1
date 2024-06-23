@@ -62,6 +62,9 @@ regret that I have not managed to do so. In particular:
 	- It DOES NOT WORK on Pi 5 machines. Don't try. You'll be 
           disappointed.
 
+	- There is some limited 64 bit support, but only on Pi 4 hardware.
+	  See next heading.
+
 It is some time since I saw a kernel crash with this module, but you should be
 alive to the prospect that it might happen. If you use this on a production
 system that's doing something else, you have been warned!
@@ -75,6 +78,9 @@ disabled with the updated EEPROM or device tree overlay files when
 thsee platforms are used in 64 bit mode. If you do not need Wifi, then
 there is no problem. If you do, then please ensure you use a 32 bit 
 version of PiOS until I figure out what is causing the problem.
+
+It appears this may also break USB on these platforms. 64 bit use
+on anything but a Pi 4 is ** not advised **.
 
 
 INTRODUCTION 
@@ -134,12 +140,16 @@ Prerequisites
 -------------
 
 The system will require:
+
 	- Raspberry Pi Zero 2W, 3B+, or 4 (unless you are running a version 1
 	  bridge board in which case nothing less than a Pi 4B will do, and you
           must not install the desktop!).
 
 	  *** This software and its associated hardware WILL NOT WORK ON A PI 5
               - Don't even try. ***
+
+	  *** See note above about 64 bit operation on Pi 3/Zero2W - not 
+	      recommended. 32 bit on these platforms is fine. ***
 
 	- A proper RPi PSU. Experimentation shows that the Econet hardware has
 	  quite a current draw and an underpowered PSU can lead to rx/tx
@@ -162,6 +172,10 @@ The system will require:
 
 	- A pre-existing functioning Econet (with clock) with a spare station
 	  port to connect to the hardware, if you want to use real BBCs
+
+	  (More recent hardware HATs from @KenLowe on the stardot.org.uk 
+	  forums have built in clock (configurable from this software) and
+ 	  termination.)
 
 
 If you are using a version 1 hardware board
@@ -204,6 +218,11 @@ install the most recent 32- or 64- bit for your chosen platform but don't
 install the desktop. As part of that process:
 
 - Always use the "Lite" version (doesn't install the desktop).
+
+- Don't plug a monitor in when in production use - something upsets the 
+  signal timings to the HAT. Probably clock-related.
+
+- 64 bit use is reliable ONLY on Pi 4 hardware. Use 32 bit on Pi 3 / Zero2W.
 
 - Use the "Advanced Options" cog and set an appropriate username and password
   for logging into your Pi.
@@ -265,6 +284,27 @@ The software should compile cleanly.
 
 
 The next step depends on what kind of board you have.
+
+	The original hardware design and the first round of add-on
+	boards from @KenLowe are "Version 1". These require a separate
+	ADF-10 or compatible board added to the top of the bridge
+	board and look like a "triple stack".
+
+	Version 2 is everything else, and will be marked on the
+	board as "Revision 2a,b,c, etc.". For the purposes of
+	this exercise, anything marked "Revision 2" or greater
+	is a "Version 2" board.
+
+The choices are these:
+
+	You have a version 1 hardware HAT --> Use option A.
+
+	You have a version 2 hardware HAT with no EEPROM (not may
+		of these about now) --> Use option C.
+
+	You have a version 2 hardware HAT *with* an EEPROM
+		AND you can and are happy to write to it
+		--> Use option B.
 
 	A. Version 1 boards. You need to fix your ARM processor frequency if
 you didn't do it above and then put an overlay in your /boot partition

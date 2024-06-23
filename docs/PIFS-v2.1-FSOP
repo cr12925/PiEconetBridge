@@ -52,7 +52,7 @@ ARG 32..64 can be used by anyone (no functionality at present)
 ARG = 0 - Return Pi Bridge build information
 - No additional parameters in transmitted data block
 - Return data is a string (terminated at end of packet) which
-  sets out the github branch & version
+  sets out the github branch & version, terminated &0D
 
 ARG = 1 - Shut down the Pi
 - No additional parameters required
@@ -119,4 +119,26 @@ ARG = 20 - Log off user
 - Return data is two byte integer (LSB first) being a
   count of how many stations were logged off as a result
   of the call.
+
+PI FS Additional FS Op &12 argument
+-----------------------------------
+
+Pi FS implements an additional 'arg' value on
+fileserver call &12 (Get Object Info) which
+will return the canonicalised full filename for a
+partial path supplied. Call & return as follows:
+
+Call: Supply pathname as per all other uses of &12
+      Set arg = 96 (&60)
+
+Return (after standard return header):
+
+0-3	Load address
+4-7	Exec address
+8-10	Length
+11	Access byte
+12-13	File date/time
+14	Ownership byte
+15...	Canonicalised filename, terminated &0D
+
 

@@ -26,7 +26,13 @@ RELEASE NOTES FOR V2.1
 
   - defaults to file handles with only 1 bit set for compatibility with NFS 3.
     Previous behaviour can be re-enabled if you are not using NFS 3 with
-    *NETCONF (see below).
+    *NETCONF (see below). Fileserver version string now starts "3 " to 
+    indicate to 32bit clients that a limited number of file handles is
+    available so that the "MANYHANDLES" option is now largely redundant.
+
+    A future version will do what Level 4 FS does and do a Machine Peek
+    query to a station at logon, and then provide more filehandles if
+    the station is ANFS or 32 bit.
 
   - Changing a password to something in quotes now works properly
 
@@ -74,7 +80,7 @@ RELEASE NOTES FOR V2.1
     for accessing GPIO Clock and PWM function (for the ADLC clock and Network
     clock respectively). It continues to write directly to the GPIO hardware for
     speed, having attempted to use the official calls for that purpose without
-    success. NB there is a problem with Pi3 and PiZero2W - see below.
+    success. NB there is a problem with 64bit on Pi3 and PiZero2W - see below.
 
 - Core bridge functionality
 
