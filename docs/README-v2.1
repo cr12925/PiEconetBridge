@@ -83,6 +83,21 @@ It appears this may also break USB on these platforms. 64 bit use
 on anything but a Pi 4 is ** not advised **.
 
 
+ONBOARD NETWORK CLOCK - KERNEL MODULE RELOADING
+-----------------------------------------------
+
+There is a known issue that if you are using the network clock
+on the Bridge HAT and you re-load the kernel module, e.g. with
+
+rmmod econet-gpio 
+modprobe econet-gpio
+
+The module will load and the kernel will tell it that the 
+requisite clock has been enabled, but the network clock will not
+in fact start up on the Econet. It is not known why this is.
+
+The workaround is to reboot.
+
 INTRODUCTION 
 ------------
 
