@@ -8,8 +8,10 @@
 
 //#define GPIO_PERI_BASE (PERIBASE + 0x200000)
 #define GPIO_PERI_BASE ((econet_data->peribase) + 0x200000)
+/* No longer required
 #define CLOCK_PERI_BASE ((econet_data->peribase) + 0x101000)
 #define PWM_PERI_BASE ((econet_data->peribase) + 0x20C000)
+*/
 
 /* GPIO PINS - Broadcom numbering */
 
@@ -36,28 +38,32 @@
 #define ECONET_GPIO_CLRMASK_RW          (0x01 << ECONET_GPIO_PIN_RW)
 #define ECONET_GPIO_CLRMASK_BUSY         (0x01 << ECONET_GPIO_PIN_BUSY)
 
+/* No longer required
+ 
 // GP CLK 0
-#define ECONET_GPIO_CMCTL 28 /* The offset within Clock base address to the Clock Manager Control for the pin we are using - here, BCM4 */
+#define ECONET_GPIO_CMCTL 28 // The offset within Clock base address to the Clock Manager Control for the pin we are using - here, BCM4 
 
 // PWM CLK
 #define ECONET_GPIO_PWM_CLKCTL 40 // PWM Control within the clock space 
 #define ECONET_GPIO_PWM_CLKDIV 41 // PWM Div within the clock space 
 
 #define ECONET_GPIO_CLOCKPASSWD 0x5A000000
-#define ECONET_GPIO_CLOCKSRC 0x06 /* PLLD */
+#define ECONET_GPIO_CLOCKSRC 0x06 // PLLD 
 #define ECONET_GPIO_CLOCKDISABLE (ECONET_GPIO_CLOCKPASSWD | 0x00000020)
 #define ECONET_GPIO_CLOCKSOURCEPLLD (ECONET_GPIO_CLOCKPASSWD | ECONET_GPIO_CLOCKSRC)
 #define ECONET_GPIO_CLOCKENABLE (ECONET_GPIO_CLOCKPASSWD | 0x00000010 | ECONET_GPIO_CLOCKSRC)
-#define ECONET_GPIO_CLOCKIDIV (62) /* We use PLLD, which is a constant 500 Mhz source, so we divide by 62.5 (hence FDIV is 512 because the divisor is (IDIV + (FDIV/1024)) )  We want 8MHz which gets divided on the board. */
+#define ECONET_GPIO_CLOCKIDIV (62) // We use PLLD, which is a constant 500 Mhz source, so we divide by 62.5 (hence FDIV is 512 because the divisor is (IDIV + (FDIV/1024)) )  We want 8MHz which gets divided on the board. 
 #define ECONET_GPIO_CLOCKFDIV (512)
 #define ECONET_GPIO_CLOCKDIVSET (ECONET_GPIO_CLOCKPASSWD | (ECONET_GPIO_CLOCKIDIV << 12) | ECONET_GPIO_CLOCKFDIV)
 #define ECONET_GPIO_CLOCKDIVFAST (ECONET_GPIO_CLOCKPASSWD | (93 << 12) | (768)) // Some variants run PLLD at 750MHz not 500MHz - so this larger divider is the failsafe default to avoid driving the 68B54 too quickly
-#define ECONET_GPIO_CLK_ALT_FUNCTION 0x04 /* ALT0 for the pin we're using. Change this by reference to the ARM SOC reference manual if your clock is on a pin which doesn't want FSELn set to 100 for the CLock function */
+#define ECONET_GPIO_CLK_ALT_FUNCTION 0x04 // ALT0 for the pin we're using. Change this by reference to the ARM SOC reference manual if your clock is on a pin which doesn't want FSELn set to 100 for the CLock function 
 #define GPSEL0 0x00
 #define GPSET0 0x07
 #define GPCLR0 0x0a
 #define GPLEV0 0x0d
 
+*/
+/* Pi3 64 bit experiment 20240623
 // Fixes for test 64bit compat
 #ifdef CONFIG_ARM64
 #define NGPSET0 (volatile void __iomem *) ((u64) GPIO_PORT + 0x1c)
@@ -70,7 +76,14 @@
 #define NGPLEV0 (volatile void __iomem *) ((u32) GPIO_PORT + 0x34)
 #define NGPFSEL0 (volatile void __iomem *) ((u32) GPIO_PORT + 0x00)
 #endif
+*/
+#define NGPSET0 (GPIO_PORT + 0x1c)
+#define NGPCLR0 (GPIO_PORT + 0x28)
+#define NGPLEV0 (GPIO_PORT + 0x34)
+#define NGPFSEL0 (GPIO_PORT + 0x00)
+#define NGPFSEL2 (GPIO_PORT + 0x08)
 
+/* No longer required
 // PWM defines (with thanks to the authors of PiGPIO)
 #define PWM_CTL      0
 #define PWM_STA      1
@@ -99,5 +112,6 @@
 #define GPHEN0 25
 #define GPLEN0 28
 
+*/
 #endif
 

@@ -77,12 +77,15 @@ struct gpio_desc *data_desc_array[11]; // Top 3 are the address & RnW lines in c
 #endif
 
 // Next 6 lines can be commented if we ever manage to move to all gpiod_ calls.
-unsigned long *GPIO_PORT = NULL;
+// 20240623 Pi3 64 Bit change
+void __iomem *GPIO_PORT = NULL;
 unsigned GPIO_RANGE = 0x40;
+/* No longer required
 unsigned long *GPIO_CLK;
 unsigned GPIO_CLK_RANGE = 0xA8;
 unsigned long *GPIO_PWM;
 unsigned GPIO_PWM_RANGE = 0x28;
+*/
 
 u8 sr1, sr2;
 u32 gpioset_value;
@@ -178,9 +181,9 @@ void econet_set_dir(short d)
 	}
 
 #else
-	iowrite32((ioread32(NGPFSEL0) & ~ECONET_GPIO_DATA_PIN_MASK) | 
+	iowrite32((ioread32(NGPFSEL2) & ~ECONET_GPIO_DATA_PIN_MASK) | 
 		(d == ECONET_GPIO_WRITE ? ECONET_GPIO_DATA_PIN_OUT : 0),
-		NGPFSEL0);
+		NGPFSEL2);
 #endif
 
 	econet_set_rw(d);
@@ -252,7 +255,7 @@ void econet_write_cr(unsigned short r, unsigned char d)
 
 	if (econet_data->current_dir != ECONET_GPIO_WRITE)
 	{
-		iowrite32((ioread32(GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10)) & ~ECONET_GPIO_DATA_PIN_MASK) | ECONET_GPIO_DATA_PIN_OUT, GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10));
+		iowrite32(((ioread32(NGPFSEL2)) & ~ECONET_GPIO_DATA_PIN_MASK) | ECONET_GPIO_DATA_PIN_OUT, NGPFSEL2);
 		econet_data->current_dir = ECONET_GPIO_WRITE;
 	}
 
@@ -333,7 +336,7 @@ unsigned char econet_read_sr(unsigned short r)
 		for (count = EGP_D0; count <= EGP_D7; count++)
 			gpiod_direction_input(econet_data->econet_gpios[count]);
 #else
-		iowrite32(ioread32(GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10)) & ~ECONET_GPIO_DATA_PIN_MASK, GPIO_PORT + (ECONET_GPIO_PIN_DATA / 10));
+		iowrite32(ioread32(NGPFSEL2) & ~ECONET_GPIO_DATA_PIN_MASK, NGPFSEL2);
 		barrier();
 #endif
 	}
