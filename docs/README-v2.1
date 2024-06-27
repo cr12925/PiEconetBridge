@@ -62,25 +62,9 @@ regret that I have not managed to do so. In particular:
 	- It DOES NOT WORK on Pi 5 machines. Don't try. You'll be 
           disappointed.
 
-	- There is some limited 64 bit support, but only on Pi 4 hardware.
-	  See next heading.
-
 It is some time since I saw a kernel crash with this module, but you should be
 alive to the prospect that it might happen. If you use this on a production
 system that's doing something else, you have been warned!
-
-
-PI3 & SISTER PLATFORMS INCLUDING PI ZERO2W
-------------------------------------------
-
-A problem has been found which causes the Wifi on these platforms to be 
-disabled with the updated EEPROM or device tree overlay files when
-thsee platforms are used in 64 bit mode. If you do not need Wifi, then
-there is no problem. If you do, then please ensure you use a 32 bit 
-version of PiOS until I figure out what is causing the problem.
-
-It appears this may also break USB on these platforms. 64 bit use
-on anything but a Pi 4 is ** not advised **.
 
 
 ONBOARD NETWORK CLOCK - KERNEL MODULE RELOADING
@@ -112,19 +96,10 @@ two real BBC Econets together over the IP network, including the Internet,
 providing the correct ports are opened. The necessary ports are the ones you
 configure in the configuration file.
 
-It is unnecessary for the two networks in a 'back to back' configuration such
-as that to have discrete Econet network numbers. Properly configured, all
-stations can be on the same network number, including 0.
-
 What is more, if you are connecting to your friends' Econets and some of them
 use the same network number as you, you can configure their networks to have a
 different number in your config and it should all work, thus the overlapping
 network numbers no longer matter.
-
-At the moment, each individual host on each individual network must be
-individually configured. A wildcard entry can be inserted to match 'all other
-undefined stations on a network' but it MUST come after all defined stations.
-See below.
 
 
 OTHER DOCUMENTATION
@@ -156,15 +131,12 @@ Prerequisites
 
 The system will require:
 
-	- Raspberry Pi Zero 2W, 3B+, or 4 (unless you are running a version 1
+	- Raspberry Pi Zero 2W, 3, or 4 (unless you are running a version 1
 	  bridge board in which case nothing less than a Pi 4B will do, and you
           must not install the desktop!).
 
 	  *** This software and its associated hardware WILL NOT WORK ON A PI 5
               - Don't even try. ***
-
-	  *** See note above about 64 bit operation on Pi 3/Zero2W - not 
-	      recommended. 32 bit on these platforms is fine. ***
 
 	- A proper RPi PSU. Experimentation shows that the Econet hardware has
 	  quite a current draw and an underpowered PSU can lead to rx/tx
@@ -236,8 +208,6 @@ install the desktop. As part of that process:
 
 - Don't plug a monitor in when in production use - something upsets the 
   signal timings to the HAT. Probably clock-related.
-
-- 64 bit use is reliable ONLY on Pi 4 hardware. Use 32 bit on Pi 3 / Zero2W.
 
 - Use the "Advanced Options" cog and set an appropriate username and password
   for logging into your Pi.
