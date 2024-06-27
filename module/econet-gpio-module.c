@@ -3775,7 +3775,7 @@ static int econet_probe (struct platform_device *pdev)
 	{
 		econet_data->peribase = 0x3F000000;
 		// Disused: econet_data->clockdiv = ECONET_GPIO_CLOCKDIVSET;
-		printk (KERN_INFO "econet-gpio: This appears to be a Pi3B\n");
+		printk (KERN_INFO "econet-gpio: This appears to be a Pi3\n");
 	}
 	else if (of_machine_is_compatible("raspberrypi,3-model-b-plus"))
 	{
