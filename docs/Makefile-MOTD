@@ -1,0 +1,44 @@
+	@echo "Install routine finished."
+	@echo "If you are using version 1 hardware, Please ensure you have 'arm_freq=1000'\
+	       (or your chosen frequency) and 'force_turbo=1' in /boot/config.txt (see README).\
+	       Then please reboot."
+	@echo "Note that Econet library utilities for use on your server are NOT included,\
+	       but they may be found distributed with BeebEm for Windows, and copied using\
+	       the CopyFiles utility onto your network."	
+	@echo ""
+	@echo "Please see docs/RELEASE-v2.1 for what is new in this version."
+	@echo ""
+
+***** Installation complete.
+
+***** Please read docs/RELEASE-v2.1 for what is new in this version.
+
+***** If you are using version 1 hardware, please ensure you have:
+
+	a) Not installed the desktop
+	b) Included the following lines in your /boot/config.txt and rebooted
+
+	   arm_freq=1000
+	   force_turbo=1
+
+	   (Note that on some Pi OSes the file is in /boot/firmware/config.txt
+	   See the README!)
+
+***** The Econet library utilities are not included. However they can be found in 
+      various places, such as distributed with BeebEm for Windows on the Level 3
+      disc (from which they can be copied to the Pi FS with CopyFiles or your
+      preferred copier). Alternatively, you can copy the MDFS libraries (there
+      is an 8-bit one and a 32-bit one) which can also be found for download.
+
+***** The Pi FS in this version has a number of extensions beyond Level 3,
+      including some which are Pi FS specific - for example canonicalisation
+      of filenames, and control over the bridge itself. A sample utility
+      called PIFSTOOL will have been copied into :PIBRIDGE-00.$.SYSTEM.PIFSTOOL
+      on fresh installs, and any installation which has that disc unrenamed.
+
+      If you have renamed your disc 0 (or moved it to be somewhere else)
+      then you will need to copy FS/PIFSTOOL to your chosen location. It is
+      in BBC BASIC, so you don't need to set load/execute when you copy it.
+
+
+Enjoy!
