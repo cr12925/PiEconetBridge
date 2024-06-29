@@ -23,7 +23,7 @@ install-utilities:	install-mkgroup build-utilities
 	[ -d /etc/econet-gpio ] || sudo mkdir -p /etc/econet-gpio
 	[ -d /etc/econet-gpio/printers ] || sudo cp -r printers /etc/econet-gpio
 	[ -d /home/`whoami`/econetfs ] || mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00 || mkdir -p /home/`whoami`/econetfs/1STORAGE
-	[ -d /home/`whoami`/econetfs/0PIBRIDGE-00 ] && mkdir -p /home/`whoami`/econetfs/SYSTEM && ( [ -a /home/`whoami`/econetfs/SYSTEM/PIFSTOOL ] || (cp FS/PIFSTOOL /home/`whoami`/econetfs/SYSTEM/PIFSTOOL && setfattr -n 'user.econet_load' -v '00000E00' && setfattr -n 'user.econet_exec' -v '0000802B'))
+	[ -d /home/`whoami`/econetfs/0PIBRIDGE-00 ] && mkdir -p /home/`whoami`/econetfs/SYSTEM && [ ! -a /home/`whoami`/econetfs/SYSTEM/PIFSTOOL ] && cp FS/PIFSTOOL /home/`whoami`/econetfs/SYSTEM/PIFSTOOL 
 	[ -a /etc/econet-gpio/pserv.sh ] || sudo cp config/pserv.sh /etc/econet-gpio
 	-sudo systemctl stop econet-hpbridge
 	sudo chgrp econet utilities/econet-hpbridge utilities/econet-imm utilities/econet-monitor utilities/econet-test utilities/econet-clock utilities/econet-ledtest
