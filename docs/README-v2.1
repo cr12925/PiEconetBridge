@@ -208,6 +208,17 @@ install the desktop. As part of that process:
   (You *might* be alright with desktop if you have a version 2 HAT, but
    no promises can be made and YMMV...)
 
+- *Immediately* after installing a 32 bit OS, edit your config.txt and
+  insert a new line
+
+  arm_64bit=0
+
+  ... and save the config.txt and reboot before you do anything else.
+
+  PiOS Bookworm seems to have developed a "feature" whereby you install
+  a 32-bit OS but it boots as a 64-bit OS. (i.e. shows 'v8' on 'uname -a'
+  rather than 'v7l'.
+
 - Don't plug a monitor in when in production use - something upsets the 
   signal timings to the HAT. Probably clock-related.
 
