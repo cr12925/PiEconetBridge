@@ -20,7 +20,7 @@ install-module:	install-mkgroup build-module
 	sudo /usr/sbin/depmod
 
 install-utilities:	install-mkgroup build-utilities
-	[ ! -d /etc/econet-gpio -a ! -L /etc/econet-gpio ] && sudo mkdir -p /etc/econet-gpio
+	/bin/bash [ -a /etc/econet-gpio ] || sudo mkdir -p /etc/econet-gpio
 	[ ! -d /etc/econet-gpio/printers -a ! -L /etc/econet-gpio/printers ] && sudo cp -r printers /etc/econet-gpio
 	[ ! -d /home/`whoami`/econetfs -a ! -L /home/`whoami`/econetfs ] && mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00 && mkdir -p /home/`whoami`/econetfs/1STORAGE
 	[ -d /home/`whoami`/econetfs/0PIBRIDGE-00 -a ! -d /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM ] && mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM 
