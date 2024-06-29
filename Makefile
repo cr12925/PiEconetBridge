@@ -20,12 +20,12 @@ install-module:	install-mkgroup build-module
 	sudo /usr/sbin/depmod
 
 install-utilities:	install-mkgroup build-utilities
-	[ -d /etc/econet-gpio ] || sudo mkdir -p /etc/econet-gpio
-	[ -d /etc/econet-gpio/printers ] || sudo cp -r printers /etc/econet-gpio
-	[ -d /home/`whoami`/econetfs ] || mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00 || mkdir -p /home/`whoami`/econetfs/1STORAGE
-	[ -d /home/`whoami`/econetfs/0PIBRIDGE-00 ] && mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM 
-	[[ -a /home/`whoami`/econetfs/SYSTEM/PIFSTOOL ]] || cp FS/PIFSTOOL /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM/PIFSTOOL 
-	[[ -a /etc/econet-gpio/pserv.sh ]] || sudo cp config/pserv.sh /etc/econet-gpio
+	[ ! -d /etc/econet-gpio -a ! -L /etc/econet-gpio ] && sudo mkdir -p /etc/econet-gpio
+	[ ! -d /etc/econet-gpio/printers -a ! -L /etc/econet-gpio/printers ] && sudo cp -r printers /etc/econet-gpio
+	[ ! -d /home/`whoami`/econetfs -a ! -L /home/`whoami`/econetfs ] && mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00 && mkdir -p /home/`whoami`/econetfs/1STORAGE
+	[ -d /home/`whoami`/econetfs/0PIBRIDGE-00 -a ! -d /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM ] && mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM 
+	[ ! -f /home/`whoami`/econetfs/SYSTEM/PIFSTOOL -a ! -L /home/`whoami`/econetfs/SYSTEM/PIFSTOOL ] && cp FS/PIFSTOOL /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM/PIFSTOOL 
+	[ ! -f /etc/econet-gpio/pserv.sh -a ! -L /etc/econet-gpio/pserv.sh ] && sudo cp config/pserv.sh /etc/econet-gpio
 	-sudo systemctl stop econet-hpbridge
 	sudo chgrp econet utilities/econet-hpbridge utilities/econet-imm utilities/econet-monitor utilities/econet-test utilities/econet-clock utilities/econet-ledtest
 	sudo chmod u=rx,g=rxs utilities/econet-hpbridge utilities/econet-imm utilities/econet-monitor utilities/econet-test utilities/econet-clock utilities/econet-ledtest
@@ -37,8 +37,8 @@ install-utilities:	install-mkgroup build-utilities
 	utilities/config-mangle config/econet-hpbridge.cfg-EconetPlusFileserverAndTrunk
 	utilities/config-mangle config/econet-hpbridge.cfg-EconetFSPlusDynamicAUN
 	utilities/config-mangle systemd/econet-hpbridge.service
-	[[ -a /etc/econet-gpio/econet-hpbridge.cfg ]] || (sudo cp config/econet-hpbridge.cfg-EconetPlusFileserver.local /etc/econet-gpio/econet-hpbridge.cfg ; sudo chown `whoami` /etc/econet-gpio/econet-hpbridge.cfg )
-	[[ -a /etc/systemd/system/econet-hpbridge.service ]] || sudo cp systemd/econet-hpbridge.service.local /etc/systemd/system/econet-hpbridge.service
+	[ ! -f /etc/econet-gpio/econet-hpbridge.cfg && ! -L /etc/econet-gpio/econet-hpbridge.cfg ] && (sudo cp config/econet-hpbridge.cfg-EconetPlusFileserver.local /etc/econet-gpio/econet-hpbridge.cfg ; sudo chown `whoami` /etc/econet-gpio/econet-hpbridge.cfg )
+	[ ! -f /etc/systemd/system/econet-hpbridge.service && ! -L /etc/systemd/system/econet-hpbridge.service ] && sudo cp systemd/econet-hpbridge.service.local /etc/systemd/system/econet-hpbridge.service
 	sudo cp BEEBMEM /etc/econet-gpio
 	-sudo systemctl daemon-reload
 	-sudo systemctl enable econet-hpbridge
