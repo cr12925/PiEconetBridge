@@ -23,7 +23,7 @@ install-utilities:	install-mkgroup build-utilities
 	[ -e /etc/econet-gpio ] || sudo mkdir -p /etc/econet-gpio
 	[ -e /etc/econet-gpio/printers ] || sudo cp -r printers /etc/econet-gpio
 	[ -e /home/`whoami`/econetfs ] || mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00 && mkdir -p /home/`whoami`/econetfs/1STORAGE
-	[ -e /home/`whoami`/econetfs/0PIBRIDGE-00 ] || mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM 
+	[ -e /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM ] || mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM 
 	[ -e /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM/PIFSTOOL ] || cp FS/PIFSTOOL /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM/PIFSTOOL 
 	[ -e /etc/econet-gpio/pserv.sh ] || sudo cp config/pserv.sh /etc/econet-gpio
 	-sudo systemctl stop econet-hpbridge
