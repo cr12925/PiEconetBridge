@@ -42,17 +42,7 @@ install-utilities:	install-mkgroup build-utilities
 	-sudo systemctl daemon-reload
 	-sudo systemctl enable econet-hpbridge
 	-sudo systemctl start econet-hpbridge
-	cat docs/Makefile-MOTD
-	@echo "Install routine finished."
-	@echo "If you are using version 1 hardware, Please ensure you have 'arm_freq=1000'\
-	       (or your chosen frequency) and 'force_turbo=1' in /boot/config.txt (see README).\
-	       Then please reboot."
-	@echo "Note that Econet library utilities for use on your server are NOT included,\
-	       but they may be found distributed with BeebEm for Windows, and copied using\
-	       the CopyFiles utility onto your network."	
-	@echo ""
-	@echo "Please see docs/RELEASE-v2.1 for what is new in this version."
-	@echo ""
+	@cat docs/Makefile-MOTD
 
 
 install-hp-utilities:	install-utilities
