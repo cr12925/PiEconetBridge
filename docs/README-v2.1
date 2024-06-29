@@ -205,6 +205,8 @@ install the most recent 32- or 64- bit for your chosen platform but don't
 install the desktop. As part of that process:
 
 - Always use the "Lite" version (doesn't install the desktop).
+  (You *might* be alright with desktop if you have a version 2 HAT, but
+   no promises can be made and YMMV...)
 
 - Don't plug a monitor in when in production use - something upsets the 
   signal timings to the HAT. Probably clock-related.
@@ -245,6 +247,12 @@ include the following entries:
 Then save config.txt
 
 
+If you have installed Bookworm 32bit, the installer seems to boot you into
+a 64 bit system. Add the following to config.txt and save it:
+
+	arm_64bit=0
+
+
 Next, you will need to install some packages to ensure that the Pi can build
 the bridge software itself, so execute the following commands:
 
@@ -280,19 +288,41 @@ The next step depends on what kind of board you have.
 	this exercise, anything marked "Revision 2" or greater
 	is a "Version 2" board.
 
+	In each case, if you are copying something into
+	/boot/overlays, on recent versions of PiOS you may find
+	that has moved to /boot/firmware/overlays - so adjust
+	instructions accordingly.
+
+	Similarly, config.txt is either in /boot or
+	/boot/firmwqre depending on which version of PiOS you
+	are running.
+
+
 The choices are these:
 
 	You have a version 1 hardware HAT --> Use option A.
 
 	You have a version 2 hardware HAT with no EEPROM (not may
-		of these about now) --> Use option C.
+		of these about now) --> Use option D.
+
+	You have a version 2 hardware HAT with an EEPROM but 
+		it is blank and cannot be written to --> Use option D
+
+	You have a version 2 hardware HAT with an EEPROM but
+		it has an old set of EEPROM contents on it
+		and you don't want to try re-programming the
+		EEPROM --> Use option C.
 
 	You have a version 2 hardware HAT *with* an EEPROM
 		AND you can and are happy to write to it
 		--> Use option B.
 
-	A. Version 1 boards. You need to fix your ARM processor frequency if
-you didn't do it above and then put an overlay in your /boot partition
+***     A. Version 1 boards.
+
+	   You need to fix your ARM processor frequency if
+	   you didn't do it above.
+
+	   Put an overlay in your /boot partition
 	
 		make eeprom-v1
 
@@ -306,12 +336,10 @@ system), and that you put the right entry in your config.txt:
 and	Include "dtoverlay=econet-gpio-v1" in your config.txt.
 
 
-	B. Version 2 boards which do not have an up to date EEPROM. (As at
-31.03.2024, no version 2 board 'in the wild' has been updated). The following
-will update your EEPROM without which the bridge kernel module will not
-operate. You need only do this once for each physical board.
+***     B. Version 2 boards which do not have an up to date EEPROM and
+	   you are happy to update it (one-off procedure).
 
-		First, ensure your EEPROM's write enable solder bridge is made.
+	First, ensure your EEPROM's write enable solder bridge is made.
 See instructions with your Bridge board or contact supplier if you don't know
 how. Check the revision number of your board (it'll be printed on the board):
 
@@ -338,10 +366,8 @@ pins), then you will need to implement a workaround as described in (C),
 below.
 
 
-	C. Version 2 boards which do not have an up to date EEPROM and which
-have a defectively wired write enable line (or where you do not for some reason
-fancy re-blowing the EEPROM as in (B) above!). These EEPROMs cannot be upgraded
-following (B) above and you need to implement a workaround as follows:
+***     C. Version 2 boards which do not have an up to date EEPROM and
+	   you don't want to try reprogramming it.
 
 		make eeprom-general 
                 sudo cp dts/econet-gpio-v2-overlay.dtbo /boot/firmware/overlays
@@ -357,6 +383,26 @@ start properly.
            It is thought that there are in fact no such boards "in the wild",
 as they were only produced in small numbers and weren't sold as bridge boards.
 This section (C) is here just in case.
+
+
+***     D. Version 2 boards which have an EEPROM which is defectively
+	   connected (it is not clear there are actually any of these in
+	   the wild), or Version 2 boards with a correctly wired but
+	   empty EEPROM which you do not wish to try re-programming
+
+	   Put an overlay in your /boot partition
+	
+		make eeprom-general
+
+	   You will need to follow the instructions to edit your config.txt
+(use the same method as above). You will need to ensure that the dtbo file
+is copied into /boot/overlays (or /boot/firmware/overlays depending on your
+system), and that you put the right entry in your config.txt:
+
+	sudo cp {PiBridgeDirectory}/dts/econet-gpio-v2.dtbo /boot/overlays
+
+and	Include "dtoverlay=econet-gpio-v2" in your config.txt.
+
 
 
 Then reboot:
@@ -437,7 +483,11 @@ the DIP switches on the Bridge board, or separate), and an active network clock
 (ditto), then providing your BBC is Econet-enabled and has NFS or ANFS in it,
 you should be able to log into the fileserver on the Pi with
 
-	*NET *I AM SYST
+	*NET 
+	*I AM SYST
+
+(If you put the fileserver on anything but 254, you may need to include the
+station number between *I AM and SYST)
 
 The built in fileserver will have a blank 'disc' called PIBRIDGE-00. You will
 need to copy library utilities and other data onto it. The fileserver broadly
@@ -527,7 +577,7 @@ The PiBridge can:
   server is to be exposed. This was developed for the Econet LAN parties at
   Bletchley so that many remote sites could join.
 
-See the NETWORKING and README.HPB.TECHNICAL docs.
+See the NETWORK-v2.1 and README.HPB.TECHNICAL docs.
 
 
 STARTING, STOPPING, AND CONFIGURATION 
