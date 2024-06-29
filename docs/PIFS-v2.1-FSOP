@@ -27,6 +27,9 @@ System privileged users.
 
 The fileserver calls can be accessed with standard OSWORD funcitons.
 
+A sample program ($.SYSTEM.PIFSTOOL) is installed on disc 0
+when the PIFS is installed.
+
 The data block to be sent to port &99 on the FS is as follows:
 
 |------|---------------------------|
