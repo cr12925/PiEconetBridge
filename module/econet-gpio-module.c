@@ -80,15 +80,19 @@ struct gpio_desc *data_desc_array[11]; // Top 3 are the address & RnW lines in c
 // 20240623 Pi3 64 Bit change
 void __iomem *GPIO_PORT = NULL;
 unsigned GPIO_RANGE = 0x40;
-/* No longer required
-unsigned long *GPIO_CLK;
-unsigned GPIO_CLK_RANGE = 0xA8;
-unsigned long *GPIO_PWM;
-unsigned GPIO_PWM_RANGE = 0x28;
-*/
+
+/* 
+ * Variables to hold
+ * ADLC Status Register values when read, and
+ * the value to be set into the data reg
+ */
 
 u8 sr1, sr2;
 u32 gpioset_value;
+
+/* 
+ * Module operations
+ */
 
 struct file_operations econet_fops = {
 	.open = econet_open,
@@ -133,13 +137,46 @@ void econet_set_read_mode(void);
 void econet_set_write_mode(struct __econet_pkt_buffer *, int);
 void econet_set_pwm(uint8_t, uint8_t);
 
-unsigned char econet_stations[8192]; /* Station MAP - which are we proxying for */
+/*
+ * Bitmap of 65536 stations we 
+ * might receive traffic for. 
+ *
+ * Updated from user space with ioctl()
+ *
+ */
 
-struct __econet_pkt_buffer econet_pkt_tx, econet_pkt_tx_prepare, econet_pkt_rx;
+unsigned char econet_stations[8192]; 
 
-struct __aun_pkt_buffer aun_tx, aun_rx;
+/* 
+ * Buffers to hold packets to be tx'd,
+ * packet being rx'd and
+ * ... er, something else.
+ *
+ */
 
+struct __econet_pkt_buffer 	econet_pkt_tx, 
+				econet_pkt_tx_prepare, 
+				econet_pkt_rx;
+
+/*
+ * AUN+4 format buffers for packet received
+ * from userspace / received off wire
+ *
+ */
+
+struct __aun_pkt_buffer 	aun_tx,  
+				aun_rx;
+
+/* Appears to be disused
 char aun_stn, aun_net; // The net & station we are presently dealing with in the IP world - used to sanity check whether what comes off the wire is what we expect!
+*/
+
+/* 
+ * Tracks when last data received
+ *
+ * So we can tell whether to start new transaction
+ *
+ */
 
 u64 last_data_rcvd;
 
@@ -193,6 +230,12 @@ void econet_set_dir(short d)
 	barrier();
 
 }
+
+/*
+ * Macros which abstract econet_write_cr()
+ * to write to the FIFO and write to
+ * FIFO and signal last data byte
+ */
 
 #define econet_write_fifo(x) econet_write_cr(3, (x))
 #define econet_write_last(x) econet_write_cr(4, (x))
@@ -296,11 +339,15 @@ void econet_write_cr(unsigned short r, unsigned char d)
 }
 
 /* 
- * econet_read_sr - read value from ADLC status register
- *
+ * Macro abstracting econet_read_sr() to read FIFO
  */
 
 #define econet_read_fifo() econet_read_sr(3)
+
+/* 
+ * econet_read_sr - read value from ADLC status register
+ *
+ */
 
 unsigned char econet_read_sr(unsigned short r)
 {
@@ -1705,6 +1752,8 @@ unexpected_scout:
 							printk (KERN_INFO "econet-gpio: econet_irq_read(): Valid frame received, length %04x, but was expecting final ACK from %d.%d\n", econet_pkt_rx.ptr, aun_tx.d.p.dstnet, aun_tx.d.p.dststn);
 							econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
 							econet_set_aunstate(EA_IDLE);
+							// 20240630 to see if this fixes the RISC OS No Reply Errors
+							goto unexpected_scout;
 						}
 						else // It was an ACK from where we expected, so flag completion to writefd
 						{
