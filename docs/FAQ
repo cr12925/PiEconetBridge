@@ -1,0 +1,26 @@
+This document is very limited and not intended to replace the README, which
+you should read.
+
+1. I have upgraded to v2.1. Why are my permissions different?
+
+   v2.1 has different default permissions, but they should not affect existing
+   files. If you had files which were put in the operating system's own 
+   filing system, or which for some reason did not have Pi FS permission
+   settings, then the permissions you see may have altered.
+
+   You can cure any such problems by manually setting permissions,
+   e.g. with *ACCESS on an 8-bit machine, or using the GUI on 
+   RISC OS.
+
+
+2. I am trying to copy a file from the Pi FS to my RISC machine
+   and I keep getting 'No Reply' errors.
+
+   This will sound bizarre, but your network termination is probably
+   wonky. In testing, this symptom was experienced and all manner
+   of things were tried. What cured it was a terminator. That was so
+   even though transfers from (e.g.) a Level 4 server on an A3000 on
+   the same Econet hub as the Pi worked fine. Transfers from a Level 3
+   on the same hub failed - until we added the termination. (That's
+   termination *in addition* to the termination being switched on
+   on the Pi's HAT.)
