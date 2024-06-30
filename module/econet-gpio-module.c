@@ -3117,8 +3117,13 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 			else if (econet_data->aun_mode != 1) printk (KERN_INFO "econet-gpio: AUN mode on\n");
 
 			/* Enable AUN mode and set state to IDLE */
-			econet_data->aun_mode = 1;
-			econet_set_aunstate(EA_IDLE);
+
+			if (econet_data->aun_mode) break; // Leave state alone in case mid transaction
+			else
+			{
+				econet_data->aun_mode = 1;
+				econet_set_aunstate(EA_IDLE);
+			}
 
 			break;
 
