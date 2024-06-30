@@ -469,6 +469,7 @@ struct path {
 struct __pq {
 	struct __econet_packet_udp *packet; // Don't bother with internal 4 byte src/dest header - they are given as parameters to aun_send.
 	int len; // Packet data length
+	uint8_t delay; // in milliseconds - to cope with RISC OS not listening...
 	struct __pq *next;
 };
 
@@ -1018,7 +1019,7 @@ short fs_get_uid(int server, char *username)
 	while (counter < ECONET_MAX_FS_USERS && (strncasecmp(padded_username, users[server][counter].username, 10) != 0))
 		counter++;
 
-	return (counter < ECONET_MAX_FS_USERS ? counter : -1);
+	return ((counter < ECONET_MAX_FS_USERS) ? counter : -1);
 
 }
 
@@ -4162,8 +4163,22 @@ void fs_pibridge (int server, uint8_t reply_port, uint16_t active_id, uint8_t ne
 		case 1:
 		{
 			fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 1 - Pi Shutdown", "", net, stn);
-			fs_error(server, reply_port, net, stn, 0xFF, "Not yet implemented");
-			return;
+			if (seteuid(0) != 0)
+				fs_error(server, reply_port, net, stn, 0xFF, "Bridge not able to shut down");
+			else
+			{
+				char *	shutdown_msg = "Bridge shutting down\x0d";
+
+				fs_reply_ok_with_data(server, reply_port, net, stn, shutdown_msg, strlen(shutdown_msg));
+
+				if (!fork())
+				{
+					usleep(5000000); // To get the reply out
+					execl("/usr/sbin/shutdown", "shutdown", "-h", "now", NULL);
+				}
+
+			}
+			return; // May never get here
 		} break;
 
 		/* SYSTEM PRIVILEGES ONLY */
@@ -4249,8 +4264,13 @@ void fs_pibridge (int server, uint8_t reply_port, uint16_t active_id, uint8_t ne
 
 		case 0x13:
 		{
+			char shutdown_msg[128];
+
+			snprintf (shutdown_msg, 127, "Fileserver at %d.%d shutting down\x0d", fs_stations[server].net, fs_stations[server].stn);
 			fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 19 - Shut down fileserver", "", net, stn);
-			fs_error(server, reply_port, net, stn, 0xFF, "Not yet implemented");
+			fs_reply_ok_with_data(server, reply_port, net, stn, shutdown_msg, strlen(shutdown_msg));
+			fs_shutdown(server);
+
 		} break;
 
 		/* Force log user off by name (arg2 = 0) or uid (arg2 = 1) or station number (arg2 = 2) */
@@ -4279,7 +4299,7 @@ void fs_pibridge (int server, uint8_t reply_port, uint16_t active_id, uint8_t ne
 					fs_copy_to_cr (username, (data+7), 10);
 					uid = fs_get_uid(server, username);
 
-					fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 20 - Force log off by username: %s", "", net, stn, username);
+					fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 20 - Force log off by username: %s (ID 0x%04X)", "", net, stn, username, uid);
 					if (uid < 0) /* Not known */
 					{
 						fs_error(server, reply_port, net, stn, 0xFF, "Unknown user");
@@ -4331,8 +4351,8 @@ void fs_pibridge (int server, uint8_t reply_port, uint16_t active_id, uint8_t ne
 	
 			for (count = 0; count < ECONET_MAX_FS_USERS; count++)
 			{
-				if (	(arg == 2 && active[server][count].net == l_net && active[server][count].stn == l_stn)
-				||	(arg < 2 && active[server][count].userid == uid) 
+				if (	(arg2 == 2 && active[server][count].net == l_net && active[server][count].stn == l_stn)
+				||	(arg2 < 2 && active[server][count].userid == uid) 
 				)
 				{
 					fs_bye(server, 0, active[server][count].net, active[server][count].stn, 0); // Silent bye
@@ -5699,7 +5719,7 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 	if (command == 65) // Not yet implemented
 	{
 		fs_error(server, reply_port, net, stn, 0x85, "FS Error");
-		return;
+	return;
 	}
 
 	if (command == 96) // PiFS canonicalize object name function
@@ -7668,7 +7688,7 @@ void fs_cat_header(int server, unsigned short reply_port, int active_id, unsigne
 #define FS_ENQUEUE_LOAD 1
 #define FS_ENQUEUE_GETBYTES 2
 
-char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigned char net, unsigned char stn, unsigned char internal_handle, unsigned char mode, uint32_t seq, uint8_t qtype)
+char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigned char net, unsigned char stn, unsigned char internal_handle, unsigned char mode, uint32_t seq, uint8_t qtype, uint8_t delay)
 {
 
 	struct __econet_packet_udp *u; // Packet we'll put into the queue
@@ -7788,6 +7808,7 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 
 	q->packet = u;
 	q->len = len; // Data len only
+	q->delay = delay; // Delay in ms before TX when asked
 	q->next = NULL; // Always adding to end
 
 	if (!(n->pq_head)) // No existing packet in the queue for this transaction
@@ -7920,6 +7941,9 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn, uint32_t 
 	l->pq_head->packet->p.seq = new_seq;
 
 	fs_debug (0, 3, "to %3d.%3d from %3d.%3d Sending packet from __pq %p, length %04X with new sequence number %08X", net, stn, fs_stations[server].net, fs_stations[server].stn, l->pq_head, l->pq_head->len, l->pq_head->packet->p.seq);
+
+	if (l->pq_head->delay)
+		usleep (1000 * l->pq_head->delay); // Usually 0, but we have a facility to delay packets because sometimes RISC OS isn't listening...(!) Usually used on first packet of a databurst
 
 	// Send without inserting a sequence number
 
@@ -8162,7 +8186,7 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		{
 			collected = fread(&(r.p.data), 1, 1280, f);
 			
-			if (collected > 0) enqueue_result = fs_load_enqueue(server, &r, collected, net, stn, internal_handle, 1, sequence, FS_ENQUEUE_LOAD); else enqueue_result = 0;
+			if (collected > 0) enqueue_result = fs_load_enqueue(server, &r, collected, net, stn, internal_handle, 1, sequence, FS_ENQUEUE_LOAD, 0); else enqueue_result = 0;
 
 			if (collected < 0 || enqueue_result < 0)
 			{
@@ -8180,7 +8204,7 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		r.p.port = reply_port;
 		r.p.ctrl = rxctrl;
 
-		fs_load_enqueue(server, &r, 2, net, stn, internal_handle, 1, sequence, FS_ENQUEUE_LOAD);
+		fs_load_enqueue(server, &r, 2, net, stn, internal_handle, 1, sequence, FS_ENQUEUE_LOAD, 0);
 
 	}
 	
@@ -8705,7 +8729,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 		// Now put them on a load queue
 		//fs_aun_send(&r, server, readlen, net, stn);
 
-		fs_load_enqueue(server, &(r), readlen, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES);
+		fs_load_enqueue(server, &(r), readlen, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES, (sent == 0) ? 60 : 0); // Insert 60ms delay on first packet
 
 		seq = 0; // seq != 0 means start a new load queue, so always set to 0 here to add to same queue
 		sent += readlen;
@@ -8737,7 +8761,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 		// Now goes on a load queue
 		//fs_aun_send(&r, server, 6, net, stn);
-		fs_load_enqueue(server, &(r), 6, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES);
+		fs_load_enqueue(server, &(r), 6, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES, 0);
 	}
 	
 }
