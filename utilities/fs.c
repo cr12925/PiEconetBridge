@@ -8729,7 +8729,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 		// Now put them on a load queue
 		//fs_aun_send(&r, server, readlen, net, stn);
 
-		fs_load_enqueue(server, &(r), readlen, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES, (sent == 0) ? 60 : 0); // Insert 60ms delay on first packet
+		fs_load_enqueue(server, &(r), readlen, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES, (sent == 0) ? 60 : 0); // Insert 60ms delay on first packet (Though it doesn't seem to help: when RISC OS decides to "cock a deaf'un", it just doesn't listen at all now - we can send 20 Scouts 100ms apart and it still won't be listening, which is just a bit odd.)
 
 		seq = 0; // seq != 0 means start a new load queue, so always set to 0 here to add to same queue
 		sent += readlen;
