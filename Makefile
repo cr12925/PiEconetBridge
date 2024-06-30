@@ -15,7 +15,7 @@ install-mkgroup:
 	-sudo usermod -a -G econet `whoami`
 
 install-module:	install-mkgroup build-module
-	[[ -a /etc/udev/rules.d/90-econet.rules ]] || sudo cp udev/90-econet.rules /etc/udev/rules.d/90-seconet.rules
+	[ -e /etc/udev/rules.d/90-econet.rules ] || sudo cp udev/90-econet.rules /etc/udev/rules.d/90-seconet.rules
 	sudo cp module/econet-gpio.ko /lib/modules/`uname -r`/kernel/drivers/net
 	sudo /usr/sbin/depmod
 
