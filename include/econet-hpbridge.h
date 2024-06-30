@@ -81,6 +81,7 @@ struct __eb_packetqueue {
 	struct timeval 			last_tx; // Last transmission attempt on an input queue (i.e. sending to the destination driver); on an output queue this is when the packet got put on the queue - used to time it out and dump the rest of the queue if need be
 	uint8_t 			tx; // Number of transmission attempts
 	uint8_t				errors; // Number of transmission errors
+	uint8_t				notlistening; // Number of not listening errors (subset of 'errors')
 	uint16_t			length; // Length of packet including 12 byte header
 	struct __eb_packetqueue 	*n; // Next or null.
 };

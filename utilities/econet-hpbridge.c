@@ -2679,6 +2679,7 @@ uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_au
 	packetq->last_tx.tv_sec = packetq->last_tx.tv_usec = 0; // Cause immediate first transmission
 	packetq->tx = 0; // Gets set to 1 when this has gone on the requisite input queue
 	packetq->errors = 0; // Ditto tx
+	packetq->notlistening = 0; // Counts up the not listening errors
 	packetq->length = length;
 	packetq->n = NULL; // Initialize
 	
@@ -3009,6 +3010,7 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 		q->last_tx.tv_sec = q->last_tx.tv_usec = 0;
 		q->tx = 0;
 		q->errors = 0;
+		q->notlistening = 0;
 		q->n = NULL;
 		q->length = length;
 		
@@ -6177,7 +6179,7 @@ static void * eb_device_despatcher (void * device)
 
 							if ((p->tx)++ < EB_CONFIG_WIRE_RETRIES)
 							{
-								eb_debug (0, 4, "DESPATCH", "%-8s %3d     Attempting to transmit packet at pq %p, packet at %p, length 0x%04X", eb_type_str(d->type), d->net, p, p->p, p->length);
+								eb_debug (0, 4, "DESPATCH", "%-8s %3d     Attempting to transmit packet at pq %p, packet at %p, length 0x%04X, attempt %d", eb_type_str(d->type), d->net, p, p->p, p->length, p->tx);
 
 								gettimeofday(&(d->wire.last_tx), 0); // Update last transmission time
 
@@ -6201,7 +6203,7 @@ static void * eb_device_despatcher (void * device)
 
 								err = ioctl(d->wire.socket, ECONETGPIO_IOC_TXERR);
 
-								if (err == ECONET_TX_NOCLOCK || err == ECONET_TX_NOCOPY || err == ECONET_TX_NECOUTEZPAS) // Catches too many other errors || (result != p->length + 12))
+								if (err == ECONET_TX_NOCLOCK || err == ECONET_TX_NOCOPY /* || err == ECONET_TX_NECOUTEZPAS */) // Catches too many other errors || (result != p->length + 12))
 								{
 									remove = 1; // These are hard fails
 									eb_debug (0, 4, "DESPATCH", "%-8s %3d     Attempt to transmit packet to %d.%d from %d.%d at %p FAILED (Terminal) with error 0x%02X (%s) (written: %d/%d)- attempt %d", eb_type_str(d->type), d->net, tx.p.dstnet, tx.p.dststn, tx.p.srcnet, tx.p.srcstn, p, err, econet_strtxerr(err), result, p->length + 12, p->tx);
@@ -6272,11 +6274,13 @@ static void * eb_device_despatcher (void * device)
 
 										aunstate = ioctl(d->wire.socket, ECONETGPIO_IOC_GETAUNSTATE);
 
-										eb_debug (0, 4, "DESPATCH", "%-8s %3d     Attempt to transmit packet to %d.%d from %d.%d at %p FAILED with error 0x%02X (%s) - attempt %d - kernel tx ptr = 0x%02X, aun_state = 0x%02X", eb_type_str(d->type), d->net, tx.p.dstnet, tx.p.dststn, tx.p.srcnet, tx.p.srcstn, p, err, econet_strtxerr(err), p->tx, (aunstate >> 16), aunstate & 0xff);
 										p->errors++;	
+										if (err == ECONET_TX_NECOUTEZPAS) p->notlistening++;
+
+										eb_debug (0, 4, "DESPATCH", "%-8s %3d     Attempt to transmit packet to %d.%d from %d.%d at %p FAILED with error 0x%02X (%s) - attempt %d - errors %d (not listening %d/%d), kernel tx ptr = 0x%02X, aun_state = 0x%02X", eb_type_str(d->type), d->net, tx.p.dstnet, tx.p.dststn, tx.p.srcnet, tx.p.srcstn, p, err, econet_strtxerr(err), p->tx, p->errors, p->notlistening, EB_CONFIG_WIRE_MAX_NOTLISTENING, (aunstate >> 16), aunstate & 0xff);
 										wire_output_pending++;
 
-										if (p->errors > /* 3 */ EB_CONFIG_WIRE_MAX_NOTLISTENING && (err == ECONET_TX_NECOUTEZPAS))
+										if (p->notlistening > /* 3 */ EB_CONFIG_WIRE_MAX_NOTLISTENING && (err == ECONET_TX_NECOUTEZPAS))
 										{
 											remove = 1; // Dump it - lots of errors on this - TODO - Suspect this line is wrong too.
 											// Send NAK if DAT packet got not listening, or our internal-special "INK" for an immediate not listening - so a source can tell that's what happened
@@ -6614,7 +6618,7 @@ static void * eb_device_despatcher (void * device)
 							new_output = 1;
 
 						}
-						else if (p->p->p.port == 0x9f) // Print server query
+						else if (p->p->p.port == 0x9f && p->p->p.aun_ttype == ECONET_AUN_DATA) // Print server query
 						{
 							uint8_t		querytype;
 							unsigned char	pname[7];
@@ -6699,7 +6703,7 @@ static void * eb_device_despatcher (void * device)
 
 							eb_free (__FILE__, __LINE__, "PRINTER", "Freeing printer reply packet", reply);
 						}
-						else if (p->p->p.port == 0xD1) // Print server data
+						else if (p->p->p.port == 0xD1 && p->p->p.aun_ttype == ECONET_AUN_DATA) // Print server data
 						{
 							struct __eb_printjob	*job;
 							struct __eb_printer	*printer;
@@ -6889,7 +6893,7 @@ static void * eb_device_despatcher (void * device)
 							}
 
 						}
-						else if (p->p->p.port == 0xB0 && p->p->p.ctrl == 0x80) // FindServer query
+						else if (p->p->p.port == 0xB0 && p->p->p.ctrl == 0x80 && p->p->p.aun_ttype == ECONET_AUN_DATA) // FindServer query
 						{
 
 							char	findserver_type[9], server_type[9];
@@ -6970,7 +6974,7 @@ static void * eb_device_despatcher (void * device)
 							eb_free (__FILE__, __LINE__, "FINDSRVR", "Freeing FindServer reply packet", reply);
 
 						}
-						else if (p->p->p.port == 0xD2 && d->local.ip.tunif[0]) // IP/Econet
+						else if (p->p->p.port == 0xD2 && d->local.ip.tunif[0] && (p->p->p.aun_ttype == ECONET_AUN_DATA || p->p->p.aun_ttype == ECONET_AUN_BCAST)) // IP/Econet
 						{
 							uint32_t src_ip, dst_ip;
 						
@@ -9209,7 +9213,7 @@ int main (int argc, char **argv)
 					case 24:	EB_CONFIG_WIRE_IMM_WAIT = atoi(optarg); break;
 					case 25:	EB_CONFIG_BRIDGE_LOOP_DETECT = (atoi(optarg) ? 1 : 0); break;
 					case 26:	EB_CONFIG_POOL_RESET_FWD = (atoi(optarg) ? 1 : 0); break;
-					case 27:	EB_CONFIG_WIRE_MAX_NOTLISTENING = (atoi(optarg) ? 1 : 0); break;
+					case 27:	EB_CONFIG_WIRE_MAX_NOTLISTENING = atoi(optarg); break;
 					case 28:	EB_CONFIG_NOBRIDGEANNOUNCEDEBUG = 1; EB_CONFIG_NOKEEPALIVEDEBUG = 1; break;
 					case 29:	EB_CONFIG_FS_STATS_PORT = atoi(optarg); break;
 				}
