@@ -469,7 +469,7 @@ struct path {
 struct __pq {
 	struct __econet_packet_udp *packet; // Don't bother with internal 4 byte src/dest header - they are given as parameters to aun_send.
 	int len; // Packet data length
-	uint8_t delay; // in milliseconds - to cope with RISC OS not listening...
+	uint16_t delay; // in milliseconds - to cope with RISC OS not listening...
 	struct __pq *next;
 };
 
@@ -7688,7 +7688,7 @@ void fs_cat_header(int server, unsigned short reply_port, int active_id, unsigne
 #define FS_ENQUEUE_LOAD 1
 #define FS_ENQUEUE_GETBYTES 2
 
-char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigned char net, unsigned char stn, unsigned char internal_handle, unsigned char mode, uint32_t seq, uint8_t qtype, uint8_t delay)
+char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigned char net, unsigned char stn, unsigned char internal_handle, unsigned char mode, uint32_t seq, uint8_t qtype, uint16_t delay)
 {
 
 	struct __econet_packet_udp *u; // Packet we'll put into the queue
@@ -8729,7 +8729,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 		// Now put them on a load queue
 		//fs_aun_send(&r, server, readlen, net, stn);
 
-		fs_load_enqueue(server, &(r), readlen, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES, (sent == 0) ? 60 : 0); // Insert 60ms delay on first packet (Though it doesn't seem to help: when RISC OS decides to "cock a deaf'un", it just doesn't listen at all now - we can send 20 Scouts 100ms apart and it still won't be listening, which is just a bit odd.)
+		fs_load_enqueue(server, &(r), readlen, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES, (sent == 0) ? 250 : 0 ); // Interpacket delay of 200ms didn't work. 300 did. Try 250.  This is purely to cope with RISC OS cocking a deaf'un on the data burst. Probably nobody noticed in the 1990s because hard discs were so slow compared to today. And it looks like we only need it on the first databurst packet.
 
 		seq = 0; // seq != 0 means start a new load queue, so always set to 0 here to add to same queue
 		sent += readlen;
