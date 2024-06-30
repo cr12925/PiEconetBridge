@@ -8730,7 +8730,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 		// Now put them on a load queue
 		//fs_aun_send(&r, server, readlen, net, stn);
 
-		fs_load_enqueue(server, &(r), readlen, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES, (sent == 0) ? 60 : 0/* 275 : 100 */ ); // Interpacket delay of 200ms didn't work. 300 did. Try 250.  This is purely to cope with RISC OS cocking a deaf'un on the data burst. Probably nobody noticed in the 1990s because hard discs were so slow compared to today. And it looks like we only need it on the first databurst packet.
+		fs_load_enqueue(server, &(r), readlen, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES, (sent == 0) ? 0 : 0/* 275 : 100 */ ); // Interpacket delay of 200ms didn't work. 300 did. Try 250.  This is purely to cope with RISC OS cocking a deaf'un on the data burst. Probably nobody noticed in the 1990s because hard discs were so slow compared to today. And it looks like we only need it on the first databurst packet.
 
 		seq = 0; // seq != 0 means start a new load queue, so always set to 0 here to add to same queue
 		sent += readlen;

@@ -354,6 +354,8 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			uint32_t	last_imm_seq; // Sequence number of the last immediate sent to the wire from somewhere else. If we get an immediate reply from the net/stn in the line above, then put the matching sequence number in the reply
 			uint8_t		stations[8192]; // Station map for module
 			uint8_t		stations_initial[8192]; // Used to re-initialize on a bridge reset
+			uint8_t		stations_update_rq; // 1 = Please update the station set from stations[]
+			pthread_mutex_t	stations_lock;
 			struct __eb_device	*divert[255]; // Pointers to diverted stations. E.g. if station 1.254 on the wire is actually a local station, this will point to its __eb_device
 			uint8_t		filter_in[256], filter_out[256]; // Networks we ignore (i.e. we ditch traffic, and we ignore/don't send adverts)
 			uint8_t		period, mark; // clock speed. 0 = not set by user.

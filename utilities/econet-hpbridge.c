@@ -1054,6 +1054,13 @@ struct __eb_device * eb_device_init (uint8_t net, uint16_t type, uint8_t config)
 		if (pthread_mutex_init(&(p->updatemutex), NULL) == -1)
 			eb_debug (1, 0, "CONFIG", "Cannot initialize update mutex for net %d", net);
 
+		if (p->type == EB_DEF_WIRE)
+		{
+			if (pthread_mutex_init(&(p->wire.stations_lock), NULL) == -1)
+				eb_debug (1, 0, "CONFIG", "Cannot initialize wire station update mutex for net %d", net);
+			p->wire.stations_update_rq = 0;
+		}
+
 		p->all_nets_pooled = 0; // Starting point
 
 		p->self = p;
@@ -2060,6 +2067,8 @@ void eb_bridge_reset (struct __eb_device *trigger)
 	{
 		if (dev->type == EB_DEF_WIRE)
 		{
+			pthread_mutex_lock (&(dev->wire.stations_lock));
+
 			memcpy (&(dev->wire.stations), &(dev->wire.stations_initial), sizeof (dev->wire.stations));
 
 			/* Copy active pipe stations into the MAP */
@@ -2069,6 +2078,11 @@ void eb_bridge_reset (struct __eb_device *trigger)
 
 			ioctl (dev->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(dev->wire.stations));
 			eb_debug (0, 2, "BRIDGE", "%-8s         Station set reset on wire network %d", (trigger ? eb_type_str(trigger->type) : "Internal"), dev->net);
+
+			dev->wire.stations_update_rq = 1;
+
+			pthread_mutex_unlock (&(dev->wire.stations_lock));
+			pthread_cond_signal (&(dev->qwake));
 		}
 
 		dev = dev->next;
@@ -2108,6 +2122,8 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 
 	if (source->type == EB_DEF_WIRE) // Always should be wire, but just in case
 	{
+
+		pthread_mutex_lock (&(source->wire.stations_lock));
 		/*
 		 * Clear any .0 hosts out of this wire's station map
 		 * and then add farside.0 to the map so the kernel
@@ -2127,7 +2143,11 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 
 		/* And poke the map into the kernel */
 
-		ioctl(source->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(source->wire.stations)); 
+		source->wire.stations_update_rq = 1;
+
+		pthread_mutex_unlock (&(source->wire.stations_lock));
+		pthread_cond_signal (&(source->qwake));
+		//ioctl(source->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(source->wire.stations)); 
 	}
 
 	reply->p.srcstn = 0;
@@ -5175,6 +5195,18 @@ static void * eb_device_despatcher (void * device)
 
 		}
 
+		/* If this is a wire device, see if it needs its station set updating */
+
+		if (d->type == EB_DEF_WIRE)
+		{
+			pthread_mutex_lock (&(d->wire.stations_lock));
+			if (d->wire.stations_update_rq)
+				ioctl (d->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(d->wire.stations));
+			d->wire.stations_update_rq = 0;
+			pthread_mutex_unlock (&(d->wire.stations_lock));
+			pthread_cond_signal (&(d->qwake));
+		}
+
 		new_output = 0;
 
 		// First do a poll(0) to see if there was anything to read
@@ -6277,7 +6309,10 @@ static void * eb_device_despatcher (void * device)
 										p->errors++;	
 										if (err == ECONET_TX_NECOUTEZPAS) p->notlistening++;
 
-										eb_debug (0, 4, "DESPATCH", "%-8s %3d     Attempt to transmit packet to %d.%d from %d.%d at %p FAILED with error 0x%02X (%s) - attempt %d - errors %d (not listening %d/%d), kernel tx ptr = 0x%02X, aun_state = 0x%02X", eb_type_str(d->type), d->net, tx.p.dstnet, tx.p.dststn, tx.p.srcnet, tx.p.srcstn, p, err, econet_strtxerr(err), p->tx, p->errors, p->notlistening, EB_CONFIG_WIRE_MAX_NOTLISTENING, (aunstate >> 16), aunstate & 0xff);
+										if (EB_DEBUG_LEVEL < 4 && (err == ECONET_TX_NECOUTEZPAS))
+											eb_debug (0, 2, "DESPATCH", "Wire     %3d.%3d from %3d.%3d P:&%02X C:&%02X Not listening for packet length 0x%04X seq 0x%08X", tx.p.dstnet, tx.p.dststn, tx.p.srcnet, tx.p.srcstn, tx.p.port, tx.p.ctrl, p->length, tx.p.seq);
+										else
+											eb_debug (0, 4, "DESPATCH", "%-8s %3d     Attempt to transmit packet to %d.%d from %d.%d at %p FAILED with error 0x%02X (%s) - attempt %d - errors %d (not listening %d/%d), kernel tx ptr = 0x%02X, aun_state = 0x%02X", eb_type_str(d->type), d->net, tx.p.dstnet, tx.p.dststn, tx.p.srcnet, tx.p.srcstn, p, err, econet_strtxerr(err), p->tx, p->errors, p->notlistening, EB_CONFIG_WIRE_MAX_NOTLISTENING, (aunstate >> 16), aunstate & 0xff);
 										wire_output_pending++;
 
 										if (p->notlistening > /* 3 */ EB_CONFIG_WIRE_MAX_NOTLISTENING && (err == ECONET_TX_NECOUTEZPAS))
@@ -7270,13 +7305,21 @@ void eb_set_whole_wire_net (uint8_t net, struct __eb_device *src)
 	{
 		if (other->type == EB_DEF_WIRE && other != src)
 		{
-			eb_debug (0, 4, "BRIDGE", "%-8s %3d     Setting station set for net %d", eb_type_str(other->type), other->net, net);
+
 			uint8_t count; // Need to catch potential bridge 4-ways, so start at 0
+
+			eb_debug (0, 4, "BRIDGE", "%-8s %3d     Setting station set for net %d", eb_type_str(other->type), other->net, net);
+
+			pthread_mutex_lock (&(other->wire.stations_lock));
 
 			for (count = 0; count < 255; count++)
 				ECONET_SET_STATION((other->wire.stations), net, count);	
 
-			ioctl(other->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(other->wire.stations));
+			other->wire.stations_update_rq = 1;
+
+			pthread_mutex_unlock (&(other->wire.stations_lock));
+			pthread_cond_signal (&(other->qwake));
+			//ioctl(other->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(other->wire.stations));
 
 		}
 	
@@ -7308,6 +7351,8 @@ void eb_setclr_single_wire_host (uint8_t net, uint8_t stn, uint8_t set)
 
 			real_net = (net == other->net) ? 0 : net;
 
+			pthread_mutex_lock (&(other->wire.stations_lock));
+
 			if (set)
 			{
 				// Listen for native net so stations can talk to it as (e.g.) 1.254 as well as 0.254 if it's on the local network (see below)
@@ -7321,7 +7366,11 @@ void eb_setclr_single_wire_host (uint8_t net, uint8_t stn, uint8_t set)
 				//other->wire.stations[(real_net * 32) + (stn/8)] &= ~(1 << (stn % 8));
 			}
 
-			ioctl(other->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(other->wire.stations)); // Poke to kernel
+			other->wire.stations_update_rq = 1;
+
+			pthread_mutex_unlock (&(other->wire.stations_lock));
+			pthread_cond_signal (&(other->qwake));
+			//ioctl(other->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(other->wire.stations)); // Poke to kernel
 		}
 	
 		other = other->next;
@@ -7400,9 +7449,14 @@ void eb_reset_tables (void)
 	while (d)
 	{
 		if (d->type == EB_DEF_WIRE)
+		{
+			pthread_mutex_lock (&(d->wire.stations_lock));
 			memcpy (&(d->wire.stations), &(d->wire.stations_initial), sizeof (d->wire.stations));
-
-		ioctl(d->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(d->wire.stations));
+			d->wire.stations_update_rq = 1;
+			pthread_mutex_unlock (&(d->wire.stations_lock));
+			pthread_cond_signal (&(d->qwake));
+			//ioctl(d->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(d->wire.stations));
+		}
 		
 		d = d->next;
 	}
