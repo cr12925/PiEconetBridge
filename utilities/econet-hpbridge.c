@@ -9089,10 +9089,10 @@ int main (int argc, char **argv)
 	gettimeofday (&(config.start), 0);
 	EB_DEBUG_OUTPUT = stderr;
 	EB_DEBUG_MALLOC = 0;
-	EB_CONFIG_WIRE_RETX = 25; // Reduced to 10 20231226 to see if !Machines performance improves - 20240611 increased to 25 - seems to make RISC OS happier on getbytes
+	EB_CONFIG_WIRE_RETX = 50; // Reduced to 10 20231226 to see if !Machines performance improves - 20240611 increased to 25 - seems to make RISC OS happier on getbytes - increased to 50 20240630 to see if we can help RISC OS limp along
 	EB_CONFIG_AUN_RETX = 1000;  // BeebEm Seems to need quite a while - and does not like another packet turning up before it's ACKd the last one. Long timeout. If the ACK turns up, the inbound AUN listener wakes the queue anyway, so it should be fine.
 	EB_CONFIG_WIRE_RETRIES = 10;
-	EB_CONFIG_WIRE_MAX_NOTLISTENING = 3; // Number of not listenings to treat as non-fatal on transmission of a 4-way (to cope with RISC OS bug where it sometimes isn't listening for a data burst on getbytes/load 
+	EB_CONFIG_WIRE_MAX_NOTLISTENING = 5; // Number of not listenings to treat as non-fatal on transmission of a 4-way (to cope with RISC OS bug where it sometimes isn't listening for a data burst on getbytes/load 
 	EB_CONFIG_WIRE_IMM_WAIT = 1000; // Wait 1s before resetting ADLC from flag fill - assume immediate reply not turning up for transmission on to wire - TODO - Implemennt command line variable
 	EB_CONFIG_AUN_RETRIES = 5;
 	EB_CONFIG_AUN_NAKTOLERANCE = 2; // How many NAKs we tolerate before we dump the packet off an AUN outq. Used to appease RiscOS, which sometimes isn't listening when it should be
