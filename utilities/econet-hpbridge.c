@@ -2525,7 +2525,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 						strcat (net_string, trans_string);
 					}
 
-					if (networks[in_adv] && networks[in_adv] != source)
+					if ((networks[in_adv]) && (networks[in_adv] != source) && (!EB_CONFIG_NOBRIDGEANNOUNCEDEBUG))
 					{
 						if (networks[in_adv]->type == EB_DEF_WIRE)
 							eb_debug (0, 2, "BRIDGE", "%-8s %3d     Ignored incoming bridge update for net %d: already known on wire net %d", eb_type_str(source->type), source->net, in_adv, networks[in_adv]->net);
