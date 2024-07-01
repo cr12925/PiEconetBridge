@@ -552,6 +552,7 @@ void fs_get_parameters (uint8_t server, uint32_t *params, uint8_t *fnlength)
 
 	//*params = fs_config[server].fs_fnamelen << 24;
 	*fnlength = fs_config[server].fs_fnamelen;
+	*params = 0;
 	*params |= (fs_config[server].fs_default_dir_perm) << 24;
 	*params |= (fs_config[server].fs_default_file_perm) << 16;
 	
@@ -4220,9 +4221,9 @@ void fs_pibridge (int server, uint8_t reply_port, uint16_t active_id, uint8_t ne
 			uint8_t	data[5];
 			uint32_t params;
 
-			fs_get_parameters (server, &params, &(data[5]));
+			fs_get_parameters (server, &params, &(data[4]));
 
-			fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 17 - Get FS parameters (0x%04X, filename length %d)", "", net, stn, params, data[6]);
+			fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 17 - Get FS parameters (0x%04X, filename length %d)", "", net, stn, params, data[4]);
 
 			// Shift FS params into data, LSB first
 
@@ -9701,6 +9702,7 @@ void fs_write_readable_config(int server)
 		fprintf (out, "%-25s %-3s\n", "Inf files are :inf", (fs_config[server].fs_infcolon ? "On" : "Off"));
 		fprintf (out, "%-25s %-3s\n", "> 8 file handles", (fs_config[server].fs_manyhandle ? "On" : "Off"));
 		fprintf (out, "%-25s %-3s\n", "MDFS-style *INFO", (fs_config[server].fs_mdfsinfo ? "On" : "Off"));
+		fprintf (out, "%-25s %-3s\n", "Acornd Directory Display", (fs_config[server].fs_mask_dir_wrr ? "On" : "Off"));
 
 		fclose(out);
 
