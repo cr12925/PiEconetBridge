@@ -221,6 +221,7 @@ struct __econet_packet_pipe {
 #define ECONETGPIO_IOC_TEST		_IO(ECONETGPIO_MAGIC, 104) /* Put into test mode - interrupts off, ignore all user-space read/write ops. Use RESET to come back to normal ops */
 #define ECONETGPIO_IOC_TESTPACKET	_IO(ECONETGPIO_MAGIC, 105)
 #define ECONETGPIO_IOC_EXTRALOGS	_IOW(ECONETGPIO_MAGIC, 106, char) /* TUrn on additional logging */
+#define ECONETGPIO_IOC_KERNVERS		_IO(ECONETGPIO_MAGIC, 107) /* Obtain Pi version (based on HW GPIO address) (b8-b15), Hardware HAT version (low byte) */
 
 
 #define ECONET_GPIO_WRITE 0

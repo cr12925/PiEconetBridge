@@ -4815,6 +4815,8 @@ static void * eb_device_despatcher (void * device)
 		case EB_DEF_WIRE:
 		{
 
+			uint32_t	kernvers;
+			char 		hardwareclass[4];
 
 			if (EB_CONFIG_LOCAL)
 				d->wire.socket = open("/dev/null", O_RDWR);
@@ -4831,6 +4833,12 @@ static void * eb_device_despatcher (void * device)
 
 			ioctl(d->wire.socket, ECONETGPIO_IOC_EXTRALOGS, EB_CONFIG_EXTRALOGS);
 
+			kernvers = ioctl(d->wire.socket, ECONETGPIO_IOC_KERNVERS);
+
+			sprintf (hardwareclass, "%1d", (kernvers & 0xff));
+
+			eb_debug (0, 1, "DESPATCH", "%-8s %3d     Pi hardware is %s class; bridge hardware is version %d", "", d->net, hardwareclass, (kernvers & 0xff00) >> 8);
+					
 			if (pthread_create(&d->bridge_update_thread, NULL, eb_bridge_update_watcher, d))
 				eb_debug (1, 0, "DESPATCH", "%-8s %3d     Cannot start bridge updater on this device.", "Wire", d->net);
 		

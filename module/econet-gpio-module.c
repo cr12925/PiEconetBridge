@@ -3435,6 +3435,28 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 			break;
 
 		/*
+		 * Return Pi version (based on hardware address of GPIO)
+		 * and HAT version (from the device tree)
+		 *
+		 */
+
+		case ECONETGPIO_IOC_KERNVERS:
+			{
+				uint32_t version = 0;
+
+				version |= (econet_data->hwver << 8);
+
+				switch (econet_data->peribase)
+				{
+					case 0xFE000000: version |= 4; break;
+					case 0x3F000000: version |= 3; break;
+					case 0x20000000: version |= 2; break;
+				}
+
+				return version;
+			} break; // Not executed
+
+		/*
 		 * And if we get here, then something
 		 * went wrong...
 		 *
@@ -3828,25 +3850,21 @@ static int econet_probe (struct platform_device *pdev)
 	else if (of_machine_is_compatible("raspberrypi,3-model-b"))
 	{
 		econet_data->peribase = 0x3F000000;
-		// Disused: econet_data->clockdiv = ECONET_GPIO_CLOCKDIVSET;
 		printk (KERN_INFO "econet-gpio: This appears to be a Pi3\n");
 	}
 	else if (of_machine_is_compatible("raspberrypi,3-model-b-plus"))
 	{
 		econet_data->peribase = 0x3F000000;
-		// Disused: econet_data->clockdiv = ECONET_GPIO_CLOCKDIVSET;
 		printk (KERN_INFO "econet-gpio: This appears to be a Pi3B+\n");
 	}
 	else if (of_machine_is_compatible("raspberrypi,model-zero-w") || of_machine_is_compatible("raspberrypi,model-zero"))
 	{
 		econet_data->peribase = 0x20000000;
-		// Disused: econet_data->clockdiv = ECONET_GPIO_CLOCKDIVSET;
 		printk (KERN_INFO "econet-gpio: This appears to be a PiZero (reliability uncertain)\n");
 	}
 	else if (of_machine_is_compatible("raspberrypi,model-zero-2-w") || of_machine_is_compatible("raspberrypi,model-zero-2"))
 	{
 		econet_data->peribase = 0x3F000000;
-		// Disused: econet_data->clockdiv = ECONET_GPIO_CLOCKDIVSET;
 		printk (KERN_INFO "econet-gpio: This appears to be a PiZero2\n");
 	}
 	else 
