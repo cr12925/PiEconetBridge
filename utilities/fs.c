@@ -587,6 +587,9 @@ regex_t r_pathname, r_discname, r_wildcard;
 int fs_count = 0;
 
 extern void eb_debug_fmt (uint8_t, uint8_t, char *, char *);
+int fs_stn_logged_in(int, unsigned char, unsigned char);
+void fs_bye(int, unsigned char, unsigned char, unsigned char, unsigned short);
+void fsop_build_data (struct fsop_data *, uint8_t, uint8_t, uint8_t);
 
 void fs_debug (uint8_t death, uint8_t level, char *fmt, ...)
 {
@@ -631,8 +634,8 @@ void fs_get_parameters (uint8_t server, uint32_t *params, uint8_t *fnlength)
 {
 	struct fsop_data f;
 
-	f.server = &(fs_stations[server]);
-	f.server->config = &(fs_config[server]);
+	fsop_build_data (&f, server, 0, 0);
+
 	fsop_get_parameters (&f, params, fnlength);
 }
 
@@ -658,9 +661,8 @@ void fs_set_parameters (uint8_t server, uint32_t params, uint8_t fnlength)
 {
 	struct fsop_data f;
 
-	f.server = &(fs_stations[server]);
-	f.server->config = &(fs_config[server]);
-	f.server_id = server;
+	fsop_build_data (&f, server, 0, 0);
+
 	fsop_set_parameters (&f, params, fnlength);
 }
 
@@ -1079,6 +1081,41 @@ void fs_make_mdfs_pw_file(int server)
 
 }
 
+/* 
+ * fsop_build_data
+ *
+ * Fill in the struct fsop_data provided by 
+ * populating the server data and user data 
+ * for the user logged into the net & stn provided
+ */
+
+void fsop_build_data (struct fsop_data *param, uint8_t server, uint8_t net, uint8_t stn)
+{
+
+	int	active_id;
+
+	param->net = net;
+	param->stn = stn;
+
+	active_id = fs_stn_logged_in(server, net, stn);
+
+	param->active = (active_id >= 0 ? &(active[server][active_id]) : NULL);
+	param->active_id = active_id;
+
+	param->user = (active_id >= 0 ? &(users[server][param->active->userid]) : NULL);
+	param->user_id = param->active->userid;
+
+	param->server = &(fs_stations[server]);
+	param->server_id = server;
+
+	param->server->config = &(fs_config[server]);
+	param->server->discs = &(fs_discs[server][0]);
+	param->server->files = &(fs_files[server][0]);
+	param->server->dirs = &(fs_dirs[server][0]);
+	param->server->enabled = &(fs_enabled[server]);
+
+}
+
 // Find a disc number by name
 
 int fs_get_discno(int server, char *discname)
@@ -1352,7 +1389,6 @@ int fs_aun_send_noseq(struct __econet_packet_udp *p, int server, int len, unsign
 	a.p.dstnet = net;
 	a.p.dststn = stn;
 
-#ifdef BRIDGE_V2
 	// Put the enqueue call here
 	
 	if (a.p.dstnet == 0)	a.p.dstnet = a.p.srcnet;
@@ -1362,9 +1398,30 @@ int fs_aun_send_noseq(struct __econet_packet_udp *p, int server, int len, unsign
 
 	return len;
 
-#else
-	return aun_send (&a, len + 8 + 4);
-#endif
+}
+
+/* FSOP variant of fs_aun_send_noseq() */
+
+int fsop_aun_send_noseq(struct __econet_packet_udp *p, int len, struct fsop_data *f)
+{
+        struct __econet_packet_aun a;
+
+        memcpy(&(a.p.aun_ttype), p, len+8);
+        a.p.padding = 0x00;
+
+        a.p.srcnet = f->server->net;
+        a.p.srcstn = f->server->stn;
+        a.p.dstnet = f->net;
+        a.p.dststn = f->stn;
+
+        // Put the enqueue call here
+
+        if (a.p.dstnet == 0)    a.p.dstnet = a.p.srcnet;
+        eb_enqueue_output (fs_devices[f->server_id], &a, len, NULL);
+        pthread_cond_signal(&(fs_devices[f->server_id]->qwake));
+        eb_add_stats (&(fs_devices[f->server_id]->statsmutex), &(fs_devices[f->server_id]->b_out), len);
+
+        return len;
 
 }
 
@@ -1382,6 +1439,14 @@ int fs_aun_send(struct __econet_packet_udp *p, int server, int len, unsigned sho
 
 	p->p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
 	return fs_aun_send_noseq(p, server, len, net, stn);
+}
+
+/* FSOP variant of fs_aun_send() */
+
+int fsop_aun_send(struct __econet_packet_udp *p, int len, struct fsop_data *f)
+{
+	p->p.seq = get_local_seq(f->server->net, f->server->stn);
+	return fsop_aun_send_noseq(p, len, f);
 }
 
 /* Procedure to dump all FS currently open files & directories
@@ -3410,6 +3475,8 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 
 	memset (&fsops, 0, sizeof(fsops));
 
+	FSOP_SET (17, (FSOP_F_LOGGEDIN)); /* Bye */
+
 	FSOP_SET (60, (FSOP_F_LOGGEDIN | FSOP_F_SYST)); /* PiBridge functions */
 
 
@@ -4137,53 +4204,54 @@ int fs_stn_logged_in(int server, unsigned char net, unsigned char stn)
 	return -1;	
 }
 
+
 void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned char stn, unsigned short do_reply)
+{
+	struct	fsop_data	f;
+
+	fsop_build_data(&f, server, net, stn);
+
+	fsop_bye_internal(&f, do_reply);
+
+}
+
+void fsop_bye_internal(struct fsop_data *f, unsigned short do_reply)
 {
 
 	struct __econet_packet_udp reply;
-	int active_id;
 	int count;
 
-	active_id = fs_stn_logged_in(server, net, stn);
-
-	fs_debug (0, 1, "            from %3d.%3d Bye", net, stn);
+	fs_debug (0, 1, "            from %3d.%3d Bye", f->net, f->stn);
 
 	// Close active files / handles
-
 	
 	count = 1;
 	while (count < FS_MAX_OPEN_FILES)
 	{
-		if (active[server][active_id].fhandles[count].handle != -1 /* && (active[server][active_id].fhandles[count].is_dir == 0) */)
+		if (f->active->fhandles[count].handle != -1)
 		{
-			fs_close_interlock(server, active[server][active_id].fhandles[count].handle, active[server][active_id].fhandles[count].mode);
-			fs_deallocate_user_file_channel(server, active_id, count);
+			fs_close_interlock(f->server_id, f->active->fhandles[count].handle, f->active->fhandles[count].mode);
+			fs_deallocate_user_file_channel(f->server_id, FSOP_ACTIVE, count);
 		}
 		count++;
 	}
 
-	//fs_debug (0, 1, "FS doing memset(%8p, 0, %d)", &(active[fs_stn_logged_in(server, net, stn)]), sizeof(active)/ECONET_MAX_FS_SERVERS);
-	//fs_debug (0, 1, "FS bulk ports array at %8p", fs_bulk_ports[server]);
-	//memset(&(active[fs_stn_logged_in(server, net, stn)]), 0, sizeof(active) / ECONET_MAX_FS_SERVERS);
-	active[server][active_id].stn = active[server][active_id].net = 0; // Flag unused
+	f->active->stn = f->active->net = 0; // Flag disused
 	
-#ifdef BRIDGE_V2
 	// Notify bridge definitely no longer bridge priv user, if it ever was one
 
 	if (do_reply) // If this was an active log out, clear the FAST priv bit. Otherwise don't in case the user has shut the FS down and needs to get back in to restart it!
-		eb_fast_priv_notify(fs_devices[server], net, stn, 0);
+		eb_fast_priv_notify(fs_devices[f->server_id], f->net, f->stn, 0);
 			
-#endif
-
 	if (do_reply) // != 0 if we need to send a reply (i.e. user initiated bye) as opposed to 0 if this is an internal cleardown of a user
 	{
 	
 		reply.p.ptype = ECONET_AUN_DATA;
-		reply.p.port = reply_port;
+		reply.p.port = FSOP_REPLY_PORT;
 		reply.p.ctrl = 0x80;
 		reply.p.data[0] = reply.p.data[1] = 0;
 
-		fs_aun_send(&reply, server, 2, net, stn);
+		fsop_aun_send(&reply, 2, f);
 	}
 
 }
@@ -11481,9 +11549,11 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		case 0x16: // Set boot opts
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_set_bootopt(server, reply_port, userid, net, stn, data); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
+/* Moved to new structure
 		case 0x17: // BYE
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_bye(server, reply_port, net, stn, 1); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
+*/
 		case 0x18: // Read user info
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_user_info(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;

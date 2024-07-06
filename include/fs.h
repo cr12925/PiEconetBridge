@@ -596,11 +596,16 @@ struct oscli_list {
  * FSOP Function externs
  */
 
+/*
 extern void fsop_40(struct fsop_data*);
+*/
 
 /* FSOP Definition macro */
 #define FSOP(n) void fsop_##n(struct fsop_data *f)
 #define FSOP_EXTERN(n)	extern void fsop_##n(struct fsop_data *)
+
+FSOP_EXTERN(17);
+FSOP_EXTERN(60);
 
 /* Some externs for transmission from fs.c */
 
@@ -630,12 +635,17 @@ extern void fsop_write_readable_config(struct fsop_data *f);
 
 /* Externs for cross-fertilised functions */
 
-extern void fs_bye(int, unsigned char, unsigned char, unsigned char, unsigned short);
+//extern void fs_bye(int, unsigned char, unsigned char, unsigned char, unsigned short);
+extern void fsop_bye_internal(struct fsop_data *, unsigned short);
 
 /* Externs for interlock open and close from fs.c */
 
 extern short fs_open_interlock(int, unsigned char *, unsigned short, unsigned short);
 extern void fs_close_interlock(int, unsigned short, unsigned short);
+
+/* Externs for tx */
+extern int fsop_aun_send(struct __econet_packet_udp *, int, struct fsop_data *);
+extern int fsop_aun_send_noseq(struct __econet_packet_udp *, int, struct fsop_data *);
 
 /* Some externs from econet-hpbridge.c */
 
