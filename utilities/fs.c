@@ -3410,10 +3410,8 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 
 	memset (&fsops, 0, sizeof(fsops));
 
-	fsops[0x60].flags = FSOP_F_LOGGEDIN | FSOP_F_SYST;
-	fsops[0x60].func = fsop_60;
+	FSOP_SET (60, (FSOP_F_LOGGEDIN | FSOP_F_SYST)); /* PiBridge functions */
 
-	//FSOP_SETLIST(60, FSOP_F_LOGGEDIN | FSOP_F_SYST);
 
 // Seven bit bodge test harness
 

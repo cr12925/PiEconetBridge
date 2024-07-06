@@ -564,9 +564,8 @@ struct fsop_list {
 /* Macro to register handler function */
 
 /* Note, n is a two-digit hex number */
-
-#define FSOP_SETLIST(n,f)	fsops[0x#n].flags = (f);\
-				fsops[0x#n].func = fsop_##n
+#
+#define FSOP_SET(h,f)      fsops[0x##h] = (struct fsop_list) { .flags = f, .func = fsop_##h }
 
 /* 
  * Struct for passing parameters to an oscli_func
