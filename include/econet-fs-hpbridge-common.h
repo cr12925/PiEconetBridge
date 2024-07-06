@@ -16,3 +16,5 @@
 #define FS_CONFIG_PIFSPERMS	0x40
 #define FS_CONFIG_MASKDIRWRR	0x80
 
+extern void fs_setup(void);
+
