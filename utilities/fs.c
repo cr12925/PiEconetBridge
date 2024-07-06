@@ -1112,6 +1112,7 @@ void fsop_build_data (struct fsop_data *param, uint8_t server, uint8_t net, uint
 	param->server->discs = &(fs_discs[server][0]);
 	param->server->files = &(fs_files[server][0]);
 	param->server->dirs = &(fs_dirs[server][0]);
+	param->server->users = &(users[server][0]);
 	param->server->enabled = &(fs_enabled[server]);
 
 }
@@ -1342,6 +1343,32 @@ int fs_alphacasesort(const struct dirent **d1, const struct dirent **d2)
 	//fs_debug (0, 3, "fs_alphacasesort() comparing '%s' with '%s' and returning %d", (*d1)->d_name, (*d2)->d_name, result);
 
 	return result;
+}
+
+/* 
+ * fs_copy_terminate(unsigned char *dest, unsigned char *src, uint16_t maxlen)
+ *
+ * Copy a string from src to dst until we come across a space, at which
+ * point we terminate it with the terminator character, up to
+ * maxlen.
+ *
+ */
+
+uint16_t fs_copy_terminate(unsigned char *dst, unsigned char *src, uint16_t maxlen, uint8_t term)
+{
+
+	uint16_t	count;
+
+	while (count < maxlen && *(src+count) != 0x20)
+	{
+		*(dst+count) = *(src+count);
+		count++;
+	}
+
+	*(dst+(count++)) = term;
+
+	return count;
+
 }
 
 // Often Econet clients send strings which are terminated with 0x0d. This copies them so we don't repeat the routine.
@@ -3439,11 +3466,7 @@ uint8_t fs_is_active(int fs)
 // Initialize a fileserver. Return its index into fs_config etc.
 // unless fs_number is >=0, in which case initialize it with that fs number.
 
-#ifndef BRIDGE_V2
-int fs_initialize(unsigned char net, unsigned char stn, char *serverparam)
-#else
 int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char stn, char *serverparam, int fs_number)
-#endif
 {
 	
 	DIR *d;
@@ -3471,13 +3494,6 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 	fs_parse_cmd ("DELETE        MYFILE   \r", "DELETE", 3, &param);
 #endif
 
-	/* Initialize list of tabled FSOP handler functions */
-
-	memset (&fsops, 0, sizeof(fsops));
-
-	FSOP_SET (17, (FSOP_F_LOGGEDIN)); /* Bye */
-
-	FSOP_SET (60, (FSOP_F_LOGGEDIN | FSOP_F_SYST)); /* PiBridge functions */
 
 
 // Seven bit bodge test harness
@@ -3977,9 +3993,7 @@ void fs_shutdown (int fs)
 {
 	struct fsop_data f;
 
-	f.server = &(fs_stations[fs]);
-	f.server->active = &(active[fs][0]);
-	f.server->enabled = &(fs_enabled[fs]);
+	fsop_build_data(&f, fs, 0, 0);
 
 	fsop_shutdown (&f);
 }
@@ -3997,9 +4011,9 @@ void fsop_shutdown (struct fsop_data *f)
 	
 	for (count = 0; count < ECONET_MAX_FS_ACTIVE; count++)
 	{
-		if (f->server->active[count].stn) // In use
+		if (f->server->actives[count].stn) // In use
 		{
-			fs_bye (f->server_id, 0, f->server->active[count].net, f->server->active[count].stn, 0);
+			fs_bye (f->server_id, 0, f->server->actives[count].net, f->server->actives[count].stn, 0);
 		}
 	}
 
@@ -7820,6 +7834,7 @@ void fs_read_logged_on_users(int server, unsigned short reply_port, unsigned cha
 	fs_aun_send (&r, server, ptr, net, stn);
 }
 
+/* Now in separate file
 // Read user information
 void fs_read_user_info(int server, unsigned short reply_port, unsigned char net, unsigned char stn, int active_id, unsigned char *data, int datalen)
 {
@@ -7854,6 +7869,7 @@ void fs_read_user_info(int server, unsigned short reply_port, unsigned char net,
 			r.p.data[3] = active[server][count].stn;
 			r.p.data[4] = active[server][count].net;
 
+
 			fs_aun_send(&r, server, 5, net, stn);
 			break;
 		
@@ -7865,7 +7881,9 @@ void fs_read_user_info(int server, unsigned short reply_port, unsigned char net,
 		fs_error(server, reply_port, net, stn, 0xBC, "No such user or not logged on");
 
 }
+*/
 
+/*
 // Read fileserver version number
 void fs_read_version(int server, unsigned short reply_port, unsigned char net, unsigned char stn, unsigned char *data, int datalen)
 {
@@ -7883,6 +7901,7 @@ void fs_read_version(int server, unsigned short reply_port, unsigned char net, u
 	fs_aun_send(&r, server, strlen(FS_VERSION_STRING)+3, net, stn);
 
 }
+*/
 
 // Read catalogue header
 void fs_cat_header(int server, unsigned short reply_port, int active_id, unsigned char net, unsigned char stn, unsigned char *data, int datalen)
@@ -10022,7 +10041,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 	param.stn = stn;
 	param.active = (active_id >= 0 ? &(active[server][active_id]) : NULL);
 	param.active_id = active_id;
-	param.user = (userid >= 0 ? &(users[server][userid]) : NULL);
+	param.user = (active_id >= 0 ? &(users[server][userid]) : NULL);
 	param.user_id = userid;
 	param.server = &(fs_stations[server]);
 	param.server_id = server;
@@ -10031,6 +10050,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 	param.server->files = &(fs_files[server][0]);
 	param.server->dirs = &(fs_dirs[server][0]);
 	param.server->enabled = &(fs_enabled[server]);
+	param.server->users = &(users[server][0]);
+	param.server->actives = &(active[server][0]);
 	param.data = data;
 	param.datalen = datalen;
 	param.ctrl = ctrl;
@@ -11553,13 +11574,13 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		case 0x17: // BYE
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_bye(server, reply_port, net, stn, 1); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
-*/
 		case 0x18: // Read user info
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_user_info(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
 		case 0x19: // Read FS version
 			fs_read_version(server, reply_port, net, stn, data, datalen);
 			break;
+*/
 		case 0x1a: // Read free space
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_free(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
@@ -11615,6 +11636,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				fs_reply_success(server, reply_port, net, stn, 0, 0);
 			}
 			break;
+/* Moved to new structure
 		case 0x20: // Read client ID
 			if (fs_stn_logged_in(server, net, stn) >= 0)
 			{
@@ -11631,6 +11653,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				
 				fs_aun_send (&reply, server, counter+1, net, stn);
 			}
+*/
 /* NOT YET IMPLEMENTED
 		case 0x21: if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_user_info_extended_multi(server, reply_port, net, stn, *(data+5), *(data+6)); break;
 		case 0x22: if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_user_info_extended_single(server, reply_port, net, stn, data+5); break;
@@ -12051,3 +12074,27 @@ uint8_t fs_writedisclist (uint8_t server, unsigned char *addr)
 	return ((found/2) + ((found%2 == 0) ? 0 : 1));
 }
 #endif
+
+/*
+ * fs_setup
+ *
+ * Called by econet-hpbridge.c to get the 
+ * once-off stuff set up in the fileserver
+ *
+ */
+
+void fs_setup(void)
+{
+
+	/* Initialize list of tabled FSOP handler functions */
+
+	memset (&fsops, 0, sizeof(fsops));
+
+	FSOP_SET (17, (FSOP_F_LOGGEDIN)); /* Bye */
+	FSOP_SET (18, (FSOP_F_LOGGEDIN)); /* Read user information */
+	FSOP_SET (19, (FSOP_F_NONE)); /* Read FS Version */
+	FSOP_SET (20, (FSOP_F_LOGGEDIN)); /* Read Client Information */
+	FSOP_SET (60, (FSOP_F_LOGGEDIN | FSOP_F_SYST)); /* PiBridge functions */
+
+}
+

@@ -134,7 +134,8 @@ struct __fs_station {
 	struct __fs_disc	*discs; // Pointer to discs
 	struct __fs_file	*files; // Pointer to open files
 	struct __fs_dir		*dirs; // Pointer to open dirs
-	struct __fs_active	*active; // Pointer to active structs
+	struct __fs_active	*actives; // Pointer to actives
+	struct __fs_user	*users; // Pointer to (effectively) the password data
 	uint8_t		*enabled; // Pointer to entry in fs_enabled
 };
 
@@ -604,8 +605,9 @@ extern void fsop_40(struct fsop_data*);
 #define FSOP(n) void fsop_##n(struct fsop_data *f)
 #define FSOP_EXTERN(n)	extern void fsop_##n(struct fsop_data *)
 
-FSOP_EXTERN(17);
-FSOP_EXTERN(60);
+/* Some bog standard reply packet stuff */
+
+#define FS_REPLY_DATA(c)	struct __econet_packet_udp reply = { .p.port = FSOP_REPLY_PORT, .p.ctrl = c, .p.ptype = ECONET_AUN_DATA }
 
 /* Some externs for transmission from fs.c */
 
@@ -619,6 +621,7 @@ extern void fs_debug (uint8_t, uint8_t, char *, ...);
 
 /* Externals for string manipulation from fs.c */
 extern void fs_copy_to_cr(unsigned char *, unsigned char *, unsigned short);
+extern uint16_t fs_copy_terminate(unsigned char *, unsigned char *, uint16_t, uint8_t);
 extern short fs_get_uid(int, char *);
 
 /* Externs for fileserver control from fs.c */
@@ -678,4 +681,8 @@ extern float timediffstart(void);
 
 /* List of externs for FSOP functions */
 
+FSOP_EXTERN(17);
+FSOP_EXTERN(18);
+FSOP_EXTERN(19);
+FSOP_EXTERN(20);
 FSOP_EXTERN(60);
