@@ -1357,7 +1357,7 @@ int fs_alphacasesort(const struct dirent **d1, const struct dirent **d2)
 uint16_t fs_copy_terminate(unsigned char *dst, unsigned char *src, uint16_t maxlen, uint8_t term)
 {
 
-	uint16_t	count;
+	uint16_t	count = 0;
 
 	while (count < maxlen && *(src+count) != 0x20)
 	{
