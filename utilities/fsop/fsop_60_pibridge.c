@@ -263,11 +263,11 @@ FSOP(60)
 
                         for (count = 0; count < ECONET_MAX_FS_ACTIVE; count++)
                         {
-                                if (    (arg2 == 2 && f->server->active[count].net == l_net && f->server->active[count].stn == l_stn)
-                                ||      (arg2 < 2 && f->server->active[count].userid == uid)
+                                if (    (arg2 == 2 && f->server->actives[count].net == l_net && f->server->actives[count].stn == l_stn)
+                                ||      (arg2 < 2 && f->server->actives[count].userid == uid)
                                 )
                                 {
-                                        fs_bye(f->server_id, 0, f->server->active[count].net, f->server->active[count].stn, 0); // Silent bye
+                                        fsop_bye_internal(f, 0);
                                         loggedoff++;
                                 }
                         }
