@@ -650,6 +650,9 @@ extern void fs_close_interlock(int, unsigned short, unsigned short);
 extern int fsop_aun_send(struct __econet_packet_udp *, int, struct fsop_data *);
 extern int fsop_aun_send_noseq(struct __econet_packet_udp *, int, struct fsop_data *);
 
+/* Externs for time / date */
+extern void fs_date_to_two_bytes(unsigned short, unsigned short, unsigned short, unsigned char *, unsigned char *);
+
 /* Some externs from econet-hpbridge.c */
 
 extern uint32_t get_local_seq(unsigned char, unsigned char);
@@ -681,6 +684,7 @@ extern float timediffstart(void);
 
 /* List of externs for FSOP functions */
 
+FSOP_EXTERN(10);
 FSOP_EXTERN(17);
 FSOP_EXTERN(18);
 FSOP_EXTERN(19);

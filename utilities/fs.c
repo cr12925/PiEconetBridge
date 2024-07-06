@@ -7725,6 +7725,7 @@ void fs_read_discs(int server, unsigned short reply_port, unsigned char net, uns
 
 }
 
+/* Moved to new structure
 // Read time
 void fs_read_time(int server, unsigned short reply_port, unsigned char net, unsigned char stn, int active_id, unsigned char *data, int datalen)
 {
@@ -7757,6 +7758,7 @@ void fs_read_time(int server, unsigned short reply_port, unsigned char net, unsi
 	fs_aun_send(&r, server, 7, net, stn);
 
 }
+*/
 
 // Read logged on users
 void fs_read_logged_on_users(int server, unsigned short reply_port, unsigned char net, unsigned char stn, int active_id, unsigned char *data, int datalen)
@@ -11548,9 +11550,11 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		case 0x0f: // Read logged on users
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_logged_on_users(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
+/* moved to new structure
 		case 0x10: // Read time
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_time(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
+*/
 		case 0x11: // Read end of file status 
 			//if (fs_stn_logged_in(server, net, stn) >= 0) fs_eof(server, reply_port, net, stn, active_id, *(data+2)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_eof(server, reply_port, net, stn, active_id, FS_DIVHANDLE(*(data+5))); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?"); // this used to be data+2 for the handle, but I reckon it's really meant to be byte 5.
@@ -12090,6 +12094,7 @@ void fs_setup(void)
 
 	memset (&fsops, 0, sizeof(fsops));
 
+	FSOP_SET (10, (FSOP_F_NONE)); /* Read time */
 	FSOP_SET (17, (FSOP_F_LOGGEDIN)); /* Bye */
 	FSOP_SET (18, (FSOP_F_LOGGEDIN)); /* Read user information */
 	FSOP_SET (19, (FSOP_F_NONE)); /* Read FS Version */
