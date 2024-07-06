@@ -9122,6 +9122,8 @@ int main (int argc, char **argv)
 	/* Set up some initial config
 	*/
 
+	fs_setup();
+
 	max_fds.rlim_cur = max_fds.rlim_max = 0;
 
 	threads_started = threads_ready = 0;
