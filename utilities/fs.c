@@ -553,34 +553,7 @@ struct mdfs_user {
  * List of FSOps in our new list form
  */
 
-struct fsop_list fsops[255]; /* = {
-	{	0x00, 	FSOP_F_NONE,				fsop_00_oscli },
-	{	0x1f,	FSOP_F_LOGGEDIN | FSOP_F_SYST, 		fsop_1f_set_free },
-	{	0x40,	FSOP_F_LOGGEDIN | FSOP_F_SYST, 		fsop_40 },
-	{	0xFF,	FSOP_F_NONE,	NULL } // Rogue to end (it's the null function, not the 0xff, though either will probably do) //
-};
-*/
-
-/* 
- * List of FSOp 0x00 OSCLI commands
- * in our new list form
- */
-
-struct oscli_list oscli[] = {
-/*	{	"BYE",			0,	fs_oscli_bye},
-	{	"CDIR",			2,	fs_oscli_cdir},
-	{	"DIR",			2,	fs_oscli_dir},
-	{	"I AM",			2,	fs_oscli_iam},
-	{	"IAM",			3,	fs_oscli_iam},
-	{	"LIB",			2,	fs_oscli_lib},
-	{	"LOGIN",		4,	fs_oscli_iam},
-	{	"LOGON",		4,	fs_oscli_iam},
-	{	"LOGOFF",		4,	fs_oscli_logoff},
-*/
-
-	{	NULL,			0,	NULL}
-};
-
+struct fsop_list fsops[255]; 
 
 regex_t r_pathname, r_discname, r_wildcard;
 
@@ -6253,6 +6226,8 @@ void fs_free(int server, unsigned short reply_port, unsigned char net, unsigned 
 }
 */
 
+/* Moved to new structure
+ *
 // Return error specifying who owns a file
 void fs_owner(int server, unsigned short reply_port, int active_id, uint8_t relative_to, unsigned char net, unsigned char stn, unsigned char *command)
 {
@@ -6302,7 +6277,7 @@ void fs_owner(int server, unsigned short reply_port, int active_id, uint8_t rela
 
 	}
 }
-
+*/
 // Change ownership
 void fs_chown(int server, unsigned short reply_port, int active_id, unsigned char net, unsigned char stn, unsigned char *command)
 {
@@ -10020,7 +9995,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 	unsigned int userid;
 	int active_id;
 
-	struct fsop_data	param; 	/* Holds data to pass to our new structured list of fsop handlers */
+	struct fsop_data	fsop_param; 	/* Holds data to pass to our new structured list of fsop handlers */
 
 	// If server disabled, return without doing anything
 	
@@ -10071,43 +10046,43 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 	/* Set up 'param' */
 
-	param.net = net;
-	param.stn = stn;
-	param.active = (active_id >= 0 ? &(active[server][active_id]) : NULL);
-	param.active_id = active_id;
-	param.user = (active_id >= 0 ? &(users[server][userid]) : NULL);
-	param.user_id = userid;
-	param.server = &(fs_stations[server]);
-	param.server_id = server;
-	param.server->config = &(fs_config[server]);
-	param.server->discs = &(fs_discs[server][0]);
-	param.server->files = &(fs_files[server][0]);
-	param.server->dirs = &(fs_dirs[server][0]);
-	param.server->enabled = &(fs_enabled[server]);
-	param.server->users = &(users[server][0]);
-	param.server->actives = &(active[server][0]);
-	param.data = data;
-	param.datalen = datalen;
-	param.ctrl = ctrl;
-	param.flags = 0; // Initialize, but it'll be copied from the array
-	param.reply_port = *data;
-	param.urd = *(data+2); // NB sometimes this isn't the root handle and is used for something else (fsop 1,2,5,10,11 we think)
-	param.cwd = *(data+3);
-	param.lib = *(data+4);
+	fsop_param.net = net;
+	fsop_param.stn = stn;
+	fsop_param.active = (active_id >= 0 ? &(active[server][active_id]) : NULL);
+	fsop_param.active_id = active_id; // Ultimately in the new structure, this should never be needed because we have the pointer above
+	fsop_param.user = (active_id >= 0 ? &(users[server][userid]) : NULL);
+	fsop_param.user_id = userid;
+	fsop_param.server = &(fs_stations[server]);
+	fsop_param.server_id = server;
+	fsop_param.server->config = &(fs_config[server]);
+	fsop_param.server->discs = &(fs_discs[server][0]);
+	fsop_param.server->files = &(fs_files[server][0]);
+	fsop_param.server->dirs = &(fs_dirs[server][0]);
+	fsop_param.server->enabled = &(fs_enabled[server]);
+	fsop_param.server->users = &(users[server][0]);
+	fsop_param.server->actives = &(active[server][0]);
+	fsop_param.data = data;
+	fsop_param.datalen = datalen;
+	fsop_param.ctrl = ctrl;
+	fsop_param.flags = 0; // Initialize, but it'll be copied from the array
+	fsop_param.reply_port = *data;
+	fsop_param.urd = *(data+2); // NB sometimes this isn't the root handle and is used for something else (fsop 1,2,5,10,11 we think)
+	fsop_param.cwd = *(data+3);
+	fsop_param.lib = *(data+4);
 
 	/* Handle new FSOP list */
 
 	if (fsops[fsop].func) /* There's a registration */
 	{
 
-		if ((fsops[fsop].flags & FSOP_F_LOGGEDIN) && !param.user) // Requires log in but not logged in
-			fsop_error (&param, 0xBF, "Who are you?");
-		else if ((fsops[fsop].flags & FSOP_F_SYST) && !(param.user->priv & FS_PRIV_SYSTEM))
-			fsop_error (&param, 0xFF, "Insufficient privilege");
-		else if ((fsops[fsop].flags & FSOP_F_MDFS) && !(param.server->config->fs_sjfunc))
-			fsop_error (&param, 0xFF, "Unknown operation");
+		if ((fsops[fsop].flags & FSOP_F_LOGGEDIN) && !fsop_param.user) // Requires log in but not logged in
+			fsop_error (&fsop_param, 0xBF, "Who are you?");
+		else if ((fsops[fsop].flags & FSOP_F_SYST) && !(fsop_param.user->priv & FS_PRIV_SYSTEM))
+			fsop_error (&fsop_param, 0xFF, "Insufficient privilege");
+		else if ((fsops[fsop].flags & FSOP_F_MDFS) && !(fsop_param.server->config->fs_sjfunc))
+			fsop_error (&fsop_param, 0xFF, "Unknown operation");
 		else
-			(fsops[fsop].func)(&param);
+			(fsops[fsop].func)(&fsop_param);
 
 		return;
 
@@ -10163,6 +10138,30 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			int counter;
 			char *param;
 
+			struct 		oscli_params p[10]; // Max params should be less than 10
+			uint8_t		num_params;
+			struct		fsop_00_cmd	*cmd;
+
+			/* New structure - parse the command & params */
+
+			num_params = fsop_00_oscli_parse(data+5, &p[0]);
+
+			/* See if the command is in the new structure */
+			if (num_params > 0 && (cmd = fsop_00_match(data+5))) /* Yes, assignment from fsop_00_match */
+			{
+				if ((cmd->flags & FSOP_00_LOGGEDIN) && (!fsop_param.user))
+					fsop_error (&fsop_param, 0xff, "Who are you?");
+				else if ((cmd->flags & FSOP_00_SYSTEM) && !(fsop_param.user->priv & FS_PRIV_SYSTEM))
+					fsop_error (&fsop_param, 0xff, "Insufficient privilege");
+				else if ((cmd->flags & FSOP_00_BRIDGE) && !(fsop_param.user->priv2 & FS_PRIV2_BRIDGE))
+					fsop_error (&fsop_param, 0xff, "No bridge privilege");
+				else
+					(cmd->func)(&fsop_param, &p[0], num_params);
+
+				return;
+			}
+			// else { barf, later }
+			
 			counter = 5;
 			while ((*(data+counter) != 0x0d) && (counter < datalen))
 			{
@@ -10410,9 +10409,11 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			//else if (!strncasecmp("CHOWN ", (const char *) command, 6))
 			else if (fs_parse_cmd(command, "CHOWN", 3, &param) || fs_parse_cmd(command, "SETOWNER", 5, &param))
 				fs_chown(server, reply_port, active_id, net, stn, param);
+/* Moved to new structure
 			//else if (!strncasecmp("OWNER ", (const char *) command, 6))
 			else if (fs_parse_cmd(command, "OWNER", 3, &param))
 				fs_owner(server, reply_port, active_id, *(data+3), net, stn, param);
+*/
 			else if (fs_parse_cmd(command, "BRIDGEVER", 7, &param))
 			{
 				fs_error(server, reply_port, net, stn, 0xFF, "Ver " GIT_VERSION);
@@ -12141,6 +12142,10 @@ void fs_setup(void)
 	FSOP_SET (20, (FSOP_F_LOGGEDIN)); /* Read Client Information */
 	FSOP_SET (40, (FSOP_F_LOGGEDIN | FSOP_F_MDFS)); /* Read SJ Information - Not yet implemented */
 	FSOP_SET (60, (FSOP_F_LOGGEDIN | FSOP_F_SYST)); /* PiBridge functions */
+
+	/* Initialize known command list */
+
+	FSOP_OSCLI(OWNER,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM),1,1,3);
 
 }
 

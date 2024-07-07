@@ -572,35 +572,47 @@ struct fsop_list {
 /* 
  * Struct for passing parameters to an oscli_func
  */
+/* FSOP Oscli parameters struct */
 
-struct oscli_param {
-	unsigned char *		param; /* pointer into packet data */
-	uint8_t			len; /* Handy, saves strlen(). Packet data should have been modified before calling to put nulls in place of spaces */
-	struct oscli_param *	next; /* Next parameter or null */
+struct oscli_params {
+        uint8_t         op_s; /* Start pointer in string */
+        uint8_t         op_e; /* End pointer in string + 1 (i.e. the trailing space) */
 };
 
-/* 
- * oscli_list struct
- *
- * Hold list of known commands and their minimum abbreviated length
- *
- */
+/* FSOP Oscli command list for new structure */
 
-typedef void (*oscli_func) (struct oscli_param *);
+typedef void (*oscli_func) (struct fsop_data *, struct oscli_params *, uint8_t);
 
-struct oscli_list {
-	unsigned char *		command;
-	uint8_t			minlength; /* 0 means no abbreviation */
-	oscli_func		func;
+struct fsop_00_cmd {
+        unsigned char *         cmd;    /* Command in full. If there has to be a space in the command, then use 0x80 and it'll not be parsed as a space */
+        uint8_t                 flags;  /* See below - bitwise OR */
+        uint8_t                 p_min;  /* Minimum number of parameters */
+        uint8_t                 p_max;  /* Maximum number of parameters */
+        uint8_t                 abbrev; /* Minimum characters for abbreviation */
+	oscli_func		func;   /* Handler for this command */
+        struct fsop_00_cmd      *next;
 };
 
-/*
- * FSOP Function externs
- */
+/* FSOP Oscli macros */
 
-/*
-extern void fsop_40(struct fsop_data*);
-*/
+#define FSOP_00(n) void fsop_00_##n(struct fsop_data *f, struct oscli_params *p, uint8_t num)
+#define FSOP_00_EXTERN(n) extern void fsop_00_##n(struct fsop_data *, struct oscli_params *, uint8_t)
+#define FSOP_OSCLI(c,f,m,max,abbr) fsop_00_addcmd(fsop_00_mkcmd(#c,f,m,max,abbr,fsop_00_##c))
+
+#define FSOP_00_ANON	0x00 /* Anyone can do this */
+#define FSOP_00_LOGGEDIN 0x01 /* Only if user is logged in */
+#define FSOP_00_SYSTEM	0x02 /* Only if user is syst */
+#define FSOP_00_32BIT	0x04 /* Only if user is on a 32 bit client */
+#define FSOP_00_BRIDGE 0x08 /* Only if user has bridge privileges */
+
+/* Some externs for functions within fsop_00_oscli.c which manage the command list */
+
+extern struct fsop_00_cmd * fsop_00_match (unsigned char *); /* Tells us whether a command exists in the list, so we use new structure not old. Feed the OSCLI command (abbreviated) in here and you'll get a pointer to the struct or NULL if not found */
+extern void fsop_00_addcmd (struct fsop_00_cmd *); /* Add the malloced command with its parameters to the list. */
+extern struct fsop_00_cmd * fsop_00_mkcmd(unsigned char *, uint8_t, uint8_t, uint8_t, uint8_t, oscli_func);
+extern uint8_t fsop_00_oscli_parse(unsigned char *, struct oscli_params *);
+extern void fsop_00_oscli_extract(unsigned char *, struct oscli_params *, uint8_t, char *, uint8_t);
+
 
 /* FSOP Definition macro */
 #define FSOP(n) void fsop_##n(struct fsop_data *f)
@@ -609,6 +621,10 @@ extern void fsop_40(struct fsop_data*);
 /* Some bog standard reply packet stuff */
 
 #define FS_REPLY_DATA(c)	struct __econet_packet_udp reply = { .p.port = FSOP_REPLY_PORT, .p.ctrl = c, .p.ptype = ECONET_AUN_DATA, .p.data[0] = 0, .p.data[1] = 0 }
+
+/*
+ * FSOP Function externs
+ */
 
 /* Some externs for transmission from fs.c */
 
@@ -666,10 +682,15 @@ extern int8_t get_printer(unsigned char, unsigned char, char*);
 
 // printer information routines in econet-bridge.c
 extern uint8_t get_printer_info (unsigned char, unsigned char, uint8_t, char *, char *, uint8_t *, uint8_t *, short *);
-extern uint8_t set_printer_info (unsigned char, unsigned char, uint8_t, char *, char *, uint8_t, short);
+extern uint8_t set_printer_info (unsigned char, unsigned char, uint8_t, char *, char *, uint8_t, ushort);
 extern uint8_t get_printer_total (unsigned char, unsigned char);
 extern void send_printjob (char *, uint8_t, uint8_t, uint8_t, uint8_t, char *, char *, char *, char *);
 extern char * get_user_print_handler (uint8_t, uint8_t, uint8_t, char *, char *);
+
+// memory allocation in the bridge
+
+extern void * eb_malloc(char *, int, char *, char *, size_t);
+extern void eb_free (char *, int, char *, char *, void *);
 
 // Server timing
 extern float timediffstart(void);
@@ -696,3 +717,8 @@ FSOP_EXTERN(19);
 FSOP_EXTERN(20);
 FSOP_EXTERN(40);
 FSOP_EXTERN(60);
+
+/* List of OSCLI externs */
+
+FSOP_00_EXTERN(OWNER);
+
