@@ -553,6 +553,7 @@ extern struct load_queue *fs_load_queue;
 #define FSOP_F_LOGGEDIN 	0x01
 #define FSOP_F_SYST	0x02
 #define FSOP_F_32BIT	0x04
+#define FSOP_F_MDFS	0x08 /* Only works if MDFS functions enabled */
 #define FSOP_F_NONE	0x00
 
 typedef void (*fsop_func) (struct fsop_data *);
@@ -607,7 +608,7 @@ extern void fsop_40(struct fsop_data*);
 
 /* Some bog standard reply packet stuff */
 
-#define FS_REPLY_DATA(c)	struct __econet_packet_udp reply = { .p.port = FSOP_REPLY_PORT, .p.ctrl = c, .p.ptype = ECONET_AUN_DATA }
+#define FS_REPLY_DATA(c)	struct __econet_packet_udp reply = { .p.port = FSOP_REPLY_PORT, .p.ctrl = c, .p.ptype = ECONET_AUN_DATA, .p.data[0] = 0, .p.data[1] = 0 }
 
 /* Some externs for transmission from fs.c */
 
@@ -650,6 +651,9 @@ extern void fs_close_interlock(int, unsigned short, unsigned short);
 extern int fsop_aun_send(struct __econet_packet_udp *, int, struct fsop_data *);
 extern int fsop_aun_send_noseq(struct __econet_packet_udp *, int, struct fsop_data *);
 
+/* Macro to enable easy tx of a standard FS_REPLY_DATA block */
+#define fsop_send(n)	fsop_aun_send(&reply, (n), f)
+
 /* Externs for time / date */
 extern void fs_date_to_two_bytes(unsigned short, unsigned short, unsigned short, unsigned char *, unsigned char *);
 
@@ -685,8 +689,10 @@ extern float timediffstart(void);
 /* List of externs for FSOP functions */
 
 FSOP_EXTERN(10);
+FSOP_EXTERN(1a);
 FSOP_EXTERN(17);
 FSOP_EXTERN(18);
 FSOP_EXTERN(19);
 FSOP_EXTERN(20);
+FSOP_EXTERN(40);
 FSOP_EXTERN(60);

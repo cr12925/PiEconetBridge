@@ -6179,7 +6179,13 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 	
 }
 
-// Change ownership
+/*
+ * Read free space.
+ *
+ * Now done in new structure
+ */
+
+/*
 void fs_free(int server, unsigned short reply_port, unsigned char net, unsigned char stn, int active_id, unsigned char *data, int datalen)
 {
 
@@ -6245,6 +6251,8 @@ void fs_free(int server, unsigned short reply_port, unsigned char net, unsigned 
 
 	
 }
+*/
+
 // Return error specifying who owns a file
 void fs_owner(int server, unsigned short reply_port, int active_id, uint8_t relative_to, unsigned char net, unsigned char stn, unsigned char *command)
 {
@@ -10037,6 +10045,30 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 	active_id = fs_stn_logged_in(server, net, stn);
 	userid = fs_find_userid(server, net, stn);
 
+	// Only do this if the FS Call actually presents file handles - some of them don't and we hadn't spotted that in earlier versions
+
+	if ((fsop != 8) && (fsop != 9)) // 8 & 9 are Getbyte / Putbyte which do not pass the usual three handles in the tx block
+        {
+                /* Modify the three handles that are in every packet - assuming the packet is long enough - if we are not in manyhandle mode */
+
+                if (!fs_config[server].fs_manyhandle) // NFS 3 / BBC B compatible handles
+                {
+                        if (!(fsop == 1 || fsop == 2 || (fsop == 5) || (fsop >=10 && fsop <= 11))) if (datalen >= 3) *(data+2) = FS_DIVHANDLE(*(data+2)); // Don't modify for LOAD, SAVE, RUNAS, (GETBYTE, PUTBYTE - not in this loop), GETBYTES, PUTBYTES - all of which either don't have the usual three handles in the tx block or use the URD for something else
+                        if (datalen >= 4) *(data+3) = FS_DIVHANDLE(*(data+3));
+                        if (datalen >= 5) *(data+4) = FS_DIVHANDLE(*(data+4));
+                }
+
+                if (active_id >= 0) // If logged in, update handles from the incoming packet
+                {
+                        if (!(fsop == 1 || fsop == 2 || (fsop >= 8 && fsop <= 11))) active[server][active_id].root = *(data+2);
+                        if (datalen >= 4) active[server][active_id].current = *(data+3);
+                        if (datalen >= 5) active[server][active_id].lib = *(data+4);
+
+                        if (fsop != 0x09) // Not a putbyte
+                                active[server][active_id].sequence = 2; // Reset so that next putbyte will be taken to be in sequence.
+                }
+        }
+
 	/* Set up 'param' */
 
 	param.net = net;
@@ -10072,12 +10104,16 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			fsop_error (&param, 0xBF, "Who are you?");
 		else if ((fsops[fsop].flags & FSOP_F_SYST) && !(param.user->priv & FS_PRIV_SYSTEM))
 			fsop_error (&param, 0xFF, "Insufficient privilege");
+		else if ((fsops[fsop].flags & FSOP_F_MDFS) && !(param.server->config->fs_sjfunc))
+			fsop_error (&param, 0xFF, "Unknown operation");
 		else
 			(fsops[fsop].func)(&param);
 
 		return;
 
 	}
+
+	/* This bit will go when everything's in the new structure */
 
 	if (fsop != 0 && fsop != 0x0e && fsop != 0x19) // Things we can do when not logged in
 	{
@@ -10094,11 +10130,12 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		}
 	}
 
+/* Moved above
 	// Only do this if the FS Call actually presents file handles - some of them don't and we hadn't spotted that in earlier versions 
 	
 	if ((fsop != 8) && (fsop != 9)) // 8 & 9 are Getbyte / Putbyte which do not pass the usual three handles in the tx block
 	{
-		/* Modify the three handles that are in every packet - assuming the packet is long enough - if we are not in manyhandle mode */
+		// Modify the three handles that are in every packet - assuming the packet is long enough - if we are not in manyhandle mode 
 	
 		if (!fs_config[server].fs_manyhandle) // NFS 3 / BBC B compatible handles
 		{
@@ -10117,7 +10154,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				active[server][active_id].sequence = 2; // Reset so that next putbyte will be taken to be in sequence.
 		}
 	}
-
+*/
 	switch (fsop)
 	{
 		case 0: // OSCLI
@@ -11584,10 +11621,10 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		case 0x19: // Read FS version
 			fs_read_version(server, reply_port, net, stn, data, datalen);
 			break;
-*/
 		case 0x1a: // Read free space
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_free(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
+*/
 		case 0x1b: // Create directory ??
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_cdir(server, reply_port, active_id, net, stn, *(data+3), (data+6)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
@@ -11667,6 +11704,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			}
 			break;
 */
+/* Moved to new structure 
 		case 0x40: // Read account information (SJ Only) - i.e. free space on a particular disc
 			{
 				if (fs_stn_logged_in(server, net, stn) >= 0)
@@ -11706,6 +11744,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 			}
 			break;
+*/
 		case 0x41: // Read/write system information (SJ Only)
 			{
 				// Read operations are unprivileged; write operations are privileged
@@ -12095,10 +12134,12 @@ void fs_setup(void)
 	memset (&fsops, 0, sizeof(fsops));
 
 	FSOP_SET (10, (FSOP_F_NONE)); /* Read time */
+	FSOP_SET (1a, (FSOP_F_LOGGEDIN)); /* Read free space */
 	FSOP_SET (17, (FSOP_F_LOGGEDIN)); /* Bye */
 	FSOP_SET (18, (FSOP_F_LOGGEDIN)); /* Read user information */
 	FSOP_SET (19, (FSOP_F_NONE)); /* Read FS Version */
 	FSOP_SET (20, (FSOP_F_LOGGEDIN)); /* Read Client Information */
+	FSOP_SET (40, (FSOP_F_LOGGEDIN | FSOP_F_MDFS)); /* Read SJ Information - Not yet implemented */
 	FSOP_SET (60, (FSOP_F_LOGGEDIN | FSOP_F_SYST)); /* PiBridge functions */
 
 }

@@ -45,7 +45,9 @@ FSOP(18)
                 {
 
                         unsigned short userid = f->server->actives[count].userid;
-                        reply.p.data[0] = reply.p.data[1] = 0;
+
+                        // reply.p.data[0] = reply.p.data[1] = 0; // No longer required - macro does it above
+			
                         if (f->server->users[userid].priv & FS_PRIV_SYSTEM)
                                 reply.p.data[2] = 0x40; // This appears to be what L3 does for a privileged user
                         else    reply.p.data[2] = 0;
@@ -53,7 +55,6 @@ FSOP(18)
                         reply.p.data[3] = f->server->actives[count].stn;
                         reply.p.data[4] = f->server->actives[count].net;
 
-			//fprintf (stderr, "Found at %d.%d, priv %d\n", reply.p.data[4], reply.p.data[3], reply.p.data[2]);
                         fsop_aun_send(&reply, 5, f);
 			return;
                 }
