@@ -13,7 +13,7 @@ $(fsop_objects): %.o: %.c
 	cc -g -DGIT_VERSION=\"$(GIT_VERSION)\" -I../include -c $< -Wall -Wno-pointer-sign -o $@
 
 econet-hpbridge.o:	Makefile econet-hpbridge.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-pserv.h
-	cc -g -DGIT_VERSION=\"$(GIT_VERSION)\" -c econet-hpbridge.c -Wall
+	cc -g -I../include -DGIT_VERSION=\"$(GIT_VERSION)\" -c econet-hpbridge.c -Wall
 
 fsv2.o: Makefile fs.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/fs.h
 	cc -I../include -DGIT_VERSION=\"$(GIT_VERSION)\" -D BRIDGE_V2 -g -c fs.c -o fsv2.o -Wall -Wno-pointer-sign
