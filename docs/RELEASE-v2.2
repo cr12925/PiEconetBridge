@@ -1,4 +1,4 @@
-ECONET(R) HIGH PERFORMANCE BRIDGE - VERSION 2.1 RELEASE NOTE
+ECONET(R) HIGH PERFORMANCE BRIDGE - VERSION 2.2 RELEASE NOTE
 
 /*
   (c) 2024 Chris Royle This program is free software: you can redistribute it
@@ -14,6 +14,46 @@ FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
 with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 */
+
+RELEASE NOTES FOR V2.2
+----------------------
+
+Roadmap to v2.2
+---------------
+
+- Possible kernel change so that 4-way handshakes do not complete with a final
+  ACK from the bridge until it has had an ACK from the distant machine. This
+  will generate 'Net error' at the local site if the distant machine is not
+  there, rather than 'Not listening', but the latter cannot be generated without
+  collecting the data phase of the 4-way handshake, which is needed to build the
+  AUN type packets used for AUN stations / trunks.
+
+- Improve MDFS password file functionality, hopefully including writing to it.
+
+- Trunk ports which support multiple endpoints, and IPv6. (Existing trunk
+  ports will not be IPv6 enabled, only the ones which support multiple
+  remote endpoints.)
+
+- Handle AUN broadcasts received as IP broadcasts, and transmit same to local
+  hosts. Redistribute AUN broadcasts to distant AUN hosts as a unicast packet.
+
+- Dynamic AUN stations to use pool addresses instead of specific network
+
+- JSON-based configuration & converter from existing to JSON. Intended to
+  enable configuration by a web app.
+
+- Pipe-based 'tap' interface into the bridge (read only) which relays
+  all or selected traffic to a pipe in AUN-extended format. (Will never
+  catch all wire traffic - only that which goes through the bridge.)
+
+- Implement signals for increasing / decreasing debug (SIGUSR1/2?)
+
+- Make FS permissions mirror L3 plus extra directory permissions.
+  Add NETCONF tunable to imply WR/r on all directories and
+  mask the visible display of the same (so unlocked directories
+  simply appear as "D/" as they do in L3).
+
+- Add facilities for E permission in FS (execute only)
 
 
 RELEASE NOTES FOR V2.1 
@@ -124,56 +164,6 @@ RELEASE NOTES FOR V2.1
   - Pipe client utilities which uses the IsNets broadcast to identify which
     networks are known
 
-Known bugs in v2.1
-------------------
-
-- Copying from RISC OS to PiFS occasionally appears to lose some but not all
-  file permissions. Debug shows PiFS is setting the perms to what RISC OS
-  is asking for, but it may be that RISC OS is doing some sort of server
-  level (version) determination and changing its behaviour. So it may be
-  that PiFS needs to respond to some query or other differently to get
-  RISC OS to ask for the permissions it really wants.
-
-- FS Load and Getbytes operations can cause 'no reply' errors on lossy
-  trunks. This has been improved prior to release but is still not 
-  perfect.
-
-Roadmap to v2.2 
----------------
-
-- Possible kernel change so that 4-way handshakes do not complete with a final
-  ACK from the bridge until it has had an ACK from the distant machine. This
-  will generate 'Net error' at the local site if the distant machine is not
-  there, rather than 'Not listening', but the latter cannot be generated without
-  collecting the data phase of the 4-way handshake, which is needed to build the
-  AUN type packets used for AUN stations / trunks.
-
-- Improve MDFS password file functionality, hopefully including writing to it.
-
-- Trunk ports which support multiple endpoints, and IPv6. (Existing trunk
-  ports will not be IPv6 enabled, only the ones which support multiple
-  remote endpoints.)
-
-- Handle AUN broadcasts received as IP broadcasts, and transmit same to local
-  hosts. Redistribute AUN broadcasts to distant AUN hosts as a unicast packet.
-
-- Dynamic AUN stations to use pool addresses instead of specific network
-
-- JSON-based configuration & converter from existing to JSON. Intended to
-  enable configuration by a web app.
-
-- Pipe-based 'tap' interface into the bridge (read only) which relays
-  all or selected traffic to a pipe in AUN-extended format. (Will never
-  catch all wire traffic - only that which goes through the bridge.)
-
-- Implement signals for increasing / decreasing debug (SIGUSR1/2?)
-
-- Make FS permissions mirror L3 plus extra directory permissions.
-  Add NETCONF tunable to imply WR/r on all directories and 
-  mask the visible display of the same (so unlocked directories
-  simply appear as "D/" as they do in L3).
-
-- Add facilities for E permission in FS (execute only)
 
 Roadmap to v2.3
 ---------------
