@@ -51,10 +51,11 @@
 #include <linux/if_tun.h>
 #include <signal.h>
 #include <termios.h>
-#include "../include/econet-gpio-consumer.h"
-#include "../include/econet-pserv.h"
-#include "../include/econet-hpbridge.h"
-#include "../include/econet-fs-hpbridge-common.h"
+#include "econet-gpio-consumer.h"
+#include "econet-pserv.h"
+#include "econet-hpbridge.h"
+#include "econet-fs-hpbridge-common.h"
+#include "fs.h"
 
 extern int h_errno;
 
@@ -341,9 +342,10 @@ void eb_debug (uint8_t quit, uint8_t level, char *module, char *fmt, ...)
 }
 
 /* Memory management debug
+ * Both these *were* static inline, but changed to support FS
 */
 
-static inline void eb_free (char *file, int line, char *module, char *purpose, void *ptr)
+void eb_free (char *file, int line, char *module, char *purpose, void *ptr)
 {
 
 	if (EB_DEBUG_MALLOC)
@@ -353,7 +355,7 @@ static inline void eb_free (char *file, int line, char *module, char *purpose, v
 
 }
 
-static inline void * eb_malloc (char *file, int line, char *module, char *purpose, size_t size)
+void * eb_malloc (char *file, int line, char *module, char *purpose, size_t size)
 {
 
 	void *r;
