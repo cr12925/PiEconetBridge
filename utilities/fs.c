@@ -10146,6 +10146,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 			num_params = fsop_00_oscli_parse(data+5, &p[0]);
 
+			num_params--; // If we have command + 1 parameter, we'll get 2 back because there are two entries in &p
+
 			/* See if the command is in the new structure */
 			if (num_params > 0 && (cmd = fsop_00_match(data+5))) /* Yes, assignment from fsop_00_match */
 			{
@@ -10155,6 +10157,10 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					fsop_error (&fsop_param, 0xff, "Insufficient privilege");
 				else if ((cmd->flags & FSOP_00_BRIDGE) && !(fsop_param.user->priv2 & FS_PRIV2_BRIDGE))
 					fsop_error (&fsop_param, 0xff, "No bridge privilege");
+				else if (cmd->p_min > num_params)
+				       	fsop_error (&fsop_param, 0xff, "Not enough parameters");
+				else if (cmd->p_max < num_params)
+					fsop_error (&fsop_param, 0xff, "Too many parameters");
 				else
 					(cmd->func)(&fsop_param, &p[0], num_params);
 

@@ -63,6 +63,7 @@ struct fsop_00_cmd * fsop_00_mkcmd (unsigned char *cmd, uint8_t flags, uint8_t p
 	r->cmd = cmd;
 	r->flags = flags;
 	r->p_min = p_min;
+	r->p_max = p_max;
 	r->abbrev = abbrev;
 	r->func = func;
 

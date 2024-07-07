@@ -33,7 +33,7 @@ FSOP_00(OWNER)
 
 	fsop_00_oscli_extract(f->data + 5, p, 1, path, 240);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d *OWNER %s", "", f->net, f->stn, path);
+	fs_debug (0, 1, "%12sfrom %3d.%3d *OWNER %s (length %d)", "", f->net, f->stn, path, strlen(path));
 
 	if (!fsop_normalize_path(f, path, f->cwd, &pn) || pn.ftype == FS_FTYPE_NOTFOUND)
 		fsop_error(f, 0xD6, "Not found");
