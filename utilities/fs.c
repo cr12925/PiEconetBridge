@@ -10139,18 +10139,15 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			char *param;
 
 			struct 		oscli_params p[10]; // Max params should be less than 10
-			uint8_t		num_params;
+			uint8_t		num_params, param_start;
 			struct		fsop_00_cmd	*cmd;
 
 			/* New structure - parse the command & params */
 
-			num_params = fsop_00_oscli_parse(data+5, &p[0]);
-
-			num_params--; // If we have command + 1 parameter, we'll get 2 back because there are two entries in &p
-
-			/* See if the command is in the new structure */
-			if (num_params > 0 && (cmd = fsop_00_match(data+5))) /* Yes, assignment from fsop_00_match */
+			if ((cmd = fsop_00_match(data+5, &param_start))) /* Yes, assignment from fsop_00_match */
 			{
+				num_params = fsop_00_oscli_parse(data+5, &p[0], param_start);
+
 				if ((cmd->flags & FSOP_00_LOGGEDIN) && (!fsop_param.user))
 					fsop_error (&fsop_param, 0xff, "Who are you?");
 				else if ((cmd->flags & FSOP_00_SYSTEM) && !(fsop_param.user->priv & FS_PRIV_SYSTEM))
@@ -10162,7 +10159,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				else if (cmd->p_max < num_params)
 					fsop_error (&fsop_param, 0xff, "Too many parameters");
 				else
-					(cmd->func)(&fsop_param, &p[0], num_params);
+					(cmd->func)(&fsop_param, &p[0], num_params, param_start);
 
 				return;
 			}
@@ -10194,7 +10191,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			//else if (!strncasecmp("I .", (const char *) command, 3)) fs_login(server, reply_port, net, stn, command + 3);
 			else if (fs_stn_logged_in(server, net, stn) < 0)
 				fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
-			//else if ((!strncasecmp("CAT", (const char *) command, 3)) || (!strncmp(".", (const char *) command, 1)))
+/* Moved to new structure
 			else if (fs_parse_cmd(command, "CAT", 2, &param) || fs_parse_cmd(command, ".", 1, &param))
 			{
 
@@ -10208,27 +10205,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				r.p.data[0] = 3; // CAT
 				r.p.data[1] = 0; // Successful return
 				
-/*
-				len = strlen(command)-1; // Drop first character (there will at least be a '.'!)
-				if (*command == '.')
-				{
-					if (*(command+1) == ' ')
-						len--; // Take one off for the space
-				}
-				else
-				{
-					len -= 3; // Adjust because this had the letters 'CAT' in it and we've already deducted one above, but there will may be be a space.
-					if (*(command+3) == 0x00) // No parameters on *CAT - so nothing to copy
-						len = 0;
-				}
-	
-
-				if (len)
-					strncpy(&(r.p.data[2]), &(command[(strlen(command) - len)]), len);
-
-				r.p.data[len+2] = 0x0d; //Terminate string
-
-*/
 				len = strlen(param);
 
 				strcpy(&(r.p.data[2]), param);
@@ -10276,6 +10252,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				fs_aun_send (&r, server, 7 + 1 + strlen(filename), net, stn);
 		
 			}
+*/
 			else if (fs_parse_cmd(command, "SAVE", 2, &param))
 			{
 
@@ -12151,6 +12128,13 @@ void fs_setup(void)
 
 	/* Initialize known command list */
 
+	/* Catalogue done as a special case */
+	fsop_00_addcmd(fsop_00_mkcmd(".", FSOP_00_LOGGEDIN, 0, 1, 1, fsop_00_catalogue));
+	fsop_00_addcmd(fsop_00_mkcmd("CAT", FSOP_00_LOGGEDIN, 0, 1, 2, fsop_00_catalogue));
+
+	/* The rest of the commands */
+
+	FSOP_OSCLI(LOAD,(FSOP_00_LOGGEDIN),1,2,2);
 	FSOP_OSCLI(OWNER,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM),1,1,3);
 
 }

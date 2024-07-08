@@ -581,7 +581,7 @@ struct oscli_params {
 
 /* FSOP Oscli command list for new structure */
 
-typedef void (*oscli_func) (struct fsop_data *, struct oscli_params *, uint8_t);
+typedef void (*oscli_func) (struct fsop_data *, struct oscli_params *, uint8_t, uint8_t);
 
 struct fsop_00_cmd {
         unsigned char *         cmd;    /* Command in full. If there has to be a space in the command, then use 0x80 and it'll not be parsed as a space */
@@ -595,8 +595,8 @@ struct fsop_00_cmd {
 
 /* FSOP Oscli macros */
 
-#define FSOP_00(n) void fsop_00_##n(struct fsop_data *f, struct oscli_params *p, uint8_t num)
-#define FSOP_00_EXTERN(n) extern void fsop_00_##n(struct fsop_data *, struct oscli_params *, uint8_t)
+#define FSOP_00(n) void fsop_00_##n(struct fsop_data *f, struct oscli_params *p, uint8_t num, uint8_t param_start)
+#define FSOP_00_EXTERN(n) extern void fsop_00_##n(struct fsop_data *, struct oscli_params *, uint8_t, uint8_t)
 #define FSOP_OSCLI(c,f,m,max,abbr) fsop_00_addcmd(fsop_00_mkcmd(#c,f,m,max,abbr,fsop_00_##c))
 
 #define FSOP_00_ANON	0x00 /* Anyone can do this */
@@ -607,11 +607,11 @@ struct fsop_00_cmd {
 
 /* Some externs for functions within fsop_00_oscli.c which manage the command list */
 
-extern struct fsop_00_cmd * fsop_00_match (unsigned char *); /* Tells us whether a command exists in the list, so we use new structure not old. Feed the OSCLI command (abbreviated) in here and you'll get a pointer to the struct or NULL if not found */
+extern struct fsop_00_cmd * fsop_00_match (unsigned char *, uint8_t *); /* Tells us whether a command exists in the list, so we use new structure not old. Feed the OSCLI command (abbreviated) in here and you'll get a pointer to the struct or NULL if not found, uint8_t * is index of character AFTER command end (either the end of the word, or the '.' for an abbreviation) */
 extern void fsop_00_addcmd (struct fsop_00_cmd *); /* Add the malloced command with its parameters to the list. */
 extern struct fsop_00_cmd * fsop_00_mkcmd(unsigned char *, uint8_t, uint8_t, uint8_t, uint8_t, oscli_func);
-extern uint8_t fsop_00_oscli_parse(unsigned char *, struct oscli_params *);
-extern void fsop_00_oscli_extract(unsigned char *, struct oscli_params *, uint8_t, char *, uint8_t);
+extern uint8_t fsop_00_oscli_parse(unsigned char *, struct oscli_params *, uint8_t);
+extern void fsop_00_oscli_extract(unsigned char *, struct oscli_params *, uint8_t, char *, uint8_t, uint8_t);
 
 
 /* FSOP Definition macro */
@@ -720,5 +720,8 @@ FSOP_EXTERN(60);
 
 /* List of OSCLI externs */
 
+/* The catalogue function */
+extern void fsop_00_catalogue (struct fsop_data *, struct oscli_params *, uint8_t, uint8_t);
+FSOP_00_EXTERN(LOAD);
 FSOP_00_EXTERN(OWNER);
 

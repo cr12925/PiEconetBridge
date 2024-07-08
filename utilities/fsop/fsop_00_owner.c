@@ -31,7 +31,7 @@ FSOP_00(OWNER)
 	unsigned char result[30];
 	unsigned char username[11];
 
-	fsop_00_oscli_extract(f->data + 5, p, 1, path, 240);
+	fsop_00_oscli_extract(f->data, p, 0, path, 240, param_start);
 
 	fs_debug (0, 1, "%12sfrom %3d.%3d *OWNER %s (length %d)", "", f->net, f->stn, path, strlen(path));
 
