@@ -472,6 +472,7 @@ struct __fs_user_fhandle {
 			struct __fs_file	*f_handle;
 			struct __fs_dir		*d_handle;
 		}; /* Pointers depending on whether file or dir */
+		uint8_t		handle_id; /* Not used in old model - array index is used; this is for new structure - contains network handle number */
                 unsigned long cursor; // Our pointer into the file
                 unsigned long cursor_old; // Previous cursor in case we get a repeated request, we can go back
                 unsigned short mode; // 1 = read, 2 = openup, 3 = openout
@@ -508,7 +509,11 @@ struct __fs_active {
                 char acorntailpath[ECONET_ABS_MAX_FILENAME_LENGTH+1];
         } fhandles[FS_MAX_OPEN_FILES];
 	*/
-	struct __fs_user_fhandle fhandles[FS_MAX_OPEN_FILES];
+	union {
+		struct __fs_user_fhandle fhandles[FS_MAX_OPEN_FILES];
+		struct __fs_user_fhandle *fhandle_list; /* Start of list for new structure */
+	};
+	uint32_t	handle_map; /* New structure - 1 bit per handle if handle is in use / valid. To find a free handle, XOR with &FFFFFFFF and if 0 then no free handles (for 32 bit machines), if XOR = &FFFFFF00 then no free handles for 8 bit machines. To find first new handle, just keep looking at least significant bit - if 0, then you've found a handle, otherwise shift right one bit. */
         unsigned char sequence; // Used to detect duplicate transmissions on putbyte - oscillates 0-1-0-1 - low bit of ctrl byte in packet. Gets re-set whenever there is an operation which is not a putbyte, so that successive putbytes get the tracker, but anything else in the way resets it
         unsigned char urd_unix_path[1024]; // Used for chroot purposes - stored at login / sdisc
 	struct __fs_active	*next, *prev; /* Ready for full implementation of new structure */
