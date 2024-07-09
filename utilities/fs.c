@@ -1086,7 +1086,7 @@ void fsop_build_data (struct fsop_data *param, uint8_t server, uint8_t net, uint
 	param->server->files = &(fs_files[server][0]);
 	param->server->dirs = &(fs_dirs[server][0]);
 	param->server->users = &(users[server][0]);
-	param->server->enabled = &(fs_enabled[server]);
+	param->server->enabled = fs_enabled[server];
 
 }
 
@@ -3978,7 +3978,7 @@ void fsop_shutdown (struct fsop_data *f)
 
 	// Flag server inactive
 	
-	*(f->server->enabled) = 0;
+	f->server->enabled = 0;
 
 	// Forcibly log everyone off
 	
@@ -10058,7 +10058,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 	fsop_param.server->discs = &(fs_discs[server][0]);
 	fsop_param.server->files = &(fs_files[server][0]);
 	fsop_param.server->dirs = &(fs_dirs[server][0]);
-	fsop_param.server->enabled = &(fs_enabled[server]);
+	fsop_param.server->enabled = fs_enabled[server];
 	fsop_param.server->users = &(users[server][0]);
 	fsop_param.server->actives = &(active[server][0]);
 	fsop_param.data = data;
@@ -10918,13 +10918,10 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						else	fs_error(server, reply_port, net, stn, 0xA8, "Bad directory");
 					}
 				}
-				//else if (!strncasecmp("LINK ", (const char *) command, 5))
 				else if (fs_parse_cmd(command, "LINK", 4, &param) || fs_parse_cmd(command, "MKLINK", 4, &param))
 					fs_link(server, reply_port, active_id, net, stn, param);
-				//else if (!strncasecmp("UNLINK ", (const char *) command, 7))
 				else if (fs_parse_cmd(command, "UNLINK", 3, &param))
 					fs_unlink(server, reply_port, active_id, net, stn, param);
-				//else if (!strncasecmp("FLOG ", (const char *) command, 5)) // Force log user off
 				else if (fs_parse_cmd(command, "FLOG", 3, &param) || fs_parse_cmd(command, "LOGOFF", 5, &param))
 				{
 					char parameter[20];

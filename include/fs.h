@@ -125,18 +125,18 @@
 /* __fs_station - instance information about a fileserver instance */
 
 struct __fs_station {
-        unsigned char net; // Network number of this server
-        unsigned char stn; // Station number of this server
-        unsigned char directory[256]; // Root directory
-        unsigned int total_users; // How many entries in users[][]?
-        int total_discs;
+        unsigned char 		net; // Network number of this server
+        unsigned char 		stn; // Station number of this server
+        unsigned char 		directory[256]; // Root directory
+        unsigned int 		total_users; // How many entries in users[][]?
+        int 			total_discs;
 	struct __fs_config	*config; // Pointer to my config
 	struct __fs_disc	*discs; // Pointer to discs
 	struct __fs_file	*files; // Pointer to open files
 	struct __fs_dir		*dirs; // Pointer to open dirs
 	struct __fs_active	*actives; // Pointer to actives
 	struct __fs_user	*users; // Pointer to (effectively) the password data
-	uint8_t		*enabled; // Pointer to entry in fs_enabled
+	uint8_t			enabled; // Whether server enabled
 };
 
 /* __fs_config - config of an individual fileserver instance */
@@ -161,6 +161,8 @@ struct __fs_config {
 
 struct __fs_disc {
 	unsigned char name[17];
+	uint8_t			index; /* Disc number - ready for new structure */
+	struct __fs_disc	*next;
 };
 
 /* __fs_file - open file information for a particular server */
@@ -169,6 +171,7 @@ struct __fs_file {
         unsigned char name[1024];
         FILE *handle;
         int readers, writers; // Used for locking; when readers = writers = 0 we close the file
+	struct __fs_file 	*next, *prev; /* Pointers for new structure */
 };
 
 /* __fs_dir - open directory information for a particular server */
@@ -177,7 +180,7 @@ struct __fs_dir {
         unsigned char name[1024];
         DIR *handle;
         int readers; // When 0, we close the handle
-
+	struct __fs_dir 	*next, *prev; /* Pointers for new structure */
 };
 
 /* __fs_bulk_port - fileserver bulk (data burst) port list */
@@ -195,6 +198,7 @@ struct __fs_bulk_port {
         unsigned short user_handle; // index into active[server][active_id].fhandles[] so that cursor can be updated
         unsigned long long last_receive; // Time of last receipt so that we can garbage collect
         unsigned char acornname[ECONET_ABS_MAX_FILENAME_LENGTH+2]; // Tail path segment - enables *SAVE to return it on final close // Was 12
+	struct __fs_bulk_port		*next, *prev; /* Pointers for new structure */
 };
 
 /* File handling struct definitions */
@@ -460,6 +464,25 @@ struct __fs_group {
 	unsigned char grouopname[10];
 };
 
+/* __fs_user_fhandle - user filehandle */
+
+struct __fs_user_fhandle {
+		union {
+	        	short handle; // Pointer into fs_files
+			struct __fs_file	*f_handle;
+			struct __fs_dir		*d_handle;
+		}; /* Pointers depending on whether file or dir */
+                unsigned long cursor; // Our pointer into the file
+                unsigned long cursor_old; // Previous cursor in case we get a repeated request, we can go back
+                unsigned short mode; // 1 = read, 2 = openup, 3 = openout
+                unsigned char sequence; // Oscillates 0-1-0-1... This variable stores the LAST b0 of ctrl byte received, so when we get new traffic it should be *different* to what's in here.
+                unsigned short pasteof; // Signals when there has already been one attempt to read past EOF and if there's another we need to generate an error
+                unsigned short is_dir; // Looks like Acorn systems can OPENIN() a directory so there has to be a single set of handles between dirs & files. So if this is non-zero, the handle element is a pointer into fs_dirs, not fs_files.
+                char acornfullpath[1024]; // Full Acorn path, used for calculating relative paths
+                char acorntailpath[ECONET_ABS_MAX_FILENAME_LENGTH+1];
+		struct __fs_user_fhandle 	*next, *prev; /* Ready for full implementation of new structure */
+};
+
 /* __fs_active - cache information about a logged in user */
 
 struct __fs_active {
@@ -472,6 +495,7 @@ struct __fs_active {
         unsigned char bootopt;
         unsigned char priv;
         uint8_t printer; // Index into this station's printer array which shows which printer has been selected - defaults to &ff to signal 'none'.
+	/*
         struct {
                 short handle; // Pointer into fs_files
                 unsigned long cursor; // Our pointer into the file
@@ -483,8 +507,11 @@ struct __fs_active {
                 char acornfullpath[1024]; // Full Acorn path, used for calculating relative paths
                 char acorntailpath[ECONET_ABS_MAX_FILENAME_LENGTH+1];
         } fhandles[FS_MAX_OPEN_FILES];
+	*/
+	struct __fs_user_fhandle fhandles[FS_MAX_OPEN_FILES];
         unsigned char sequence; // Used to detect duplicate transmissions on putbyte - oscillates 0-1-0-1 - low bit of ctrl byte in packet. Gets re-set whenever there is an operation which is not a putbyte, so that successive putbytes get the tracker, but anything else in the way resets it
         unsigned char urd_unix_path[1024]; // Used for chroot purposes - stored at login / sdisc
+	struct __fs_active	*next, *prev; /* Ready for full implementation of new structure */
 };
 /*
  * fsop_data struct
