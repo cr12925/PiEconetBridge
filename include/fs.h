@@ -641,6 +641,10 @@ extern void fs_copy_to_cr(unsigned char *, unsigned char *, unsigned short);
 extern uint16_t fs_copy_terminate(unsigned char *, unsigned char *, uint16_t, uint8_t);
 extern short fs_get_uid(int, char *);
 
+/* Externs from fsop_00_oscli.c */
+
+extern void fsop_lsb_reply (char *, uint8_t, uint32_t);
+
 /* Externs for fileserver control from fs.c */
 
 extern void fsop_shutdown(struct fsop_data *);
@@ -724,4 +728,5 @@ FSOP_EXTERN(60);
 extern void fsop_00_catalogue (struct fsop_data *, struct oscli_params *, uint8_t, uint8_t);
 FSOP_00_EXTERN(LOAD);
 FSOP_00_EXTERN(OWNER);
+FSOP_00_EXTERN(SAVE);
 

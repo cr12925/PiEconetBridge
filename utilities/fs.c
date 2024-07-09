@@ -10252,7 +10252,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				fs_aun_send (&r, server, 7 + 1 + strlen(filename), net, stn);
 		
 			}
-*/
 			else if (fs_parse_cmd(command, "SAVE", 2, &param))
 			{
 
@@ -10310,9 +10309,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				fs_aun_send (&r, server, 13 + 1 + strlen(filename), net, stn);
 
 			}
-			//else if (!strncasecmp("BYE", (const char *) command, 3)) fs_bye(server, reply_port, net, stn, 1);
+*/
 			else if (fs_parse_cmd(command, "BYE", 3, &param)) fs_bye(server, reply_port, net, stn, 1);
-			//else if (!strncasecmp("SETLIB ", (const char *) command, 7))
 			else if (fs_parse_cmd(command, "SETLIB", 4, &param))
 			{ // Permanently set library directory
 				unsigned char libdir[97], username[11], params[256];
@@ -12136,6 +12134,7 @@ void fs_setup(void)
 
 	FSOP_OSCLI(LOAD,(FSOP_00_LOGGEDIN),1,2,2);
 	FSOP_OSCLI(OWNER,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM),1,1,3);
+	FSOP_OSCLI(SAVE,(FSOP_00_LOGGEDIN), 3, 5, 2);
 
 }
 

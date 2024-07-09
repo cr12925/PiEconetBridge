@@ -251,6 +251,56 @@ void fsop_00_oscli_extract(unsigned char *s, struct oscli_params *p, uint8_t ind
 
 }
 
+/* Hex parameter parser 
+ *
+ * Returns <>0 for success, 0 for parse failure
+ */
+
+uint8_t	 fsop_00_hexparse(char *s, uint8_t maxlen, uint32_t *r)
+{
+	unsigned char 	c;
+	uint32_t	result = 0;
+	uint8_t		count = 0;
+
+	while (count < maxlen && count < strlen(s))
+	{
+		c = *(s+count);
+
+		if (c >= '0' && c <= '9')
+			c -= '0';
+		else if (c >= 'A' && c <= 'F')
+			c = c - 'A' + 10;
+		else if (c >= 'a' && c <= 'f')
+			c = c - 'a' + 10;
+		else
+			return 0;
+
+		result = (result << 4) + (c);
+
+		count++;
+	}
+
+	*r = result;
+
+	return 1;
+
+}
+
+/* Utility routine to put up to a 32-bit value into a reply block, LSB first */
+
+void fsop_lsb_reply (char *source, uint8_t bytes, uint32_t value)
+{
+
+	uint8_t count = 0;
+
+	while (count < bytes)
+	{
+		*(source + count) = (value & (0xff << (count * 8))) >> (count * 8);
+		count++;
+	}
+
+}
+
 /* Not presently used unless it's a command in the new structure */
 
 FSOP(00)
