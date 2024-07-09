@@ -10309,8 +10309,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				fs_aun_send (&r, server, 13 + 1 + strlen(filename), net, stn);
 
 			}
-*/
 			else if (fs_parse_cmd(command, "BYE", 3, &param)) fs_bye(server, reply_port, net, stn, 1);
+*/
 			else if (fs_parse_cmd(command, "SETLIB", 4, &param))
 			{ // Permanently set library directory
 				unsigned char libdir[97], username[11], params[256];
@@ -10375,7 +10375,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					else	fs_error(server, reply_port, net, stn, 0xA8, "Bad library");
 				}
 			}
-			//else if (!strncasecmp("PRINTER ", (const char *) command, 8))
 			else if (fs_parse_cmd(command, "PRINTER", 6, &param))
 				fs_select_printer(server, reply_port, active_id, net, stn, param);
 #ifdef EB_VERSION
@@ -10384,46 +10383,33 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				fs_printout(server, reply_port, active_id, net, stn, param, active[server][active_id].current);
 	#endif
 #endif
-			//else if (!strncasecmp("PASS ", (const char *) command, 5))
 			else if (fs_parse_cmd(command, "PASS", 4, &param))
 				fs_change_pw(server, reply_port, userid, net, stn, param);
-			//else if (!strncasecmp("CHOWN ", (const char *) command, 6))
 			else if (fs_parse_cmd(command, "CHOWN", 3, &param) || fs_parse_cmd(command, "SETOWNER", 5, &param))
 				fs_chown(server, reply_port, active_id, net, stn, param);
 /* Moved to new structure
-			//else if (!strncasecmp("OWNER ", (const char *) command, 6))
 			else if (fs_parse_cmd(command, "OWNER", 3, &param))
 				fs_owner(server, reply_port, active_id, *(data+3), net, stn, param);
-*/
 			else if (fs_parse_cmd(command, "BRIDGEVER", 7, &param))
 			{
 				fs_error(server, reply_port, net, stn, 0xFF, "Ver " GIT_VERSION);
 				return;
 			}
-			//else if (!strncasecmp("ACCESS ", (const char *) command, 7))
+*/
 			else if (fs_parse_cmd(command, "ACCESS", 3, &param))
 				fs_access(server, reply_port, active_id, net, stn, param);
-			//else if (!strncasecmp("INFO ", (const char *) command, 5))
 			else if (fs_parse_cmd(command, "INFO", 1, &param)) // For some reason *I. is an abbreviation for *INFO...
 				fs_info(server, reply_port, active_id, net, stn, param);
-			//else if (!strncasecmp("CDIR ", (const char *) command, 5))
 			else if (fs_parse_cmd(command, "CDIR", 2, &param))
 				fs_cdir(server, reply_port, active_id, net, stn, active[server][active_id].current, param);
-			//else if (!strncasecmp("DELETE ", (const char *) command, 7))
 			else if (fs_parse_cmd(command, "DELETE", 3, &param))
 				fs_delete(server, reply_port, active_id, net, stn, active[server][active_id].current, param);
-			//else if (!strncasecmp("RENAME ", (const char *) command, 7))
 			else if (fs_parse_cmd(command, "RENAME", 3, &param))
 				fs_rename(server, reply_port, active_id, net, stn, active[server][active_id].current, param);
-			//else if (!strncasecmp("REN. ", (const char *) command, 5))
-				//fs_rename(server, reply_port, active_id, net, stn, active[server][active_id].current, command+5);
-			//else if (!strncasecmp("SDISC ", (const char *) command, 6))
 			else if (fs_parse_cmd(command, "SDISC", 2, &param))
 				fs_sdisc(server, reply_port, active_id, net, stn, param);
-			//else if (!strncasecmp("COPY ", (const char *) command, 5))
 			else if (fs_parse_cmd(command, "COPY", 2, &param))
 				fs_copy(server, reply_port, active_id, net, stn, param);
-			//else if (!strncasecmp("LIB ", (const char *) command, 4)) // Change library directory
 			else if (fs_parse_cmd(command, "LIB", 3, &param))
 			{
 				int found;
@@ -12132,6 +12118,8 @@ void fs_setup(void)
 
 	/* The rest of the commands */
 
+	FSOP_OSCLI(BRIDGEVER, (FSOP_00_LOGGEDIN | FSOP_00_BRIDGE),0,0,7);
+	FSOP_OSCLI(BYE,(FSOP_00_LOGGEDIN),0,0,2);
 	FSOP_OSCLI(LOAD,(FSOP_00_LOGGEDIN),1,2,2);
 	FSOP_OSCLI(OWNER,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM),1,1,3);
 	FSOP_OSCLI(SAVE,(FSOP_00_LOGGEDIN), 3, 5, 2);

@@ -659,7 +659,6 @@ extern void fsop_write_readable_config(struct fsop_data *f);
 
 /* Externs for cross-fertilised functions */
 
-//extern void fs_bye(int, unsigned char, unsigned char, unsigned char, unsigned short);
 extern void fsop_bye_internal(struct fsop_data *, unsigned short);
 
 /* Externs for interlock open and close from fs.c */
@@ -726,6 +725,8 @@ FSOP_EXTERN(60);
 
 /* The catalogue function */
 extern void fsop_00_catalogue (struct fsop_data *, struct oscli_params *, uint8_t, uint8_t);
+FSOP_00_EXTERN(BRIDGEVER);
+FSOP_00_EXTERN(BYE);
 FSOP_00_EXTERN(LOAD);
 FSOP_00_EXTERN(OWNER);
 FSOP_00_EXTERN(SAVE);
