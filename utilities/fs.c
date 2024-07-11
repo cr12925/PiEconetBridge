@@ -9148,7 +9148,7 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 	if (bytes == 0) // No data expected
 	{	
-		fs_close_interlock(server, fs_bulk_ports[server][incoming_port].handle, 3);
+		/* ERROR ? fs_close_interlock(server, fs_bulk_ports[server][incoming_port].handle, 3); //
 		fs_bulk_ports[server][incoming_port].handle = -1; // Make the port available again
 		r.p.port = reply_port;
 		r.p.ctrl = ctrl;
