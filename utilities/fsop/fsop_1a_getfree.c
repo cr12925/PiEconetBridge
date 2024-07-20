@@ -22,28 +22,23 @@ FSOP(1a)
 
 	FS_REPLY_DATA(0x80); // Sets up as a data packet, ctrl byte as specified, to the reply port, with first two data bytes 0
 
+	struct __fs_disc	*disc;
 	uint8_t 	path[1024];
-	uint8_t		disc;
 	unsigned char	discname[17], tmp[17];
 
-	fs_copy_to_cr(tmp, f->data+5, 16);
-	snprintf((char * ) discname, 17, "%-16s", (const char * ) tmp);
+	fs_copy_to_cr(discname, f->data+5, 16);
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d Read free space on %s", "", f->net, f->stn, discname);
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "Read free space on %s", discname);
 
-	disc = 0;
+	disc = f->server->discs;
 
-	while (disc < ECONET_MAX_FS_DISCS)
+	while (disc)
 	{
-		char realname[20];
-
-		snprintf(realname, 17, "%-16s", (const char * ) f->server->discs[disc].name);
-
-		if (!strcasecmp((const char *) discname, (const char *) realname))
+		if (!strcasecmp((const char *) discname, (const char *) disc->name))
 		{
 			struct statvfs s;
 
-			snprintf((char * ) path, 1024, "%s/%1d%s",(const char * ) f->server->directory, disc, (const char * ) f->server->discs[disc].name);
+			snprintf((char * ) path, 1024, "%s/%1d%s",(const char * ) f->server->directory, disc->index, (const char *) disc->name);
 
 			if (!statvfs((const char * ) path, &s))
 			{
@@ -74,7 +69,8 @@ FSOP(1a)
 			}
 			else fsop_error(f, 0xFF, "FS Error");
 		}
-		disc++;
+
+		disc = disc->next;
 	}
 
 	fsop_error(f, 0xFF, "No such disc");

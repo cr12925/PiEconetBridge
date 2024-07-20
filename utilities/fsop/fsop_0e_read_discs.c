@@ -27,28 +27,26 @@ FSOP(0e)
 	uint8_t		delivered = 0;
 	struct __fs_disc	*disc;
 	uint8_t		data_ptr = 3;
+	uint8_t		counted;
 
 	r.p.data[0] = 10;
 
 	fs_debug (0, 2, "%12sfrom %3d.%3d Read Discs from %d (up to %d)", "", f->net, f->stn, start, number);
 
 	disc = f->server->discs;
-
-	/* Find first disc which has index >= start */
-
-	while (disc && disc->index < start)
-		disc = disc->next;
+	counted = 0;
 
 	/* Now copy discs to the reply, if there are any */
 
 	while (disc && delivered < number)
 	{
-		if (FS_DISC_VIS(f->server, f->userid, disc->index))
+		if (FS_DISC_VIS(f->server, f->userid, disc->index) && (disc->index >= start))
 		{
-			snprintf((char *) &(r.p.data[data_ptr]), 18, "%c%-16s", disc->index, disc->name);
-			delivered++;
-			data_ptr += 17;
+				snprintf((char *) &(r.p.data[data_ptr]), 18, "%c%-16s", disc->index, disc->name);
+				delivered++;
+				data_ptr += 17;
 		}
+
 		disc = disc->next;
 	}
 

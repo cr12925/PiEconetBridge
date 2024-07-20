@@ -30,6 +30,7 @@ void	fsop_00_dirlib_internal(struct fsop_data *f, uint8_t *user_handle, unsigned
 	int8_t			err;
 	uint8_t			handle;
 	int			found;
+	uint8_t			num_paths = 0;
 
 	if (*(dirname) == '"' && *(dirname + strlen(dirname) - 1) == '"') /* Need to de-quote */
 	{
@@ -43,6 +44,8 @@ void	fsop_00_dirlib_internal(struct fsop_data *f, uint8_t *user_handle, unsigned
 	}
 
 	found = fsop_normalize_path_wildcard(f, dirname, FSOP_CWD, &p, 1);
+
+	if (p.paths)	num_paths = 1; 
 
 	fs_free_wildcard_list(&p); /* We don't need the other possible wildcard matches... */
 
@@ -81,8 +84,11 @@ void	fsop_00_dirlib_internal(struct fsop_data *f, uint8_t *user_handle, unsigned
 			strncpy(new_dir, (const char *) p.acornfullpath, 255);
 
 			/* normalize wildcard doesn't add tail path */
-			strcat(new_dir, ".");
-			strcat(new_dir, p.acornname);
+			if (num_paths)
+			{
+				strcat(new_dir, ".");
+				strcat(new_dir, p.acornname);
+			}
 
 			fs_store_tail_path(tail, new_dir);
 			
@@ -124,11 +130,11 @@ FSOP_00(DIR)
 	unsigned char	dirname[256];
 
 	if (num == 0) /* No directory given - pick our home dir */
-		strcpy(dirname, "$.Library"); /* Normalize routine will fix this up */
+		strcpy(dirname, "&"); /* Normalize routine will fix this up */
 	else
 		FSOP_EXTRACT(f,0,dirname,255);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d DIR %s", "", f->net, f->stn, dirname);
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "DIR %s", dirname);
 
 	fsop_00_dirlib_internal(f, &(f->active->current), dirname, 1);
 
@@ -139,7 +145,7 @@ FSOP_00(LIB)
 	unsigned char	dirname[256];
 
 	if (num == 0) /* No directory given - pick our home dir */
-		strcpy(dirname, "$.Library"); /* Normalize routine will fix this up */
+		strcpy(dirname, "@"); /* Normalize routine will fix this up */
 	else
 		FSOP_EXTRACT(f,0,dirname,255);
 

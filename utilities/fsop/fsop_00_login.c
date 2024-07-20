@@ -343,6 +343,8 @@ FSOP_00(LOGIN)
 
 	mtype = stnpeek->mtype; /* If we got no reply, it'll be 0x0000 */
 
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "Machine type received by login task %08X", mtype);
+
 	FS_LIST_SPLICEFREE(f->server->peeks, stnpeek, "FS", "Freeing machinepeek probe structure");
 
 	fsop_00_oscli_extract(f->data, p, 0, username_extract, 10, param_start);
@@ -356,7 +358,6 @@ FSOP_00(LOGIN)
 	fs_copy_padded(password, password_extract, 10);
 	fs_toupper(username);
 	fs_toupper(password);
-
 			
 	counter = 0;
 
@@ -402,6 +403,8 @@ FSOP_00(LOGIN)
 			{
 				if ((a->net == f->net && a->stn == f->stn)) // Allows us to overwrite an existing handle if the station is already logged in
 					break;
+
+				a = a->next;
 			}
 
 			if (a) // Log off

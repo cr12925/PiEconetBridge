@@ -51,9 +51,10 @@ FSOP(0f)
 	while (a && found < start)
 	{
 		if (
-			!(f->server->users[a->userid].priv2 & FS_PRIV2_HIDEOTHERS)
-		||	!(f->server->users[a->userid].priv & FS_PRIV_SYSTEM && !(f->user->priv & FS_PRIV_SYSTEM)) /* We aren't syst and the logged on user is */
-		||	a->userid == f->userid /* It's us */
+			(f->user->priv & FS_PRIV_SYSTEM)
+		||	!(f->server->users[a->userid].priv & FS_PRIV_SYSTEM) /* We aren't syst and the logged on user is */
+		||	a->userid == f->userid
+		||	!(f->server->users[a->userid].priv2 & FS_PRIV2_HIDEOTHERS)
 		)
 			found++;
 
@@ -65,13 +66,20 @@ FSOP(0f)
 	while (a && found < (start + number))
 	{
 		if (
-			!(f->server->users[a->userid].priv2 & FS_PRIV2_HIDEOTHERS)
-		||	!(f->server->users[a->userid].priv & FS_PRIV_SYSTEM && !(f->user->priv & FS_PRIV_SYSTEM)) /* We aren't syst and the logged on user is */
+			(f->user->priv & FS_PRIV_SYSTEM)
+		||	!(f->server->users[a->userid].priv & FS_PRIV_SYSTEM) /* We aren't syst and the logged on user is */
 		||	a->userid == f->userid
+		||	!(f->server->users[a->userid].priv2 & FS_PRIV2_HIDEOTHERS)
 		)
 		{
+			char *space;
+
 			fs_copy_padded(username, f->server->users[a->userid].username, 10);
 			username[10] = '\0';
+
+			space = strchr(username, ' ');
+
+			if (space) *space = '\0';
 
 			found++;
 
@@ -79,7 +87,7 @@ FSOP(0f)
 
 			sprintf((char * ) &(r.p.data[ptr]), "%c%c%-s%c%c",
 				a->stn, a->net,
-				username, (char) 0x0d,
+				username, (char) 0x0D,
 				((f->server->users[a->userid].priv & FS_PRIV_SYSTEM) ? 1 : 0) 
 			);
 
