@@ -367,6 +367,7 @@ void * eb_malloc (char *file, int line, char *module, char *purpose, size_t size
 		*/
 
 	r = calloc(1, size);
+	//r = malloc(size);
 
 	/* res = posix_memalign(&r, 256, size); */
 	if (EB_DEBUG_MALLOC)
@@ -377,7 +378,7 @@ void * eb_malloc (char *file, int line, char *module, char *purpose, size_t size
 	else	return NULL;
 	*/
 
-	/* memset(r, 0, size); // Zero everything out - Now done using calloc() */
+	// memset(r, 0, size); // Zero everything out - Now done using calloc() 
 
 	return r;
 
@@ -1060,6 +1061,12 @@ struct __eb_device * eb_device_init (uint8_t net, uint16_t type, uint8_t config)
 
 		p->exposures = NULL;
 
+		// Set up config
+
+		p->config = config;
+
+		// Traffic stats
+		
 		p->b_in = p->b_out = 0; // Traffic stats
 
 		if (pthread_mutex_init(&(p->statsmutex), NULL) == -1)
@@ -3783,6 +3790,8 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 					if (!enqueue_result)
 						ack.p.aun_ttype = ECONET_AUN_NAK; // NAK if we couldn't enqueue the packet
 
+					/* AUN PROCESS */
+					eb_debug (0, 4, "AUN", "                source_device = %p, type %s, AUN Auto Ack is %s", source_device, eb_type_str(source_device->type), (source_device->config & EB_DEV_CONF_AUTOACK) ? "On" : "Off");
 					if ((!enqueue_result) || (incoming.p.aun_ttype == ECONET_AUN_DATA && (source_device->config & EB_DEV_CONF_AUTOACK))) // NAK if we didn't manage to enqueue; ACK if other end if AUTO ACK
 						sendto (e->socket, &(ack.p.aun_ttype), 8, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
 				}
@@ -8411,7 +8420,7 @@ int eb_readconfig(char *f)
 				uint8_t			flags = 0;
 				uint8_t			stn;
 
-				if (strcasecmp(eb_getstring(line, &matches[2]), "AUTOACK"))
+				if (!strcasecmp(eb_getstring(line, &matches[2]), "AUTOACK"))
 					flags = EB_DEV_CONF_AUTOACK;
 				
 				net = atoi(eb_getstring(line, &matches[1]));
@@ -8435,6 +8444,8 @@ int eb_readconfig(char *f)
 					if (!a) eb_debug (1, 0, "CONFIG", "Unable to malloc() for remote AUN device %d.%d", net, stn);
 					
 					r->aun = a;
+
+					r->config = flags; /* Enable autoack if requested */
 
 					/* Initialize the aun struct */
 
@@ -8460,6 +8471,7 @@ int eb_readconfig(char *f)
 					if (aun_remotes)	a->next = aun_remotes;
 					aun_remotes = a;
 
+					//fprintf (stderr, "AutoAck status for %d.%d is %s (matches[2] = %s)\n", r->net, a->stn, (r->config & EB_DEV_CONF_AUTOACK) ? "On" : "Off", eb_getstring(line, &matches[2]));
 				}
 
 				eb_set_whole_wire_net (net, NULL);
