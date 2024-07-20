@@ -5080,7 +5080,7 @@ static void * eb_device_aun_sender (void *device)
 				{
 					eb_debug (0, 4, "AUNSEND", "%16s Looking at outq %p, packet %p - not sending (time diff = %d)", devstring, o, p, timediff);
 
-					if (timediff < min_sleep)	min_sleep = timediff; /* Shorten our snooze because this packet needs to go sooner */
+					if ((EB_CONFIG_AUN_RETX - timediff) < min_sleep)	min_sleep = (EB_CONFIG_AUN_RETX - timediff); /* Shorten our snooze because this packet needs to go sooner */
 
 					p_parent = p;
 
