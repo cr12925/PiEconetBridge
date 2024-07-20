@@ -37,8 +37,8 @@ FSOP(40)
 	reply.p.data[2] = reply.p.data[3] = 0xff; // Next account to try
 	reply.p.data[4] = 0x01; // 1 account returned
 	reply.p.data[5] = 0x00; // Number of accounts returned high byte
-	reply.p.data[6] = f->user_id & 0xff;
-	reply.p.data[7] = (f->user_id & 0xff00) >> 8;
+	reply.p.data[6] = f->userid & 0xff;
+	reply.p.data[7] = (f->userid & 0xff00) >> 8;
 	reply.p.data[8] = reply.p.data[9] = 0xff; // Free space
 
 	fsop_send(10);

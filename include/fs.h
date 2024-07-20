@@ -31,6 +31,7 @@
 #include <errno.h>
 #include <sys/syscall.h>
 #include <sys/sendfile.h>
+#include <sys/mman.h>
 #include <ctype.h>
 #include <stdint.h>
 #include <stdarg.h>
@@ -45,8 +46,9 @@
 	#define __NO_LIBEXPLAIN
 #endif
 
-#include "../include/econet-gpio-consumer.h"
-#include "../include/econet-hpbridge.h"
+#include "econet-gpio-consumer.h"
+#include "econet-hpbridge.h"
+#include "econet-fs-hpbridge-common.h"
 
 /*
  * Pi Econet Bridge FS include header
@@ -67,7 +69,7 @@
 #define ECONET_MAX_FS_FILES 512 // Maximum number of active file handles
 #define FS_MAX_OPEN_FILES 33 // Really 32 because we don't use entry 0 - maximum per user
 
-#define ECONET_MAX_FILENAME_LENGTH (fs_config[server].fs_fnamelen)
+#define ECONET_MAX_FILENAME_LENGTH (f->server->config->fs_fnamelen)
 // Do NOT change this. Some format string lengths and array lengths are still hard coded.  (And some of the
 // arrays are of length 81 to take a null byte as well. So to make this fully flexible, a number of arrays
 // need to be altered, and some format strings need to be built with sprintf so that the right length
@@ -122,21 +124,46 @@
 
 /* Various important struct definitions */
 
+/* Structure to be passed to the machine registration thread */
+
+struct __fs_machine_peek_reg {
+	struct __fs_station	*s; /* Server - used when calling the update function, but not within an FS itself*/
+	uint8_t		net;
+	uint8_t		stn;
+	uint32_t	mtype;
+	struct __fs_machine_peek_reg	*next, *prev;
+};
+			
 /* __fs_station - instance information about a fileserver instance */
 
 struct __fs_station {
         unsigned char 		net; // Network number of this server
         unsigned char 		stn; // Station number of this server
         unsigned char 		directory[256]; // Root directory
-        unsigned int 		total_users; // How many entries in users[][]?
+        uint16_t 		total_users; // How many entries in users?
+	uint16_t		total_groups; // Number of entries in groups
+	uint32_t		seq;
         int 			total_discs;
 	struct __fs_config	*config; // Pointer to my config
 	struct __fs_disc	*discs; // Pointer to discs
 	struct __fs_file	*files; // Pointer to open files
-	struct __fs_dir		*dirs; // Pointer to open dirs
 	struct __fs_active	*actives; // Pointer to actives
-	struct __fs_user	*users; // Pointer to (effectively) the password data
+	struct __fs_user	*users; // Pointer to (effectively) the mmaped password data
+	struct __fs_group	*groups; // Pointer to mmaped group file
+	struct __fs_bulk_port	*bulkports; // Pointer to list of bulk ports
+	struct __fs_machine_peek_reg	*peeks; // List of pending machine peeks
+	uint8_t			bulkport_use[32]; // Bitmap - Need to move this to the local device in the bridge
 	uint8_t			enabled; // Whether server enabled
+	struct load_queue	*fs_load_queue; // Per server load queue
+	struct __eb_device	*fs_device; // Pointer to device housing this server in the main bridge 
+	pthread_mutex_t		fs_mutex; // Lock when this FS is working
+	pthread_mutex_t		fs_mpeek_mutex; // Lock we sit on waiting for machine peeks
+	pthread_cond_t		fs_condition; // Condition the FS waits on for traffic
+	pthread_t		fs_thread; // FS thread 
+	struct __eb_packetqueue	*fs_workqueue; // Packets to be processed by this FS
+	regex_t			wildcard_regex; // Not yet used. Need to have this local to the FS not global
+	regex_t			r_pathname; // Pathname by filename length
+	struct __fs_station	*next, *prev; // Up and down the tree
 };
 
 /* __fs_config - config of an individual fileserver instance */
@@ -160,41 +187,46 @@ struct __fs_config {
 /* __fs_discs - disc information for a particular server */
 
 struct __fs_disc {
-	unsigned char name[17];
+	unsigned char 		name[17];
 	uint8_t			index; /* Disc number - ready for new structure */
-	struct __fs_disc	*next;
+	struct __fs_disc	*next, *prev;
+	struct __fs_station	*server; /* Upward reference */
 };
 
 /* __fs_file - open file information for a particular server */
 
 struct __fs_file {
-        unsigned char name[1024];
-        FILE *handle;
-        int readers, writers; // Used for locking; when readers = writers = 0 we close the file
+        unsigned char 	name[1024];
+        FILE 		*handle;
+        int 		readers, writers; // Used for locking; when readers = writers = 0 we close the file
 	struct __fs_file 	*next, *prev; /* Pointers for new structure */
 };
 
+#if 0
+/* Not used */
 /* __fs_dir - open directory information for a particular server */
 
 struct __fs_dir {
-        unsigned char name[1024];
-        DIR *handle;
-        int readers; // When 0, we close the handle
+        unsigned char 	name[1024];
+        DIR 		*handle;
+        int 		readers; // When 0, we close the handle
 	struct __fs_dir 	*next, *prev; /* Pointers for new structure */
 };
+#endif
 
 /* __fs_bulk_port - fileserver bulk (data burst) port list */
 
 struct __fs_bulk_port {
-        unsigned char net, stn;
-        short handle; // -1 if available
+	struct __fs_file *handle;
+	struct __fs_active *active; // Station this goes to
+	uint8_t	bulkport; // Bulk port number
         unsigned char ack_port;
         unsigned char reply_port;
         unsigned char rx_ctrl;
         unsigned long length;
         unsigned long received;
         unsigned short mode; // as in 1 read, 2 updated, 3 write & truncate (I think!)
-        unsigned short active_id; // 0 = no user handle because we are doing a fs_save
+        unsigned short is_gbpb; // 0 = no user handle because we are doing a fs_save
         unsigned short user_handle; // index into active[server][active_id].fhandles[] so that cursor can be updated
         unsigned long long last_receive; // Time of last receipt so that we can garbage collect
         unsigned char acornname[ECONET_ABS_MAX_FILENAME_LENGTH+2]; // Tail path segment - enables *SAVE to return it on final close // Was 12
@@ -302,59 +334,59 @@ struct path {
 // of a file. It was found that SYST is just equivalent to owner
 
 // Actual owner
-#define FS_PERM_ISOWNER(s,a,o)  ((FS_ACTIVE_UID((s),(a)) == (o)) ? 1 : 0)
+#define FS_PERM_ISOWNER(a,o)  ((FS_ACTIVE_UID((a)) == (o)) ? 1 : 0)
 // Effective owner - i.e. actual owner or system priv
-#define FS_PERM_EFFOWNER(s,a,o) (FS_ACTIVE_SYST((s),(a)) || FS_PERM_ISOWNER((s),(a),(o)) ? 1 : 0)
+#define FS_PERM_EFFOWNER(a,o) (FS_ACTIVE_SYST((a)) || FS_PERM_ISOWNER((a),(o)) ? 1 : 0)
 
 // Object visible to this user - as distinct from readable - this is testing the hidden bit
-#define FS_PERM_VISIBLE(s,a,p,o)        (!FS_PERM_SET((p), FS_PERM_H) || FS_PERM_EFFOWNER((s),(a),(o)))
+#define FS_PERM_VISIBLE(a,p,o)        (!FS_PERM_SET((p), FS_PERM_H) || FS_PERM_EFFOWNER((a),(o)))
 
 // Can create new file if it doesn't exist already
-#define FS_PERM_CREATE(s,a,p,o,pp,po)   ((FS_PERM_EFFOWNER((s),(a),(po)) && (!FS_CONFIG_PIFSPERMS((s)) || FS_PERM_SET((pp), FS_PERM_OWN_W))) || (FS_CONFIG_PIFSPERMS((s)) && FS_PERM_SET((pp), FS_PERM_OTH_W) && FS_PERM_SET((pp), FS_PERM_OWN_W)))
+#define FS_PERM_CREATE(a,p,o,pp,po)   ((FS_PERM_EFFOWNER((a),(po)) && (!FS_CONFIG_PIFSPERMS((a->server)) || FS_PERM_SET((pp), FS_PERM_OWN_W))) || (FS_CONFIG_PIFSPERMS((a->server)) && FS_PERM_SET((pp), FS_PERM_OTH_W) && FS_PERM_SET((pp), FS_PERM_OWN_W)))
 
 // Can SAVE - only if unlocked and we effectively own it. Non-owners cannot save unless PiFS perms enabled.
 // Even then, only if both owner & other W are set, which is similar to what happens when non-owner read is
 // requested in L4, which requires both OTH_R and OWN_R set.
-#define FS_PERM_SAVE(s,a,p,o,pp,po) ((FS_PERM_UNSET((p), FS_PERM_L) && (\
-                (FS_PERM_EFFOWNER((s),(a),(o))) ||\
-                (FS_CONF_PIFSPERMS((s)) && FS_PERM_SET((p), FS_PERM_OWN_W) && FS_PERM_SET((p), FS_PERM_OTH_W)) \
+#define FS_PERM_SAVE(a,p,o,pp,po) ((FS_PERM_UNSET((p), FS_PERM_L) && (\
+                (FS_PERM_EFFOWNER((a),(o))) ||\
+                (FS_CONF_PIFSPERMS((a->server)) && FS_PERM_SET((p), FS_PERM_OWN_W) && FS_PERM_SET((p), FS_PERM_OTH_W)) \
                 ))
 // Can LOAD - note that L4 enforces both R/ and /r for a non-owner to read, so R/ is required whether owner or not
-#define FS_PERM_LOAD(s,a,p,o,pp,po) (\
-                (!FS_CONFIG_PIFSPERMS((s)) || (FS_PERM_SET_((pp), FS_PERM_OWN_R) && (FS_PERM_EFFOWNER((s), (a), (po)) || FS_PERM_SET((pp), FS_PERM_OTH_R)))) && \
-                (FS_PERM_SET((p), FS_PERM_OWN_R) && (FS_PERM_EFFOWNER((s),(a),(o)) || FS_PERM_SET((p), FS_PERM_OTH_R))) \
+#define FS_PERM_LOAD(a,p,o,pp,po) (\
+                (!FS_CONFIG_PIFSPERMS((a->server)) || (FS_PERM_SET_((pp), FS_PERM_OWN_R) && (FS_PERM_EFFOWNER((a), (po)) || FS_PERM_SET((pp), FS_PERM_OTH_R)))) && \
+                (FS_PERM_SET((p), FS_PERM_OWN_R) && (FS_PERM_EFFOWNER((a),(o)) || FS_PERM_SET((p), FS_PERM_OTH_R))) \
                 )
 
 // Can RENAME - Owner always can unless locked, non-owner never can - except if PIFS PERMS enabled, in which case they can if they have write access to the parent
-#define FS_PERM_RENAME(s,a,p,o,pp,po) (\
+#define FS_PERM_RENAME(a,p,o,pp,po) (\
                 FS_PERM_UNSET((p), FS_PERM_L) && \
                 ( \
                         ( \
-                         FS_CONFIG_PIFSPERMS((s)) && \
-                                (FS_PERM_SET((pp), FS_PERM_OWN_W) && (FS_PERM_EFFOWNER((s),(a),(po)) || FS_PERM_SET((pp), FS_PERM_OTH_W))) \
+                         FS_CONFIG_PIFSPERMS((a->server)) && \
+                                (FS_PERM_SET((pp), FS_PERM_OWN_W) && (FS_PERM_EFFOWNER((a),(po)) || FS_PERM_SET((pp), FS_PERM_OTH_W))) \
                         ) \
                         || \
-                        (!FS_CONFIG_PIFSPERMS((s) && FS_PERM_EFFOWNER((s),(a),(o)))) \
+                        (!FS_CONFIG_PIFSPERMS((a->server) && FS_PERM_EFFOWNER((a),(o)))) \
                 ))
 
 // Can OPENIN
 #define FS_PERM_OPENIN  FS_PERM_LOAD
 
 // Can OPENOUT - Level 4 forbids this on WL/ but allows it on +R or +W (wither +L or -L!) - looks like this is (+L && +R) || (+W || +R). In Acorn world, OPENOUT *always* fails for non-owner. In PIFS world, it will succeed if +W/w
-#define FS_PERM_OPENOUT(s,a,p,o,pp,po) \
+#define FS_PERM_OPENOUT(a,p,o,pp,po) \
         ( \
-          (FS_PERM_EFFOWNER((s),(a),(o)) && ( (FS_PERM_SET((p), FS_PERM_L) && FS_PERM_SET((p), FS_PERM_OWN_R)) || (FS_PERM_SET((p), FS_PERM_OWN_R) || FS_PERM_SET((p), FS_PERM_OWN_W)) ) ) \
+          (FS_PERM_EFFOWNER((a),(o)) && ( (FS_PERM_SET((p), FS_PERM_L) && FS_PERM_SET((p), FS_PERM_OWN_R)) || (FS_PERM_SET((p), FS_PERM_OWN_R) || FS_PERM_SET((p), FS_PERM_OWN_W)) ) ) \
           || \
-          (FS_CONFIG_PIFSPERMS((s)) && FS_PERM_SET((p), FS_PERM_OWN_W) && FS_PERM_SET((p), FS_PERM_OTH_W)) \
+          (FS_CONF_PIFSPERMS((a->server)) && FS_PERM_SET((p), FS_PERM_OWN_W) && FS_PERM_SET((p), FS_PERM_OTH_W)) \
         )
 
 // Can OPENUP - Level 4 does same as OPENOUT
 #define FS_PERM_OPENUP FS_PERM_OPENOUT
 
 // Can BPUT/S - Owner: requires +R,+W,-L. Other requires +W/+W and -L
-#define FS_PERM_WRITE(s,a,p,o,pp,po) \
+#define FS_PERM_WRITE(a,p,o,pp,po) \
         ( FS_PERM_UNSET((p), FS_PERM_L) && \
-          (FS_PERM_EFFOWNER((s),(a),(o)) ? \
+          (FS_PERM_EFFOWNER((a),(o)) ? \
            (FS_PERM_SET((p), FS_PERM_OWN_R) && FS_PERM_SET((p), FS_PERM_OWN_W)) \
          : (FS_PERM_SET((p), FS_PERM_OWN_W) && FS_PERM_SET((p), FS_PERM OTH(W))) \
          ) \
@@ -362,40 +394,27 @@ struct path {
 
 /* FS Configuration and dir mask defines */
 
-#define FS_CONF_PIFSPERMS(s)    (fs_config[(s)].fs_pifsperms == 0x80 ? 0 : 1)
-#define FS_CONF_DEFAULT_DIR_PERM(s)     (fs_config[(s)].fs_default_dir_perm)
-#define FS_CONF_DEFAULT_FILE_PERM(s)    (fs_config[(s)].fs_default_file_perm)
+#define FS_CONF_PIFSPERMS(s)    (FS_CONFIG(s,fs_pifsperms) == 0x80 ? 0 : 1)
+#define FS_CONF_DEFAULT_DIR_PERM(s)     (s->config->fs_default_dir_perm)
+#define FS_CONF_DEFAULT_FILE_PERM(s)    (s->config->fs_default_file_perm)
 #define FS_ACORN_DIR_MASK       (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R)
 
 /* Macros to find user information */
 
-#define FS_DISC_VIS(s,u,d) ((d >= 16) || (users[(s)][(u)].home_disc == (d)) || !(users[(s)][(u)].discmask & (1 << (d))))
+#define FS_DISC_VIS(s,u,d) ((d >= 16) || (s->users[(u)].home_disc == (d)) || !(s->users[(u)].discmask & (1 << (d))))
 
 // Macro to provide a shortcut to getting a user's real ID when the caller only knows the index into active[]
-#define FS_ACTIVE_UID(s,a) (active[(s)][(a)].userid)
+#define FS_ACTIVE_UID(a) (a->userid)
 // Macro to identify if we have system privileges
-#define FS_ACTIVE_SYST(s,a) (users[(s)][FS_ACTIVE_UID((s),(a))].priv & FS_PRIV_SYSTEM)
+#define FS_ACTIVE_SYST(a) (a->server->users[a->userid].priv & FS_PRIV_SYSTEM)
 // Macro to identify if we have bridge privileges
-#define FS_ACTIVE_BRIDGE(s,a) (users[(s)][FS_ACTIVE_UID((s),(a))].priv2 & FS_PRIV2_BRIDGE)
+#define FS_ACTIVE_BRIDGE(a) (a->server->users[a->userid].priv2 & FS_PRIV2_BRIDGE)
 
-/* And some FSOP_ wrappers */
-#define FSOP_PERM_ISOWNER(f,o)	((f)->user_id == (o) ? 1 : 0)
-#define FSOP_PERM_EFFOWNER(f,o)	(FSOP_ACTIVE_SYST(f) || FSOP_PERM_ISOWNER((f),(o) ? 1 : 0)
-#define FSOP_PERM_VISIBLE(f,p,o)	(!FS_PERM_SET((p), FS_PERM_H) || FSOP_PERM_EFFOWNER((f),(o))
-#define FSOP_PERM_CREATE(f,p,o,pp,po)	FS_PERM_CREATE((f)->server_id, (f)->active_id,(p),(o),(pp),(po))
-#define FSOP_PERM_SAVE(f,...)		FS_PERM_SAVE((f)->server_id, (f)->active_id,...)
-#define FSOP_PERM_LOAD(f,...)		FS_PERM_LOAD((f)->server_id, (f)->active_id,...)
-#define FSOP_PERM_RENAME(f,...)		FS_PERM_RENAME((f)->server_id, (f)->active_id,...)
-#define FSOP_PERM_OPENIN		FSOP_PERM_LOAD
-#define FSOP_PERM_OPENUP		FSOP_PERM_OPENOUT
-#define FSOP_PERM_OPENOUT(f,...)	FS_PERM_OPENOUT((f)->server_id, (f)->active_id,...)
-#define FSOP_PERM_WRITE(f,...)		FS_PERM_WRITE((f)->server_id, (f)->active_id,...)
-#define FSOP_CONF_PIFSPERMS(f)		((f)->server->fs_config->fs_pifsperms == 0x80 ? 0 : 1)
-#define FSOP_CONF_DEFAULT_DIR_PERM(f)	((f)->server->fs_config->fs.default_dir_perm)
-#define FSOP_CONF_DEFAULT_FILE_PERM(f)	((f)->server->fs_config->fs_default_file_perm)
-#define FSOP_SYST			((f)->user->priv & FS_PRIV_SYSTEM)
-#define FSOP_BRIDGE			((f)->user->priv2 & FS_PRIV2_BRIDGE)
+// Macro to get us at the user config from an fs_active
+#define FS_UINFO(a)	a->server->users[a->userid]
 
+// Macro to get us serverconfig from fsop_data
+#define FS_CONFIG(s,n)	(s->config->n)
 /*
  * Bulk transfer structures
  *
@@ -406,18 +425,23 @@ struct path {
 struct __pq {
         struct __econet_packet_udp *packet; // Don't bother with internal 4 byte src/dest header - they are given as parameters to aun_send.
         int len; // Packet data length
+	struct __fs_station	*server; // Upward link to server ready for tx routine
+	uint8_t		is_32bit;	// Whether to close with a 32 bit length when we are reading dynamically instead of queues
         uint16_t delay; // in milliseconds - to cope with RISC OS not listening...
         struct __pq *next;
 };
 
 struct load_queue {
-        unsigned char net, stn; // Destination net, stn
-        unsigned int server; // Determines source address
+	struct __fs_station	*server;
+	struct __fs_active	*active; /* Identify client & address */
         unsigned queue_type; // For later use with getbytes() - but for now assume always a load
-        unsigned char internal_handle; // Internal file handle to be closed at end / abort
+	struct __fs_file	*internal_handle; // Pointer to the file we're reading
         unsigned char mode; // Internal mode
         uint32_t        ack_seq_trigger; // Sequence number for which we receive an ack which will trigger next transmission
         time_t          last_ack_rx; // Last time we received an ACK from this station - used for garbage collection
+	/* For future use - when implemented, we can dump the packet queue and its memory usage ...  */
+	uint32_t	start_ptr, send_len, sent_len; /* filepos to start at, length to send (in chunk_size lumps), amount sent already - to calculate next packet start pos */
+	uint16_t	chunk_size;
         struct load_queue *next;
         struct __pq *pq_head, *pq_tail;
 
@@ -467,12 +491,7 @@ struct __fs_group {
 /* __fs_user_fhandle - user filehandle */
 
 struct __fs_user_fhandle {
-		union {
-	        	short handle; // Pointer into fs_files
-			struct __fs_file	*f_handle;
-			struct __fs_dir		*d_handle;
-		}; /* Pointers depending on whether file or dir */
-		uint8_t		handle_id; /* Not used in old model - array index is used; this is for new structure - contains network handle number */
+		struct __fs_file 	*handle; /* System file handle */ 
                 unsigned long cursor; // Our pointer into the file
                 unsigned long cursor_old; // Previous cursor in case we get a repeated request, we can go back
                 unsigned short mode; // 1 = read, 2 = openup, 3 = openout
@@ -481,43 +500,39 @@ struct __fs_user_fhandle {
                 unsigned short is_dir; // Looks like Acorn systems can OPENIN() a directory so there has to be a single set of handles between dirs & files. So if this is non-zero, the handle element is a pointer into fs_dirs, not fs_files.
                 char acornfullpath[1024]; // Full Acorn path, used for calculating relative paths
                 char acorntailpath[ECONET_ABS_MAX_FILENAME_LENGTH+1];
-		struct __fs_user_fhandle 	*next, *prev; /* Ready for full implementation of new structure */
 };
 
 /* __fs_active - cache information about a logged in user */
 
 struct __fs_active {
-        unsigned char net, stn;
-        unsigned int userid; // Index into users[n][]
-        unsigned char root, current, lib; // Handles
-        char root_dir[1024], current_dir[1024], lib_dir[1024]; // Paths relative to root
-        char root_dir_tail[ECONET_ABS_MAX_FILENAME_LENGTH+1], lib_dir_tail[ECONET_ABS_MAX_FILENAME_LENGTH+1], current_dir_tail[ECONET_ABS_MAX_FILENAME_LENGTH+1]; // Just the last element of path, or $ // these were 15
-        unsigned int home_disc, current_disc, lib_disc; // Currently selected disc for each of the three handles
-        unsigned char bootopt;
-        unsigned char priv;
-        uint8_t printer; // Index into this station's printer array which shows which printer has been selected - defaults to &ff to signal 'none'.
-	/*
-        struct {
-                short handle; // Pointer into fs_files
-                unsigned long cursor; // Our pointer into the file
-                unsigned long cursor_old; // Previous cursor in case we get a repeated request, we can go back
-                unsigned short mode; // 1 = read, 2 = openup, 3 = openout
-                unsigned char sequence; // Oscillates 0-1-0-1... This variable stores the LAST b0 of ctrl byte received, so when we get new traffic it should be *different* to what's in here.
-                unsigned short pasteof; // Signals when there has already been one attempt to read past EOF and if there's another we need to generate an error
-                unsigned short is_dir; // Looks like Acorn systems can OPENIN() a directory so there has to be a single set of handles between dirs & files. So if this is non-zero, the handle element is a pointer into fs_dirs, not fs_files.
-                char acornfullpath[1024]; // Full Acorn path, used for calculating relative paths
-                char acorntailpath[ECONET_ABS_MAX_FILENAME_LENGTH+1];
-        } fhandles[FS_MAX_OPEN_FILES];
-	*/
-	union {
-		struct __fs_user_fhandle fhandles[FS_MAX_OPEN_FILES];
-		struct __fs_user_fhandle *fhandle_list; /* Start of list for new structure */
-	};
-	uint32_t	handle_map; /* New structure - 1 bit per handle if handle is in use / valid. To find a free handle, XOR with &FFFFFFFF and if 0 then no free handles (for 32 bit machines), if XOR = &FFFFFF00 then no free handles for 8 bit machines. To find first new handle, just keep looking at least significant bit - if 0, then you've found a handle, otherwise shift right one bit. */
-        unsigned char sequence; // Used to detect duplicate transmissions on putbyte - oscillates 0-1-0-1 - low bit of ctrl byte in packet. Gets re-set whenever there is an operation which is not a putbyte, so that successive putbytes get the tracker, but anything else in the way resets it
+        uint8_t net, stn;
+        uint16_t userid; // Index into users[n][]
+
+	struct __fs_station	*server; /* Upward reference to server housing this active user */
+	struct __fs_user	*user; /* Pointer to __fs_station->user[userid] */
+
+        uint8_t root, current, lib; // Handles
+        unsigned char root_dir[1024], current_dir[1024], lib_dir[1024]; // Paths relative to root
+        unsigned char root_dir_tail[ECONET_ABS_MAX_FILENAME_LENGTH+1], lib_dir_tail[ECONET_ABS_MAX_FILENAME_LENGTH+1], current_dir_tail[ECONET_ABS_MAX_FILENAME_LENGTH+1]; // Just the last element of path, or $ // these were 15
+        uint8_t home_disc, current_disc, lib_disc; // Currently selected disc for each of the three handles
         unsigned char urd_unix_path[1024]; // Used for chroot purposes - stored at login / sdisc
+
+        uint8_t bootopt;
+
+        uint8_t priv; // Copy of priv bits from user info
+
+	uint32_t machinepeek; /* Machinepeek result if it's happened */
+
+        uint8_t printer; // Index into this station's printer array which shows which printer has been selected - defaults to &ff to signal 'none'.
+
+	struct __fs_user_fhandle fhandles[FS_MAX_OPEN_FILES];
+	uint32_t	handle_map; /* New structure - 1 bit per handle if handle is in use / valid. To find a free handle, XOR with &FFFFFFFF and if 0 then no free handles (for 32 bit machines), if XOR = &FFFFFF00 then no free handles for 8 bit machines. To find first new handle, just keep looking at least significant bit - if 0, then you've found a handle, otherwise shift right one bit. */
+
+        uint8_t sequence; // Used to detect duplicate transmissions on putbyte - oscillates 0-1-0-1 - low bit of ctrl byte in packet. Gets re-set whenever there is an operation which is not a putbyte, so that successive putbytes get the tracker, but anything else in the way resets it
+
 	struct __fs_active	*next, *prev; /* Ready for full implementation of new structure */
 };
+
 /*
  * fsop_data struct
  *
@@ -527,15 +542,15 @@ struct __fs_active {
 struct fsop_data {
 	uint8_t				net, stn;  	/* Client */
 	struct __fs_active *		active;		/* Active user struct, or NULL */
-	uint8_t				active_id;	/* Pre-thread ID within the active[server][] array */
 	struct __fs_user *		user;		/* Pointer to PW file entry for this user, or NULL */
-	uint8_t				user_id;	/* Entry in PW file */
+	uint16_t			userid;		/* Entry in PW file */
 	struct __fs_station *		server;		/* fs_station struct for server */
-	uint8_t				server_id;	/* Pre-thread ID within the fs_station[] array */
 	uint8_t *			data;		/* Data portion of packet received */
 	uint16_t			datalen;	/* Amount of data payload in packet */
+	uint8_t				ptype;		/* Packet type of incoming packet */
+	uint8_t				port; 		/* Port number of incoming packet */
 	uint8_t				ctrl;		/* Control byte received */
-	uint8_t				flags;		/* b0: 32bit variant, b1: run not load (for relevant FSOP) */
+	uint32_t			seq;		/* Sequence number of incoming packet */
 	uint8_t				urd, cwd, lib; 	/* Pre-decoded handles from packet */
 	uint8_t				reply_port;	/* Pre-decoded reply-port from packet */
 };
@@ -552,28 +567,17 @@ struct fsop_data {
 #define FSOP_NET	f->net
 #define FSOP_STN	f->stn
 #define FSOP_REPLY_PORT	*(f->data)
-#define FSOP_ACTIVE	f->active_id
-#define FSOP_USER	f->user_id
-#define FSOP_UINFO(u)	(&users[f->server_id][(u)])
-#define FSOP_SERVER	f->server_id
+#define FSOP_ACTIVE	(f->active)
+#define FSOP_USER	f->userid
+#define FSOP_UINFO(u)	(&(f->server->users[(u)]))
 #define FSOP_FSOP	*(f->data+1)
 #define FSOP_URD	*(f->data+2)
 #define FSOP_CWD	*(f->data+3)
 #define FSOP_LIB	*(f->data+4)
 #define FSOP_ARG	*(f->data+5)
-
-/* Some externs for the arrays of data */
-
-extern struct __fs_active active[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_ACTIVE];
-extern struct __fs_config fs_config[ECONET_MAX_FS_SERVERS];
-extern struct __fs_user users[ECONET_MAX_FS_SERVERS+1][ECONET_MAX_FS_USERS];
-extern struct __fs_group groups[ECONET_MAX_FS_SERVERS][256];
-extern struct __fs_station fs_stations[ECONET_MAX_FS_SERVERS];
-extern struct __fs_disc fs_discs[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_DISCS];
-extern struct __fs_file fs_files[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_FILES];
-extern struct __fs_dir fs_dirs[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_FILES];
-extern struct __fs_bulk_port fs_bulk_ports[ECONET_MAX_FS_SERVERS][256];
-extern struct load_queue *fs_load_queue;
+#define FSOP_CTRL	(f->ctrl)
+#define FSOP_PORT	(f->port)
+#define FSOP_SEQ	(f->seq)
 
 /* 
  * fsop_list struct
@@ -637,6 +641,19 @@ struct fsop_00_cmd {
 #define FSOP_00_32BIT	0x04 /* Only if user is on a 32 bit client */
 #define FSOP_00_BRIDGE 0x08 /* Only if user has bridge privileges */
 
+/* Defines for switching discs */
+
+#define FSOP_MOVE_DISC_URD 0x01
+#define FSOP_MOVE_DISC_CWD 0x02
+#define FSOP_MOVE_DISC_LIB 0x03
+#define FSOP_MOVE_DISC_INVIS 0x60
+#define FSOP_MOVE_DISC_NOTFOUND 0x10
+#define FSOP_MOVE_DISC_NOTDIR 0x20
+#define FSOP_MOVE_DISC_UNREADABLE 0x30
+#define FSOP_MOVE_DISC_UNMAPPABLE 0x40
+#define FSOP_MOVE_DISC_CHANNEL 0x50
+#define FSOP_MOVE_DISC_SUCCESS 0x00
+
 /* Some externs for functions within fsop_00_oscli.c which manage the command list */
 
 extern struct fsop_00_cmd * fsop_00_match (unsigned char *, uint8_t *); /* Tells us whether a command exists in the list, so we use new structure not old. Feed the OSCLI command (abbreviated) in here and you'll get a pointer to the struct or NULL if not found, uint8_t * is index of character AFTER command end (either the end of the word, or the '.' for an abbreviation) */
@@ -644,6 +661,7 @@ extern void fsop_00_addcmd (struct fsop_00_cmd *); /* Add the malloced command w
 extern struct fsop_00_cmd * fsop_00_mkcmd(unsigned char *, uint8_t, uint8_t, uint8_t, uint8_t, oscli_func);
 extern uint8_t fsop_00_oscli_parse(unsigned char *, struct oscli_params *, uint8_t);
 extern void fsop_00_oscli_extract(unsigned char *, struct oscli_params *, uint8_t, char *, uint8_t, uint8_t);
+#define FSOP_EXTRACT(f,n,v,l)	fsop_00_oscli_extract(f->data,p,n,v,l,param_start)
 
 
 /* FSOP Definition macro */
@@ -653,6 +671,8 @@ extern void fsop_00_oscli_extract(unsigned char *, struct oscli_params *, uint8_
 /* Some bog standard reply packet stuff */
 
 #define FS_REPLY_DATA(c)	struct __econet_packet_udp reply = { .p.port = FSOP_REPLY_PORT, .p.ctrl = c, .p.ptype = ECONET_AUN_DATA, .p.data[0] = 0, .p.data[1] = 0 }
+/* We have a second version because sometimes we used 'r' in the main code so it's easier not to change it! */
+#define FS_R_DATA(c)	struct __econet_packet_udp r = { .p.port = FSOP_REPLY_PORT, .p.ctrl = c, .p.ptype = ECONET_AUN_DATA, .p.data[0] = 0, .p.data[1] = 0 }
 
 /*
  * FSOP Function externs
@@ -665,13 +685,60 @@ extern void fsop_reply_ok(struct fsop_data *);
 extern void fsop_error(struct fsop_data *, uint8_t, char *);
 extern void fsop_error_ctrl(struct fsop_data *, uint8_t, uint8_t, char *);
 extern void fs_debug (uint8_t, uint8_t, char *, ...);
+extern void fs_debug_full (uint8_t, uint8_t, struct __fs_station *, uint8_t, uint8_t, char *, ...);
 
-#define fsop_debug fsdebug
+/* Externs for internal file handling from fs.c */
+extern struct __fs_file * fsop_open_interlock(struct fsop_data *, unsigned char *, uint8_t, int8_t *, uint8_t);
+//extern struct __fs_dir * fsop_get_dir_handle(struct fsop_data *, unsigned char *);
+extern void fsop_close_interlock(struct __fs_station *, struct __fs_file *, uint8_t);
+//extern void fsop_close_dir_handle(struct __fs_station *, struct __fs_dir *);
+extern uint8_t fsop_allocate_user_file_channel(struct __fs_active *);
+extern void fsop_deallocate_user_file_channel(struct __fs_active *, uint8_t);
+extern uint8_t fsop_allocate_user_dir_channel(struct __fs_active *, struct __fs_file *);
+extern void fsop_deallocate_user_dir_channel(struct __fs_active *, uint8_t);
+extern uint8_t fsop_find_bulk_port(struct __fs_station *);
+extern void fs_acorn_to_unix(char *, uint8_t);
+extern void fs_unix_to_acorn(char *);
+extern uint8_t fsop_perm_from_acorn(struct __fs_station *, uint8_t);
+extern uint8_t fsop_perm_to_acorn(struct __fs_station *, uint8_t, uint8_t);
+extern int16_t fsop_get_acorn_entries(struct fsop_data *, unsigned char *);
+extern unsigned char *pathname_to_dotfile(unsigned char *, uint8_t);
+
+/* Externs for load/getbytes dequeuer system in fs.c */
+
+extern struct load_queue * fsop_load_enqueue(struct fsop_data *, struct __econet_packet_udp *, uint16_t, struct __fs_file *, uint8_t, uint32_t, uint8_t, uint16_t);
+
+/* And some defines for use with fsop_load_enqueu */
+
+#define FS_ENQUEUE_LOAD 1
+#define FS_ENQUEUE_GETBYTES 2
+
+/* Externs to deal with users from fs.c */
+extern int fsop_find_userid(struct fsop_data *, uint8_t, uint8_t);
+extern uint8_t fs_isdir(char *);
+extern void fs_read_xattr(unsigned char *, struct objattr *, struct fsop_data *);
+extern void fs_write_xattr(unsigned char *, uint16_t, uint16_t, uint32_t, uint32_t, uint16_t, struct fsop_data *);
+extern uint8_t fsop_exists(struct fsop_data *, unsigned char *);
+extern void fsop_write_user(struct __fs_station *, int, unsigned char *);
+extern struct __fs_active * fsop_stn_logged_in(struct __fs_station *, uint8_t, uint8_t);
+extern struct __fs_active * fsop_stn_logged_in_lock(struct __fs_station *, uint8_t, uint8_t);
+extern int fsop_get_discno(struct fsop_data *, char *);
+extern void fsop_get_disc_name(struct __fs_station *, uint8_t, unsigned char *);
+extern void fsop_set_disc_name(struct __fs_station *, uint8_t, unsigned char *);
+extern void fsop_get_username_lock(struct __fs_active *, char *);
+extern uint8_t fsop_writedisclist(struct __fs_station *, unsigned char *);
+extern void fsop_dump_handle_list(FILE *, struct __fs_station *);
 
 /* Externals for string manipulation from fs.c */
 extern void fs_copy_to_cr(unsigned char *, unsigned char *, unsigned short);
 extern uint16_t fs_copy_terminate(unsigned char *, unsigned char *, uint16_t, uint8_t);
-extern short fs_get_uid(int, char *);
+int16_t fsop_get_uid(struct __fs_station *, char *);
+extern void fs_toupper(char *);
+extern void fs_copy_padded(unsigned char *, unsigned char *, uint16_t);
+
+/* Externs for printer stuff */
+
+int8_t fsop_get_user_printer(struct __fs_active *);
 
 /* Externs from fsop_00_oscli.c */
 
@@ -679,28 +746,53 @@ extern void fsop_lsb_reply (char *, uint8_t, uint32_t);
 
 /* Externs for fileserver control from fs.c */
 
-extern void fsop_shutdown(struct fsop_data *);
+extern void fsop_shutdown(struct __fs_station *);
 extern int fs_normalize_path(int, int, unsigned char *, short, struct path *);
 extern int fs_normalize_path_wildcard(int, int, unsigned char *, short, struct path *, unsigned short);
 extern int fsop_normalize_path(struct fsop_data *, unsigned char *, short, struct path *);
 extern int fsop_normalize_path_wildcard(struct fsop_data *, unsigned char *, short, struct path *, unsigned short);
+extern void fs_free_wildcard_list(struct path *);
 extern void fs_get_parameters (uint8_t, uint32_t *, uint8_t *);
-extern void fsop_get_parameters (struct fsop_data *, uint32_t *, uint8_t *);
-extern void fsop_set_parameters (struct fsop_data *, uint32_t, uint8_t);
-extern void fsop_write_readable_config(struct fsop_data *f);
+extern void fsop_get_parameters (struct __fs_station *, uint32_t *, uint8_t *);
+extern void fsop_set_parameters (struct __fs_station *, uint32_t, uint8_t);
+extern uint8_t fsop_clear_syst_pw (struct __fs_station *);
+extern uint8_t fsop_write_server_config(struct __fs_station *);
+extern void fsop_write_readable_config(struct __fs_station *);
+extern void fs_store_tail_path(char *, char *);
+extern void fsop_read_xattr(unsigned char *, struct objattr *, struct fsop_data *);
+extern void fsop_write_xattr(unsigned char *, uint16_t, uint16_t, uint32_t, uint32_t, uint16_t, struct fsop_data *);
+
+/* Some date functions from fs.c */
+uint8_t fs_year_from_two_bytes(uint8_t, uint8_t);
+uint8_t fs_month_from_two_bytes(uint8_t, uint8_t);
+uint8_t fs_day_from_two_bytes(uint8_t, uint8_t);
 
 /* Externs for cross-fertilised functions */
 
-extern void fsop_bye_internal(struct fsop_data *, unsigned short);
-
-/* Externs for interlock open and close from fs.c */
-
-extern short fs_open_interlock(int, unsigned char *, unsigned short, unsigned short);
-extern void fs_close_interlock(int, unsigned short, unsigned short);
+extern void fsop_bye_internal(struct __fs_active *, uint8_t, uint8_t);
 
 /* Externs for tx */
 extern int fsop_aun_send(struct __econet_packet_udp *, int, struct fsop_data *);
 extern int fsop_aun_send_noseq(struct __econet_packet_udp *, int, struct fsop_data *);
+extern int raw_fsop_aun_send(struct __econet_packet_udp *, int, struct __fs_station *, uint8_t, uint8_t);
+extern int raw_fsop_aun_send_noseq(struct __econet_packet_udp *, int, struct __fs_station *, uint8_t, uint8_t);
+extern void fsop_error_ctrl(struct fsop_data *, uint8_t, uint8_t, char *);
+extern void fsop_error(struct fsop_data *, uint8_t, char *);
+extern void fsop_reply_ok(struct fsop_data *);
+extern void fsop_reply_success(struct fsop_data *, uint8_t, uint8_t);
+extern void fsop_reply_ok_with_data(struct fsop_data *, uint8_t *, uint16_t);
+extern void * fsop_register_machine (struct __fs_machine_peek_reg *);
+
+/* Externs for the HPB */
+void fsop_setup(void);
+uint8_t fsop_is_enabled (struct __fs_station *);
+struct __fs_station *fsop_initialize(struct __eb_device *, char *);
+int8_t fsop_run(struct __fs_station *);
+
+/* Port allocator in the HPB */
+
+uint8_t	eb_port_allocate(struct __eb_device *, uint8_t, port_func, void *);
+void	eb_port_deallocate(struct __eb_device *, uint8_t);
 
 /* Macro to enable easy tx of a standard FS_REPLY_DATA block */
 #define fsop_send(n)	fsop_aun_send(&reply, (n), f)
@@ -710,7 +802,7 @@ extern void fs_date_to_two_bytes(unsigned short, unsigned short, unsigned short,
 
 /* Some externs from econet-hpbridge.c */
 
-extern uint32_t get_local_seq(unsigned char, unsigned char);
+extern uint32_t eb_get_local_seq(struct __eb_device *);
 
 // routine in econet-bridge.c to find a printer definition
 extern int8_t get_printer(unsigned char, unsigned char, char*);
@@ -739,27 +831,139 @@ extern float timediffstart(void);
 #define FSDOTREGEX "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;\\.[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 #define FS_NETCONF_REGEX_ONE "^NETCONF(IG)?\\s+([\\+\\-][A-Z]+)\\s*"
 
-#define FS_DIVHANDLE(x) ((fs_config[server].fs_manyhandle == 0) ? (  (  ((x) == 128) ? 8 : ((x) == 64) ? 7 : ((x) == 32) ? 6 : ((x) == 16) ? 5 : ((x) == 8) ? 4 : ((x) == 4) ? 3 : ((x) == 2) ? 2 : ((x) == 1) ? 1 : (x))) : (x))
-#define FS_MULHANDLE(x) ((fs_config[server].fs_manyhandle != 0) ? (x) : (1 << ((x) - 1)))
+#define FS_DIVHANDLE(x) ((f->server->config->fs_manyhandle == 0) ? (  (  ((x) == 128) ? 8 : ((x) == 64) ? 7 : ((x) == 32) ? 6 : ((x) == 16) ? 5 : ((x) == 8) ? 4 : ((x) == 4) ? 3 : ((x) == 2) ? 2 : ((x) == 1) ? 1 : (x))) : (x))
+#define FS_MULHANDLE(x) ((f->server->config->fs_manyhandle != 0) ? (x) : (1 << ((x) - 1)))
+
+/* Some linked list manipulation macros */
+
+/* Create new struct of type t, put it on l, put it on the head (1) or tail (0) of the queue of such structs at l, and put the pointer (or null) in p,
+ * use module & descr as parameters to eb_malloc()
+ */
+
+#define FS_LIST_MAKENEW(t,l,head,p,module,descr) \
+	p = eb_malloc(__FILE__, __LINE__, module, descr, sizeof(t)); \
+	memset (p, 0, sizeof(t)); \
+	if (head) \
+	{ \
+		p->next = l; \
+		p->prev = NULL; \
+		l = p; \
+	} \
+	else \
+	{ \
+		t       *tmp; \
+		tmp = l; \
+		if (!tmp) \
+		{ \
+			l = p; \
+			p->next = NULL; \
+			p->prev = NULL; \
+		} \
+		else \
+		{ \
+			while (tmp->next) tmp=tmp->next;\
+			p->prev = tmp; \
+			tmp->next = p;\
+			p->next = NULL; \
+		} \
+	} \
+
+#define FS_LIST_SPLICEFREE(l,p,module,descr) \
+	if (p->prev) \
+		p->prev->next = p->next; \
+	else \
+		l = p->next; \
+	\
+	if (p->next) \
+		p->next->prev = p->prev; \
+	\
+	eb_free (__FILE__, __LINE__, module, descr, p)
 
 /* List of externs for FSOP functions */
 
+FSOP_EXTERN(00);
+FSOP_EXTERN(01);
+FSOP_EXTERN(02);
+FSOP_EXTERN(03);
+FSOP_EXTERN(04);
+FSOP_EXTERN(05);
+FSOP_EXTERN(06);
+FSOP_EXTERN(07);
+FSOP_EXTERN(08);
+FSOP_EXTERN(09);
+FSOP_EXTERN(0a);
+FSOP_EXTERN(0b);
+FSOP_EXTERN(0c);
+FSOP_EXTERN(0d);
+FSOP_EXTERN(0e);
+FSOP_EXTERN(0f);
 FSOP_EXTERN(10);
-FSOP_EXTERN(1a);
+FSOP_EXTERN(11);
+FSOP_EXTERN(12);
+FSOP_EXTERN(13);
+FSOP_EXTERN(14);
+FSOP_EXTERN(15);
 FSOP_EXTERN(17);
 FSOP_EXTERN(18);
 FSOP_EXTERN(19);
+FSOP_EXTERN(1a);
+FSOP_EXTERN(1b);
+FSOP_EXTERN(1c);
+FSOP_EXTERN(1d);
+FSOP_EXTERN(1e);
+FSOP_EXTERN(1f);
 FSOP_EXTERN(20);
+FSOP_EXTERN(26);
+FSOP_EXTERN(27);
+FSOP_EXTERN(28);
+FSOP_EXTERN(29);
+FSOP_EXTERN(2a);
+FSOP_EXTERN(2b);
+FSOP_EXTERN(2c);
 FSOP_EXTERN(40);
+FSOP_EXTERN(41);
 FSOP_EXTERN(60);
 
 /* List of OSCLI externs */
 
 /* The catalogue function */
 extern void fsop_00_catalogue (struct fsop_data *, struct oscli_params *, uint8_t, uint8_t);
-FSOP_00_EXTERN(BRIDGEVER);
-FSOP_00_EXTERN(BYE);
-FSOP_00_EXTERN(LOAD);
-FSOP_00_EXTERN(OWNER);
-FSOP_00_EXTERN(SAVE);
 
+FSOP_00_EXTERN(ACCESS);
+FSOP_00_EXTERN(BRIDGEVER);
+FSOP_00_EXTERN(BRIDGEUSER);
+FSOP_00_EXTERN(BYE);
+FSOP_00_EXTERN(CHOWN);
+FSOP_00_EXTERN(COPY);
+FSOP_00_EXTERN(DELETE);
+FSOP_00_EXTERN(DIR);
+FSOP_00_EXTERN(DISCMASK);
+FSOP_00_EXTERN(DISKMASK);
+FSOP_00_EXTERN(FSCONFIG);
+FSOP_00_EXTERN(INFO);
+FSOP_00_EXTERN(LIB);
+FSOP_00_EXTERN(LINK);
+FSOP_00_EXTERN(LOAD);
+FSOP_00_EXTERN(LOGIN);
+FSOP_00_EXTERN(LOGOFF);
+FSOP_00_EXTERN(MKLINK);
+FSOP_00_EXTERN(NEWUSER);
+FSOP_00_EXTERN(OWNER);
+FSOP_00_EXTERN(PASS);
+FSOP_00_EXTERN(PRINTER);
+FSOP_00_EXTERN(PRINTOUT);
+FSOP_00_EXTERN(PRIV);
+FSOP_00_EXTERN(REMUSER);
+FSOP_00_EXTERN(RENUSER);
+FSOP_00_EXTERN(SAVE);
+FSOP_00_EXTERN(SDISC);
+FSOP_00_EXTERN(SETHOME);
+FSOP_00_EXTERN(SETLIB);
+FSOP_00_EXTERN(SETOPT);
+FSOP_00_EXTERN(SETOWNER);
+FSOP_00_EXTERN(SETPASS);
+FSOP_00_EXTERN(UNLINK);
+
+/* From fs.c - master fileserver list */
+
+extern struct __fs_station *fileservers;

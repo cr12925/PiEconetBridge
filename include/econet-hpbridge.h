@@ -139,7 +139,7 @@ struct __eb_printer { // Struct used to hold printer definitions on local emulat
 
 struct __eb_fileserver { // Struct used to hold data defining a locally emulated fileserver
 	char 		*rootpath; // Full pathname to directory holding password file & directories for emulated disks
-	int		index; // Fileserver index number
+	struct __fs_station	*server; // Pointer to __fs_station struct created on initialization - NULL if not initialized
 	pthread_mutex_t	statsmutex; // Lock on the stats values - they are written to and read by different threads
 	uint64_t	b_in, b_out; // Traffic stats
 };
@@ -270,6 +270,10 @@ struct __eb_notify {
 
 */
 
+// Port handler function
+
+typedef void (*port_func) (struct __econet_packet_aun *, uint16_t, void *);
+
 struct __eb_device { // Structure holding information about a "physical" device to which we might send packets to / receive packets from.
 
 
@@ -289,6 +293,10 @@ struct __eb_device { // Structure holding information about a "physical" device 
 	pthread_mutex_t		statsmutex; // Lock on the stats values - they are written to and read by different threads
 	uint64_t		b_in, b_out; // Traffic stats
 	struct __eb_aun_exposure	*exposures; // Pointer to start of this net in the AUN exposure list
+	struct __eb_outq	*aun_out_head, *aun_out_tail; // AUN output queues for this device
+	pthread_mutex_t		aun_out_mutex; // Lock on AUN output queues (above)
+	pthread_cond_t		aun_out_cond; // Condition for AUN sender thread
+	pthread_t		aun_out_thread; // Thread which sends AUN traffic out
 	struct __eb_device	*self; // Pointer to own struct in case of need
 	struct pollfd		p_reset; // The fresh pollfd structure used by device listeners. Saves recreating it every time
 	
@@ -383,6 +391,12 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			struct __eb_fileserver	fs; // Not a pointer, this one
 			struct __eb_ipgw	ip; // Not a pointer, this one
 			uint32_t		seq; // AUN sequence number
+			pthread_mutex_t		ports_mutex; // Locks ports[]
+			uint32_t		ports[8]; // Ports in use by devices attached to this local server
+			uint32_t		reserved_ports[8]; // Ports we cannot just obtain on a non-zero port request
+			port_func		port_funcs[256]; // Function handlers for each port
+			void			*port_param[256]; // Pointer to parameter data registered when the port was seized (e.g. for an FS, it's the __fs_sstation struct)
+			uint8_t			last_port; // Last port we allocated
 			// Stuff to handle *FAST to a local host
 			uint8_t			fastbit; // Oscillates 0, 1 on transmissions from the *FAST handler
 			uint8_t			fast_priv_stns[8192]; // Bitmap of stations who have logged into this FS with the Bridge privilege bit (cleared on *BYE by the FS - means that if the FS gets shut down, we can still tell this was a privileged station)
@@ -415,6 +429,13 @@ struct __eb_device { // Structure holding information about a "physical" device 
 	struct __eb_device	*next; // Linked list. Used to maintain the chain in *devices, except trunks, where it's a pointer to the next trunk in 'trunks' because whilst a trunk will appear in networks[], it doesn't have a network number of its own.
 
 };
+
+#define EB_PORT_SET(device,list,port,func,param)	{ device->local.list[((port) / 8)] |= (1 << (port & 0x01f));  device->local.port_funcs[(port)]=func; device->local.port_param[(port)]=param; }
+#define EB_PORT_CLR(device,port)	device->local.ports[((port) / 8)] &= ~(1 << ((port) & 0x01f))
+#define EB_PORT_ISSET(device,list,port)	((device->local.list[(port)/8] & (1 << (port & 0x01f))) != 0)
+
+uint8_t	eb_port_allocate(struct __eb_device *, uint8_t, port_func, void*);
+void eb_port_deallocate(struct __eb_device *, uint8_t);
 
 /* __eb_imm_clear struct
  * 
@@ -663,3 +684,7 @@ struct __econet_packet_ip {
 #endif
 
 
+/* Externs for the FS */
+extern struct __eb_device * eb_find_station (uint8_t, struct __econet_packet_aun *);
+extern uint8_t eb_aunpacket_to_aun_queue(struct __eb_device *, struct __eb_device *, struct __econet_packet_aun *, uint16_t);
+extern uint8_t eb_enqueue_input (struct __eb_device *, struct __econet_packet_aun *, uint16_t);

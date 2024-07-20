@@ -44,8 +44,8 @@ FSOP(60)
          */
 
         if (
-                        (FSOP_ARG < 16 && !FSOP_BRIDGE)
-                ||      (FSOP_ARG >= 16 && FSOP_ARG < 32 && !FSOP_SYST)
+                        (FSOP_ARG < 16 && !FS_ACTIVE_BRIDGE(f->active))
+                ||      (FSOP_ARG >= 16 && FSOP_ARG < 32 && !FS_ACTIVE_SYST(f->active))
            )
         {
                 fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call - prohibited", "", f->net, f->stn);
@@ -105,7 +105,7 @@ FSOP(60)
                         char   		username[11];
 
                         fs_copy_to_cr((unsigned char *) username, (f->data + 6), 10);
-			uid = fs_get_uid(f->server_id, username);
+			uid = fsop_get_uid(f->server, username);
 
                         fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 16 - Get UID and priv bits for %s", "", f->net, f->stn, username);
                         if (uid < 0) /* Not found */
@@ -131,7 +131,7 @@ FSOP(60)
                         uint8_t data[5];
                         uint32_t params;
 
-                        fs_get_parameters (f->server_id, &params, &(data[4]));
+                        fsop_get_parameters (f->server, &params, &(data[4]));
 
                         fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 17 - Get FS parameters (0x%04X, filename length %d)", "", f->net, f->stn, params, data[4]);
 
@@ -168,7 +168,7 @@ FSOP(60)
                                 return;
                         }
 
-                        fsop_set_parameters (f, params, fnlength);
+                        fsop_set_parameters (f->server, params, fnlength);
 
                 } break;
 
@@ -181,7 +181,7 @@ FSOP(60)
                         snprintf (shutdown_msg, 127, "Fileserver at %d.%d shutting down\x0d", f->server->net, f->server->stn);
                         fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 19 - Shut down fileserver", "", f->net, f->stn);
                         fsop_reply_ok_with_data(f, (unsigned char *) shutdown_msg, strlen(shutdown_msg));
-                        fsop_shutdown(f);
+                        fsop_shutdown(f->server);
 
                 } break;
 
@@ -191,10 +191,10 @@ FSOP(60)
                         uint8_t         arg2;
                         int16_t         uid;
                         uint8_t         l_net, l_stn;
-                        char   	username[11];
+                        char   		username[11];
                         uint16_t        loggedoff = 0;
                         uint8_t         replydata[2];
-                        uint16_t        count;
+			struct __fs_active	*a;
 
                         arg2 = *(f->data+6);
 
@@ -209,7 +209,7 @@ FSOP(60)
                                         }
 
                                         fs_copy_to_cr ((unsigned char *) username, (f->data+7), 10);
-                                        uid = fs_get_uid(f->server_id, username);
+                                        uid = fsop_get_uid(f->server, username);
 
                                         fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 20 - Force log off by username: %s (ID 0x%04X)", "", FSOP_NET, FSOP_STN, username, uid);
                                         if (uid < 0) /* Not known */
@@ -261,16 +261,24 @@ FSOP(60)
 
                         /* Log the relevant users off & send back a count of how many */
 
-                        for (count = 0; count < ECONET_MAX_FS_ACTIVE; count++)
-                        {
-                                if (    (arg2 == 2 && f->server->actives[count].net == l_net && f->server->actives[count].stn == l_stn)
-                                ||      (arg2 < 2 && f->server->actives[count].userid == uid)
+			a = f->server->actives;
+
+			while (a)
+			{
+				struct __fs_active *n;
+
+				n = a->next;
+
+                                if (    (arg2 == 2 && a->net == l_net && a->stn == l_stn)
+                                ||      (arg2 < 2 && a->userid == uid)
                                 )
                                 {
-                                        fsop_bye_internal(f, 0);
+                                        fsop_bye_internal(a, 0, 0);
                                         loggedoff++;
                                 }
-                        }
+
+				a = n;
+			}
 
                         replydata[0] = loggedoff & 0xff;
                         replydata[1] = (loggedoff & 0xff00) >> 8;

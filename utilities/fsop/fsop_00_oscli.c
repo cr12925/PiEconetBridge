@@ -94,17 +94,17 @@ struct fsop_00_cmd * fsop_00_match (unsigned char *c, uint8_t *nextchar)
 		{
 			/* Uppercase-ify the command */
 
-			if (*(c+count) >= 'a' && *(c+count) <= 'z')	*(c+count) &= ~0x20;
+			if (*(c+5+count) >= 'a' && *(c+5+count) <= 'z')	*(c+5+count) &= ~0x20;
 
 			/* Compare */
 
 			if (
-				!(*(c+count) == 0x20 && (*(t->cmd+count)) == 0x80) // Match 0x80 as space
-			&&	(*(c+count) != (*(t->cmd+count))) 
+				!(*(c+5+count) == 0x20 && (*(t->cmd+count)) == 0x80) // Match 0x80 as space
+			&&	(*(c+5+count) != (*(t->cmd+count))) 
 			) /* No match */
 			{
 				/* Not matched. Character 0x80 in the table matches space - for *I AM */
-				//fprintf (stderr, "%c XXX Failed at character %d\n", *(c+count), count+1);
+				//fprintf (stderr, "%c XXX Failed at character %d\n", *(c+5+count), count+1);
 				count = strlen(t->cmd)+1; // Exit this loop
 			}
 			else
@@ -113,18 +113,18 @@ struct fsop_00_cmd * fsop_00_match (unsigned char *c, uint8_t *nextchar)
 					
 				if (
 					((count + 1) < strlen(t->cmd)) /* Might be a '.' next - if there is... */
-				&&	(*(c+count+1) == '.')
+				&&	(*(c+5+count+1) == '.')
 				&&	((count+1) >= t->abbrev)
 				) /* Found abbreviation */
 				
 				{
-					*nextchar = count+2;
+					*nextchar = count+5+2;
 					//fprintf (stderr, "%c +++ Abbreviation found, returning nextchar = %d\n", *(c+count), *nextchar);
 					return t;
 				}
 
 				/* If we're here, we've matched and there are characters still to go */
-				//fprintf (stderr, "%c", *(c+count));
+				//fprintf (stderr, "%c", *(c+5+count));
 
 				count++;
 			}
@@ -132,7 +132,7 @@ struct fsop_00_cmd * fsop_00_match (unsigned char *c, uint8_t *nextchar)
 
 		if (count == strlen(t->cmd)) // NB it will be strlen(t->cmd)+1 if no match
 		{
-			*nextchar = count;
+			*nextchar = count+5;
 			//fprintf (stderr, " +++ Matched in full, returning nextchar = %d\n", *nextchar);
 			return t; /* Must have matched */
 		}
@@ -167,19 +167,7 @@ uint8_t fsop_00_oscli_parse(unsigned char *s, struct oscli_params *p, uint8_t st
 
 	str = s + start;
 
-	/* Strip 0x0d */
-
-	while (count < 256)
-	{
-		if (*(str+count) == 0x0d)
-		{
-			*(str+count) = 0x00;
-			break;
-		} 
-		else count++;
-	}
-
-	count = 0;
+	/* str will already be 0-terminated from the main parser */
 
 	len = strlen(str);
 
@@ -197,11 +185,11 @@ uint8_t fsop_00_oscli_parse(unsigned char *s, struct oscli_params *p, uint8_t st
 
 		if (count < len) /* We've skipped the spaces, mark start and look for end */
 		{
-			p->op_s = count;
+			p->op_s = count + start;
 
 			while (count < len && *(str+count) != ' ') count++;
 
-			p->op_e = count - 1;
+			p->op_e = count - 1 + start;
 	
 			//fprintf (stderr, "fsop_00_oscli_parse: Parse %s element %d found at %d-%d\n", str, index, p->op_s, p->op_e);
 			p++;
@@ -211,6 +199,8 @@ uint8_t fsop_00_oscli_parse(unsigned char *s, struct oscli_params *p, uint8_t st
 		{
 			return index; // Nothing here
 		}
+
+		count++;
 	}
 
 	return index; // I.e. number of entries in oscli_params array (returning 1 means entry 0 is valid)
@@ -231,21 +221,23 @@ void fsop_00_oscli_extract(unsigned char *s, struct oscli_params *p, uint8_t ind
 {
 	uint8_t		count = 0;
 	uint8_t		real_length;
-	char *		start = s+5;
+	char *		start = s; // s+5;
 
 	p += index;
 
 	real_length = (p->op_e - p->op_s) + 1;
 
-	//fprintf (stderr, "fsop_00_oscli_extract from %s index %d between %d and %d\n", start, index, p->op_s + param_start, p->op_e + param_start);
+	//fprintf (stderr, "fsop_00_oscli_extract from %s index %d between %d and %d\n", start+5, index, p->op_s, p->op_e);
 
 	while (count < maxlen && count < real_length)
 	{
-		*(output + count) = *(start + count + p->op_s + param_start);
+		*(output + count) = *(start + count + p->op_s);
 		count++;
 	}
 
 	*(output + count) = '\0';
+
+	//fprintf (stderr, "fsop_00_oscli_extract returning '%s'\n", output);
 
 	return;
 
@@ -306,6 +298,7 @@ void fsop_lsb_reply (char *source, uint8_t bytes, uint32_t value)
 FSOP(00)
 {
 
+	FS_REPLY_DATA(0x80);
 	struct oscli_params p[10]; /* Max 10 things on a command */
 	char *	cr;
 	struct fsop_00_cmd	*cmd;
@@ -318,8 +311,12 @@ FSOP(00)
 
 	if ((cmd = fsop_00_match(f->data, &param_start)))
 	{
+		//fs_debug (0, 2, "FS Parser found %s", cmd->cmd);
+
 		num = fsop_00_oscli_parse(f->data, &p[0], param_start);
 
+		//fs_debug (0, 2, "FS Parser found %s with %d parameters", cmd->cmd, num);
+		
 		if ((cmd->flags & FSOP_00_LOGGEDIN) && (!f->user))
 			fsop_error (f, 0xff, "Who are you?");
 		else if ((cmd->flags & FSOP_00_SYSTEM) && !(f->user->priv & FS_PRIV_SYSTEM))
@@ -334,7 +331,13 @@ FSOP(00)
 			(cmd->func)(f, &p[0], num, param_start);
 	}
 	else
-		fsop_error(f, 0xFF, "Bad command");
+	{
+		reply.p.data[0] = 0x08; // Unknown command
+		memcpy(&(reply.p.data[2]), (f->data + 5), f->datalen - 5);
+		reply.p.data[f->datalen-5 + 2] = 0x0D;
+		fsop_aun_send(&reply,f->datalen-5+2,f);
+	}
+
 
 	return;
 

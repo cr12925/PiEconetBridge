@@ -124,7 +124,7 @@ void econet_flagfill(void);
 #define econet_get_aunstate() atomic_read(&(econet_data->aun_state))
 
 #define econet_set_tx_status(x) \
-        atomic_set(&(econet_data->tx_status), (x))
+        atomic_set(&(econet_data->tx_status), (x)); 
 
 #define econet_set_irq_state(x) \
         atomic_set(&(econet_data->irq_state), (x))

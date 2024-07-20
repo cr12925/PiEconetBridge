@@ -17,12 +17,27 @@
 
 #include "fs.h"
 
-FSOP(17)
+/* 
+ * &1E - Read user free space 
+ * &1F - Set user free space
+ *
+ * Neither does anything because we don't implement quotas.
+ */
+
+FSOP(1e)
 {
 
-	fsop_bye_internal(f->active, 1, FSOP_REPLY_PORT); /* Do reply */
+	fsop_reply_ok(f);
 
 	return;
 
 }
 
+FSOP(1f)
+{
+
+	fsop_reply_ok(f);
+
+	return;
+
+}

@@ -17,10 +17,14 @@
 
 #include "fs.h"
 
-FSOP(17)
+/*
+ * FSOP &1C - Set Real Time Clock (silently do nothing)
+ */
+
+FSOP(1c)
 {
 
-	fsop_bye_internal(f->active, 1, FSOP_REPLY_PORT); /* Do reply */
+	fsop_reply_ok(f);
 
 	return;
 

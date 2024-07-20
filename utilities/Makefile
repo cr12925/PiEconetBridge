@@ -9,7 +9,7 @@ econet-hpbridge:	econet-hpbridge.o fsv2.o $(fsop_objects)
 	if [ -f .noexplain ]; then cc -g -o econet-hpbridge econet-hpbridge.o fsv2.o $(fsop_objects) -lpthread -lssl -lcrypto; else cc -g -o econet-hpbridge econet-hpbridge.o fsv2.o $(fsop_objects) -lpthread -lssl -lcrypto -lexplain; fi
 	-chgrp econet econet-hpbridge
 
-$(fsop_objects): %.o: %.c
+$(fsop_objects): %.o: %.c ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
 	cc -g -DGIT_VERSION=\"$(GIT_VERSION)\" -I../include -c $< -Wall -Wno-pointer-sign -o $@
 
 econet-hpbridge.o:	Makefile econet-hpbridge.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-pserv.h

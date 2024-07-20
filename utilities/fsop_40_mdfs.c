@@ -15,14 +15,3 @@
 
 */
 
-#include "fs.h"
-
-FSOP(17)
-{
-
-	fsop_bye_internal(f->active, 1, FSOP_REPLY_PORT); /* Do reply */
-
-	return;
-
-}
-

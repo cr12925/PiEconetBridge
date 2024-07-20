@@ -84,470 +84,21 @@ short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for e
 short use_xattr=1 ; // When set use filesystem extended attributes, otherwise use a dotfile
 short normalize_debug = 0; // Whether we spew out loads of debug about filename normalization
 
-/*
-#ifdef BRIDGE_V2
-*/
-	extern struct __eb_device * eb_find_station (uint8_t, struct __econet_packet_aun *);
-	extern uint8_t eb_enqueue_output (struct __eb_device *, struct __econet_packet_aun *, uint16_t, struct __eb_device *);
-	extern void eb_add_stats (pthread_mutex_t *, uint64_t *, uint16_t);
-	extern void eb_fast_priv_notify (struct __eb_device *, uint8_t, uint8_t, uint8_t);
-/*
-#else
-	extern int aun_send (struct __econet_packet_aun *, int);
-	unsigned short fs_quiet = 0, fs_noisy = 0;
-#endif
-*/
+struct __fs_station	*fileservers; /* Set to NULL in fs_setup() */
 
-	/* moved to fs.h 
-extern uint32_t get_local_seq(unsigned char, unsigned char);
-
-// routine in econet-bridge.c to find a printer definition
-extern int8_t get_printer(unsigned char, unsigned char, char*);
-
-// printer information routines in econet-bridge.c
-extern uint8_t get_printer_info (unsigned char, unsigned char, uint8_t, char *, char *, uint8_t *, uint8_t *, short *);
-extern uint8_t set_printer_info (unsigned char, unsigned char, uint8_t, char *, char *, uint8_t, short);
-extern uint8_t get_printer_total (unsigned char, unsigned char);
-extern void send_printjob (char *, uint8_t, uint8_t, uint8_t, uint8_t, char *, char *, char *, char *);
-extern char * get_user_print_handler (uint8_t, uint8_t, uint8_t, char *, char *);
-
-// Server timing
-extern float timediffstart(void);
-
-*/
-
-/* moved to fs.h
-short fs_open_interlock(int, unsigned char *, unsigned short, unsigned short);
-void fs_close_interlock(int, unsigned short, unsigned short);
-void fs_bye(int, unsigned char, unsigned char, unsigned char, unsigned short);
-*/
+/* Moved to econet-fs-hpbridge-common.h */
+#if 0
+extern struct __eb_device * eb_find_station (uint8_t, struct __econet_packet_aun *);
+extern uint8_t eb_enqueue_output (struct __eb_device *, struct __econet_packet_aun *, uint16_t, struct __eb_device *);
+extern void eb_add_stats (pthread_mutex_t *, uint64_t *, uint16_t);
+extern void eb_fast_priv_notify (struct __eb_device *, uint8_t, uint8_t, uint8_t);
 
 void fs_write_readable_config(int);
+#endif
 
 // Parser
 //#define FS_PARSE_DEBUG 1
 uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
-
-/* Moved to fs.h
-#ifndef BRIDGE_V2
-	#define FS_VERSION_STRING "3 PiEconetBridge FS 2.10"
-#else
-	#define FS_VERSION_STRING "3 Pi Econet HP Bridge FS 2.10"
-#endif
-
-#define FS_DEFAULT_NAMELEN 10
-
-// Implements basic AUN fileserver within the econet bridge
-
-#define ECONET_MAX_FS_SERVERS 4
-#define ECONET_MAX_FS_USERS 256 // Total defined on a server, not total logged in
-#define ECONET_MAX_FS_ACTIVE 80 // Maximum simultaneous logged in users (after all they all need at least 3 handles...)
-#define ECONET_MAX_FS_DISCS 10 // Don't change this. It won't end well.
-#define ECONET_MAX_FS_DIRS 256 // maximum number of active directory handles
-#define ECONET_MAX_FS_FILES 512 // Maximum number of active file handles
-#define FS_MAX_OPEN_FILES 33 // Really 32 because we don't use entry 0 - maximum per user
-
-#define ECONET_MAX_FILENAME_LENGTH (fs_config[server].fs_fnamelen)
-// Do NOT change this. Some format string lengths and array lengths are still hard coded.  (And some of the 
-// arrays are of length 81 to take a null byte as well. So to make this fully flexible, a number of arrays
-// need to be altered, and some format strings need to be built with sprintf so that the right length
-// can be incorporated before that (second) format string can be used... sort of a work in progress!
-#define ECONET_ABS_MAX_FILENAME_LENGTH 80
-#define ECONET_MAX_PATH_ENTRIES 30
-#define ECONET_MAX_PATH_LENGTH ((ECONET_MAX_PATH_ENTRIES * (ECONET_ABS_MAX_FILENAME_LENGTH + 1)) + 1)
-
-// Definitions common to HP Bridge and FS
-#include "../include/econet-fs-hpbridge-common.h"
-
-// PiFS privilege bytes
-
-// Our native privs
-#define FS_PRIV_SYSTEM 0x80
-#define FS_PRIV_LOCKED 0x40
-#define FS_PRIV_NOPASSWORDCHANGE 0x20
-#define FS_PRIV_USER 0x01
-#define FS_PRIV_INVALID 0x00
-
-// MDFS-related privs in our native format - this doesn't work because we don't check for priv & FS_PRIV_SYSTEM for example, we check equality. Use the macro and fix the macro. TODO.
-#define FS_PRIV_PERMENABLE 0x08
-#define FS_PRIV_NOSHORTSAVE 0x04
-#define FS_PRIV_RUNONLY 0x02
-#define FS_PRIV_NOLIB 0x10 // Yes, this one is different - we don't have 0x10 as a flag in our native priv system 
-
-// MDFS privilege bits in MDFS format
-#define MDFS_PRIV_PWUNLOCKED 0x01
-#define MDFS_PRIV_SYST 0x02
-#define MDFS_PRIV_NOSHORTSAVE 0x04
-#define MDFS_PRIV_PERMENABLE 0x08
-#define MDFS_PRIV_NOLIB 0x10
-#define MDFS_PRIV_RUNONLY 0x20
-
-// priv2 bits
-#define FS_PRIV2_BRIDGE 0x01 // Can access *FAST, can use the FSOP to shut down the bridge (power off) etc.  
-#define FS_PRIV2_CHROOT 0x02 // Make user home dir appear as root 
-#define FS_PRIV2_HIDEOTHERS 0x04 // Don't show other users in fs_users() 
-#define FS_PRIV2_ANFSNAMEBODGE 0x08 // ANFS strips the colon off the start of a filename if it appears to be a disc number instead of a disc name. This privilege causes the normalizer to spot [0-9].$ and replace with :[0-9].$ in filenames. This is a per user priv because it can break filenames! 
-#define FS_PRIV2_FIXOPT 0x10 // User cannot change boot option 
-
-// user *opt 4,x options 
-#define FS_BOOTOPT_OFF 0x00
-#define FS_BOOTOPT_LOAD 0x01
-#define FS_BOOTOPT_RUN 0x02
-#define FS_BOOTOPT_EXEC 0x03
-
-#define FS_MAX_BULK_SIZE 0x1000 // 4k - see RiscOS PRM
-*/
-
-#ifdef BRIDGE_V2
-	/* Cache device pointer to V2 bridge devices per server
-	   so that fs_aun_send can put things on the right queue
-	*/
-
-	struct __eb_device 	*fs_devices[ECONET_MAX_FS_SERVERS];
-#endif
-
-uint8_t	fs_enabled[ECONET_MAX_FS_SERVERS+1];
-uint8_t fs_enablement = 0; // Set to 1 when fs_enabled has been initialized
-
-/*
-struct {
-	uint8_t	fs_acorn_home; // != 0 means implement acorn home directory ownership semantics
-	uint8_t fs_sjfunc; // != 0 means turn on SJ MDFS functionality
-	uint8_t fs_bigchunks; // Whether we use 4k chunks on data bursts, or 1.25k (BeebEm compatibility - it appears to have a buffer overrun!)
-	uint8_t fs_pwtenchar; // Set to non-zero when the FS has run the 6 to 10 character password conversion, by moving the fullname field along by 5 chracters
-	uint8_t fs_fnamelen; // Live (modifiable!) max filename length. Must be less than ECONET_MAX_FILENAME_LENGTH. When changed, this has to recompile the fs regex
-	uint8_t fs_infcolon; // Uses :inf for alternative to xattrs instead of .inf, and maps Acorn / to Unix . instead of Unix :
-	uint8_t fs_manyhandle; // Enables user handles > 8, and presents them as 8-bit integers rather than handle n presented as 2^n (which is what FS 3 does with its limit of 8 handles)
-	uint8_t fs_mdfsinfo; // Enables longer output from *INFO akin to MDFS
-	uint8_t fs_pifsperms; // Enables more flexible permissions on directories and enforces them
-	uint8_t fs_default_dir_perm; // Default permission to apply to a directory when created / if no xattr file. Will pick wr/r if config file exists (existing fileserver), or wr/ otherwise (for level3-alikeness)
-	uint8_t fs_default_file_perm; // Ditto for files. If the config file exists, it'll pick wr/r for backward compat; otherwise wr/ for level3-alikeness
-	uint8_t fs_mask_dir_wrr; // Whether to mask off the wr/r bits on a directory in human and non-human-readable output. These are implied if a client sets perms on a directory to &00 anyway. Won't mask if ((perms & wr/r) != wr/r) so that manually set permissions are shown/returned.
-	uint8_t pad[243]; // Spare spare in the config
-} fs_config[ECONET_MAX_FS_SERVERS];
-*/
-
-/* Moved to fs.h
-#define FS_CONF_PIFSPERMS(s)	(fs_config[(s)].fs_pifsperms == 0x80 ? 0 : 1)
-#define FS_CONF_DEFAULT_DIR_PERM(s)	(fs_config[(s)].fs_default_dir_perm)
-#define FS_CONF_DEFAULT_FILE_PERM(s)	(fs_config[(s)].fs_default_file_perm)
-#define FS_ACORN_DIR_MASK	(FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R)
-*/
-
-/*
-struct fs_user {
-	unsigned char username[10];
-	unsigned char password[11];
-	unsigned char fullname[25];
-	unsigned char priv;
-	unsigned char bootopt;
-	unsigned char home[80];
-	uint8_t		unused1[16];
-	unsigned char lib[80];
-	uint8_t		unused2[16];
-	unsigned char home_disc;
-	unsigned char year, month, day, hour, min, sec; // Last login time
-	uint8_t		priv2;
-	uint16_t	discmask; // 1 bit per disk number, if set the system will not show that disc to the user. discmask must never have the bit set which refers to the home drive. The FS_DISC_VIS macro deliberately will always return 1 for the home drive
-	char unused[6];
-} users[ECONET_MAX_FS_SERVERS+1][ECONET_MAX_FS_USERS];
-*/
-
-// MAX_FS_SERVERS+1 is because we use the last entry to sort a real server entry to produce an MDFS format password file.
-// We don't use it for live data
-
-// Macro to indicate whether a particular FS disc is visible to a particular user. Will always return 1 if disc number >= 16 (because the bit field is only 16 bits), or if the disc in question is the user's home drive (which can never be hidden), or if the bit in the bitfield is clear (i.e. disc visible)
-
-/* Moved to fs.h
-#define FS_DISC_VIS(s,u,d) ((d >= 16) || (users[(s)][(u)].home_disc == (d)) || !(users[(s)][(u)].discmask & (1 << (d))))
-
-// Macro to provide a shortcut to getting a user's real ID when the caller only knows the index into active[]
-#define FS_ACTIVE_UID(s,a) (active[(s)][(a)].userid)
-// Macro to identify if we have system privileges
-#define FS_ACTIVE_SYST(s,a) (users[(s)][FS_ACTIVE_UID((s),(a))].priv & FS_PRIV_SYSTEM)
-// Macro to identify if we have bridge privileges
-#define FS_ACTIVE_BRIDGE(s,a) (users[(s)][FS_ACTIVE_UID((s),(a))].priv2 & FS_PRIV2_BRIDGE)
-*/
-
-/*
-struct {
-	unsigned char groupname[10]; // First character null means unused.
-} groups[ECONET_MAX_FS_SERVERS][256];
-*/
-
-/*
-struct fs_active {
-	unsigned char net, stn;
-	unsigned int userid; // Index into users[n][]
-	unsigned char root, current, lib; // Handles
-	char root_dir[1024], current_dir[1024], lib_dir[1024]; // Paths relative to root
-	char root_dir_tail[ECONET_ABS_MAX_FILENAME_LENGTH+1], lib_dir_tail[ECONET_ABS_MAX_FILENAME_LENGTH+1], current_dir_tail[ECONET_ABS_MAX_FILENAME_LENGTH+1]; // Just the last element of path, or $ // these were 15
-	unsigned int home_disc, current_disc, lib_disc; // Currently selected disc for each of the three handles
-	unsigned char bootopt;
-	unsigned char priv;
-	uint8_t printer; // Index into this station's printer array which shows which printer has been selected - defaults to &ff to signal 'none'.
-	struct {
-		short handle; // Pointer into fs_files
-		unsigned long cursor; // Our pointer into the file
-		unsigned long cursor_old; // Previous cursor in case we get a repeated request, we can go back
-		unsigned short mode; // 1 = read, 2 = openup, 3 = openout
-		unsigned char sequence; // Oscillates 0-1-0-1... This variable stores the LAST b0 of ctrl byte received, so when we get new traffic it should be *different* to what's in here.
-		unsigned short pasteof; // Signals when there has already been one attempt to read past EOF and if there's another we need to generate an error
-		unsigned short is_dir; // Looks like Acorn systems can OPENIN() a directory so there has to be a single set of handles between dirs & files. So if this is non-zero, the handle element is a pointer into fs_dirs, not fs_files.
-		char acornfullpath[1024]; // Full Acorn path, used for calculating relative paths
-		char acorntailpath[ECONET_ABS_MAX_FILENAME_LENGTH+1];
-	} fhandles[FS_MAX_OPEN_FILES];
-	unsigned char sequence; // Used to detect duplicate transmissions on putbyte - oscillates 0-1-0-1 - low bit of ctrl byte in packet. Gets re-set whenever there is an operation which is not a putbyte, so that successive putbytes get the tracker, but anything else in the way resets it
-	unsigned char urd_unix_path[1024]; // Used for chroot purposes - stored at login / sdisc
-} active[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_ACTIVE];
-*/
-
-/*
-struct fs_station {
-	unsigned char net; // Network number of this server
-	unsigned char stn; // Station number of this server
-	unsigned char directory[256]; // Root directory
-	unsigned int total_users; // How many entries in users[][]?
-	int total_discs;
-} fs_stations[ECONET_MAX_FS_SERVERS];
-*/
-
-/*
-struct {
-	unsigned char name[17];
-} fs_discs[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_DISCS];
-
-struct {
-	unsigned char name[1024];
-	FILE *handle;
-	int readers, writers; // Used for locking; when readers = writers = 0 we close the file 
-} fs_files[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_FILES];
-
-struct {
-	unsigned char name[1024];
-	DIR *handle;
-	int readers; // When 0, we close the handle
-} fs_dirs[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_FILES];
-
-struct {
-	unsigned char net, stn;
-	short handle; // -1 if available
-	unsigned char ack_port;
-	unsigned char reply_port;
-	unsigned char rx_ctrl;
-	unsigned long length;
-	unsigned long received;
-	unsigned short mode; // as in 1 read, 2 updated, 3 write & truncate (I think!)
-	unsigned short active_id; // 0 = no user handle because we are doing a fs_save
-	unsigned short user_handle; // index into active[server][active_id].fhandles[] so that cursor can be updated
-	unsigned long long last_receive; // Time of last receipt so that we can garbage collect	
-	unsigned char acornname[ECONET_ABS_MAX_FILENAME_LENGTH+2]; // Tail path segment - enables *SAVE to return it on final close // Was 12
-} fs_bulk_ports[ECONET_MAX_FS_SERVERS][256];
-
-struct objattr {
-	unsigned short perm;
-	unsigned short owner;
-	unsigned long load, exec;
-	unsigned short homeof;
-};
-*/
-
-/* New header-based data definitions */
-
-struct __fs_config fs_config[ECONET_MAX_FS_SERVERS];
-struct __fs_user users[ECONET_MAX_FS_SERVERS+1][ECONET_MAX_FS_USERS];
-struct __fs_group groups[ECONET_MAX_FS_SERVERS][256];
-struct __fs_active active[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_ACTIVE];
-struct __fs_station fs_stations[ECONET_MAX_FS_SERVERS];
-struct __fs_disc fs_discs[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_DISCS];
-struct __fs_file fs_files[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_FILES];
-struct __fs_dir fs_dirs[ECONET_MAX_FS_SERVERS][ECONET_MAX_FS_FILES];
-struct __fs_bulk_port fs_bulk_ports[ECONET_MAX_FS_SERVERS][256];
-struct load_queue *fs_load_queue = NULL; // Pointer to first load_queue entry. If NULL, there are no load queues to execute. The load queue entries are enqueued so as to be sorted in server, net, stn order. 
-
-/* Moved to fs.h
-// Internal file / dir result codes
-
-#define FS_FTYPE_NOTFOUND 0
-#define FS_FTYPE_FILE 1
-#define FS_FTYPE_DIR 2
-#define FS_FTYPE_SPECIAL 3 // Not sure what I'll use that for, but we'll have it anyhow
-
-// PiFS file / dir permission bits
-
-#define FS_PERM_H 0x80 // Hidden - doesn't show up in directory list, but can be opened (not accessible to non-owner)
-#define FS_PERM_OTH_W 0x20 // Write by others
-#define FS_PERM_OTH_R 0x10 // Read by others
-#define FS_PERM_EXEC 0x08 // Execute only
-#define FS_PERM_L 0x04 // Locked
-#define FS_PERM_OWN_W 0x02 // Write by owner
-#define FS_PERM_OWN_R 0x01 // Read by owner
-
-#define FS_PERM_PRESERVE 0xff00 // Special 16-bit value fed to fs_setxattr() to stop it overwriting perms
-
-// Defines to test permission bits
-// p = perm byte
-// b = bit required
-
-#define FS_PERM_SET(p,b) 	(((p) & (b)) ? 1 : 0)
-#define FS_PERM_UNSET(p,b)	(((p) & (b)) ? 0 : 1)
-
-// Defines to implement file & dir access permissions
-// In each case:
-//   s = server number
-//   a = active_id
-//   p = file perms (the whole 8 bits)
-//   o = file owner
-//   pp = parent dir perms
-//   po = parent owner
-
-// The following are derived from watching what ANFS does/doesn't do when talking to a Level 4 server as both owner and non-owner 
-// of a file. It was found that SYST is just equivalent to owner
-
-// Actual owner
-#define FS_PERM_ISOWNER(s,a,o)	((FS_ACTIVE_UID((s),(a)) == (o)) ? 1 : 0)
-// Effective owner - i.e. actual owner or system priv
-#define FS_PERM_EFFOWNER(s,a,o)	(FS_ACTIVE_SYST((s),(a)) || FS_PERM_ISOWNER((s),(a),(o)) ? 1 : 0)
-
-// Object visible to this user - as distinct from readable - this is testing the hidden bit
-#define FS_PERM_VISIBLE(s,a,p,o)	(!FS_PERM_SET((p), FS_PERM_H) || FS_PERM_EFFOWNER((s),(a),(o)))
-
-// Can create new file if it doesn't exist already
-#define FS_PERM_CREATE(s,a,p,o,pp,po)	((FS_PERM_EFFOWNER((s),(a),(po)) && (!FS_CONFIG_PIFSPERMS((s)) || FS_PERM_SET((pp), FS_PERM_OWN_W))) || (FS_CONFIG_PIFSPERMS((s)) && FS_PERM_SET((pp), FS_PERM_OTH_W) && FS_PERM_SET((pp), FS_PERM_OWN_W)))
-
-// Can SAVE - only if unlocked and we effectively own it. Non-owners cannot save unless PiFS perms enabled.
-// Even then, only if both owner & other W are set, which is similar to what happens when non-owner read is
-// requested in L4, which requires both OTH_R and OWN_R set.
-
-#define FS_PERM_SAVE(s,a,p,o,pp,po) ((FS_PERM_UNSET((p), FS_PERM_L) && (\
-		(FS_PERM_EFFOWNER((s),(a),(o))) ||\
-		(FS_CONF_PIFSPERMS((s)) && FS_PERM_SET((p), FS_PERM_OWN_W) && FS_PERM_SET((p), FS_PERM_OTH_W)) \
-		))
-// Can LOAD - note that L4 enforces both R/ and /r for a non-owner to read, so R/ is required whether owner or not
-#define FS_PERM_LOAD(s,a,p,o,pp,po) (\
-		(!FS_CONFIG_PIFSPERMS((s)) || (FS_PERM_SET_((pp), FS_PERM_OWN_R) && (FS_PERM_EFFOWNER((s), (a), (po)) || FS_PERM_SET((pp), FS_PERM_OTH_R)))) && \
-		(FS_PERM_SET((p), FS_PERM_OWN_R) && (FS_PERM_EFFOWNER((s),(a),(o)) || FS_PERM_SET((p), FS_PERM_OTH_R))) \
-		)
-
-// Can RENAME - Owner always can unless locked, non-owner never can - except if PIFS PERMS enabled, in which case they can if they have write access to the parent
-#define FS_PERM_RENAME(s,a,p,o,pp,po) (\
-		FS_PERM_UNSET((p), FS_PERM_L) && \
-		( \
-		 	( \
-			 FS_CONFIG_PIFSPERMS((s)) && \
-				(FS_PERM_SET((pp), FS_PERM_OWN_W) && (FS_PERM_EFFOWNER((s),(a),(po)) || FS_PERM_SET((pp), FS_PERM_OTH_W))) \
-			) \
-			|| \
-			(!FS_CONFIG_PIFSPERMS((s) && FS_PERM_EFFOWNER((s),(a),(o)))) \
-		))
-
-// Can OPENIN
-#define FS_PERM_OPENIN	FS_PERM_LOAD
-
-// Can OPENOUT - Level 4 forbids this on WL/ but allows it on +R or +W (wither +L or -L!) - looks like this is (+L && +R) || (+W || +R). In Acorn world, OPENOUT *always* fails for non-owner. In PIFS world, it will succeed if +W/w
-#define FS_PERM_OPENOUT(s,a,p,o,pp,po) \
-	( \
-	  (FS_PERM_EFFOWNER((s),(a),(o)) && ( (FS_PERM_SET((p), FS_PERM_L) && FS_PERM_SET((p), FS_PERM_OWN_R)) || (FS_PERM_SET((p), FS_PERM_OWN_R) || FS_PERM_SET((p), FS_PERM_OWN_W)) ) ) \
-	  || \
-	  (FS_CONFIG_PIFSPERMS((s)) && FS_PERM_SET((p), FS_PERM_OWN_W) && FS_PERM_SET((p), FS_PERM_OTH_W)) \
-	)
-
-// Can OPENUP - Level 4 does same as OPENOUT
-#define FS_PERM_OPENUP FS_PERM_OPENOUT
-
-// Can BPUT/S - Owner: requires +R,+W,-L. Other requires +W/+W and -L
-#define FS_PERM_WRITE(s,a,p,o,pp,po) \
-	( FS_PERM_UNSET((p), FS_PERM_L) && \
-	  (FS_PERM_EFFOWNER((s),(a),(o)) ? \
-	   (FS_PERM_SET((p), FS_PERM_OWN_R) && FS_PERM_SET((p), FS_PERM_OWN_W)) \
-	 : (FS_PERM_SET((p), FS_PERM_OWN_W) && FS_PERM_SET((p), FS_PERM OTH(W))) \
-	 ) \
-	 )
-
-struct path_entry {
-	short ftype;
-	int owner, parent_owner;
-	unsigned char ownername[11];
-	unsigned short perm, parent_perm, my_perm;
-	unsigned short homeof;
-	unsigned long load, exec, length, internal;
-	unsigned char unixpath[1024], unixfname[ECONET_ABS_MAX_FILENAME_LENGTH+1], acornname[ECONET_ABS_MAX_FILENAME_LENGTH+1]; // unixfname / acornname were 15, but now 81 to handle max 80 character filenames
-	unsigned char day, monthyear, hour, min, sec; // Modified date / time
-	unsigned char c_day, c_monthyear, c_hour, c_min, c_sec;
-	void *next, *parent;
-};
-
-#define FS_PATH_ERR_NODIR 0x01 // Path searched for had a directory that did not exist
-#define FS_PATH_ERR_FORMAT 0x02 // Path searched for contained invalid material (e.g. started with a '.')
-#define FS_PATH_ERR_NODISC 0x03 // Selected disc does not exist
-#define FS_PATH_ERR_TYPE 0x04 // What we found was neither file nor directory (even on following a symlink)
-#define FS_PATH_ERR_LENGTH 0x05 // Path provided was too long or too short
-
-struct path {
-	unsigned short error; // One of FS_PATH_ERR* - only valid if function returns 0
-	short ftype; // ECONET_FTYPE_DIR, ECONET_FTYPE_FILE
-	// If ftype == NOTFOUND, the rest of the fields are invalid
-	unsigned char discname[30]; // Actually max 10 chars. This is just safety.
-	short disc; // Disc number
-	unsigned char path[12][ECONET_ABS_MAX_FILENAME_LENGTH+1]; // Path elements in order, relative to root // Was 30, 11 - adjusted to 12 paths to keep within the typical 1024 byte path block in the code
-	unsigned char acornname[ECONET_ABS_MAX_FILENAME_LENGTH+1]; // Acorn format filename - tail end - gets populated on not found for non-wildcard searches to enable *SAVE to return it
-	short npath; // Number of entries in path[]. 1 means last entry is [0]
-	unsigned char path_from_root[2560]; // Path from root directory in Econet format // Was 256 - extended for long fnames
-	uint16_t owner; // Owner user ID
-	uint16_t parent_owner;
-	uint16_t homeof;
-	unsigned char ownername[11]; // Readable name of owner
-	uint8_t perm; // Permissions for owner & other - ECONET_PERM_... etc.
-	uint8_t parent_perm; // If object is not found or is a file, this contains permission on parent dir
-	uint8_t my_perm; // This user's access rights to this object - i.e. only bottom 3 bits of perm, adjusted for ownership
-	uint32_t load, exec, length;
-	uint32_t internal; // System internal name for file. (aka inode number for us)
-	struct objattr attr; // Not yet in use generally
-	unsigned char unixpath[1024]; // Full unix path from / in the filesystem (done because Econet is case insensitive)
-	unsigned char acornfullpath[1024]; // Full acorn path within this server, including disc name
-	unsigned char unixfname[ECONET_ABS_MAX_FILENAME_LENGTH+5]; // As stored on disc, in case different case to what was requested // Was 15 before long fnames
-	unsigned char day; // day of month last written
-	unsigned char monthyear; // Top 4 bits years since 1981; bottom four are month (Not very y2k...)
-	unsigned char hour, min, sec; // Hours mins sec of modification time
-	unsigned char c_day, c_monthyear, c_hour, c_min, c_sec; // Date/time of Creation
-	struct path_entry *paths, *paths_tail; // pointers to head and tail of a linked like of path_entry structs. These are dynamically malloced by the wildcard normalize function and must be freed by the caller. If FS_FTYPE_NOTFOUND, then both will be NULL.
-};
-	
-// Structures used to queue bulk transfers on *LOAD,*RUN. May be adapted later to work on getbytes(), but the latter typically uses smaller number of packets and so doesn't interrupt FS flow like repeated *LOAD does
-// When fs_load_queue is not null (see below), the main loop in the bridge will call fs_execute_load_queue to dump one packet off the head of each queue to the destination station
-struct __pq {
-	struct __econet_packet_udp *packet; // Don't bother with internal 4 byte src/dest header - they are given as parameters to aun_send.
-	int len; // Packet data length
-	uint16_t delay; // in milliseconds - to cope with RISC OS not listening...
-	struct __pq *next;
-};
-
-struct load_queue {
-	unsigned char net, stn; // Destination net, stn
-	unsigned int server; // Determines source address
-	unsigned queue_type; // For later use with getbytes() - but for now assume always a load
-	unsigned char internal_handle; // Internal file handle to be closed at end / abort
-	unsigned char mode; // Internal mode
-	uint32_t	ack_seq_trigger; // Sequence number for which we receive an ack which will trigger next transmission
-	time_t		last_ack_rx; // Last time we received an ACK from this station - used for garbage collection
-	struct load_queue *next;
-	struct __pq *pq_head, *pq_tail;	
-
-};
-
-
-struct mdfs_user {
-	unsigned char 	username[10]; // 0x0D terminated if less than 10 chars - MDFS manual seems to have only 9 bytes for a 10 character username. Looks like a misprint
-	unsigned char 	password[10]; // Ditto
-	uint8_t 	opt; 
-	uint8_t		flag; // bit 0:Pw unlocked; 1:syst priv; 2: No short saves; 3: Permanent *ENABLE; 4: No lib; 5: RUn only 
-	uint8_t		offset_root[3]; // File offset to URD, or 0 if "normal", whatever that may be 
-	uint8_t		offset_lib[3]; // File offset to LIB, or 0 if "normal" 
-	uint8_t		uid[2];
-	uint8_t		reserved[2]; // Assume not supposed to use this! 
-	uint8_t		owner_map[32]; // Bitmap of account ownership *
-};
-*/
 
 /* 
  * List of FSOps in our new list form
@@ -555,54 +106,50 @@ struct mdfs_user {
 
 struct fsop_list fsops[255]; 
 
-regex_t r_pathname, r_discname, r_wildcard;
-
-int fs_count = 0;
+regex_t r_discname, r_wildcard;
 
 extern void eb_debug_fmt (uint8_t, uint8_t, char *, char *);
+#if 0
 int fs_stn_logged_in(int, unsigned char, unsigned char);
 void fs_bye(int, unsigned char, unsigned char, unsigned char, unsigned short);
 void fsop_build_data (struct fsop_data *, uint8_t, uint8_t, uint8_t);
+#endif
+
+#define fsop_debug	fs_debug
 
 void fs_debug (uint8_t death, uint8_t level, char *fmt, ...)
 {
 
 	va_list 	ap;
-#ifdef BRIDGE_V2
 	char		str[1024];
 	char		padstr[1044];
 
-#else
-	if (level >= 2 && !fs_noisy)	return;
-	if (level == 1 && fs_quiet)	return;
-#endif
-
 	va_start (ap, fmt);
 
-#ifndef BRIDGE_V2
-
-	/* Version 1 bridge code - do a simple fprintf to stderr */
-
-	fprintf (stderr, "[+%15.6f]    FS: ", timediffstart());
-	vfprintf (stderr, fmt, ap);
-	fprintf (stderr, "\n");
-	
-	if (death)	exit(EXIT_FAILURE);
-
-#else
-
-	/* Version 2 bridge code */
-
 	vsprintf (str, fmt, ap);
-	strcpy (padstr, "                 ");
+	strcpy (padstr, "FS               ");
 	strcat (padstr, str);
 	eb_debug_fmt (death, level, "FS", padstr);
-
-#endif
 
 	va_end(ap);
 }
 
+void fs_debug_full (uint8_t death, uint8_t level, struct __fs_station *s, uint8_t net, uint8_t stn, char *fmt, ...)
+{
+	va_list 	ap;
+	char		str[850];
+	char		padstr[1044];
+
+	va_start (ap, fmt);
+
+	vsprintf (str, fmt, ap);
+	sprintf (padstr, "FS       %3d.%3d from %3d.%3d %s", s->net, s->stn, net, stn, str);
+	eb_debug_fmt (death, level, "FS", padstr);
+
+	va_end(ap);
+}
+
+#if 0
 void fs_get_parameters (uint8_t server, uint32_t *params, uint8_t *fnlength)
 {
 	struct fsop_data f;
@@ -611,25 +158,27 @@ void fs_get_parameters (uint8_t server, uint32_t *params, uint8_t *fnlength)
 
 	fsop_get_parameters (&f, params, fnlength);
 }
+#endif
 
-void fsop_get_parameters (struct fsop_data *f, uint32_t *params, uint8_t *fnlength)
+void fsop_get_parameters (struct __fs_station *server, uint32_t *params, uint8_t *fnlength)
 {
 
-	*fnlength = f->server->config->fs_fnamelen;
+	*fnlength = server->config->fs_fnamelen;
 	*params = 0;
-	*params |= (f->server->config->fs_default_dir_perm) << 24;
-	*params |= (f->server->config->fs_default_file_perm) << 16;
+	*params |= (server->config->fs_default_dir_perm) << 24;
+	*params |= (server->config->fs_default_file_perm) << 16;
 	
-	if (f->server->config->fs_acorn_home)	*params |= FS_CONFIG_ACORNHOME;
-	if (f->server->config->fs_sjfunc)	*params |= FS_CONFIG_SJFUNC;
-	if (f->server->config->fs_bigchunks)	*params |= FS_CONFIG_BIGCHUNKS;
-	if (f->server->config->fs_infcolon)	*params |= FS_CONFIG_INFCOLON;
-	if (f->server->config->fs_manyhandle)	*params |= FS_CONFIG_MANYHANDLE;
-	if (f->server->config->fs_mdfsinfo)	*params |= FS_CONFIG_MDFSINFO;
-	if (f->server->config->fs_pifsperms)	*params |= FS_CONFIG_PIFSPERMS;
-	if (f->server->config->fs_mask_dir_wrr)	*params |= FS_CONFIG_MASKDIRWRR;
+	if (server->config->fs_acorn_home)	*params |= FS_CONFIG_ACORNHOME;
+	if (server->config->fs_sjfunc)	*params |= FS_CONFIG_SJFUNC;
+	if (server->config->fs_bigchunks)	*params |= FS_CONFIG_BIGCHUNKS;
+	if (server->config->fs_infcolon)	*params |= FS_CONFIG_INFCOLON;
+	if (server->config->fs_manyhandle)	*params |= FS_CONFIG_MANYHANDLE;
+	if (server->config->fs_mdfsinfo)	*params |= FS_CONFIG_MDFSINFO;
+	if (server->config->fs_pifsperms)	*params |= FS_CONFIG_PIFSPERMS;
+	if (server->config->fs_mask_dir_wrr)	*params |= FS_CONFIG_MASKDIRWRR;
 }
 
+#if 0
 void fs_set_parameters (uint8_t server, uint32_t params, uint8_t fnlength)
 {
 	struct fsop_data f;
@@ -639,50 +188,63 @@ void fs_set_parameters (uint8_t server, uint32_t params, uint8_t fnlength)
 	fsop_set_parameters (&f, params, fnlength);
 }
 
-void fsop_set_parameters (struct fsop_data *f, uint32_t params, uint8_t fnlength)
+#endif
+
+uint8_t fsop_write_server_config (struct __fs_station *s)
 {
+	unsigned char	configfile[512];
+	FILE *		config;
 
-	unsigned char		regex[1024], configfile[512];
-	FILE *			config;
-	uint8_t			/*fnlength, */default_dir_perm, default_file_perm;
-
-	default_dir_perm = (params & 0x00ff0000) >> 24;
-	default_file_perm = (params & 0x0000ff00) >> 16;
-
-	f->server->config->fs_acorn_home = (params & FS_CONFIG_ACORNHOME) ? 1 : 0;
-	f->server->config->fs_sjfunc = (params & FS_CONFIG_SJFUNC) ? 1 : 0;
-	f->server->config->fs_bigchunks = (params & FS_CONFIG_BIGCHUNKS) ? 1 : 0;
-	f->server->config->fs_infcolon = (params & FS_CONFIG_INFCOLON) ? 1 : 0;
-	f->server->config->fs_manyhandle = (params & FS_CONFIG_MANYHANDLE) ? 1 : 0;
-	f->server->config->fs_mdfsinfo = (params & FS_CONFIG_MDFSINFO) ? 1 : 0;
-	f->server->config->fs_pifsperms = (params & FS_CONFIG_PIFSPERMS) ? 1 : 0;
-	f->server->config->fs_mask_dir_wrr = (params & FS_CONFIG_MASKDIRWRR) ? 1 : 0;
-
-	if (fnlength != f->server->config->fs_fnamelen)
-	{
-		f->server->config->fs_fnamelen = fnlength;
-
-		sprintf(regex, "^(%s{1,%d})", FSACORNREGEX, ECONET_ABS_MAX_FILENAME_LENGTH);
-
-		if (regcomp(&r_pathname, regex, REG_EXTENDED) != 0)
-			fs_debug (1, 0, "Unable to compile regex for file and directory names.");
-	}
-
-	sprintf(configfile, "%s/Configuration", f->server->directory);
-
-	f->server->config->fs_default_dir_perm = default_dir_perm;
-	f->server->config->fs_default_file_perm = default_file_perm;
+	sprintf(configfile, "%s/Configuration", s->directory);
 
 	config = fopen(configfile, "w+");
 
 	if (!config)
+	{
 		fs_debug (0, 1, "Unable to write config file!");
+		return 0;
+	}
 	else
 	{
-		fwrite(&f->server->config, 256, 1, config);
+		fwrite(&s->config, 256, 1, config);
 		fclose(config);
-		fsop_write_readable_config(f);
+		fsop_write_readable_config(s);
+		return 1;
 	}
+}
+
+void fsop_set_parameters (struct __fs_station *server, uint32_t params, uint8_t fnlength)
+{
+
+	unsigned char		regex[1024];
+	uint8_t			default_dir_perm, default_file_perm;
+
+	default_dir_perm = (params & 0x00ff0000) >> 24;
+	default_file_perm = (params & 0x0000ff00) >> 16;
+
+	server->config->fs_acorn_home = (params & FS_CONFIG_ACORNHOME) ? 1 : 0;
+	server->config->fs_sjfunc = (params & FS_CONFIG_SJFUNC) ? 1 : 0;
+	server->config->fs_bigchunks = (params & FS_CONFIG_BIGCHUNKS) ? 1 : 0;
+	server->config->fs_infcolon = (params & FS_CONFIG_INFCOLON) ? 1 : 0;
+	server->config->fs_manyhandle = (params & FS_CONFIG_MANYHANDLE) ? 1 : 0;
+	server->config->fs_mdfsinfo = (params & FS_CONFIG_MDFSINFO) ? 1 : 0;
+	server->config->fs_pifsperms = (params & FS_CONFIG_PIFSPERMS) ? 1 : 0;
+	server->config->fs_mask_dir_wrr = (params & FS_CONFIG_MASKDIRWRR) ? 1 : 0;
+
+	if (fnlength != server->config->fs_fnamelen)
+	{
+		server->config->fs_fnamelen = fnlength;
+
+		sprintf(regex, "^(%s{1,%d})", FSACORNREGEX, ECONET_ABS_MAX_FILENAME_LENGTH);
+
+		if (regcomp(&(server->r_pathname), regex, REG_EXTENDED) != 0)
+			fs_debug (1, 0, "Unable to compile regex for file and directory names.");
+	}
+
+	server->config->fs_default_dir_perm = default_dir_perm;
+	server->config->fs_default_file_perm = default_file_perm;
+
+	fsop_write_server_config(server);
 
 }
 
@@ -810,7 +372,7 @@ int fs_mdfs_username_compare (const void *a, const void *b)
 }
 
 // Take fs_users[server] and write an MDFS-format password file in the server root directory
-void fs_make_mdfs_pw_file(int server)
+void fsop_make_mdfs_pw_file(struct __fs_station *s)
 {
 
 	/*
@@ -850,23 +412,23 @@ void fs_make_mdfs_pw_file(int server)
 
 	// Cycle through out native password file and move the active users (and their IDs) into mu[]
 	
-	while (picounter < fs_stations[server].total_users)
+	while (picounter < s->total_users)
 	{
-		if (users[server][picounter].priv) // Active user
+		if (s->users[picounter].priv) // Active user
 		{
 			uint32_t	fileptr;
 
 			// Empty the destination struct
 			memset(&(mu[mucounter]), 0, sizeof(struct mdfs_user));
 
-			fs_mdfs_copy_terminate((unsigned char *) &(mu[mucounter].username), (unsigned char *) &(users[server][picounter].username), 10);
-			fs_mdfs_copy_terminate((unsigned char *) &(mu[mucounter].password), (unsigned char *) &(users[server][picounter].password), 10);
+			fs_mdfs_copy_terminate((unsigned char *) &(mu[mucounter].username), (unsigned char *) &(s->users[picounter].username), 10);
+			fs_mdfs_copy_terminate((unsigned char *) &(mu[mucounter].password), (unsigned char *) &(s->users[picounter].password), 10);
 
 			// Boot option
-			mu[mucounter].opt = users[server][picounter].bootopt;
+			mu[mucounter].opt = s->users[picounter].bootopt;
 
 			// Privilege
-			mu[mucounter].flag = fs_pifs_to_mdfs_priv(users[server][picounter].priv);
+			mu[mucounter].flag = fs_pifs_to_mdfs_priv(s->users[picounter].priv);
 
 			// UID
 			mu[mucounter].uid[0] = (picounter & 0xff);
@@ -874,12 +436,12 @@ void fs_make_mdfs_pw_file(int server)
 
 			// Set pointers for URD & LIB
 			
-			fileptr = fs_get_mdfs_dir_pointer (users[server][picounter].home, 0, mu[mucounter].username);
+			fileptr = fs_get_mdfs_dir_pointer (s->users[picounter].home, 0, mu[mucounter].username);
 			mu[mucounter].offset_root[0] = (fileptr & 0x000000FF);
 			mu[mucounter].offset_root[1] = (fileptr & 0x0000FF00) >> 8;
 			mu[mucounter].offset_root[2] = (fileptr & 0x00FF0000) >> 16;
 
-			fileptr = fs_get_mdfs_dir_pointer (users[server][picounter].lib, 1, mu[mucounter].username);
+			fileptr = fs_get_mdfs_dir_pointer (s->users[picounter].lib, 1, mu[mucounter].username);
 			mu[mucounter].offset_lib[0] = (fileptr & 0x000000FF);
 			mu[mucounter].offset_lib[1] = (fileptr & 0x0000FF00) >> 8;
 			mu[mucounter].offset_lib[2] = (fileptr & 0x00FF0000) >> 16;
@@ -937,17 +499,6 @@ void fs_make_mdfs_pw_file(int server)
 			mu[dircounter].offset_root[0] = (total & 0xFF);
 			mu[dircounter].offset_root[1] = (total & 0xFF00) >> 8;
 			mu[dircounter].offset_root[2] = (total & 0xFF0000) >> 16;
-
-			/* OLD CODE 
-			while (bytecount < 4)
-			{
-				total = mu[dircounter].offset_root[bytecount] + do_bytes[bytecount];
-				mu[dircounter].offset_root[bytecount] = (total & 0xFF);
-				if ((total > 0xFF) & (bytecount != 2))
-					mu[dircounter].offset_root[bytecount]++; // Carry
-				bytecount++;
-			}
-			*/
 		}
 
 		if (
@@ -974,17 +525,6 @@ void fs_make_mdfs_pw_file(int server)
 			mu[dircounter].offset_lib[0] = (total & 0xFF);
 			mu[dircounter].offset_lib[1] = (total & 0xFF00) >> 8;
 			mu[dircounter].offset_lib[2] = (total & 0xFF0000) >> 16;
-
-			/* OLD CODE 
-			while (bytecount < 4)
-			{
-				total = mu[dircounter].offset_lib[bytecount] + do_bytes[bytecount];
-				mu[dircounter].offset_lib[bytecount] = (total & 0xFF);
-				if ((total > 0xFF) & (bytecount != 2))
-					mu[dircounter].offset_lib[bytecount]++; // Carry
-				bytecount++;
-			}
-			*/
 		}
 
 		dircounter++;
@@ -1026,7 +566,7 @@ void fs_make_mdfs_pw_file(int server)
 	
 	// Now write out the file, creating the pointer block (to users < 'A', first 'A' or 'B', etc. ...) as we go
 
-	strcpy(mdfs_pwfile, fs_stations[server].directory);
+	strcpy(mdfs_pwfile, s->directory);
 	strcat(mdfs_pwfile, "/");
 	strcat(mdfs_pwfile, "MDFSPasswords");
 
@@ -1054,6 +594,8 @@ void fs_make_mdfs_pw_file(int server)
 
 }
 
+#if 0 
+/* About to be disused */
 /* 
  * fsop_build_data
  *
@@ -1072,10 +614,10 @@ void fsop_build_data (struct fsop_data *param, uint8_t server, uint8_t net, uint
 
 	active_id = fs_stn_logged_in(server, net, stn);
 
-	param->active = (active_id >= 0 ? &(active[server][active_id]) : NULL);
+	param->active = (f->active_id >= 0 ? &(active[server][active_id]) : NULL);
 	param->active_id = active_id;
 
-	param->user = (active_id >= 0 ? &(users[server][param->active->userid]) : NULL);
+	param->user = (f->active_id >= 0 ? &(users[server][param->active->userid]) : NULL);
 	param->user_id = param->active->userid;
 
 	param->server = &(fs_stations[server]);
@@ -1089,30 +631,30 @@ void fsop_build_data (struct fsop_data *param, uint8_t server, uint8_t net, uint
 	param->server->enabled = fs_enabled[server];
 
 }
+#endif
 
 // Find a disc number by name
 
-int fs_get_discno(int server, char *discname)
+int fsop_get_discno(struct fsop_data *f, char *discname)
 {
-	uint8_t 	count = 0;
-	uint8_t		found = 0;
+	struct __fs_disc	*d;
 
-	while ((count < ECONET_MAX_FS_DISCS) && !found)
+	d = f->server->discs;
+
+	while (d)
 	{
-		if (!strcasecmp(fs_discs[server][count].name, discname))
-			found = 1;
-		else	count++;
+		if (!strcasecmp(d->name, discname))
+			return d->index;
+		d = d->next;
 	}
 
-	if (!found) return -1;
-	else return count;
-
+	return -1;
 }
 
 // Find username if it exists in server's userbase
-short fs_get_uid(int server, char *username)
+int16_t fsop_get_uid(struct __fs_station *s, char *username)
 {
-	unsigned short counter = 0;
+	int16_t counter = 0;
 	unsigned char padded_username[11];
 	
 	strcpy(padded_username, username);
@@ -1123,13 +665,14 @@ short fs_get_uid(int server, char *username)
 
 	padded_username[counter] = '\0';
 
+	fs_toupper(padded_username);
+
 	counter = 0;
 
-	while (counter < ECONET_MAX_FS_USERS && (strncasecmp(padded_username, users[server][counter].username, 10) != 0))
+	while (counter < ECONET_MAX_FS_USERS && (strncasecmp(padded_username, s->users[counter].username, 10) != 0))
 		counter++;
 
 	return ((counter < ECONET_MAX_FS_USERS) ? counter : -1);
-
 }
 
 /*
@@ -1139,44 +682,24 @@ short fs_get_uid(int server, char *username)
  * See fs_get_username() for this based on active ID
  */
 
-void fs_get_username_base (int server, int userid, char *username)
+void fsop_get_username_base (struct __fs_station *s, int userid, char *username)
 {
+	memcpy (username, &(s->users[userid]), 10);
+}
 
-	short ptr = 0;
-
-	while (ptr < 10)
-	{
-		*(username+ptr) = users[server][userid].username[ptr];
-		ptr++;
-	}
-
-	*(username+ptr) = 0; // Null terminate
+void fsop_get_username_lock (struct __fs_active *a, char *username)
+{
+	pthread_mutex_lock(&(a->server->fs_mutex));
+	fsop_get_username_base (a->server, a->userid, username);
+	pthread_mutex_lock(&(a->server->fs_mutex));
+	return;
 }
 
 // Fill character array with username for a given active_id on this server. Put NULL in
 // first byte if active id is invalid
-void fs_get_username (int server, int active_id, char *username)
+void fsop_get_active_username (struct fsop_data *f, struct __fs_active *a, char *username)
 {
-
-	if (active[server][active_id].stn == 0 && active[server][active_id].net == 0)
-		*username = 0;
-	else
-	{
-		fs_get_username_base(server, active[server][active_id].userid, username);
-		/* OLD
-		short ptr = 0;
-
-		while (ptr < 10)
-		{
-			*(username+ptr) = users[server][active[server][active_id].userid].username[ptr];
-			ptr++;
-		}
-
-		*(username+ptr) = 0; // Null terminate
-		*/
-
-	}
-
+	fsop_get_username_base(f->server, a->userid, username);
 }
 
 // Find the tail end entry on path2 and store in path1. If path2 empty, store "$".
@@ -1190,11 +713,25 @@ void fs_store_tail_path(char *path1, char *path2)
 		strcpy (path1, "$");
 }
 
+void fs_copy_padded(unsigned char *dst, unsigned char *src, uint16_t maxlen)
+{
+	uint16_t	count;
+
+	strncpy(dst, src, maxlen);
+
+	*(dst + maxlen) = '\0';
+
+	if (maxlen < ECONET_ABS_MAX_FILENAME_LENGTH)
+	{
+		for (count = strlen(src); count < maxlen; count++)
+			*(dst+count) = ' ';
+	}
+}
 
 // Convert our perm storage to Acorn / MDFS format
-unsigned char fs_perm_to_acorn(int server, unsigned char fs_perm, unsigned char ftype)
+uint8_t fsop_perm_to_acorn(struct __fs_station *s, uint8_t fs_perm, uint8_t ftype)
 {
-	unsigned char r;
+	uint8_t r;
 
 	r = fs_perm & FS_PERM_H; // High bit
 
@@ -1204,26 +741,24 @@ unsigned char fs_perm_to_acorn(int server, unsigned char fs_perm, unsigned char 
 	if (fs_perm & FS_PERM_L)
 		r |= 0x10;
 
-	if (fs_config[server].fs_sjfunc & FS_PERM_H) // SJ research Privacy bit
+	if (s->config->fs_sjfunc & FS_PERM_H) // SJ research Privacy bit
 		r |= ((fs_perm & (FS_PERM_H)) ? 0x40 : 0);
 
 	r |= ((fs_perm & (FS_PERM_OWN_R | FS_PERM_OWN_W)) << 2);
 	r |= ((fs_perm & (FS_PERM_OTH_R | FS_PERM_OTH_W)) >> 4);
 	
-	if (ftype == FS_FTYPE_DIR && fs_config[server].fs_mask_dir_wrr && ((fs_perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == FS_ACORN_DIR_MASK)) // (OTH_W) added here because we want to provide full real perms if OTH_W is set
+	if (ftype == FS_FTYPE_DIR && s->config->fs_mask_dir_wrr && ((fs_perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == FS_ACORN_DIR_MASK)) // (OTH_W) added here because we want to provide full real perms if OTH_W is set
 		r &= 0xF2;  // Acorn OWN_W, OWN_R, OTH_R bits (inverse of) 
 
-	//if (!fs_quiet) fprintf (stderr, "Converted perms %02X (ftype %02d) to Acorn %02X\n", fs_perm, ftype, r);
-	// fs_debug (0, 1, "Converted perms %02X (ftype %02d) to Acorn %02X", fs_perm, ftype, r);
 	return r;
 	
 
 }
 
 // Convert acorn / MDFS perm to our format
-unsigned char fs_perm_from_acorn(int server, unsigned char acorn_perm)
+uint8_t fsop_perm_from_acorn(struct __fs_station *s, uint8_t acorn_perm)
 {
-	unsigned char r;
+	uint8_t r;
 
 	r = 0;
 
@@ -1231,7 +766,7 @@ unsigned char fs_perm_from_acorn(int server, unsigned char acorn_perm)
 	// 20240520 Commented - this only applies to directories
 	// if (acorn_perm == 0) r = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R; // Acorn clients seem to use &00 to mean WR/r
 
-	if (fs_config[server].fs_sjfunc) r |= (acorn_perm & 0x40) ? FS_PERM_H : 0; // Hidden / Private. This is MDFS only really
+	if (s->config->fs_sjfunc) r |= (acorn_perm & 0x40) ? FS_PERM_H : 0; // Hidden / Private. This is MDFS only really
 	r |= (acorn_perm & 0x10) ? FS_PERM_L : 0; // Locked
 	r |= (acorn_perm & 0x08) ? FS_PERM_OWN_W : 0; // Owner write
 	r |= (acorn_perm & 0x04) ? FS_PERM_OWN_R : 0; // Owner read
@@ -1265,42 +800,35 @@ void fs_date_to_two_bytes(unsigned short day, unsigned short month, unsigned sho
 		year_internal -= 40;
 		year_internal = year_internal << 4;
 		*monthyear |= (year_internal & 0x0f);
-		//fprintf (stderr, "Converted %02d/%02d/%02d to MY=%02X, D=%02X\n", day, month, year, *monthyear, *dday);
-		//fs_debug (0, 1, "Converted %02d/%02d/%02d to MY=%02X, D=%02X", day, month, year, *monthyear, *dday);
 	}
 	else // use top three bits of day as low three bits of year
 	{
 		*dday |= ((year_internal & 0x70) << 1);
 		*monthyear |= ((year_internal & 0x0f) << 4);
-		//fprintf (stderr, "Converted %02d/%02d/%04d to MY=%02X, D=%02X\n", day, month, year, *monthyear, *dday);
-		//fs_debug (0, 1, "Converted %02d/%02d/%04d to MY=%02X, D=%02X", day, month, year, *monthyear, *dday);
 	}
 
 }
 
-unsigned short fs_year_from_two_bytes(unsigned char day, unsigned char monthyear)
+uint8_t fs_year_from_two_bytes(uint8_t day, uint8_t monthyear)
 {
 
-	unsigned short r;
+	uint8_t r;
 
 	if (!fs_sevenbitbodge)
 		r = ((((monthyear & 0xf0) >> 4) + 81) % 100);
 	else
 		r = ((( ((monthyear & 0xf0) >> 4) | ((day & 0xe0) >> 1) ) + 81) % 100);
 
-	//fprintf (stderr, "year_from2byte (%02x, %02x) = %02d\n", day, monthyear, r);
-	//fs_debug (0, 1, "year_from2byte (%02x, %02x) = %02d", day, monthyear, r);
-
 	return r;
 
 }
 
-unsigned short fs_month_from_two_bytes(unsigned char day, unsigned char monthyear)
+uint8_t fs_month_from_two_bytes(uint8_t day, uint8_t monthyear)
 {
 	return (monthyear & 0x0f);
 }
 
-unsigned short fs_day_from_two_bytes(unsigned char day, unsigned char monthyear)
+uint8_t fs_day_from_two_bytes(uint8_t day, uint8_t monthyear)
 {
 	return (day & 0x1f);
 }
@@ -1326,6 +854,8 @@ int fs_alphacasesort(const struct dirent **d1, const struct dirent **d2)
  * maxlen.
  *
  */
+
+#define fsop_copy_terminate fs_copy_terminate
 
 uint16_t fs_copy_terminate(unsigned char *dst, unsigned char *src, uint16_t maxlen, uint8_t term)
 {
@@ -1370,6 +900,44 @@ void fs_copy_to_cr(unsigned char *dest, unsigned char *src, unsigned short len)
 
 }
 
+/* Raw sender routine for packets into the bridge */
+
+int raw_fs_send (struct __fs_station *s, struct __econet_packet_aun *p, int len)
+{
+
+	struct __eb_device	*destdevice;
+
+        if (p->p.dstnet == 0)    p->p.dstnet = p->p.srcnet;
+
+	if ((destdevice = eb_find_station(2, p)))
+	{
+		if (destdevice->type == EB_DEF_AUN)
+		{
+			/* Put on AUN output queue */
+			if (eb_aunpacket_to_aun_queue(s->fs_device, destdevice, p, len))
+			{
+        			eb_add_stats (&(s->fs_device->statsmutex), &(s->fs_device->b_out), len);
+				return len;
+			}
+			else /* Went wrong */
+			{
+				eb_free(__FILE__, __LINE__, "FS", "PROBLEM: Freeing AUN packet after failed tx to AUN queue", p);
+				return 0;
+			}
+		}
+		else
+		{
+			/* Put it on the real destination device */
+			eb_enqueue_input(destdevice, p, len);
+			pthread_cond_signal(&(destdevice->qwake));
+			return len;
+		}
+	}
+
+        return 0;
+
+}
+
 /* fs_aun_send_noseq()
  *
  * Send AUN into the bridge, but don't set the sequence number
@@ -1377,6 +945,8 @@ void fs_copy_to_cr(unsigned char *dest, unsigned char *src, unsigned short len)
  * sequence number so it can track it.
  */
 
+#if 0
+/* About to be disused */
 int fs_aun_send_noseq(struct __econet_packet_udp *p, int server, int len, unsigned short net, unsigned short stn)
 {
 	struct __econet_packet_aun a;
@@ -1399,29 +969,64 @@ int fs_aun_send_noseq(struct __econet_packet_udp *p, int server, int len, unsign
 	return len;
 
 }
+#endif
+
+/* Raw variant of fsop_aun_send_noseq */
+
+int raw_fsop_aun_send_noseq(struct __econet_packet_udp *p, int len, struct __fs_station *s, uint8_t dstnet, uint8_t dststn)
+{
+        struct __econet_packet_aun *a;
+
+	a = eb_malloc(__FILE__, __LINE__, "FS", "Create new AUN packet for transmission", 12+len);
+
+        memcpy(&(a->p.aun_ttype), p, len+8);
+        a->p.padding = 0x00;
+
+        a->p.srcnet = s->net;
+        a->p.srcstn = s->stn;
+        a->p.dstnet = dstnet;
+        a->p.dststn = dststn;
+
+
+	/* Changed 20240720 to put the traffic straight on the right input queue,
+	 * or onto an AUN output queue if that's where it's going */
+#if 0
+        eb_enqueue_output (s->fs_device, &a, len, NULL);
+        pthread_cond_signal(&(s->fs_device->qwake));
+#endif
+
+	return raw_fs_send (s, a, len);
+
+}
 
 /* FSOP variant of fs_aun_send_noseq() */
 
 int fsop_aun_send_noseq(struct __econet_packet_udp *p, int len, struct fsop_data *f)
 {
-        struct __econet_packet_aun a;
+        struct __econet_packet_aun *a;
 
-        memcpy(&(a.p.aun_ttype), p, len+8);
-        a.p.padding = 0x00;
+	a = eb_malloc(__FILE__, __LINE__, "FS", "Create new AUN packet for transmission", 12+len);
 
-        a.p.srcnet = f->server->net;
-        a.p.srcstn = f->server->stn;
-        a.p.dstnet = f->net;
-        a.p.dststn = f->stn;
+        memcpy(&(a->p.aun_ttype), p, len+8);
+        a->p.padding = 0x00;
+
+        a->p.srcnet = f->server->net;
+        a->p.srcstn = f->server->stn;
+        a->p.dstnet = f->net;
+        a->p.dststn = f->stn;
 
         // Put the enqueue call here
 
-        if (a.p.dstnet == 0)    a.p.dstnet = a.p.srcnet;
-        eb_enqueue_output (fs_devices[f->server_id], &a, len, NULL);
-        pthread_cond_signal(&(fs_devices[f->server_id]->qwake));
-        eb_add_stats (&(fs_devices[f->server_id]->statsmutex), &(fs_devices[f->server_id]->b_out), len);
+        //if (a.p.dstnet == 0)    a.p.dstnet = a.p.srcnet;
+	
+	/* Changed 20240720 - see comment in raw variant above */
+#if 0
+        eb_enqueue_output (f->server->fs_device, &a, len, NULL);
+        pthread_cond_signal(&(f->server->fs_device->qwake));
+        eb_add_stats (&(f->server->fs_device->statsmutex), &(f->server->fs_device->b_out), len);
+#endif
 
-        return len;
+        return raw_fs_send (f->server, a, len);
 
 }
 
@@ -1434,19 +1039,18 @@ int fsop_aun_send_noseq(struct __econet_packet_udp *p, int len, struct fsop_data
  *
  */
 
-int fs_aun_send(struct __econet_packet_udp *p, int server, int len, unsigned short net, unsigned short stn)
-{
-
-	p->p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
-	return fs_aun_send_noseq(p, server, len, net, stn);
-}
-
 /* FSOP variant of fs_aun_send() */
 
 int fsop_aun_send(struct __econet_packet_udp *p, int len, struct fsop_data *f)
 {
-	p->p.seq = get_local_seq(f->server->net, f->server->stn);
+	p->p.seq = eb_get_local_seq(f->server->fs_device);
 	return fsop_aun_send_noseq(p, len, f);
+}
+
+int raw_fsop_aun_send(struct __econet_packet_udp *p, int len, struct __fs_station *s, uint8_t net, uint8_t stn)
+{
+	p->p.seq = eb_get_local_seq(s->fs_device);
+	return raw_fsop_aun_send_noseq(p, len, s, net, stn);
 }
 
 /* Procedure to dump all FS currently open files & directories
@@ -1455,259 +1059,254 @@ int fsop_aun_send(struct __econet_packet_udp *p, int len, struct fsop_data *f)
  * MUST hold the FS global lock before calling
  */
 
-void fs_dump_handle_list(FILE *out, int fsnumber)
+void fsop_dump_handle_list(FILE *out, struct __fs_station *s)
 {
 
-	int c;
-	uint8_t found;
+	uint8_t 		found;
+	struct __fs_disc	*disc;
+	struct __fs_active	*active;
+	struct __fs_file	*file;
 
-	if (fsnumber < 0) // Bad
+	if (!s) // bad
 		return;
 
-	fprintf (out, "\n\nServer %3d %s\n\n", fsnumber, fs_enabled[fsnumber] ? "ENABLED" : "SHUT DOWN");
+	pthread_mutex_lock(&(s->fs_mutex));
 
-	if (!fs_enabled[fsnumber]) // Nothing to do
-		return;
+	fprintf (out, "\n\nServer at %3d.%3d is %s\n\n", s->net, s->stn, s->enabled ? "RUNNING" : "SHUT DOWN");
 
-	fprintf (out, "  Station %d.%d\n  Root directory: %s\n  Total discs: %d\n", fs_stations[fsnumber].net, fs_stations[fsnumber].stn, fs_stations[fsnumber].directory, fs_stations[fsnumber].total_discs);
-
-	for (c = 0; c < ECONET_MAX_FS_DISCS; c++)
+	if (!s->enabled) // Nothing to do
 	{
-		if (fs_discs[fsnumber][c].name[0])
-			fprintf (out, "    %2d %s\n", c, fs_discs[fsnumber][c].name);
+		pthread_mutex_unlock(&(s->fs_mutex));
+		return;
+	}
+
+	fprintf (out, "  Root directory: %s\n\n  Total discs: %d\n\n", s->directory, s->total_discs);
+
+	disc = s->discs;
+
+	while (disc)
+	{
+		fprintf (out, "    %2d %s\n", disc->index, disc->name);
+		disc = disc->next;
 	}
 
 	fprintf (out, "\n  Currently logged in users: ");
 
+	active = s->actives;
+
 	found = 0;
 
-	for (c = 0 ; c < ECONET_MAX_FS_ACTIVE; c++)
+	while (active)
 	{
-		if (active[fsnumber][c].net != 0 && active[fsnumber][c].stn != 0) // Active
+		char	username[11];
+		uint8_t	c;
+		uint8_t f2;
+		struct __fs_file	*d;
+
+		memcpy (username, s->users[active->userid].username, 10);
+		username[10] = 0;
+
+		found++;
+		fprintf (out, "\n\n    %04X %s %d.%d\n\n", active->userid, username, active->net, active->stn);
+
+		d = active->fhandles[active->root].handle;
+		fprintf (out, "       URD: %2d %s\n", active->root, d->name);
+
+		d = active->fhandles[active->current].handle;
+		fprintf (out, "       CWD: %2d %s\n", active->current, d->name);
+
+		d = active->fhandles[active->lib].handle;
+		fprintf (out, "       LIB: %2d %s\n", active->lib, d->name);
+		
+		fprintf (out, "\n       Open files & directories: ");
+
+		f2 = 0;
+
+		for (c = 0; c < FS_MAX_OPEN_FILES; c++)
 		{
-			char	username[11];
-
-			memcpy (username, users[fsnumber][active[fsnumber][c].userid].username, 10);
-			username[10] = 0;
-
-			found++;
-			fprintf (out, "\n\n    %04X %s %d.%d\n\n", active[fsnumber][c].userid, username, active[fsnumber][c].net, active[fsnumber][c].stn);
-			fprintf (out, "       URD: %2d (internal %3d) %s\n", active[fsnumber][c].root, active[fsnumber][c].fhandles[active[fsnumber][c].root].handle, active[fsnumber][c].fhandles[active[fsnumber][c].root].acornfullpath);
-			fprintf (out, "       CWD: %2d (internal %3d) %s\n", active[fsnumber][c].current, active[fsnumber][c].fhandles[active[fsnumber][c].current].handle, active[fsnumber][c].fhandles[active[fsnumber][c].current].acornfullpath);
-			fprintf (out, "       LIB: %2d (internal %3d) %s\n\n", active[fsnumber][c].lib, active[fsnumber][c].fhandles[active[fsnumber][c].lib].handle, active[fsnumber][c].fhandles[active[fsnumber][c].lib].acornfullpath);
-			
+			if (active->fhandles[c].handle)
 			{
-				int f, f2 = 0;
+				if (!f2) fprintf (out, "\n");
 
-				fprintf (out, "      Open files & directories: ");
+				fprintf (out, "\n        %2d %s", 
+					c, 
+					active->fhandles[c].acornfullpath
+				);
 
-				for (f = 0; f < FS_MAX_OPEN_FILES; f++)
-				{
-					if (active[fsnumber][c].fhandles[f].handle != -1)
-					{
-						if (!f2) fprintf (out, "\n");
-						fprintf (out, "\n        %2d (internal %3d) %s", f, active[fsnumber][c].fhandles[f].handle, active[fsnumber][c].fhandles[f].acornfullpath);
-						f2++;
-					}
-
-				}
-
-				if (!f2) fprintf (out, "None");
-
-				fprintf (out, "\n");
+				f2++;
 			}
+
 		}
+
+		if (!f2) fprintf (out, "None");
+
+		fprintf (out, "\n");
+
+		active = active->next;
 	}
 
 	if (!found) fprintf (out, "None\n\n");
 	else fprintf (out, "\n");
 
-	fprintf (out, "  Files and directories open: ");
+	fprintf (out, "  Server files open: ");
 
+	file = s->files;
 	found = 0;
 
-	for (c = 0; c < ECONET_MAX_FS_FILES; c++)
+	while (file)
 	{
-		if (fs_files[fsnumber][c].handle)
-		{
-			if (!found) fprintf (out, "\n");
+		if (!found) fprintf (out, "\n");
 
-			fprintf (out, "\n    %3d R: %3d W: %3d %s", c, fs_files[fsnumber][c].readers, fs_files[fsnumber][c].writers, fs_files[fsnumber][c].name);
-			found++;
-		}
+		fprintf (out, "\n    R: %3d W: %3d %s", file->readers, file->writers, file->name);
+
+		found++;
+
+		file = file->next;
 	}
 
 	if (!found) fprintf (out, "None");
-
 	fprintf (out, "\n");
+
+	pthread_mutex_unlock(&(s->fs_mutex));
 	return;	
 
 }
 
-
-unsigned short fs_get_dir_handle(int server, unsigned int active_id, unsigned char *path)
+/* Allocate a server directory handle for a Unix filesystem path */
+#if 0
+struct __fs_dir * fsop_get_dir_handle(struct fsop_data *f, unsigned char *path)
 {
-	unsigned short count;
+	struct __fs_dir		*result;
+	DIR 			*h;
 
-	unsigned short found;
+	h = opendir((const char *) path);
 
-	count = 0; found = 0;
+	if (!h) /* Open failed */
+		return NULL; 
 
-	while (!found && count < FS_MAX_OPEN_FILES)
-	{
-		if (!strcasecmp((const char *) fs_dirs[server][count].name, (const char *) path)) // Already open
-		{
-			fs_dirs[server][count].readers++;	
-			found = 1;
-			return count;
-		}
-		else count++;
-	}
+	/* Open succeeded */
 
-	if (!found) // Open the directory
-	{
-		found = 0;
-		count = 0;
-		while (!found && count < FS_MAX_OPEN_FILES)
-		{
-			if (fs_dirs[server][count].handle == NULL)
-			{
-				found = 1;
-				if (!(fs_dirs[server][count].handle = opendir((const char *) path))) // Open failed!
-					return -1;
-				fs_dirs[server][count].readers = 1;
-				return count;	
+	FS_LIST_MAKENEW(struct __fs_dir, f->server->dirs, 1, result, "FS", "Allocate new FS Dir structure");
 
-			}
-			else count++;
+	/* Open the directory */
 
-		}
+	strcpy(result->name, path);
+	result->readers = 1; /* Initial set */
+	result->handle = h;
 
+	return result;
 
-	}
-
-	return -1;
 }
 
-void fs_close_dir_handle(int server, unsigned short handle)
+/* Close system level dir handle */
+
+void fs_close_dir_handle(struct __fs_station *f, struct __fs_dir *d)
 {
-	if (!(fs_dirs[server][handle].handle)) // Not open!
+	if (!d) /* Bad handle */
 		return;
 
-	if (fs_dirs[server][handle].readers > 0)
-		fs_dirs[server][handle].readers--;
+	if (d->readers > 0)
+		d->readers--;
 
-	if (fs_dirs[server][handle].readers == 0) // Nobody left
+	if (d->readers == 0) /* Nobody still using this */
 	{
-		closedir(fs_dirs[server][handle].handle);
-		fs_dirs[server][handle].handle = NULL;
+		closedir(d->handle);
+		FS_LIST_SPLICEFREE(f->dirs, d, "FS", "Deallocate FS Dir structure");
 	}
 
 	return;
 
 }
+#endif
 
 // Find a user file channel
 // Gives 0 on failure
-unsigned short fs_allocate_user_file_channel(int server, unsigned int active_id)
+uint8_t fsop_allocate_user_file_channel(struct __fs_active *a)
 {
-	unsigned short count; // f is index into fs_files[server]
+	uint8_t count; // f is index into fs_files[server]
 
 	count = 1; // Don't want to feed the user a directory handle 0
 
-	while (active[server][active_id].fhandles[count].handle != -1 && count < FS_MAX_OPEN_FILES)
+	while (!a->fhandles[count].handle && count < FS_MAX_OPEN_FILES)
 		count++;
 
-	if (count >= (fs_config[server].fs_manyhandle ? FS_MAX_OPEN_FILES : 9)) return 0; // No handle available - if not in manyhandle mode, >= 9 is what we need because we can allocate up to and including 8
+	if (count >= (a->server->config->fs_manyhandle ? FS_MAX_OPEN_FILES : 9)) return 0; // No handle available - if not in manyhandle mode, >= 9 is what we need because we can allocate up to and including 8
 
-	active[server][active_id].fhandles[count].is_dir = 0;
+	a->fhandles[count].is_dir = 0;
 
 	return count;
 
 }
 
 // Deallocate a file handle for a user
-void fs_deallocate_user_file_channel(int server, unsigned int active_id, unsigned short channel)
+void fsop_deallocate_user_file_channel(struct __fs_active *a, uint8_t channel)
 {
 	// Do nothing if it's actually a directory handle
 
-	if (active[server][active_id].fhandles[channel].is_dir) return;
+	if (a->fhandles[channel].is_dir) return;
 
-	active[server][active_id].fhandles[channel].handle = -1;
+	a->fhandles[channel].handle = NULL;
 	
 	return;
 }
 
 // Take a unix DIR* handle and find a slot for it in the user's data
-unsigned short fs_allocate_user_dir_channel(int server, unsigned int active_id, short d)
+uint8_t fsop_allocate_user_dir_channel(struct __fs_active *a, struct __fs_file *d)
 {
-	unsigned short count;
+	uint8_t count;
 
 	count = 1; // Don't want to feed the user a directory handle 0
 
-	while (active[server][active_id].fhandles[count].handle != -1 && count < FS_MAX_OPEN_FILES)
+	while (a->fhandles[count].handle && count < FS_MAX_OPEN_FILES)
 		count++;
 
-	//if (count == FS_MAX_OPEN_FILES) return 0; // No handle available
-	if (count >= (fs_config[server].fs_manyhandle ? FS_MAX_OPEN_FILES : 9)) return 0; // No handle available - see comment in the user file allocator for why this is 9
+	if (count >= (a->server->config->fs_manyhandle ? FS_MAX_OPEN_FILES : 9)) return 0; // No handle available - see comment in the user file allocator for why this is 9
 
-	active[server][active_id].fhandles[count].handle = d;
-	active[server][active_id].fhandles[count].cursor = 0;
-	active[server][active_id].fhandles[count].cursor_old = 0;
-	active[server][active_id].fhandles[count].is_dir = 1;
+	a->fhandles[count].handle = d;
+	a->fhandles[count].cursor = 0;
+	a->fhandles[count].cursor_old = 0;
+	a->fhandles[count].mode = 1; /* Always 1 for dirs */
+	a->fhandles[count].pasteof = 0; /* Irrelevant */
+	a->fhandles[count].sequence = 0; /* Irrelevant */
+	a->fhandles[count].is_dir = 1;
 
 	return count;
 
 }
 
 // Deallocate a directory handle for a user
-void fs_deallocate_user_dir_channel(int server, unsigned int active_id, unsigned short channel)
+void fsop_deallocate_user_dir_channel(struct __fs_active *a, uint8_t channel)
 {
 
-	if (active[server][active_id].fhandles[channel].is_dir == 0) return;
+	if (a->fhandles[channel].is_dir == 0) return; /* Not a directory! */
 
-	if (active[server][active_id].fhandles[channel].handle != -1)
-		fs_close_dir_handle(server, active[server][active_id].fhandles[channel].handle);
+	if (!a->fhandles[channel].handle) return; /* Not an open handle */
 
-	active[server][active_id].fhandles[channel].handle = -1;
-	
+	//fsop_close_dir_handle(a->server, (struct __fs_dir *) a->fhandles[channel].handle);
+	fsop_close_interlock(a->server, a->fhandles[channel].handle, 1);
+
+	a->fhandles[channel].handle = NULL; /* Signal unused */
+
 	return;
 }
 
-
-int fs_reply_success(int server, unsigned short reply_port, unsigned short net, unsigned short stn, unsigned short command, unsigned short result)
-{
-
-	struct __econet_packet_udp reply;
-
-	reply.p.ptype = ECONET_AUN_DATA;
-	reply.p.port = reply_port;
-	reply.p.ctrl = 0x80;
-	reply.p.pad = 0x00;
-	//reply.p.seq = (fs_stations[server].seq += 4);
-	reply.p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
-	reply.p.data[0] = command;
-	reply.p.data[1] = result;
-
-	return fs_aun_send(&reply, server, 2, net, stn);
-
-}
-
 // Find index into users[server] with net,stn number
-int fs_find_userid(int server, unsigned char net, unsigned char stn)
+struct __fs_active * fsop_find_active(struct __fs_station *s, uint8_t net, uint8_t stn)
 {
 
-	unsigned int index = 0;
+	struct __fs_active *a;
 
-	while (index < ECONET_MAX_FS_ACTIVE)
+	a = s->actives;
+
+	while (a)
 	{
-		if (active[server][index].net == net && active[server][index].stn == stn)
-			return active[server][index].userid;
-	
-		index++;
+		if (a->net == net && a->stn == stn)
+			return a;
+		else
+			a = a->next;
 	}
 
-	return -1;	 // userid may be 0
+	return NULL;	 
 
 }
 
@@ -1763,19 +1362,19 @@ unsigned char *pathname_to_dotfile(unsigned char *path, uint8_t infcolon)
 	return dotfile;
 }
 
-void fs_read_attr_from_file(unsigned char *path, struct objattr *r, int server)
+void fsop_read_attr_from_file(unsigned char *path, struct objattr *r, struct fsop_data *f)
 {
-	char *dotfile=pathname_to_dotfile(path, fs_config[server].fs_infcolon);
-	FILE *f=fopen(dotfile,"r");
-	if (f != NULL)
+	char *dotfile=pathname_to_dotfile(path, f->server->config->fs_infcolon);
+	FILE *df=fopen(dotfile,"r");
+	if (df != NULL)
 	{
 		unsigned short owner, perm, homeof;
 		unsigned long load, exec;
 
 		homeof = 0;
 
-		if (fscanf(f, "%hx %lx %lx %hx %hx", &owner, &load, &exec, &perm, &homeof) != 5)
-			fscanf(f, "%hx %lx %lx %hx", &owner, &load, &exec, &perm);
+		if (fscanf(df, "%hx %lx %lx %hx %hx", &owner, &load, &exec, &perm, &homeof) != 5)
+			fscanf(df, "%hx %lx %lx %hx", &owner, &load, &exec, &perm);
 
 		r->owner = owner;
 		r->load = load;
@@ -1783,7 +1382,7 @@ void fs_read_attr_from_file(unsigned char *path, struct objattr *r, int server)
 		r->perm = perm;
 		r->homeof = homeof;
 
-		fclose(f);
+		fclose(df);
 
 	}
 
@@ -1791,14 +1390,14 @@ void fs_read_attr_from_file(unsigned char *path, struct objattr *r, int server)
 	return;
 }
 
-void fs_write_attr_to_file(unsigned char *path, int owner, short perm, unsigned long load, unsigned long exec, int homeof, int server)
+void fs_write_attr_to_file(unsigned char *path, int owner, short perm, unsigned long load, unsigned long exec, int homeof, struct fsop_data *f)
 {
-	char *dotfile=pathname_to_dotfile(path, fs_config[server].fs_infcolon);
-	FILE *f=fopen(dotfile,"w");
-	if (f != NULL)
+	char *dotfile=pathname_to_dotfile(path, f->server->config->fs_infcolon);
+	FILE *df=fopen(dotfile,"w");
+	if (df != NULL)
 	{
-		fprintf(f, "%hx %lx %lx %hx %hx", owner, load, exec, perm, homeof);
-		fclose(f);
+		fprintf(df, "%hx %lx %lx %hx %hx", owner, load, exec, perm, homeof);
+		fclose(df);
 	}
 	else
 		fs_debug (0, 1, "Could not open %s for writing: %s\n", path, strerror(errno));
@@ -1827,30 +1426,30 @@ uint8_t fs_isdir(char *path)
 
 }
 
-void fs_read_xattr(unsigned char *path, struct objattr *r, int server)
+void fsop_read_xattr(unsigned char *path, struct objattr *r, struct fsop_data *f)
 {
+	unsigned char 	attrbuf[20];
+	char 		*dotfile = pathname_to_dotfile(path, f->server->config->fs_infcolon);
+	int 		dotexists = access(dotfile, F_OK);
+
 	// Default values
 	r->owner=0; // syst
 	r->load=0;
 	r->exec=0;
-	//r->perm=FS_PERM_OWN_R | FS_PERM_OWN_W; // Default now doesn't include PERM_OTH_R | FS_PERM_OTH_R;
+
 	if (fs_isdir(path))
-		r->perm = FS_CONF_DEFAULT_DIR_PERM(server);
-	else	r->perm = FS_CONF_DEFAULT_FILE_PERM(server);
+		r->perm = FS_CONF_DEFAULT_DIR_PERM(f->server);
+	else	r->perm = FS_CONF_DEFAULT_FILE_PERM(f->server);
 
 	r->homeof=0;
 
-	char *dotfile=pathname_to_dotfile(path, server);
-	int dotexists=access(dotfile, F_OK);
 	free(dotfile);
 
 	if (!use_xattr || dotexists==0)
 	{
-		fs_read_attr_from_file(path, r, server);
+		fsop_read_attr_from_file(path, r, f);
 		return;
 	}
-
-	unsigned char attrbuf[20];
 
 	if (getxattr((const char *) path, "user.econet_owner", attrbuf, 4) >= 0) // Attribute found
 	{
@@ -1895,47 +1494,42 @@ void fs_read_xattr(unsigned char *path, struct objattr *r, int server)
  * permissions when overwriting a file.
  */
 
-void fs_write_xattr(unsigned char *path, uint16_t owner, uint16_t perm, uint32_t load, uint32_t exec, uint16_t homeof, int server)
+void fsop_write_xattr(unsigned char *path, uint16_t owner, uint16_t perm, uint32_t load, uint32_t exec, uint16_t homeof, struct fsop_data *f)
 {
-	struct objattr existing;
-	unsigned char attrbuf[20];
-	unsigned char old_owner[10];
-	char *dotfile=pathname_to_dotfile(path, fs_config[server].fs_infcolon);
-	int dotexists=access(dotfile, F_OK);
+	struct objattr 		existing;
+	unsigned char 		attrbuf[20];
+	unsigned char 		old_owner[10];
+	char 			*dotfile = pathname_to_dotfile(path, f->server->config->fs_infcolon);
+	int 			dotexists = access(dotfile, F_OK);
 
 	free(dotfile);
 
-	fs_read_xattr(path, &existing, server);
+	fsop_read_xattr(path, &existing, f);
 
 	if (perm & 0xff00)
 		perm = existing.perm;
 
 	if (((perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == 0) && fs_isdir(path))
-		perm |= FS_CONF_DEFAULT_DIR_PERM(server); // imply default if dir perm given as 'no perms'
+		perm |= FS_CONF_DEFAULT_DIR_PERM(f->server); // imply default if dir perm given as 'no perms'
 		// No equivalent for files, because can justifiably set to, e.g. "/"
 
 	if (!use_xattr || dotexists==0)
 	{
-		fs_write_attr_to_file(path, owner, perm & 0xFF, load, exec, homeof, server);
+		fs_write_attr_to_file(path, owner, perm & 0xFF, load, exec, homeof, f);
 		return;
 	}
 
-	//if (!(perm & 0xff00)) // Only do this if top 8 bits unset - any of them set means don't overwrite perms
-	//{
-		sprintf ((char * ) attrbuf, "%02X", (perm & 0xff));
-		if (setxattr((const char *) path, "user.econet_perm", (const void *) attrbuf, 2, 0)) // Flags = 0 means create if not exist, replace if does
-			fs_debug (0, 1, "Failed to set permission on %s\n", path);
-	//}
-
-	
 	sprintf((char * ) attrbuf, "%04X", owner);
+
 	// See if owner is being changed
+	//
 	if (getxattr((const char *) path, "user.econet_owner", old_owner, 4) >= 0) // Attribute found
 	{
 		old_owner[4] = 0;
 		if (strcasecmp(old_owner, attrbuf))
 			fs_debug (0, 1, "Owner being changed from %s to %s on file %s", old_owner, attrbuf, path);	
 	}
+
 	if (setxattr((const char *) path, "user.econet_owner", (const void *) attrbuf, 4, 0))
 		fs_debug (0, 1, "Failed to set owner on %s", path);
 
@@ -2053,7 +1647,7 @@ void fs_wildcard_to_regex(char *input, char *output, uint8_t infcolon)
 // Puts the right flags on the call too
 int fs_compile_wildcard_regex(char *string)
 {
-	return regcomp(&r_wildcard, string, REG_EXTENDED | REG_ICASE | REG_NOSUB);
+	return regcomp(&(r_wildcard), string, REG_EXTENDED | REG_ICASE | REG_NOSUB);
 }
 
 // Makes sure we aren't more than 10 characters long,
@@ -2088,6 +1682,8 @@ void fs_free_scandir_list(struct dirent ***list, int n)
 
 }
 
+#define fsop_free_wildcard_list	fs_free_wildcard_list
+
 void fs_free_wildcard_list(struct path *p)
 {
 	struct path_entry *pointer, *pointer_next;
@@ -2107,26 +1703,27 @@ void fs_free_wildcard_list(struct path *p)
 // mallocs a linked chain of struct path_entrys, and puts the address of the head in *head and the tail in *tail
 // The calling function MUST free those up on or after return.
 // The needle must already be converted from wildcards to regex-compatible text.
-// 
-int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needle, struct path_entry **head, struct path_entry **tail)
+ 
+#define fsop_get_wildcard_entries fs_get_wildcard_entries
+
+int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, char *needle, struct path_entry **head, struct path_entry **tail)
 {
 
-	unsigned short counter, found;
-	short results;
-	struct path_entry *p, *new_p;
-	char needle_wildcard[2048];
-	struct dirent **namelist;
-	struct stat statbuf;
-	// struct statx statxbuf;
-	struct objattr oa, oa_parent;
-	struct tm ct;
+	unsigned short 		counter, found;
+	short 			results;
+	struct path_entry 	*p, *new_p;
+	char 			needle_wildcard[2048];
+	struct dirent 		**namelist;
+	struct stat 		statbuf;
+	struct objattr 		oa, oa_parent;
+	struct tm 		ct;
 
 	found = counter = 0;
 	*head = *tail = p = NULL;
 
-	fs_acorn_to_unix(needle, fs_config[server].fs_infcolon);
+	fs_acorn_to_unix(needle, f->server->config->fs_infcolon);
 
-	fs_wildcard_to_regex(needle, needle_wildcard, fs_config[server].fs_infcolon);
+	fs_wildcard_to_regex(needle, needle_wildcard, f->server->config->fs_infcolon);
 
 	if (normalize_debug) fs_debug (0, 2, "fs_get_wildcard_entries() - needle = '%s', needle_wildcard = '%s'", needle, needle_wildcard);
 
@@ -2140,7 +1737,7 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 
 	// Convert to a path_entry chain here and assign head & tail.
 
-	fs_read_xattr(haystack, &oa_parent, server);
+	fsop_read_xattr(haystack, &oa_parent, f);
 	
 	while (counter < results)
 	{
@@ -2173,9 +1770,6 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 			*tail = new_p;
 	
 			// Read parent information
-	
-			// ** Bug found by @sweh
-			//fs_read_xattr(p->unixpath, &oa_parent);
 	
 			// Fill the struct
 			
@@ -2214,7 +1808,7 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 	
 			p = new_p; // update p
 	
-			fs_read_xattr(p->unixpath, &oa, server);
+			fsop_read_xattr(p->unixpath, &oa, f);
 	
 			p->load = oa.load;
 			p->exec = oa.exec;
@@ -2222,14 +1816,6 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 			p->perm = oa.perm;
 			p->homeof = oa.homeof;
 			p->length = statbuf.st_size;
-	
-			/* This is not approved.
-			 *
-			// If we own the object and it's a directory, and it has permissions 0, then spoof RW/
-			if ((p->owner == userid) && S_ISDIR(statbuf.st_mode) && (p->perm == 0))
-				p->perm = FS_PERM_OWN_R | FS_PERM_OWN_W;	
-				*/
-	
 			p->parent_owner = oa_parent.owner;
 			p->parent_perm = oa_parent.perm;
 	
@@ -2238,7 +1824,7 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 			if ((p->parent_owner == userid) && (p->parent_perm == 0))
 				p->parent_perm = FS_PERM_OWN_R | FS_PERM_OWN_W;
 	
-			if (users[server][userid].priv & FS_PRIV_SYSTEM)
+			if (f->server->users[userid].priv & FS_PRIV_SYSTEM)
 				p->my_perm = (p->perm & (FS_PERM_L | FS_PERM_OWN_W | FS_PERM_OWN_R));
 			else if (p->owner == userid)
 				p->my_perm = (p->perm & ~(FS_PERM_OTH_W | FS_PERM_OTH_R));
@@ -2268,7 +1854,7 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 			p->c_sec = ct.tm_sec;
 	
 			p->internal = statbuf.st_ino;
-			strncpy(p->ownername, users[server][p->owner].username, 10);
+			strncpy(p->ownername, f->server->users[p->owner].username, 10);
 			p->ownername[10] = '\0';
 	
 		} // End of name length if() above
@@ -2298,11 +1884,6 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 
 int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_path, short relative_to, struct path *result, unsigned short wildcard)
 {
-	return fs_normalize_path_wildcard(FSOP_SERVER, FSOP_ACTIVE, received_path, relative_to, result, wildcard);
-}
-
-int fs_normalize_path_wildcard(int server, int user, unsigned char *received_path, short relative_to, struct path *result, unsigned short wildcard)
-{
 
 	int ptr = 2;
 	regmatch_t matches[20];
@@ -2314,18 +1895,16 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	short found;
 	unsigned char path[1030];
 	uint8_t	special_path; // Set to 1 below if user is selecting a filename beginning %, @, &
+	struct __fs_active *a;
 
 	unsigned short homeof_found = 0; // Non-zero if we traverse a known home directory
 
-	int userid;
-
 	DIR *dir;
-	//struct dirent *d;
 	short count;
 
-	special_path = 0;
+	a = f->active;
 
-	userid = FS_ACTIVE_UID(server, user); // Converts 'user' (which is an index into active[]) into the underlying userid
+	special_path = 0;
 
 	result->npath = 0;
 	result->paths = result->paths_tail = NULL;
@@ -2339,14 +1918,14 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 	/* Fudge the special files here if we have SYST privs */
 
-	if (active[server][user].priv & FS_PRIV_SYSTEM)
+	if (a && a->server->users[a->userid].priv & FS_PRIV_SYSTEM)
 	{
 		unsigned char	final_path[30];
 		unsigned char 	*acorn_start_ptr;
 
 		final_path[0] = '\0';
 
-		if (fs_config[server].fs_sjfunc && (strlen(received_path) >= 10) && !strcasecmp(received_path + strlen(received_path)-10, "%PASSWORDS"))
+		if (FS_CONFIG(f->server,fs_sjfunc) && (strlen(received_path) >= 10) && !strcasecmp(received_path + strlen(received_path)-10, "%PASSWORDS"))
 		{
 			if (normalize_debug) fs_debug (0, 1, "Found request for special file %PASSWORDS");
 			strcpy(final_path, "MDFSPasswords");
@@ -2373,13 +1952,13 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	
 			result->error = 0;
 			result->ftype = FS_FTYPE_FILE;
-			strcpy(result->discname, fs_discs[server][users[server][active[server][user].userid].home_disc].name);
-			result->disc = users[server][active[server][user].userid].home_disc;
+			fsop_get_disc_name(f->server, a->server->users[a->userid].home_disc, result->discname);
+			result->disc = a->server->users[a->userid].home_disc;
 
 			strcpy(result->path[0], acorn_start_ptr);
 			strcpy(result->acornname, acorn_start_ptr);
 			strcpy(result->path_from_root, acorn_start_ptr);
-			sprintf(result->unixpath, "%s/%s", fs_stations[server].directory, final_path);
+			sprintf(result->unixpath, "%s/%s", f->server->directory, final_path);
 			sprintf(result->acornfullpath, "$.%s", acorn_start_ptr);
 			strcpy(result->unixfname, final_path);
 					
@@ -2431,8 +2010,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	
 	// Implement ANFS name bodge
 	
-	if (
-			(users[server][FS_ACTIVE_UID(server,user)].priv2 & FS_PRIV2_ANFSNAMEBODGE)
+	if ( 		a
+		&&	(a->server->users[a->userid].priv2 & FS_PRIV2_ANFSNAMEBODGE)
 		&&	(strlen(received_path) >= 4 && *received_path >= '0' && *received_path <= '9' && *(received_path+1) == '.')
 	   )
 	{
@@ -2447,7 +2026,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 	/* Check for the three specials, and make sure they are either followed by '.' or end of line */
 
-	if ((path[0] == '&' || path[0] == '@' || path[0] == '%') && (path[1] == '\0' || path[1] == '.'))
+	if (a && (path[0] == '&' || path[0] == '@' || path[0] == '%') && (path[1] == '\0' || path[1] == '.'))
 	{
 
 		unsigned char	temp_path[1048];
@@ -2459,14 +2038,14 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 		switch (path[0])
 		{
-			case '&':	relative_to = active[server][user].root; break;
-			case '@':	relative_to = active[server][user].current; break;
-			case '%':	relative_to = active[server][user].lib; break;
+			case '&':	relative_to = a->root; break;
+			case '@':	relative_to = a->current; break;
+			case '%':	relative_to = a->lib; break;
 		}
 
 		if (normalize_debug)
 		{
-			fs_debug (0, 1, "Special character detected '%c': User id = %d, active id = %d, special_path = %d, new relative_to = %d", path[0], active[server][user].userid, user, special_path, relative_to);
+			fs_debug (0, 1, "Special character detected '%c': User id = %d, special_path = %d, new relative_to = %d", path[0], a->userid, special_path, relative_to);
 		}
 
 		// Pretend we were given the bit after the special character
@@ -2476,34 +2055,40 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 		if (normalize_debug)
 		{
-			fs_debug (0, 1, "User id = %d, active id = %d, new relative path = '%s'", active[server][user].userid, user, path);
+			fs_debug (0, 1, "User id = %d, new relative path = '%s'", a->userid, path);
 		}
 
 	}
 
-	if (normalize_debug) fs_debug(0,1, "path=%s, received_path=%s, relative to %d, wildcard = %d, server %d, user %d, active user fhandle.handle = %d, acornfullpath = %s", path, received_path, relative_to, wildcard, server, user, active[server][user].fhandles[relative_to].handle, active[server][user].fhandles[relative_to].acornfullpath);
+	if (normalize_debug) 
+	{
+		if (a)
+			fs_debug(0,1, "path=%s, received_path=%s, relative to %d, wildcard = %d, user %d, acornfullpath = %s", path, received_path, relative_to, wildcard, a->userid, a->fhandles[relative_to].acornfullpath);
+		else
+			fs_debug(0,1, "path=%s, received_path=%s, relative to %d, wildcard = %d", path, received_path, relative_to, wildcard);
+	}
 
 	// If the handle we have for 'relative to' is invalid, then return directory error
-	if ((relative_to > FS_MAX_OPEN_FILES) || (active[server][user].fhandles[relative_to].handle == -1))
+	if ((relative_to > FS_MAX_OPEN_FILES) || (a && relative_to != -1 && !a->fhandles[relative_to].handle))
 	{
 		result->error = FS_PATH_ERR_NODIR; return 0;
 	}
 
 	// Cope with null path relative to dir on another disc
 	if (strlen(path) == 0 && relative_to != -1)
-		strcpy(path, active[server][user].fhandles[relative_to].acornfullpath);
+		strcpy(path, a->fhandles[relative_to].acornfullpath);
 	else if (relative_to != -1 && (path[0] != ':' && path[0] != '$') /* && path[0] != '&' */)
 	{
 		unsigned char	temp_path[2096];
 
 		// 20240506 sprintf(path, "%s.%s", active[server][user].fhandles[relative_to].acornfullpath, received_path);
-		snprintf(temp_path, 2095, "%s.%s", active[server][user].fhandles[relative_to].acornfullpath, path);
+		snprintf(temp_path, 2095, "%s.%s", a->fhandles[relative_to].acornfullpath, path);
 		// Copy & truncate if need be
 		memcpy (path, temp_path, 1024);
 		path[1025] = '\0';
 	}
 
-	if (normalize_debug && relative_to != -1) fs_debug (0, 1, "Path provided: '%s', relative to '%s'", received_path, active[server][user].fhandles[relative_to].acornfullpath);
+	if (normalize_debug && relative_to != -1) fs_debug (0, 1, "Path provided: '%s', relative to '%s'", received_path, a->fhandles[relative_to].acornfullpath);
 	else if (normalize_debug) fs_debug (0, 1, "Path provided: '%s', relative to nowhere", received_path);
 
 	// Truncate any path provided that has spaces in it
@@ -2516,10 +2101,12 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 	memset(path_internal, 0, 1024);
 
+	if (normalize_debug) fs_debug (0, 1, "Path after adjustment is '%s'", path);
+
 	if (*path == ':') // Disc selection
 	{
 
-		int count, found = 0;
+		int 	found = 0;
 
 		// Exclude lost+found!
 		if (strcasecmp(path+1, "lost+found") && regexec(&r_discname, (const char * ) path+1, 1, matches, 0) == 0)
@@ -2553,21 +2140,27 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 		// Now see if we know the disc name in our store...
 
-		count = 0;
-		while (count < ECONET_MAX_FS_DISCS && !found)
 		{
-			if ((!strcasecmp((const char *) fs_discs[server][count].name, (const char *) result->discname) || ((users[server][userid].priv2 & FS_PRIV2_ANFSNAMEBODGE) && (count == atoi(result->discname)))) && FS_DISC_VIS(server,userid,count))
-				found = 1;
-			else 	count++;
-		}
+			struct __fs_disc	*disc;
 
-		if (!found)
-		{
-			result->error = FS_PATH_ERR_NODISC;
-			return 0; // Bad path - no such disc
-		}
+			disc = f->server->discs;
 
-		result->disc = count;
+			while (disc && !found)
+			{
+				if ((!strcasecmp((const char *) disc->name, (const char *) result->discname) || ((a->server->users[a->userid].priv2 & FS_PRIV2_ANFSNAMEBODGE) && (disc->index == atoi(result->discname)))) && FS_DISC_VIS(f->server,a->userid,disc->index))
+					found = 1;
+				else
+					disc = disc->next;
+			}
+
+			if (!found)
+			{
+				result->error = FS_PATH_ERR_NODISC;
+				return 0; // Bad path - no such disc
+			}
+
+			result->disc = disc->index;
+		}
 	}
 	else if (*path == '.') // Bad path - can't start with a .
 	{
@@ -2584,7 +2177,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	if (normalize_debug) 
 	{
 		if (relative_to > 0)
-			fs_debug (0, 1, "Normalize relative to handle %d, which has full acorn path %s", relative_to, active[server][user].fhandles[relative_to].acornfullpath);
+			fs_debug (0, 1, "Normalize relative to handle %d, which has full acorn path %s", relative_to, a->fhandles[relative_to].acornfullpath);
 		else	
 			fs_debug (0, 1, "Normalize relative to nowhere.");
 	}
@@ -2607,24 +2200,6 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		// Set up 'adjusted' accordingly
 		strcpy(adjusted, path_internal + ptr);
 	}
-	/* Commented - doesn't work - we'll fudge this another way - see above
-	else if (path_internal[0] == '&') // Append home directory
-	{
-		if (normalize_debug) fs_debug (0, 1, "Found & specifier with %02x as next character", path_internal[1]);
-		switch (path_internal[1])
-		{
-			case '.': ptr = 2; break;
-			case '\0': ptr = 1; break;
-			default: result->error = FS_PATH_ERR_FORMAT; return 0; break; // Must have a . after & in a path
-		}
-		if (normalize_debug)
-		{
-			fs_debug (0, 1, "User id = %d, active id = %d, root handle = %d, full acorn path = %s", active[server][user].userid, user, active[server][user].root, active[server][user].fhandles[active[server][user].root].acornfullpath);
-		}
-		if (ptr == 2) snprintf (adjusted, 1046, "%s.%s", active[server][user].fhandles[active[server][user].root].acornfullpath, path_internal + ptr);	
-		else snprintf (adjusted, 1046, "%s", active[server][user].fhandles[active[server][user].root].acornfullpath);
-	}
-	*/
 	else // relative path given - so give it relative to the relevant handle
 	{
 		unsigned short fp_ptr = 0;
@@ -2633,16 +2208,16 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			strcpy(adjusted, "");
 		else
 		{
-			while (active[server][user].fhandles[relative_to].acornfullpath[fp_ptr] != '.') fp_ptr++;
+			while (a->fhandles[relative_to].acornfullpath[fp_ptr] != '.') fp_ptr++;
 			// Now at end of disc name
 			// Skip the '.$'
 			fp_ptr += 2;
-			if (active[server][user].fhandles[relative_to].acornfullpath[fp_ptr] == '.') // Path longer than just :DISC.$
+			if (a->fhandles[relative_to].acornfullpath[fp_ptr] == '.') // Path longer than just :DISC.$
 				fp_ptr++;
 	
-			if (fp_ptr < strlen(active[server][user].fhandles[relative_to].acornfullpath))
+			if (fp_ptr < strlen(a->fhandles[relative_to].acornfullpath))
 			{
-				sprintf(adjusted, "%s", active[server][user].fhandles[relative_to].acornfullpath + fp_ptr);
+				sprintf(adjusted, "%s", a->fhandles[relative_to].acornfullpath + fp_ptr);
 				if (strlen(path_internal) > 0) strcat(adjusted, ".");
 			}
 			else	strcpy(adjusted, "");
@@ -2652,27 +2227,26 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 		if (normalize_debug)
 		{
-			fs_debug (0, 1, "User id = %d, active id = %d, adjusted acorn path = %s", active[server][user].userid, user, adjusted);
+			fs_debug (0, 1, "User id = %d, adjusted acorn path = %s", a->userid, adjusted);
 		}
 	}
-	
+
 	if (result->disc == -1)
 	{
-		result->disc = active[server][user].current_disc; // Replace the rogue if we are not selecting a specific disc
-		strcpy ((char * ) result->discname, (const char * ) fs_discs[server][result->disc].name);
-		if (normalize_debug) fs_debug (0, 1, "No disc specified, choosing current disc: %d (%d) on server %d - %s (%s)", active[server][user].current_disc, result->disc, server, fs_discs[server][result->disc].name, result->discname);
+		result->disc = a->current_disc; // Replace the rogue if we are not selecting a specific disc
+		if (normalize_debug) fs_debug (0, 1, "No disc specified, choosing current disc: %d", a->current_disc);
 	}
 
-	if (normalize_debug) fs_debug (0, 1, "Disc selected = %d, %s", result->disc, (result->disc != -1) ? (char *) fs_discs[server][result->disc].name : (char *) "");
+	fsop_get_disc_name(f->server, result->disc, result->discname);
+
+	if (normalize_debug) fs_debug (0, 1, "Disc selected = %d, %s", result->disc, result->discname);
 	if (normalize_debug) fs_debug (0, 1, "path_internal = %s (len %d)", path_internal, (int) strlen(path_internal));
 
-	sprintf (result->acornfullpath, ":%s.$", fs_discs[server][result->disc].name);
+	sprintf (result->acornfullpath, ":%s.$", result->discname);
 
 	if (normalize_debug) fs_debug (0, 1, "Adjusted = %s / ptr = %d / path_internal = %s", adjusted, ptr, path_internal);
 
 	strcpy ((char * ) result->path_from_root, (const char * ) adjusted);
-
-	// if (normalize_debug) fs_debug (0, 1, "Adjusted = %s", adjusted);
 
 	ptr = 0;
 
@@ -2687,7 +2261,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		}
 		else
 		{
-			if (regexec(&r_pathname, adjusted + ptr, 1, matches, 0) == 0)
+			if (regexec(&(f->server->r_pathname), adjusted + ptr, 1, matches, 0) == 0)
 			{
 				strncpy((char * ) result->path[result->npath], (const char * ) adjusted + ptr, matches[0].rm_eo - matches[0].rm_so);
 				*(result->path[result->npath++] + matches[0].rm_eo - matches[0].rm_so) = '\0';
@@ -2711,8 +2285,6 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			}
 			else 	ptr++; // Move to start of next portion of path
 		}
-
-	
 	}
 
 	if (ptr < strlen((const char *) adjusted))
@@ -2726,12 +2298,12 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 	/* First build the unix path */
 
-	sprintf (result->unixpath, "%s/%1d%s", fs_stations[server].directory, result->disc, fs_discs[server][result->disc].name);
+	sprintf (result->unixpath, "%s/%1d%s", f->server->directory, result->disc, result->discname);
 
-	if ((users[server][active[server][user].userid].priv2 & FS_PRIV2_CHROOT) && (relative_to != -1) && (result->disc == users[server][active[server][user].userid].home_disc)) // CHROOT set for this user and we are not logging in / changing disc and we are on the home disc
+	if ((a->server->users[a->userid].priv2 & FS_PRIV2_CHROOT) && (relative_to != -1) && (result->disc == a->server->users[a->userid].home_disc)) // CHROOT set for this user and we are not logging in / changing disc and we are on the home disc
 	{
 		// Add home directory unix path to result->unixpath here - NB consider making the LIB normalize on login / sdisc relative to the chrooted root - might break things otherwise.
-		strcpy (result->unixpath, active[server][user].urd_unix_path); // Force $ to be home dir
+		strcpy (result->unixpath, a->urd_unix_path); // Force $ to be home dir
 	}
 
 	if (normalize_debug) fs_debug (0, 1, "Unix dir: %s, npath = %d", result->unixpath, result->npath);
@@ -2745,8 +2317,6 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	{
 		struct stat s;
 		struct tm t;
-		//int owner;
-		//char attrbuf[20];
 
 		result->ftype = FS_FTYPE_DIR;
 		
@@ -2758,21 +2328,17 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 		// Next, see if we have xattr and, if not, populate them. We do this for all paths along the way
 
-		fs_read_xattr(result->unixpath,&attr, server);
+		fsop_read_xattr(result->unixpath,&attr,f);
 
-		if (relative_to != -1 && (users[server][active[server][user].userid].priv2 & FS_PRIV2_CHROOT) && (result->disc == users[server][active[server][user].userid].home_disc))
+		if (relative_to != -1 && (a->server->users[a->userid].priv2 & FS_PRIV2_CHROOT) && (result->disc == a->server->users[a->userid].home_disc))
 		{
-			if (normalize_debug) fs_debug (0, 1, "chroot home directory %s for user %d and on home disc", result->unixpath, active[server][user].userid);
+			if (normalize_debug) fs_debug (0, 1, "chroot home directory %s for user %d and on home disc", result->unixpath, a->userid);
 			result->homeof = attr.homeof;
 			result->owner = result->parent_owner = attr.owner;
 			result->parent_perm = result->perm = attr.perm;
-			result->my_perm = (attr.owner == active[server][user].userid) ? (attr.perm & 0x0f) : ((attr.perm & 0xf0) >> 4);
-			/* 20240520 I think this is wrong... SYST just treated as owner
-			if (users[server][active[server][user].userid].priv & FS_PRIV_SYSTEM)
-				result->my_perm = (result->my_perm | (FS_PERM_OWN_R | FS_PERM_OWN_W));
-				*/
+			result->my_perm = (attr.owner == a->userid) ? (attr.perm & 0x0f) : ((attr.perm & 0xf0) >> 4);
 
-			if (normalize_debug) fs_debug (0, 1, "chroot results for root dir %s for user %d are homeof=%04X, owner=%04X, parent_owner=%04X, parent_perm = %02X, perm = %02X, my_perm = %02X", result->unixpath, active[server][user].userid, result->homeof, result->owner, result->parent_owner, result->parent_perm, result->perm, result->my_perm);
+			if (normalize_debug) fs_debug (0, 1, "chroot results for root dir %s for user %d are homeof=%04X, owner=%04X, parent_owner=%04X, parent_perm = %02X, perm = %02X, my_perm = %02X", result->unixpath, a->userid, result->homeof, result->owner, result->parent_owner, result->parent_perm, result->perm, result->my_perm);
 		}
 		else
 		{
@@ -2784,7 +2350,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			result->parent_perm = result->perm;
 			result->parent_owner = result->owner;
 	
-			if (!(active[server][user].priv & FS_PRIV_SYSTEM))
+			if (!(a->server->users[a->userid].priv & FS_PRIV_SYSTEM))
 				result->my_perm = FS_PERM_OWN_R; // Read only my_perm for non-System users on a root directory
  
 		}
@@ -2792,7 +2358,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		result->load = 0;
 		result->exec = 0;
 
-		fs_write_xattr(result->unixpath, result->owner, result->perm, result->load, result->exec, result->homeof, server);
+		fsop_write_xattr(result->unixpath, result->owner, result->perm, result->load, result->exec, result->homeof, f);
 
 		stat(result->unixpath, &s);
 
@@ -2832,7 +2398,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			strcpy(acorn_path, result->path[count]); // Preserve result->path[count] as is, otherwise fs_get_wildcard_entries will convert it to unix, which we don't want
 			if (normalize_debug) fs_debug (0, 1, "Processing path element %d - %s (Acorn: %s) in directory %s", count, result->path[count], acorn_path, result->unixpath);
 
-			num_entries = fs_get_wildcard_entries(server, active[server][user].userid, result->unixpath, // Current search dir
+			num_entries = fs_get_wildcard_entries(f, a->userid, result->unixpath, // Current search dir
 					acorn_path, // Current segment in Acorn format (which the function will convert)
 					&(result->paths), &(result->paths_tail));
 
@@ -2850,7 +2416,6 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 						fs_day_from_two_bytes(p->day, p->monthyear),
 						fs_month_from_two_bytes(p->day, p->monthyear),
 						fs_year_from_two_bytes(p->day, p->monthyear));
-						//p->day, p->monthyear & 0x0f, ((!fs_sevenbitbodge) ? (p->monthyear & 0xf0) >> 4) + 81 : (((((p->monthyear & 0xf0) << 1) | ((p->day & 0xe0) >> 5))+81) % 100));
 					p = p->next;
 				}
 			}
@@ -2870,9 +2435,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			if (found == 0) // Didn't find anything
 			{
 
-				fs_read_xattr(result->unixpath,&attr, server);
+				fsop_read_xattr(result->unixpath, &attr, f);
 
-				// BUG: TODO: Need to set parent_owner, parent_perm and perm here in case we are trying to open a file for write. 20231227
 				result->ftype = FS_FTYPE_NOTFOUND;
 				result->perm = 0;
 				result->parent_owner = attr.owner;
@@ -2881,7 +2445,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 				// Copy to thing we didn't find to result->acornname so it can be reused in the caller
 				strcpy (result->unixfname, acorn_path);
 				strcpy (result->acornname, acorn_path);
-				fs_acorn_to_unix(result->unixfname, fs_config[server].fs_infcolon);
+				fs_acorn_to_unix(result->unixfname, f->server->config->fs_infcolon);
 
 				// If we are on the last segment and the filename does not contain wildcards, we return 1 to indicate that what was 
 				// searched for wasn't there so that it can be written to. Obviously if it did contain wildcards then it can't be so we
@@ -2901,11 +2465,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			// Always copy the first entry into the main struction because we always want it.
 			// Unless on last segment (when we want to leave all the path entries available to be freed by the caller)
 			// we free them up here.
-			//
 
 			// So there's at least one entry, and it should be at *paths
-			//
-			//
 
 			result->ftype = result->paths->ftype;
 			result->parent_owner = result->paths->parent_owner;
@@ -2927,7 +2488,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			if (homeof_found == 0 && result->homeof != 0)
 				homeof_found = result->homeof;
 
-			if (fs_config[server].fs_acorn_home && homeof_found)
+			if (f->server->config->fs_acorn_home && homeof_found)
 			{
 				struct path_entry *h;
 
@@ -2939,7 +2500,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 				{
 					h->owner = homeof_found;
 					h->my_perm = h->perm;
-					strncpy(h->ownername, users[server][h->owner].username, 10);
+					strncpy(h->ownername, f->server->users[h->owner].username, 10);
 					h->ownername[10] = '\0';
 
 					h = h->next;
@@ -2978,7 +2539,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 			if (count != result->npath-1) // Not last segment - free up all the path_entries because we'll be junking them.
 			{
-				if ((result->ftype == FS_FTYPE_DIR) && (!(FS_PERM_EFFOWNER(server,user,result->owner)) && !(result->perm & FS_PERM_OTH_R))) // Owner & SYST can always read a directory // (result->my_perm & FS_PERM_OWN_R) == 0) && !FS_ACTIVE_SYST(server,user))
+				if ((result->ftype == FS_FTYPE_DIR) && (!(FS_PERM_EFFOWNER(a,result->owner)) && !(result->perm & FS_PERM_OTH_R)))
 				{
 					// Hard fail
 					result->error = FS_PATH_ERR_NODIR;
@@ -2987,7 +2548,6 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 				}
 
 				fs_free_wildcard_list(result);
-
 			}
 
 			count++;
@@ -3000,23 +2560,12 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 	// This is the non-wildcard code
 
-/* OLD - CAUSED NON-SYST USERS NOT TO BE ABLE TO READ $
-	result->my_perm = result->perm = result->parent_perm = 0; // Clear down
-*/
-
-	/* 20240516 Commented - all this is collected up above now
-	result->my_perm = result->perm;
-	result->parent_perm = result->perm;
-	if (!( (active[server][user].priv & FS_PRIV_SYSTEM) || (active[server][user].userid == result->owner) ))
-		result->my_perm = (result->my_perm & ~(FS_PERM_OWN_R | FS_PERM_OWN_W)) | ((result->my_perm & (FS_PERM_OTH_R | FS_PERM_OTH_W)) >> 4);
-		*/
-
 	/* If in chroot mode, set initial value of local variable parent_owner to owner of current dir because otherwise it is initialized to 0 (for root dir) */
 
-	if (users[server][FS_ACTIVE_UID(server,user)].priv2 & FS_PRIV2_CHROOT)
+	if (FS_UINFO(a).priv2 & FS_PRIV2_CHROOT)
 		parent_owner = result->parent_owner; // Set above correctly in chroot mode.
 
-	if (normalize_debug) fs_debug (0, 1, "non-wildcard initial results for root dir %s for user %d are homeof=%04X, owner=%04X, parent_owner=%04X, parent_perm = %02X, perm = %02X, my_perm = %02X", result->unixpath, active[server][user].userid, result->homeof, result->owner, result->parent_owner, result->parent_perm, result->perm, result->my_perm);
+	if (normalize_debug) fs_debug (0, 1, "non-wildcard initial results for root dir %s for user %d are homeof=%04X, owner=%04X, parent_owner=%04X, parent_perm = %02X, perm = %02X, my_perm = %02X", result->unixpath, FS_ACTIVE_UID(a), result->homeof, result->owner, result->parent_owner, result->parent_perm, result->perm, result->my_perm);
 
 	while ((result->npath > 0) && count < result->npath)
 	{
@@ -3037,7 +2586,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		while (result->path[count][r_counter] != '\0' && r_counter < ECONET_MAX_FILENAME_LENGTH)
 		{
 			if (result->path[count][r_counter] == '/')
-				path_segment[r_counter] = (fs_config[server].fs_infcolon ? '.' : ':');
+				path_segment[r_counter] = (FS_CONFIG(f->server,fs_infcolon) ? '.' : ':');
 			else if (result->path[count][r_counter] == 0xA0)
 				path_segment[r_counter] = '#'; // Hard space equivalent
 			else	path_segment[r_counter] = result->path[count][r_counter];
@@ -3067,26 +2616,26 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 		// Obtain permissions on dir - see if we can read it
 
-		fs_read_xattr(result->unixpath, &attr, server);
+		fsop_read_xattr(result->unixpath, &attr, f);
 		owner = attr.owner;
 		perm = attr.perm;
 
-		if (homeof_found == 0 && fs_config[server].fs_acorn_home && attr.homeof != 0)
+		if (homeof_found == 0 && FS_CONFIG(f->server,fs_acorn_home) && attr.homeof != 0)
 			homeof_found = attr.homeof;
 
 		if (homeof_found)
 			owner = homeof_found;
 		
 		// Fudge parent perm if we own the object and permissions = &00
-		if ((active[server][user].userid == attr.owner) && ((attr.perm & ~FS_PERM_L) == 0))
+		if ((FS_ACTIVE_UID(a) == attr.owner) && ((attr.perm & ~FS_PERM_L) == 0))
 			perm = attr.perm |= FS_PERM_OWN_W | FS_PERM_OWN_R;
 		
 		if (count == result->npath - 1) // Last segment
 			result->parent_perm = perm;
 
 		if (!	( 
-				(active[server][user].priv & FS_PRIV_SYSTEM)
-			||	(active[server][user].userid == owner) // Owner can always read own directory irrespective of permissions(!)
+				(FS_UINFO(a).priv & FS_PRIV_SYSTEM)
+			||	(FS_ACTIVE_UID(a) == owner) // Owner can always read own directory irrespective of permissions(!)
 			||	(perm & FS_PERM_OTH_R) // Others can read the directory
 			)
 			&& !found) 
@@ -3109,7 +2658,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 					while (result->path[count][r_counter] != '\0' && r_counter < ECONET_MAX_FILENAME_LENGTH)
 					{
 						if (result->path[count][r_counter] == '/')
-							unix_segment[r_counter] = (fs_config[server].fs_infcolon ? '.' : ':');
+							unix_segment[r_counter] = (FS_CONFIG(f->server,fs_infcolon) ? '.' : ':');
 						else if (result->path[count][r_counter] == 0xA0) // Hard space
 							unix_segment[r_counter] = '#';
 						else	unix_segment[r_counter] = result->path[count][r_counter];
@@ -3174,14 +2723,15 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			// Need to add / for setxattr
 			if (S_ISDIR(s.st_mode))	strcat(dirname, "/");
 
-			fs_read_xattr(dirname, &attr, server);
+			fsop_read_xattr(dirname, &attr, f);
 
-			if (normalize_debug) fs_debug (0, 1, "fs_read_xattr yielded: Owner %04X, Load %08lX, Exec %08lX, Home Of %04X, Perm %02X", attr.owner, attr.load, attr.exec, attr.homeof, attr.perm);
+			if (normalize_debug) fs_debug (0, 1, "fsop_read_xattr yielded: Owner %04X, Load %08lX, Exec %08lX, Home Of %04X, Perm %02X", attr.owner, attr.load, attr.exec, attr.homeof, attr.perm);
 
 			// If it's a directory with 0 permissions and we own it, set permissions to RW/
 
-			if (normalize_debug) fs_debug (0, 1, "Looking to see if this user (id %04X) is the owner (%04X), if this is a dir and if perms (%02X) are &00", active[server][user].userid, attr.owner, attr.perm);
-			if ((active[server][user].userid == attr.owner) && S_ISDIR(s.st_mode) && ((attr.perm & ~FS_PERM_L) == 0))
+			if (normalize_debug) fs_debug (0, 1, "Looking to see if this user (id %04X) is the owner (%04X), if this is a dir and if perms (%02X) are &00", a->userid, attr.owner, attr.perm);
+
+			if ((FS_ACTIVE_UID(a) == attr.owner) && S_ISDIR(s.st_mode) && ((attr.perm & ~FS_PERM_L) == 0))
 			{
 				if (normalize_debug) fs_debug (0, 1, "Is a directory owned by the user with perm = 0 - setting permissions to WR/");
 				attr.perm |= FS_PERM_OWN_W | FS_PERM_OWN_R;
@@ -3200,7 +2750,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 			result->attr.homeof = attr.homeof;
 
 
-			if (homeof_found == 0 && fs_config[server].fs_acorn_home && attr.homeof != 0)
+			if (homeof_found == 0 && FS_CONFIG(f->server,fs_acorn_home) && attr.homeof != 0)
 				homeof_found = attr.homeof;
 
 			if (homeof_found)
@@ -3246,9 +2796,9 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 				result->c_min = t.tm_min;
 				result->c_sec = t.tm_sec;
 
-				if (active[server][user].priv & FS_PRIV_SYSTEM)
+				if (FS_ACTIVE_SYST(a))
 					result->my_perm = 0xff;
-				else if (active[server][user].userid != result->owner)
+				else if (FS_ACTIVE_UID(a) != result->owner)
 					result->my_perm = (result->perm & FS_PERM_L) | ((result->perm & (FS_PERM_OTH_W | FS_PERM_OTH_R)) >> 4);
 				else	result->my_perm = (result->perm & 0x0f);
 
@@ -3273,7 +2823,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 	
 	if (normalize_debug) fs_debug (0, 1, "Returning full acorn path (non-wildcard) %s with permissions %02X, unix path %s", result->acornfullpath, result->my_perm, result->unixpath);
 
-	strncpy((char * ) result->ownername, (const char * ) users[server][result->owner].username, 10); // Populate readable owner name
+	strncpy((char * ) result->ownername, (const char *) f->server->users[result->owner].username, 10); // Populate readable owner name
 	result->ownername[10] = '\0';
 
 	return 1; // Success
@@ -3288,76 +2838,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 int fsop_normalize_path(struct fsop_data *f, unsigned char *path, short relative_to, struct path *result)
 {
-	return fs_normalize_path(FSOP_SERVER, FSOP_ACTIVE, path, relative_to, result);
-}
-
-int fs_normalize_path(int server, int user, unsigned char *path, short relative_to, struct path *result)
-{
-	if (0 && (!strcasecmp("%Passwords", path) || !strcasecmp("%Config", path)) && (users[server][active[server][user].userid].priv & FS_PRIV_SYSTEM)) // System priv user trying to normalize password file // Disabled - now done in the wildcard function instead
-	{
-		struct tm t;
-		struct stat s;
-
-		result->error = 0;
-		result->ftype = FS_FTYPE_FILE;
-		strcpy(result->discname, fs_discs[server][users[server][active[server][user].userid].home_disc].name);
-		result->disc = users[server][active[server][user].userid].home_disc;
-		if (!strcasecmp("%Passwords", path))
-		{
-			strcpy(result->path[0], "Passwords");
-			strcpy(result->acornname, "Passwords");
-			strcpy(result->path_from_root, "Passwords");
-			sprintf (result->unixpath, "%s/Passwords", fs_stations[server].directory);
-			sprintf (result->acornfullpath, "$.Passwords");
-			sprintf (result->unixfname, "Passwords");
-		}
-		if (!strcasecmp("%Config", path))
-		{
-
-			strcpy(result->path[0], "Config");
-			strcpy(result->acornname, "Config");
-			strcpy(result->path_from_root, "Config");
-			sprintf (result->unixpath, "%s/Configuration.txt", fs_stations[server].directory);
-			sprintf (result->acornfullpath, "$.Config");
-			sprintf (result->unixfname, "Configuration.txt");
-		}
-
-		result->npath = 1;
-		result->owner = result->parent_owner = 0;
-		result->perm = result->my_perm = result->parent_perm = FS_PERM_OWN_W | FS_PERM_OWN_R;
-		result->load = result->exec = 0;
-		// Length & internal name here, and date fields
-		result->paths = result->paths_tail = NULL;	
-
-		if (stat(result->unixpath, &s)) // Failed stat // this should *never* happen, but just in case it does...
-		{
-			result->error = FS_PATH_ERR_NODIR;
-			result->ftype = FS_FTYPE_NOTFOUND;
-			return -1;
-		}
-
-		result->internal = s.st_ino;
-		result->length = s.st_size;
-
-		localtime_r(&(s.st_mtime), &t);
-
-		fs_date_to_two_bytes (t.tm_mday, t.tm_mon+1, t.tm_year, &(result->monthyear), &(result->day));
-		result->hour = t.tm_hour;
-		result->min = t.tm_min;
-		result->sec = t.tm_sec;
-
-		// Create time
-		localtime_r(&(s.st_ctime), &t);
-		fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->c_day), &(result->c_monthyear));
-		result->c_hour = t.tm_hour;
-		result->c_min = t.tm_min;
-		result->c_sec = t.tm_sec;
-		
-		return 1;
-
-	}
-	else
-		return fs_normalize_path_wildcard(server, user, path, relative_to, result, 0);
+	return fsop_normalize_path_wildcard(f, path, relative_to, result, 0);
 }
 
 
@@ -3369,13 +2850,13 @@ int fs_normalize_path(int server, int user, unsigned char *path, short relative_
  *
  */
 
-uint8_t fs_exists(int server, int active_id, unsigned char *path)
+uint8_t fsop_exists(struct fsop_data *f, unsigned char *path)
 {
 
 	struct path 	p;
 	uint8_t		fsnp;
 
-	fsnp = fs_normalize_path(server, active_id, path, -1, &p);
+	fsnp = fsop_normalize_path(f, path, -1, &p);
 
 	//fprintf (stderr, "fs_normalize_path for %s returned %d, result->ftype = %d\n", path, fsnp, p.ftype);
 	if (fsnp == 0 || p.ftype == FS_FTYPE_NOTFOUND)
@@ -3385,13 +2866,15 @@ uint8_t fs_exists(int server, int active_id, unsigned char *path)
 
 }
 
-void fs_write_user(int server, int user, unsigned char *d) // Writes the 256 bytes at d to the user's record in the relevant password file
+void fsop_write_user(struct __fs_station *s, int user, unsigned char *d) // Writes the 256 bytes at d to the user's record in the relevant password file
 {
 
+	/* MMAPed now
 	char pwfile[1024];
 	FILE *h;
 
-	sprintf (pwfile, "%s/Passwords", fs_stations[server].directory);
+
+	sprintf (pwfile, "%s/Passwords", f->server->directory);
 
 	if ((h = fopen(pwfile, "r+")))
 	{
@@ -3403,157 +2886,121 @@ void fs_write_user(int server, int user, unsigned char *d) // Writes the 256 byt
 		fclose(h);
 	}
 	else fs_debug (0, 0, "Error opening password file - %s\n", strerror(errno));
+	*/
 
+	memcpy(&(s->users[user]), d, 256);
 }
 
 // Clear the SYST password on a given FS (used from the *FAST handler in the bridge)
-uint8_t fs_clear_syst_pw(int fs)
+uint8_t fsop_clear_syst_pw(struct __fs_station *server)
 {
 
 	int	count;
 	uint8_t	ret = 0;
 
+	pthread_mutex_lock(&(server->fs_mutex));
+
 	for (count = 0; count < ECONET_MAX_FS_USERS; count++)
 	{
-		if (!strncmp(users[fs][count].username, "SYST      ", 10))
+		if (!strncmp(server->users[count].username, "SYST      ", 10))
 		{
-			memset(users[fs][count].password, 32, 10);
-			fs_write_user(fs, count, (char *) &(users[fs][count]));
+			memset(server->users[count].password, 32, 10);
 			ret = 1;
 		}
 	}
+
+	pthread_mutex_unlock(&(server->fs_mutex));
 
 	return ret;
 }
 
 // Tell the bridge if a particular FS is active
 
-uint8_t fs_is_active(int fs)
+uint8_t fsop_is_enabled(struct __fs_station *s)
 {
-	if (!fs_enablement) // Theoreticaly since all FSs get started when the bridge starts, this should never evaluate to true, but just in case...
-		return 0;
-	else
-		return fs_enabled[fs];
+	uint8_t	ret;
+
+	pthread_mutex_lock(&(s->fs_mutex));
+	ret = s->enabled;
+	pthread_mutex_unlock(&(s->fs_mutex));
+
+	return ret;
 }
 
-// Initialize a fileserver. Return its index into fs_config etc.
-// unless fs_number is >=0, in which case initialize it with that fs number.
+/*
+ * fsop_initialize()
+ *
+ * Creates a new server struct and initializes it, but
+ * leaves the server disabled.
+ *
+ * Returns the __fs_station struct pointer back to the
+ * HPB.
+ *
+ * Sets up the thread locks etc.
+ *
+ * This function is called by the config reader in the HPB
+ * when it wants to get a server instantiated.
+ *
+ */
 
-int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char stn, char *serverparam, int fs_number)
+struct __fs_station * fsop_initialize(struct __eb_device *device, char *directory)
 {
 	
 	DIR *d;
 	struct dirent *entry;
 
-	int old_fs_count = fs_count;
-	
 	FILE *passwd;
 	char passwordfile[280], passwordfilecopy[300];
 	int length;
-	int portcount;
 	char regex[256];
+	
+	struct __fs_station *server;
 
-#ifdef FS_PARSE_DEBUG
-	char *param;
-#endif
+	FS_LIST_MAKENEW(struct __fs_station, fileservers, 1, server, "FS", "Initialize new server struct");
+        server->net = device->net;
+        server->stn = device->local.stn;
+        strcpy (server->directory, directory);
+        server->config = NULL;
+        server->discs = NULL;
+        server->files = NULL;
+        server->actives = NULL;
+        server->users = NULL;
+        server->enabled = 0;
+        server->fs_load_queue = NULL;
+        server->fs_device = device;
+        server->fs_workqueue = NULL;
+	server->peeks = NULL;
+        /* Don't touch next, prev - they'll be initialized by the list management macros */
 
-#ifdef FS_PARSE_DEBUG
-	fs_parse_cmd ("i am chris wobble\r", "I AM", 4, &param);
-	fs_parse_cmd ("acc. stromboli wr/r\r", "ACCESS", 3, &param);
-	fs_parse_cmd ("lo.file 6000    \r", "LOAD", 3, &param);
-	fs_parse_cmd ("lo.file 6000\r", "LOAD", 2, &param);
-	fs_parse_cmd ("lo.         file 6000\r", "LOAD", 2, &param);
-	fs_parse_cmd ("del.       file      \r", "DELETE", 3, &param);
-	fs_parse_cmd ("DELETE        MYFILE   \r", "DELETE", 3, &param);
-#endif
+        /* Don't do anything with fs_thread - fsop_run() sets that up */
 
+	fs_debug (0, 2, "Attempting to initialize server on %d.%d at directory %s", server->net, server->stn, server->directory);
 
-
-// Seven bit bodge test harness
-
-/*
+	// Ensure serverparam begins with /
+	if (*directory != '/')
 	{
-		unsigned char monthyear, day;
+		FS_LIST_SPLICEFREE(fileservers,server,"FS","Destroy FS struct on failed init");
 
-		fs_date_to_two_bytes(5, 8, 2021, &monthyear, &day);
-
-		fs_debug (0, 1, "fs_date_to_two_bytes(5/8/2021) gave MY=%02X, D=%02X\n", monthyear, day);
-
-	}
-
-*/
-
-// WILDCARD TEST HARNESS
-
-/*
-	char temp1[15], temp2[2048];
-	struct dirent **namelist;
-	int sr;
-
-	strcpy(temp1, "FF12/3");
-	fs_debug (0, 1, "temp1 = %s\n", temp1);
-	fs_unix_to_acorn(temp1);
-	fs_debug (0, 1, "fs_unix_to_acorn(temp1) = %s\n", temp1);
-	fs_acorn_to_unix(temp1);
-	fs_debug (0, 1, "fs_acorn_to_unix(temp1) = %s\n", temp1);
-	
-	strcpy(temp1, "#e*");
-	fs_debug (0, 1, "Wildcard test = %s\n", temp1);
-
-	fs_wildcard_to_regex(temp1, temp2);
-	fs_debug (0, 1, "Wildcard regex = %s\n", temp2);
-
-	fs_debug (0, 1, "Regex compile returned %d\n", fs_compile_wildcard_regex(temp2));
-	sr = scandir("/econet/0ECONET/CHRIS", &namelist, fs_scandir_filter, fs_alphacasesort);
-	
-	regfree(&r_wildcard);
-
-	if (sr == -1) fs_debug (0, 1, "scandir() test failed.\n");
-	else while (sr--)
-	{
-		fs_debug (0, 1, "File index %d = %s\n", sr, namelist[sr]->d_name);
-		free(namelist[sr]);	
-	}
-	free(namelist);
-*/
-	
-// END OF WILDCARD TEST HARNESS
-
-	if ((fs_number >= 0)&& fs_enablement && fs_enabled[fs_number]) // If we are being asked to enable a specific fileserver (which will have been initialized once already), and fileservers have been initialized at all (fs_enablement, which means fs_enabled[] has been zerod-out), and the selected FS is already enabled, return a fail
-		return -1;
-
-	if (fs_number >= 0)
-		fs_count = fs_number;
-
-	fs_enabled[fs_count] = 0; // Flag disabled in case initialization fails
-
-	fs_debug (0, 2, "Attempting to initialize server %d on %d.%d at directory %s", fs_count, net, stn, serverparam);
-
-	// First see if we need to zero-out fs_enabled
-	
-	if (!fs_enablement)
-	{
-		memset(fs_enabled, 0, sizeof(fs_enabled));
-		fs_enablement = 1;
+		fs_debug (0, 1, "Bad directory name %s", directory);
+		return NULL;
 	}
 
 	// If there is a file in this directory called "auto_inf" then we
 	// automatically turn on "-x" mode.  This should work transparently
 	// for any filesystem that isn't currently inf'd 'cos reads will
 	// get the xattr and writes will create a new inf file
-	char *autoinf=malloc(strlen(serverparam)+15);
-	strcpy(autoinf,serverparam);
+	
+	char *autoinf=malloc(strlen(server->directory)+15);
+	strcpy(autoinf,server->directory);
 	strcat(autoinf,"/auto_inf");
+
 	if (access(autoinf, F_OK) == 0)
 	{
 		fs_debug (0, 1, "Automatically turned on -x mode because of %s", autoinf);
 		use_xattr = 0;
 	}
-	free(autoinf);
 
-	sprintf(regex, "^(%s{1,16})", FSREGEX);
-	if (regcomp(&r_discname, regex, REG_EXTENDED) != 0)
-		fs_debug (1, 0, "Unable to compile regex for disc names.");
+	free(autoinf);
 
 	if (!fs_netconf_regex_initialized)
 	{
@@ -3562,69 +3009,40 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 		fs_netconf_regex_initialized = 1;
 	}
 
-	// Ensure serverparam begins with /
-	if (serverparam[0] != '/')
-	{
-		fs_debug (0, 1, "Bad directory name %s", serverparam);
-		fs_count = old_fs_count;
-		return -1;
-	}
-
-	d = opendir(serverparam);
+	d = opendir(server->directory);
 
 	if (!d)
-		fs_debug(1, 1, "Unable to open root directory %s", serverparam);
+		fs_debug(1, 1, "Unable to open root directory %s", server->directory);
 	else
 	{
 
 		FILE * cfgfile;
 
-		strncpy ((char * ) fs_stations[fs_count].directory, (const char * ) serverparam, 255);
-		fs_stations[fs_count].directory[255] = (char) 0; // Just in case
-		fs_stations[fs_count].net = net;
-		fs_stations[fs_count].stn = stn;
-		fs_stations[fs_count].config = &(fs_config[fs_count]);
-
-		// Clear state
-		memset(active[fs_count], 0, sizeof(active)/ECONET_MAX_FS_SERVERS);
-		//memset(fs_discs[fs_count], 0, sizeof(fs_discs)/ECONET_MAX_FS_SERVERS); // First character set to NULL in loop below
-		memset(fs_files[fs_count], 0, sizeof(fs_files)/ECONET_MAX_FS_SERVERS);
-		memset(fs_dirs[fs_count], 0, sizeof(fs_dirs)/ECONET_MAX_FS_SERVERS);
-		memset(users[fs_count], 0, sizeof(users)/ECONET_MAX_FS_SERVERS); // Added 18.04.22 - we didn't seem to be doing this!
-		memset(groups[fs_count], 0, sizeof(groups)/ECONET_MAX_FS_SERVERS); // Added 18.04.22 - beginning of group implementation
-		memset(&(fs_config[fs_count]), 0, sizeof(fs_config)/ECONET_MAX_FS_SERVERS); // Added 03.05.22 - Per server configuration
-
-		for (length = 0; length < ECONET_MAX_FS_DISCS; length++) // used temporarily as counter
-		{
-			//sprintf (fs_discs[fs_count][length].name, "%29s", "");
-			fs_discs[fs_count][length].name[0] = '\0';
-		}
-	
-		// Temporary use of the passwordfile variable
+		server->config = eb_malloc(__FILE__, __LINE__, "FS", "Allocate FS config struct", sizeof(struct __fs_config));
+		memset(server->config, 0, sizeof(struct __fs_config));
 
 		// Set up some defaults in case we are writing a new file
-		fs_config[fs_count].fs_acorn_home = 0;
-		fs_config[fs_count].fs_sjfunc = 1;
-		fs_config[fs_count].fs_pwtenchar = 1;
-		fs_config[fs_count].fs_fnamelen = FS_DEFAULT_NAMELEN;
-		fs_config[fs_count].fs_mask_dir_wrr = 1;
+		server->config->fs_acorn_home = 0;
+		server->config->fs_sjfunc = 1;
+		server->config->fs_pwtenchar = 1;
+		server->config->fs_fnamelen = FS_DEFAULT_NAMELEN;
+		server->config->fs_mask_dir_wrr = 1;
 		
-		FS_CONF_DEFAULT_DIR_PERM(fs_count) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R;
-		FS_CONF_DEFAULT_FILE_PERM(fs_count) = FS_PERM_OWN_W | FS_PERM_OWN_R;
+		FS_CONF_DEFAULT_DIR_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R;
+		FS_CONF_DEFAULT_FILE_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R;
 
-		sprintf(passwordfile, "%s/Configuration", fs_stations[fs_count].directory);
+		sprintf(passwordfile, "%s/Configuration", server->directory);
 		cfgfile = fopen(passwordfile, "r+");
 
 		if (!cfgfile) // Config file not present
 		{
 			if ((cfgfile = fopen(passwordfile, "w+")))
-				fwrite(&(fs_config[fs_count]), 256, 1, cfgfile);
+				fwrite(server->config, 256, 1, cfgfile);
 			else fs_debug (0, 1, "Unable to write configuration file at %s - not initializing", passwordfile);
 
-			fs_write_readable_config(fs_count);
+			fsop_write_readable_config(server);
 		}
-
-		if (cfgfile)
+		else
 		{
 			int configlen;
 
@@ -3636,66 +3054,65 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 				fs_debug (0, 1, "Configuration file is incorrect length!");
 			else
 			{
-				fread (&(fs_config[fs_count]), 256, 1, cfgfile);
+				fread (server->config, 256, 1, cfgfile);
 				fs_debug (0, 2, "Configuration file loaded");
 			}
 
 			// Install some defaults if they need setting
-			if (FS_CONF_DEFAULT_DIR_PERM(fs_count) == 0x00) 
-				FS_CONF_DEFAULT_DIR_PERM(fs_count) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R;
+			if (FS_CONF_DEFAULT_DIR_PERM(server) == 0x00) 
+				FS_CONF_DEFAULT_DIR_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R;
 
-			if (FS_CONF_DEFAULT_FILE_PERM(fs_count) == 0x00)
-				FS_CONF_DEFAULT_FILE_PERM(fs_count) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R; // NB OTH_R added here for backward compatibility. If this is a server where this default was unconfigured, we configure it to match what PiFS v2.0 did
+			if (FS_CONF_DEFAULT_FILE_PERM(server) == 0x00)
+				FS_CONF_DEFAULT_FILE_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R; // NB OTH_R added here for backward compatibility. If this is a server where this default was unconfigured, we configure it to match what PiFS v2.0 did
 
 			rewind(cfgfile);
+
 			// Write copy in case we've updated it
-			fwrite(&(fs_config[fs_count]), 256, 1, cfgfile);
+			fwrite(server->config, 256, 1, cfgfile);
 			
-			fs_write_readable_config(fs_count);
+			fsop_write_readable_config(server);
 		}
 
-		if (fs_config[fs_count].fs_fnamelen < 10 || fs_config[fs_count].fs_fnamelen > ECONET_ABS_MAX_FILENAME_LENGTH)
-			fs_config[fs_count].fs_fnamelen = 10;
+		if (FS_CONFIG(server,fs_fnamelen) < 10 || FS_CONFIG(server,fs_fnamelen) > ECONET_ABS_MAX_FILENAME_LENGTH)
+			server->config->fs_fnamelen = 10;
 
 		// Filename regex compile moved here so we know how long the filenames are. We set this to maximum length because
 		// the normalize routine sifts out maximum length for each individual server and there is only one regex compiled
 		// because the scandir filter uses it, and that routine cannot take a server number as a parameter.
 
-		/* 20231229 OLD 
-		if (fs_config[fs_count].fs_infcolon)
-			sprintf(regex, "^(%s{1,%d})", FSDOTREGEX, ECONET_ABS_MAX_FILENAME_LENGTH);
-		else
-			sprintf(regex, "^(%s{1,%d})", FSREGEX, ECONET_ABS_MAX_FILENAME_LENGTH);
-		*/
-
 		sprintf(regex, "^(%s{1,%d})", FSACORNREGEX, ECONET_ABS_MAX_FILENAME_LENGTH);
 
-		if (regcomp(&r_pathname, regex, REG_EXTENDED) != 0)
+		if (regcomp(&(server->r_pathname), regex, REG_EXTENDED) != 0)
 			fs_debug (1, 0, "Unable to compile regex for file and directory names.");
 
 		// Load / Create password file
 
-		sprintf(passwordfile, "%s/Passwords", fs_stations[fs_count].directory);
+		sprintf(passwordfile, "%s/Passwords", server->directory);
 	
 		passwd = fopen(passwordfile, "r+");
 		
 		if (!passwd)
 		{
+			struct __fs_user	u;
+
 			fs_debug (0, 1, "No password file - initializing %s with SYST", passwordfile);
+			memset (&u, 0, sizeof(u));
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wformat-overflow="
-			sprintf (users[fs_count][0].username, "%-10.10s", "SYST");
-			sprintf (users[fs_count][0].password, "%-10.10s", "");
-			sprintf (users[fs_count][0].fullname, "%-24.24s", "System User"); 
-			users[fs_count][0].priv = FS_PRIV_SYSTEM;
-			users[fs_count][0].bootopt = 0;
-			sprintf (users[fs_count][0].home, "%-80.80s", "$");
-			sprintf (users[fs_count][0].lib, "%-80.80s", "$.Library");
+			sprintf (u.username, "%-10.10s", "SYST");
+			sprintf (u.password, "%-10.10s", "");
+			sprintf (u.fullname, "%-24.24s", "System User"); 
+			u.priv = FS_PRIV_SYSTEM;
+			u.priv2 = FS_PRIV2_BRIDGE; /* Automatically add bridge privileges to new SYST user */
+			u.bootopt = 0;
+			sprintf (u.home, "%-80.80s", "$");
+			sprintf (u.lib, "%-80.80s", "$.Library");
 #pragma GCC diagnostic pop
-			users[fs_count][0].home_disc = 0;
-			users[fs_count][0].year = users[fs_count][0].month = users[fs_count][0].day = users[fs_count][0].hour = users[fs_count][0].min = users[fs_count][0].sec = 0; // Last login time
+			u.home_disc = 0;
+			u.year = u.month = u.day = u.hour = u.min = u.sec = 0; // Last login time
 			if ((passwd = fopen(passwordfile, "w+")))
-				fwrite(&(users[fs_count]), 256, 1, passwd);
+				fwrite(&(u), 256, 1, passwd);
 			else fs_debug (0, 1, "Unable to write password file at %s - not initializing", passwordfile);
 		}
 
@@ -3713,12 +3130,26 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 			{
 				int discs_found = 0;
 
+				if ((length / 256) != ECONET_MAX_FS_USERS) // Old pw file that hasn't been padded
+				{
+					struct __fs_user u;
+					fseek(passwd, 0, SEEK_END);
+					memset(&u, 0, sizeof(u));
+					fwrite(&u, 256, ECONET_MAX_FS_USERS - (length / 256), passwd);
+				}
+
+				fseek(passwd, 0, SEEK_END);
+				length = ftell(passwd);
+				
 				fs_debug (0, 2, "Password file read - %d user(s)", (length / 256));
-				fread (&(users[fs_count]), 256, (length / 256), passwd);
-				fs_stations[fs_count].total_users = (length / 256);
-				fs_stations[fs_count].total_discs = 0;
+				server->users = mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_SHARED, fileno(passwd), 0);
+				if (server->users == MAP_FAILED)
+					fs_debug (1, 0, "Cannot mmap() password file (%s)", strerror(errno));
+
+				server->total_users = (length / 256);
+				server->total_discs = 0;
 		
-				if (fs_config[fs_count].fs_pwtenchar == 0) // Shuffle full name field along 5 characters and blank out the 5 spaces
+				if (server->config->fs_pwtenchar == 0) // Shuffle full name field along 5 characters and blank out the 5 spaces
 				{
 
 					int u; // user count
@@ -3739,25 +3170,21 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 
 					system(sys_str);
 					
-					for (u = 0; u < fs_stations[fs_count].total_users; u++)
+					for (u = 0; u < server->total_users; u++)
 					{
 						char old_realname[30];
 						// Move real name 5 bytes further on (but our struct has been updated, so it's actually 5 bytes earlier than the struct suggests! And copy it, less 5 bytes
 
-						memcpy (old_realname, &(users[fs_count][u].password[6]), 30);
-						memcpy (users[fs_count][u].fullname, old_realname, 25);
-						memset (&(users[fs_count][u].password[6]), 32, 5);
+						memcpy (old_realname, &(server->users[u].password[6]), 30);
+						memcpy (server->users[u].fullname, old_realname, 25);
+						memset (&(server->users[u].password[6]), 32, 5);
 
 					}
 
-					rewind(passwd);
-					fwrite(&(users[fs_count]), length, 1, passwd);
-					rewind(passwd);
-
-					fs_config[fs_count].fs_pwtenchar = 1;
+					server->config->fs_pwtenchar = 1;
 
 					rewind(cfgfile);
-					fwrite (&(fs_config[fs_count]), 256, 1, cfgfile);
+					fwrite (server->config, 256, 1, cfgfile);
 					rewind(cfgfile);
 
 					fs_debug (0, 1, "Updated password file for 10 character passwords, and backed up password file to %s", passwordfilecopy);
@@ -3767,8 +3194,8 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 
 				// Make MDFS password file
 
-				if (fs_config[fs_count].fs_sjfunc)
-					fs_make_mdfs_pw_file(fs_count); // Causing problems in the directory build
+				if (server->config->fs_sjfunc)
+					fsop_make_mdfs_pw_file(server); // Causing problems in the directory build
 
 				// Now load up the discs. These are named 0XXX, 1XXX ... FXXXX for discs 0-15
 				while ((entry = readdir(d)) && discs_found < ECONET_MAX_FS_DISCS)
@@ -3776,59 +3203,64 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 
 					struct 	stat statbuf;
 					char	fullname[1024];
-					//int	l;
 
-					sprintf(fullname, "%s/%s", serverparam, entry->d_name);
-
-					//fprintf (stderr, "lstat(%s) = %d\n", fullname, (l = lstat(fullname, &statbuf)));
-					//fprintf (stderr, "lstat(%s) st_mode & S_IFMT = %02X, d_type = %02X\n", fullname, statbuf.st_mode, entry->d_type);
-
+					sprintf(fullname, "%s/%s", server->directory, entry->d_name);
 
 					if (((entry->d_name[0] >= '0' && entry->d_name[0] <= '9') || (entry->d_name[0] >= 'A' && entry->d_name[0] <= 'F')) && (entry->d_type == DT_DIR || (entry->d_type == DT_LNK && (stat(fullname, &statbuf) == 0) && (S_ISDIR(statbuf.st_mode)))) && (strlen((const char *) entry->d_name) <= 17)) // Found a disc. Length 17 = index character + 16 name; we ignore directories which are longer than that because the disc name will be too long
 					{
-						int index;
-						short count;
+						uint8_t index, count;
+						struct __fs_disc	*d;
+
+						FS_LIST_MAKENEW(struct __fs_disc,server->discs,0,d,"FS","Create disc structure");
 						
-						index = (int) (entry->d_name[0] - '0');
-						if (index > 9) index -= ('A' - '9' - 1);
+						if (entry->d_name[0] > '9') 
+							index = (uint8_t) ((entry->d_name[0]) - ('A' - 10));
+						else
+							index = (uint8_t) (entry->d_name[0] - '0');
 	
+						d->index = index;
+
 						count = 0;
-						while (count < 30 && (entry->d_name[count+1] != 0))
+
+						while (count < 16 && (entry->d_name[count+1] != 0))
 						{
-							fs_discs[fs_count][index].name[count] = entry->d_name[1+count];
+							d->name[count] = entry->d_name[1+count];	
 							count++;
 						}
-						fs_discs[fs_count][index].name[count] = 0;
+
+						d->name[count] = 0;
 					
-						fs_debug (0, 2, "Initialized disc name %s (%d)", fs_discs[fs_count][index].name, index);
-						discs_found++;
+						fs_debug (0, 2, "Initialized disc name %s (%d)", d->name, index);
+
+						server->total_discs++;
 	
 					}
 				}
 				
 				closedir(d);
-				
-				fs_stations[fs_count].total_discs = discs_found;
-
-				for (portcount = 0; portcount < 256; portcount++)
-					fs_bulk_ports[fs_count][portcount].handle = -1; 
 		
-				if (discs_found > 0)
+				if (server->total_discs > 0)
 				{
 					// Load / Initialize groups file here - TODO
 					unsigned char groupfile[1024];
 					FILE *group;
 
-					sprintf(groupfile, "%s/Groups", fs_stations[fs_count].directory);
+					sprintf(groupfile, "%s/Groups", server->directory);
 	
 					group = fopen(groupfile, "r+");
 
 					if (!group) // Doesn't exist - create it
 					{
 
+						struct __fs_group g;
+
+						memset (&g, 0, sizeof(g));
+
 						fs_debug (0, 1, "No group file at %s - initializing", groupfile);
+
 						if ((group = fopen(groupfile, "w+")))
-							fwrite(&(groups[fs_count]), sizeof(groups)/ECONET_MAX_FS_SERVERS, 1, group);
+							fwrite(&g, sizeof(struct __fs_group), 256, group);
+
 						else fs_debug (0, 1, "Unable to write group file at %s - not initializing", groupfile);
 					}
 
@@ -3845,176 +3277,224 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 							fs_debug (0, 1, "Group file is wrong length / corrupt - not initializing");
 						else
 						{
-							// Load it and complete initialization
-							fread (&(groups[fs_count]), 2560, 1, group);
-
-							fs_enabled[fs_count] = 1; // Flag as active
-
-							if (fs_number < 0) fs_count++; // Only now do we increment the counter, when everything's worked // And we do it if we haven't got a specific FS number to allocate
+							server->groups = mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_SHARED, fileno(group), 0);
+							server->total_groups = length;
+							server->enabled = 0;
 						}
+
+						fclose(group);
 					}
-					else fs_debug (0, 1, "Server %d - failed to initialize - cannot initialize or find Groups file!", fs_count);
+					else fs_debug (0, 1, "Server failed to initialize - cannot initialize or find Groups file!");
 
 					// (If there was still no group file here, fs_count won't increment and we don't initialize)
 				}
-				else fs_debug (0, 1, "Server %d - failed to find any discs!", fs_count);
+				else fs_debug (0, 1, "Server failed to find any discs!");
 			}
 			fclose(passwd);
 	
-			//fs_debug (0, 1, "users = %8p, active = %8p, fs_stations = %8p, fs_discs = %8p, fs_files = %8p, fs_dirs = %8p, fs_bulk_ports = %8p\n",
-					//users[fs_count], active[fs_count], fs_stations, fs_discs[fs_count], fs_files[fs_count], fs_dirs[fs_count], fs_bulk_ports[fs_count]);
 		}
 		
 	}
 	
-	/* if (fs_count == old_fs_count) // We didn't initialize
-		return -1;
-		*/
+	/* If told to, set bridge priv on SYST user */
 
-	if (!fs_enabled[((fs_number >= 0) ? fs_number : old_fs_count)]) // We didn't initialize
+	if (fs_set_syst_bridgepriv)
 	{
-		if (fs_number >= 0)
-			fs_count = old_fs_count;
-		return -1;
+		int	userid;
+
+		if ((userid = fsop_get_uid(server, "SYST")) >= 0)
+			server->users[userid].priv2 |= FS_PRIV2_BRIDGE;
 	}
-	else	
-	{
 
-		/* Wildcard test harness on real data
-		int result;
-		struct path p;
+        if (pthread_mutex_init(&server->fs_mutex, NULL) == -1)
+        {
+                FS_LIST_SPLICEFREE(fileservers, server, "FS", "Free fileserver control structure after failed mutex init");
+                return NULL;
+        }
 
-		result = fs_normalize_path_wildcard(old_fs_count, 0, ":ECONET.$.R*.A.*mc*", -1, &p, 1);
+        if (pthread_mutex_init(&server->fs_mpeek_mutex, NULL) == -1)
+        {
+                FS_LIST_SPLICEFREE(fileservers, server, "FS", "Free fileserver control structure after failed mpeek mutex init");
+                return NULL;
+        }
 
-		if (result)
-		{
-			struct path_entry *e;
+        if (pthread_cond_init(&server->fs_condition, NULL) == -1)
+        {
+                FS_LIST_SPLICEFREE(fileservers, server, "FS", "Free fileserver control structure after failed cond init");
+                return NULL;
+        }
 
-			e = p.paths;
+        /* Don't do anything with fs_thread - fsop_run() sets that up */
 
-			while (e != NULL)
-			{
-					fs_debug (0, 1, "Type %02x Owner %04x Parent owner %04x Owner %10s Perm %02x Parent Perm %02x My Perm %02x Load %08lX Exec %08lX Length %08lX Int name %06lX Unixpath %s Unix fname %s Acorn Name %s Date %02d/%02d/%02d",
-						e->ftype, e->owner, e->parent_owner, e->ownername,
-						e->perm, e->parent_perm, e->my_perm,
-						e->load, e->exec, e->length, e->internal,
-						e->unixpath, e->unixfname, e->acornname,
-						e->day, e->monthyear & 0x0f, ((e->monthyear & 0xf0) >> 4) + 81);
-					e = e->next;
+	fs_debug (0, 2, "Server at %s successfully initialized on station %d.%d", server->directory, server->net, server->stn);
 
-			}
+	fsop_write_readable_config(server);
 
-			fs_free_wildcard_list(&p);
-		}
-
-		// Test to see if a non-existent filename gives us a 1 return but no path entries, so we know it's writable.
-		// We should get a 0 if the tail of the path entry has any wildcards in it
-		//
-
-		result = fs_normalize_path_wildcard(old_fs_count, 0, ":ECONET.$.R*.WOBBLE", -1, &p, 1); // Should give us 1 & FS_FTYPE_NOTFOUND
-
-		fs_debug (0, 1, "Normalize :ECONET.$.R*.WOBBLE returned %d and FTYPE %d", result, p.ftype);
-
-		result = fs_normalize_path_wildcard(old_fs_count, 0, ":ECONET.$.R*.WOBBLE*", -1, &p, 1); // Should give us 1 & FS_FTYPE_NOTFOUND
-
-		fs_debug (0, 1, "Normalize :ECONET.$.R*.WOBBLE* returned %d and FTYPE %d", result, p.ftype);
-
-		// End of Wildcard test harness 
-*/
-
-#ifdef BRIDGE_V2
-		/* If told to, set bridge priv on SYST user */
-
-		if (fs_set_syst_bridgepriv)
-		{
-			int	userid;
-
-			if ((userid = fs_get_uid(old_fs_count, "SYST")) >= 0)
-			{
-				users[old_fs_count][userid].priv2 |= FS_PRIV2_BRIDGE;
-				fs_write_user(old_fs_count, userid, (char *) &(users[old_fs_count][userid]));	
-			}
-		}
-
-		/* Prime fs_devices */
-		
-		fs_devices[old_fs_count] = device;
-
-		fs_debug (0, 2, "Server %d successfully initialized on station %d.%d", (fs_number >= 0) ? fs_number : old_fs_count, device->net, stn);
-#else
-		fs_debug (0, 1, "Server %d successfully initialized on station %d.%d", old_fs_count, net, stn);
-#endif
-
-		fs_write_readable_config(old_fs_count);
-
-		if (fs_number >= 0)
-		{
-			fs_count = old_fs_count;
-			return fs_number;
-		}
-		else
-		{
-			return old_fs_count; // The index of the newly initialized server
-		}
-	}
+	return server;
 }
 
-// Shut down a particular fileserver and flag as inactive.
-// When implemeted, we can use fs_initialize to bring it back to life
+/* 
+ * fsop_shutdown()
+ *
+ * Designed to be called from within the main FS thread. 
+ *
+ * This kicks all users off, and cleans up the server
+ * struct so that nothing remains allocated within it.
+ *
+ * Then returns. The calling thread will then exit.
+ *
+ * To start the FS up again, call fs_initialize. That
+ * (re) creates the thread with the server disabled.
+ *
+ * Then at some stage call fs_run, which sets enabled
+ * to true and wakes the thread up.
+ *
+ * This function must be called with the fs_mutex
+ * lock held.
+ *
+ */
 
-void fs_shutdown (int fs)
+void fsop_shutdown (struct __fs_station *s)
 {
-	struct fsop_data f;
-
-	fsop_build_data(&f, fs, 0, 0);
-
-	fsop_shutdown (&f);
-}
-
-void fsop_shutdown (struct fsop_data *f)
-{
-
-	int		count;
+	struct __fs_active	*a, *n;
+	struct __fs_disc 	*disc;
+	struct load_queue	*l;
+	struct __fs_bulk_port	*bulk;
+	struct __eb_packetqueue *pq;
 
 	// Flag server inactive
 	
-	f->server->enabled = 0;
+	s->enabled = 0;
 
-	// Forcibly log everyone off
-	
-	for (count = 0; count < ECONET_MAX_FS_ACTIVE; count++)
+	eb_port_deallocate(s->fs_device, 0x99); 
+
+	a = s->actives;
+
+	while (a)
 	{
-		if (f->server->actives[count].stn) // In use
-		{
-			fs_bye (f->server_id, 0, f->server->actives[count].net, f->server->actives[count].stn, 0);
-		}
+		n = a->next;
+
+		fsop_bye_internal(a, 0, 0);
+
+		a = n;
 	}
 
-	fs_debug (0, 1, "Server %d has shut down", f->server_id);
+	if (s->actives) /* This should not have anything in it! */
+		fs_debug (0, 1, "Server at %d.%d was left with one or more active users after shutdown!", s->net, s->stn);
+
+	if (s->files) /* This should not have anything in it after everyone has been logged off! */
+		fs_debug (0, 1, "Server at %d.%d was left with one or more open files after shutdown!", s->net, s->stn);
+
+	/* Unmap users and groups */
+
+	if (s->users)
+		munmap(s->users, 256 * s->total_users); 
+
+	if (s->groups)
+		munmap(s->groups, 10 * s->total_groups);
+
+	s->users = NULL;
+	s->groups = NULL;
+
+	/* Free any discs we found */
+
+	disc = s->discs;
+
+	while (disc)
+	{
+		struct __fs_disc *n;
+
+		n = disc->next;
+		eb_free (__FILE__, __LINE__, "FS", "Free disc struct", disc);
+		disc = n;
+	}
+
+	s->discs = NULL;
+
+	/* Free the config struct */
+
+	eb_free (__FILE__, __LINE__, "FS", "Free config struct", s->config);
+
+	/* Dump the various queues, if there's anything on them */
+
+	l = s->fs_load_queue;
+
+	while (l)
+	{
+		struct load_queue *ln;
+		struct __pq *packetq, *packetq_next;
+
+		ln = l->next;	
+
+		fs_debug (0, 3, "FS", "Server at %3d.%3d cleaning up load_queue at %p on shutdown", s->net, s->stn, l);
+		packetq = l->pq_head;
+
+		while (packetq)
+		{
+			packetq_next = packetq->next;
+
+			fs_debug (0, 3, "FS", "Server at %3d.%3d freeing packetq entry at %p on load_queue at %p on shutdown", s->net, s->stn, packetq, l);
+			eb_free(__FILE__, __LINE__, "FS", "Free packet queue entry on shutdown", packetq);
+
+			packetq = packetq_next;
+		}
+
+		eb_free(__FILE__, __LINE__, "FS", "Free load queue entry at %p on shutdown", l);
+
+		l = ln;
+	}
+
+	s->fs_load_queue = NULL;
+
+	/* Next clean up the bulk ports */
+
+	bulk = s->bulkports;
+
+	while (bulk)
+	{
+		struct __fs_bulk_port *bn;
+
+		bn = bulk->next;
+
+		eb_port_deallocate(s->fs_device, bulk->bulkport);
+
+		fs_debug (0, 3, "FS", "Server at %3d.%3d freeing bulk port entry at %p on shutdown", s->net, s->stn, bulk);
+
+		bulk = bn;
+
+	}
+
+	s->bulkports = NULL;
+
+	/* Next clean up the work queue */
+
+	pq = s->fs_workqueue;
+
+	while (pq)
+	{
+		struct __eb_packetqueue	*pqn;
+
+		pqn = pq->n;
+
+		fs_debug (0, 3, "FS", "Server at %3d.%3d freeing work queue entry at %p on shutdown", s->net, s->stn, pq);
+
+		eb_free(__FILE__, __LINE__, "FS", "Free packet on FS workqueue on shutdown", pq->p);
+		eb_free(__FILE__, __LINE__, "FS", "Free packet queue entry on work queue on shutdown", pq);
+
+		pq = pqn;
+
+	}
+
+	s->fs_workqueue = NULL;
+
+	fs_debug (0, 1, "Server at %d.%d has shut down", s->net, s->stn);
+
 	return;
 
 }
 
 // Used when we must be able to specify a ctrl byte
 
-void fs_error_ctrl(int server, unsigned char reply_port, unsigned char net, unsigned char stn, unsigned char ctrl, unsigned char error, char *msg)
-{
-	struct __econet_packet_udp reply;
-
-	reply.p.port = reply_port;
-	reply.p.ctrl = ctrl;
-	reply.p.ptype = ECONET_AUN_DATA;
-	reply.p.data[0] = 0x00;
-	reply.p.data[1] = error;
-	memcpy (&(reply.p.data[2]), msg, strlen((const char *) msg));
-	reply.p.data[2+strlen(msg)] = 0x0d;
-
-	// 8 = UDP Econet header, 2 = 0 and then error code, rest is message + 0x0d
-	fs_aun_send (&reply, server, 2+(strlen(msg))+1, net, stn);
-
-}
-
-/* Variant of fs_error_ctrl for use with fsop_data struct */
 void fsop_error_ctrl(struct fsop_data *f, uint8_t ctrl, uint8_t error, char *msg)
 {
 
@@ -4029,17 +3509,12 @@ void fsop_error_ctrl(struct fsop_data *f, uint8_t ctrl, uint8_t error, char *msg
         reply.p.data[2+strlen(msg)] = 0x0d;
 
         // 8 = UDP Econet header, 2 = 0 and then error code, rest is message + 0x0d
-        fs_aun_send (&reply, FSOP_SERVER, 2+(strlen(msg))+1, FSOP_NET, FSOP_STN);
+        fsop_aun_send (&reply, 2+(strlen(msg))+1, f);
 
 }
 
 // Used when we don't need to send a particular control byte back
-void fs_error(int server, unsigned char reply_port, unsigned char net, unsigned char stn, unsigned char error, char *msg)
-{
-	fs_error_ctrl(server, reply_port, net, stn, 0x80, error, msg);
-}
-
-/* Variant of fs_error() using the fsop_data struct */
+//
 void fsop_error(struct fsop_data * f, uint8_t error, char *msg)
 {
 	fsop_error_ctrl(f, 0x80, error, msg);
@@ -4059,43 +3534,28 @@ void fsop_error(struct fsop_data * f, uint8_t error, char *msg)
  *
  */
 
-void fs_reply_ok(int server, unsigned char reply_port, unsigned char net, unsigned char stn)
-{
-
-	struct __econet_packet_udp reply;
-
-	reply.p.port = reply_port;
-	reply.p.ctrl = 0x80;
-	//reply.p.seq = (fs_stations[server].seq += 4);
-	reply.p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
-	reply.p.pad = 0x00;
-	reply.p.ptype = ECONET_AUN_DATA;
-	reply.p.data[0] = 0x00;
-	reply.p.data[1] = 0x00;
-
-	fs_aun_send (&reply, server, 2, net, stn);
-}
-
 /* Variant of fs_reply_ok for use with fsop_data struct */
 void fsop_reply_ok(struct fsop_data * f)
 {
 
-        struct __econet_packet_udp reply;
+	fsop_reply_success(f, 0, 0);
+
+}
+
+void fsop_reply_success(struct fsop_data *f, uint8_t cmd, uint8_t code)
+{
+	FS_REPLY_DATA(0x80);
 
         reply.p.port = FSOP_REPLY_PORT;
-        reply.p.ctrl = 0x80;
-        //reply.p.seq = (fs_stations[FSOP_SERVER].seq += 4);
-        reply.p.seq = get_local_seq(fs_stations[FSOP_SERVER].net, fs_stations[FSOP_SERVER].stn);
-        reply.p.pad = 0x00;
-        reply.p.ptype = ECONET_AUN_DATA;
-        reply.p.data[0] = 0x00;
-        reply.p.data[1] = 0x00;
+        reply.p.seq = eb_get_local_seq(f->server->fs_device);
+	reply.p.data[0] = cmd;
+	reply.p.data[1] = code;
 
-        fs_aun_send (&reply, FSOP_SERVER, 2, FSOP_NET, FSOP_STN);
+        fsop_aun_send (&reply, 2, f);
 }
 
 /*
- * fs_reply_ok_with_data
+ * fsop_reply_ok_with_data
  *
  * Send OK reply with data portion
  *
@@ -4103,42 +3563,19 @@ void fsop_reply_ok(struct fsop_data * f)
  *
  */
 
-void fs_reply_ok_with_data(int server, unsigned char reply_port, unsigned char net, unsigned char stn, uint8_t *data, uint16_t datalen)
-{
-
-	struct __econet_packet_udp reply;
-
-	reply.p.port = reply_port;
-	reply.p.ctrl = 0x80;
-	reply.p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
-	reply.p.pad = 0x00;
-	reply.p.ptype = ECONET_AUN_DATA;
-	reply.p.data[0] = 0x00;
-	reply.p.data[1] = 0x00;
-	memcpy (&(reply.p.data[2]), data, datalen);
-
-	fs_aun_send (&reply, server, 2+datalen, net, stn);
-}
-/*
- * Variant of fs_reply_ok_with_data for use with fsop_data struct
- */
-
 void fsop_reply_ok_with_data(struct fsop_data *f, uint8_t *data, uint16_t datalen)
 {
 
-        struct __econet_packet_udp reply;
+	FS_REPLY_DATA(0x80);
 
         reply.p.port = FSOP_REPLY_PORT;
-        reply.p.ctrl = 0x80;
-        reply.p.seq = get_local_seq(fs_stations[FSOP_SERVER].net, fs_stations[FSOP_SERVER].stn);
-        reply.p.pad = 0x00;
-        reply.p.ptype = ECONET_AUN_DATA;
-        reply.p.data[0] = 0x00;
-        reply.p.data[1] = 0x00;
+        reply.p.seq = eb_get_local_seq(f->server->fs_device);
         memcpy (&(reply.p.data[2]), data, datalen);
 
-        fs_aun_send (&reply, FSOP_SERVER, 2+datalen, FSOP_NET, FSOP_STN);
+        fsop_aun_send (&reply, 2+datalen, f);
 }
+
+#define fsop_toupper fs_toupper
 
 void fs_toupper(char *a)
 {
@@ -4153,114 +3590,125 @@ void fs_toupper(char *a)
 
 }
 
-unsigned short fs_find_bulk_port(int server)
+/* "Book out" a bulk port number.
+ * Calling function responsible for making the struct etc.
+ */
+
+void fsop_handle_bulk_traffic(struct __econet_packet_aun *, uint16_t, void *);
+
+uint8_t fsop_find_bulk_port(struct __fs_station *s)
 {
-	int portcount;
-	unsigned short found = 0;
+	return eb_port_allocate(s->fs_device, 0, fsop_handle_bulk_traffic, s);
+}
 
-	portcount = 1; // Don't try port 0... immediates!
+/* 
+ * See if a station is logged in 
+ * by searching for its 'active' struct
+ */
 
-	while (!found && portcount < 255)
+struct __fs_active * fsop_stn_logged_in(struct __fs_station *s, uint8_t net, uint8_t stn)
+{
+
+	struct __fs_active 	*a;
+	uint8_t			found = 0;
+
+	a = s->actives;
+
+	while (a && !found)
 	{
-		if ((fs_bulk_ports[server][portcount].handle == -1) && (portcount != 0x99) && (portcount != 0xd1) && (portcount != 0x9f) && (portcount != 0xdf)) // 0xd1, 9f are print server; df will be the port server, 0x99 is the fileserver...
-			found = 1;
-		else portcount++;
+		if (a->net == (net == 0 ? s->net : net)
+			&&  a->stn == stn)
+			return a;
+		else
+			a = a->next;
 	}
 
-	if (found) return portcount;
-	else return 0;
+	return NULL; /* Not found */
 }
 
-int fs_stn_logged_in(int server, unsigned char net, unsigned char stn)
+/* Variant of fsop_stn_logged_in with locking - used by the bridge itself */
+
+struct __fs_active * fsop_stn_logged_in_lock(struct __fs_station *s, uint8_t net, uint8_t stn)
+{
+	struct __fs_active	*a;
+
+	pthread_mutex_lock (&(s->fs_mutex));
+	a = fsop_stn_logged_in(s, net, stn);
+	pthread_mutex_unlock (&(s->fs_mutex));
+
+	return a;
+}
+
+void fsop_bye_internal(struct __fs_active *a, uint8_t do_reply, uint8_t reply_port)
 {
 
+	struct __econet_packet_udp	reply;
 	int count;
+	struct __fs_station *s; 
 
-	short found = 0;
+	fs_debug_full (0, 1, a->server, a->net, a->stn, "Bye");
 
-	count = 0;
+	s = a->server;
 
-	while (!found && (count < ECONET_MAX_FS_ACTIVE))
-	{
-		if (	(active[server][count].net == (net == 0 ? fs_stations[server].net : net)) &&
-			(active[server][count].stn == stn) )
-			return count;
-		count++;
-	}
-
-	return -1;	
-}
-
-
-void fs_bye(int server, unsigned char reply_port, unsigned char net, unsigned char stn, unsigned short do_reply)
-{
-	struct	fsop_data	f;
-
-	fsop_build_data(&f, server, net, stn);
-
-	fsop_bye_internal(&f, do_reply);
-
-}
-
-void fsop_bye_internal(struct fsop_data *f, unsigned short do_reply)
-{
-
-	struct __econet_packet_udp reply;
-	int count;
-
-	fs_debug (0, 1, "            from %3d.%3d Bye", f->net, f->stn);
+	reply.p.ptype = ECONET_AUN_DATA;
+	reply.p.ctrl = 0x80;
+	reply.p.port = reply_port;
 
 	// Close active files / handles
 	
 	count = 1;
 	while (count < FS_MAX_OPEN_FILES)
 	{
-		if (f->active->fhandles[count].handle != -1)
+		if (a->fhandles[count].handle)
 		{
-			fs_close_interlock(f->server_id, f->active->fhandles[count].handle, f->active->fhandles[count].mode);
-			fs_deallocate_user_file_channel(f->server_id, FSOP_ACTIVE, count);
+			/* TODO: Clean up any load_queue or bulk port entries here */
+
+			if (a->fhandles[count].is_dir) /* deallocator closes the internal handle */
+				fsop_deallocate_user_dir_channel(a, count);
+			else
+			{
+				fsop_close_interlock(a->server, a->fhandles[count].handle, a->fhandles[count].mode);
+				fsop_deallocate_user_file_channel(a, count);
+			}
 		}
 		count++;
 	}
 
-	f->active->stn = f->active->net = 0; // Flag disused
-	
-	// Notify bridge definitely no longer bridge priv user, if it ever was one
-
-	if (do_reply) // If this was an active log out, clear the FAST priv bit. Otherwise don't in case the user has shut the FS down and needs to get back in to restart it!
-		eb_fast_priv_notify(fs_devices[f->server_id], f->net, f->stn, 0);
-			
 	if (do_reply) // != 0 if we need to send a reply (i.e. user initiated bye) as opposed to 0 if this is an internal cleardown of a user
 	{
 	
-		reply.p.ptype = ECONET_AUN_DATA;
-		reply.p.port = FSOP_REPLY_PORT;
-		reply.p.ctrl = 0x80;
-		reply.p.data[0] = reply.p.data[1] = 0;
+		// Active logout - remove bridge priv bit
+		eb_fast_priv_notify(s->fs_device, a->net, a->stn, 0);
 
-		fsop_aun_send(&reply, 2, f);
+		raw_fsop_aun_send(&reply, 2, s, a->net, a->stn);
 	}
+
+	FS_LIST_SPLICEFREE(s->actives, a, "FS", "fsop_bye_internal() deallocate active struct");
 
 }
 
-void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, unsigned short net, unsigned short stn, unsigned char *params)
+#if 0
+/* Moved to new structure */
+void fsop_change_pw(struct fsop_data *f, uint8_t reply_port, uint16_t userid, uint8_t net, uint8_t stn, unsigned char *params)
 {
 	char pw_cur[11], pw_new[13], pw_old[11]; // pw_new is 13 to cope with 10 character password in quotes
 	int ptr;
 	int new_ptr;
 
-	if (users[server][userid].priv & FS_PRIV_NOPASSWORDCHANGE)
+	if (f->server->users[userid].priv & FS_PRIV_NOPASSWORDCHANGE)
 	{
-		fs_error(server, reply_port, net, stn, 0xBA, "Insufficient privilege");
+		fsop_error(f, 0xBA, "Insufficient privilege");
 		return;
 	}
 
 	// Possibly replace with memcpy() ?
-	strncpy((char * ) pw_cur, (const char * ) users[server][userid].password, 10);
+	strncpy((char * ) pw_cur, (const char *) f->server->users[userid].password, 10);
 	pw_cur[10] = '\0';
 
 	// Find end of current password in params
+	
 	ptr = 0;
+
 	while (ptr < strlen(params) && (ptr < 10) && *(params+ptr) != 0x0d && *(params+ptr) != ' ')
 	{
 		pw_old[ptr] = *(params+ptr);
@@ -4268,12 +3716,13 @@ void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, uns
 	}
 
 	new_ptr = ptr; // Temp use of new_ptr
+
 	while (new_ptr < 10) pw_old[new_ptr++] = ' ';
 
 	pw_old[10] = '\0';
 
 	if (ptr == strlen(params))
-		fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
+		fsop_error(f, 0xFE, "Bad command");
 	else
 	{
 
@@ -4285,20 +3734,14 @@ void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, uns
 
 		// Copy new password
 		while (ptr < strlen(params) && (*(params+ptr) != 0x0d) && (new_ptr < 12))
-		{
-			//fs_debug (0, 1, "Copying new password - ptr = %d, new_ptr = %d, character = %c", ptr, new_ptr, *(params+ptr));
 			pw_new[new_ptr++] = *(params+ptr++);
-		}
 
 		termination_char = *(params+ptr);
 
 		// If next character is not null and we have 10 characters then bad password
 
 		if (new_ptr >= 10 && termination_char != 0x00) // The packet comes in with a 0x0d terminator, but the OSCLI (FSOp 0) command parser changes that to null termination
-		{
-			//fs_debug (0, 1, "Character at params+ptr = %d (%c), ptr = %d, new_ptr = %d", *(params+ptr), (*(params+ptr) < 32 || *(params+ptr) > 126) ? '.' : *(params+ptr) , ptr, new_ptr);
-			fs_error(server, reply_port, net, stn, 0xFE, "Bad new password");
-		}
+			fsop_error(f, 0xFE, "Bad new password");
 		else
 		{	
 			for (; new_ptr < 12; new_ptr++)	pw_new[new_ptr] = ' ';
@@ -4321,7 +3764,7 @@ void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, uns
 			}
 			else if (pw_new[0] == '"') // Badly quoted password
 			{
-				fs_error(server, reply_port, net, stn, 0xB9, "Bad password");
+				fsop_error(f, 0xB9, "Bad password");
 				return;
 			}
 
@@ -4336,16 +3779,21 @@ void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, uns
 
 				// Correct current password
 				if (!strncmp(pw_new, "\"\"        ", 10)) // user wants to change to blank password
-					strncpy((char * ) users[server][userid].password, (const char * ) blank_pw, 10);
+					strncpy((char *) f->server->users[userid].password, (const char * ) blank_pw, 10);
 				else
-					strncpy((char * ) users[server][userid].password, (const char * ) pw_new, 10);
+					strncpy((char *) f->server->users[userid].password, (const char * ) pw_new, 10);
+
+				/* Should be unnecessary now - MMAPed
 				fs_write_user(server, userid, (char *) &(users[server][userid]));	
-				fs_reply_success(server, reply_port, net, stn, 0, 0);
-				strncpy((char * ) username, (const char * ) users[server][userid].username, 10);
+				*/
+
+				fsop_reply_success(f, 0, 0);
+
+				strncpy((char *) username, (const char *) f->server->users[userid].username, 10);
 				username[10] = 0;
 				fs_debug (0, 1, "User %s changed password", username);
 			}
-			else	fs_error(server, reply_port, net, stn, 0xB9, "Bad password");
+			else	fsop_error(f, 0xB9, "Bad password");
 		}
 	}
 
@@ -4367,6 +3815,8 @@ void fs_change_pw(int server, unsigned char reply_port, unsigned int userid, uns
  * 20 - Force logoff a user by name or ID
  *
  */
+
+/* Moved to new structure */
 
 void fs_pibridge (int server, uint8_t reply_port, uint16_t active_id, uint8_t net, uint8_t stn, uint8_t *data, uint16_t datalen)
 {
@@ -4625,66 +4075,64 @@ void fs_pibridge (int server, uint8_t reply_port, uint16_t active_id, uint8_t ne
 	}
 
 }
-
 // Set boot option
-void fs_set_bootopt(int server, unsigned char reply_port, unsigned int userid, unsigned short net, unsigned short stn, unsigned char *data)
+void fsop_set_bootopt(struct fsop_data *f, uint16_t userid, uint8_t opt)
 {
 
-	unsigned char new_bootopt;
-	unsigned char username[11];
-	int		active_id;
-
-	new_bootopt = *(data+5);
+	unsigned char 	username[11];
+	struct __fs_active	*a;
 
 	/* 
 	 * Check if user can change boot opt
 	 */
 
-	if (!(users[server][userid].priv & FS_PRIV_SYSTEM) && (users[server][userid].priv2 & FS_PRIV2_FIXOPT)) 
+	if (!(FS_ACTIVE_SYST(f->active) && f->server->users[userid].priv2 & FS_PRIV2_FIXOPT)) 
 	{
-		fs_debug (0, 2, "%12sfrom %3d.%3d Set boot option %d - prohibited", "", net, stn, new_bootopt);
-		fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
+		fs_debug (0, 2, "%12sfrom %3d.%3d Set boot option %d - prohibited", "", f->net, f->stn, opt);
+
+		fsop_error(f, 0xBD, "Insufficient access");
+
 		return;
 	}
 
-	if (new_bootopt > 7)
+	if (opt > 7)
 	{
-		fs_error(server, reply_port, net, stn, 0xBD, "Bad option");
+		fsop_error(f, 0xBD, "Bad option");
 		return;
 	}
 
-	fs_get_username_base(server, userid, username);
+	fsop_get_username_base(f->server, userid, username);
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d Set boot option %d for user %s", "", net, stn, new_bootopt, username);
+	fs_debug (0, 2, "%12sfrom %3d.%3d Set boot option %d for user %s", "", f->net, f->stn, opt, username);
 	
-	users[server][userid].bootopt = new_bootopt;
+	f->server->users[userid].bootopt = opt;
 
-	/* See if the user is logged in. If the user is calling this, 
-	 * then net, stn will be where they are. But they (a) may be logged
-	 * in more than once, and (b) this function can be called by the
-	 * System command SETOPT, so the user might not be logged in at all.
-	 */
+	/* change live bootopt if logged in */
 
-	// OLD active[server][fs_stn_logged_in(server,net,stn)].bootopt = new_bootopt;
-	
-	for (active_id = 0; active_id < ECONET_MAX_FS_ACTIVE; active_id++)
+	a = f->server->actives;
+
+	while (a)
 	{
-		if (active[server][active_id].userid == userid
-		&&  active[server][active_id].net
-		&&  active[server][active_id].stn
-		)
-			active[server][active_id].bootopt = new_bootopt;
+		if (a->userid == userid)
+			a->bootopt = opt;
+
+		a = a->next;
 	}
 
+
+	/* Should be unnecessary now we are mmaped 
 	fs_write_user(server, userid, (char *) &(users[server][userid]));
+	*/
 
-	fs_reply_success(server, reply_port, net, stn, 0, 0);
+	fsop_reply_success(f, 0, 0);
+
 	return;
 
 
 }
 
-void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned char stn, unsigned char *command)
+/* Moved to new structure */
+void fsop_login(struct fsop_data *f, unsigned char *command)
 {
 
 	char username[11];
@@ -4693,10 +4141,9 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 	unsigned short counter, stringptr;
 	unsigned short found = 0;
 
-#ifdef BRIDGE_V2
 	// Notify not privileged on any login attempt, successful or otherwise. It'll get set to 1 below if need be
-	eb_fast_priv_notify(fs_devices[server], net, stn, 0);
-#endif
+	
+	eb_fast_priv_notify(f->server->fs_device, net, stn, 0);
 
 	fs_toupper(command);
 	memset (username, ' ', 10);
@@ -4753,9 +4200,9 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 
 	counter = 0;
 
-	while (counter < fs_stations[server].total_users && !found)
+	while (counter < f->server->total_users && !found)
 	{
-		if (!strncasecmp(users[server][counter].username, username, 10) && (users[server][counter].priv != 0))
+		if (!strncasecmp(f->server->users[counter].username, username, 10) && (f->server->users[counter].priv != 0))
 			found = 1;
 		else
 			counter++;
@@ -4763,339 +4210,192 @@ void fs_login(int server, unsigned char reply_port, unsigned char net, unsigned 
 
 	if (found)
 	{
-		if (strncasecmp((const char *) users[server][counter].password, password, 10))
+		if (strncasecmp((const char *) f->server->users[counter].password, password, 10))
 		{
-			fs_error(server, reply_port, net, stn, 0xBC, "Wrong password");
-			fs_debug(0, 1, "            from %3d.%3d Login attempt - username '%s' - Wrong password", net, stn, username);
+			fsop_error(f, 0xBC, "Wrong password");
+			fs_debug(0, 1, "            from %3d.%3d Login attempt - username '%s' - Wrong password", f->net, f->stn, username);
 		}
-		else if (users[server][counter].priv & FS_PRIV_LOCKED)
+		else if (f->server->users[counter].priv & FS_PRIV_LOCKED)
 		{
-			fs_error(server, reply_port, net, stn, 0xBC, "Account locked");
-			fs_debug (0, 1, "           from %3d.%3d Login attempt - username '%s' - Account locked", net, stn, username);
+			fsop_error(f, 0xBC, "Account locked");
+			fs_debug (0, 1, "           from %3d.%3d Login attempt - username '%s' - Account locked", f->net, f->stn, username);
 		}
 		else
 		{
-			int usercount = 0;
-			short found = 0;	
-			
-			// Find a spare slot
+			FS_REPLY_DATA(0x80);
 
-			while (!found && (usercount < ECONET_MAX_FS_ACTIVE))
+			struct __fs_active *a;
+
+			uint8_t err;
+
+			a = f->server->actives;
+
+			// Is this station logged on ?
+
+			while (a)
 			{
-				if ((active[server][usercount].net == 0 && active[server][usercount].stn == 0) ||
-				    (active[server][usercount].net == net && active[server][usercount].stn == stn)) // Allows us to overwrite an existing handle if the station is already logged in
+				if ((a->net == net && a->stn == stn)) // Allows us to overwrite an existing handle if the station is already logged in
 					found = 1;
-				else usercount++;
+				else	a = a->next;
 			}
 
-			if (!found)
+			if (a) // Log off
 			{
-				fs_debug (0, 1, "           from %3d.%3d Login attempt - username '%s' - server full", net, stn, username);
-				fs_error(server, reply_port, net, stn, 0xB8, "Too many users");
+				f->active = a;
+				fsop_bye_internal(a, 0, 0); // Silent
 			}
-			else
+
+			FS_LIST_MAKENEW(struct __fs_active,f->server->actives,1,a,"FS","Login making new active struct");
+			
+			a->net = (net == 0 ? f->server->net : net);
+			a->stn = stn;
+			a->printer = 0xff; // No current printer selected
+			a->userid = counter;
+			a->user = &(f->server->users[counter]);
+			a->bootopt = users[server][counter].bootopt;
+			a->priv = f->server->users[counter].priv;
+			a->userid = counter;
+			a->current_disc = f->server->users[counter].home_disc; // Need to set here so that first normalize for URD works.
+			a->is_32bit = 0; /* Updated later, when we've implemented MachinePeek at login */
+			a->server = f->server;
+			a->root = a->current = a->lib = 0; /* Rogue so things don't get closed when they aren't open */
+			f->active = a;
+
+			for (count = 0; count < FS_MAX_OPEN_FILES; count++) a->fhandles[count].handle = NULL; // Flag unused for files
+
+			strncpy((char * ) home, (const char * ) f->server->users[counter].home, 96);
+			home[96] = '\0';
+
+			for (count = 0; count < 80; count++) if (home[count] == 0x20) home[count] = '\0'; // Remove spaces and null terminate
+
+			if (home[0] == '\0')
 			{
-				short internal_handle; 
-				char home[96], lib[96];
-				struct path p;
-				unsigned short count;
-
-				struct __econet_packet_udp reply;
-
-				if (fs_stn_logged_in(server, net, stn) != -1) // do a bye first
-					fs_bye(server, reply_port, net, stn, 0);
-
-				active[server][usercount].net = (net == 0 ? fs_stations[server].net : net);
-				active[server][usercount].stn = stn;
-				active[server][usercount].printer = 0xff; // No current printer selected
-				active[server][usercount].userid = counter;
-				active[server][usercount].bootopt = users[server][counter].bootopt;
-				active[server][usercount].priv = users[server][counter].priv;
-				active[server][usercount].userid = counter;
-				active[server][usercount].current_disc = users[server][counter].home_disc; // Need to set here so that first normalize for URD works.
-
-				for (count = 0; count < FS_MAX_OPEN_FILES; count++) active[server][usercount].fhandles[count].handle = -1; // Flag unused for files
-
-				strncpy((char * ) home, (const char * ) users[server][counter].home, 96);
-				home[96] = '\0';
-
-				for (count = 0; count < 80; count++) if (home[count] == 0x20) home[count] = '\0'; // Remove spaces and null terminate
-
-				if (home[0] == '\0')
-				{
-					sprintf(home, "$.%s", users[server][counter].username);
-					home[80] = '\0';
-					if (strchr(home, ' ')) *(strchr(home, ' ')) = '\0';
-				}
-				
-				// First, user root
-
-				if (!(fs_normalize_path(server, usercount, home, -1, &p)) || p.ftype == FS_FTYPE_NOTFOUND) // NOTE: because fs_normalize might look up current or home directory, home must be a complete path from $
-				{
-						unsigned short disc_count = 0;
-						unsigned char tmp_path[1024];
-
-						// If not found, have a look on the other discs
-	
-						while (disc_count < ECONET_MAX_FS_DISCS)
-						{
-
-							if (fs_discs[server][disc_count].name[0] != '\0') // Extant disc
-							{
-								sprintf(tmp_path, ":%s.%s", fs_discs[server][disc_count].name, home);
-	
-								if (!fs_normalize_path(server, usercount, tmp_path, -1, &p))
-								{
-									disc_count++;
-								}
-								else if (p.ftype != FS_FTYPE_DIR)
-								{
-									disc_count++;
-								}
-								else
-									break;
-							}
-							else disc_count++;
-						
-						}
-	
-						if (disc_count == ECONET_MAX_FS_DISCS)
-						{
-							sprintf (tmp_path, ":%s.$", fs_discs[server][0].name);
-							if (!(fs_normalize_path(server, usercount, tmp_path, -1, &p)) || p.ftype == FS_FTYPE_NOTFOUND) // Should NEVER happen....
-							{
-								fs_debug (0, 1, "%12sfrom %3d.%3d Login attempt - cannot find root dir %s", "", net, stn, home);
-								fs_error (server, reply_port, net, stn, 0xFF, "Unable to map root.");
-								active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
-							}
-						}
-				}
-						
-				if (p.ftype != FS_FTYPE_DIR) // Root wasn't a directory!
-				{
-					fs_error (server, reply_port, net, stn, 0xA8, "Bad root directory.");
-					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
-				}
-					
-				if ((p.owner == active[server][usercount].userid && (p.perm & FS_PERM_OWN_R) == 0) && ((p.perm & FS_PERM_OTH_R) == 0)) // Unreadable directory
-				{
-					fs_error (server, reply_port, net, stn, 0xA8, "Unreadable root directory.");
-					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
-				}
-
-				active[server][usercount].current_disc = p.disc; // Updated here once we know where the URD is for definite.
-
-				if (fs_config[server].fs_acorn_home)
-				{
-					struct objattr oa;
-
-					fs_read_xattr(p.unixpath, &oa, server);
-
-					if (oa.homeof == 0)
-						fs_write_xattr(p.unixpath, oa.owner, oa.perm, oa.load, oa.exec, active[server][usercount].userid, server);
-				}
-
-				strcpy (active[server][usercount].urd_unix_path, p.unixpath); // Used in order to enable chroot functionality
-
-				internal_handle = fs_open_interlock(server, p.unixpath, 1, active[server][usercount].userid);
-
-				if ((active[server][usercount].root = fs_allocate_user_dir_channel(server, usercount, internal_handle)) == 0) // Can't allocate
-				{
-					fs_error (server, reply_port, net, stn, 0xDE, "Root directory channel ?");
-					fs_close_interlock(server, internal_handle, 1);
-					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
-				}
-
-				fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, active[server][usercount].root, internal_handle);
-				strcpy(active[server][usercount].fhandles[active[server][usercount].root].acornfullpath, p.acornfullpath);
-				fs_store_tail_path(active[server][usercount].fhandles[active[server][usercount].root].acorntailpath, p.acornfullpath);
-				active[server][usercount].fhandles[active[server][usercount].root].mode = 1;
-
-				snprintf(active[server][usercount].root_dir, 2600, "$.%s", p.path_from_root); // Was 260 
-
-				if (p.npath == 0)	sprintf(active[server][usercount].root_dir_tail, "$         ");
-				else			sprintf(active[server][usercount].root_dir_tail, "%-80s", p.path[p.npath-1]); // WAS 10
-
-				// Just set CWD to URD
-
-				internal_handle = fs_open_interlock(server, p.unixpath, 1, active[server][usercount].userid);
-
-				if ((active[server][usercount].current = fs_allocate_user_dir_channel(server, usercount, internal_handle)) == 0) // Can't allocate a second handle for CWD on the root internal_handle
-				{
-
-					fs_error (server, reply_port, net, stn, 0xA8, "Can't map CWD!");
-					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
-					fs_close_interlock(server, active[server][usercount].fhandles[active[server][usercount].root].handle, 1); // Close the old root directory
-					fs_close_interlock(server, internal_handle, 1); // Close the CWD handle
-					fs_deallocate_user_dir_channel(server, usercount, active[server][usercount].root);
-					return;
-				}
-
-				fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, active[server][usercount].current, internal_handle);
-
-				strcpy(active[server][usercount].fhandles[active[server][usercount].current].acornfullpath, p.acornfullpath);
-				fs_store_tail_path(active[server][usercount].fhandles[active[server][usercount].current].acorntailpath, p.acornfullpath);
-				active[server][usercount].fhandles[active[server][usercount].current].mode = 1;
-
-				if (users[server][active[server][usercount].userid].priv2 & FS_PRIV2_CHROOT) // Fudge the root directory information so that $ maps to URD
-				{
-					char *dollar;
-
-					sprintf(active[server][usercount].root_dir_tail, "$         ");
-					snprintf(active[server][usercount].root_dir, 2600, "$.");
-					fs_store_tail_path(active[server][usercount].fhandles[active[server][usercount].root].acorntailpath, "$");
-					dollar = strchr(active[server][usercount].fhandles[active[server][usercount].root].acornfullpath, '$');
-
-					*(dollar+1) = 0; // Drop everything after the '.' after the dollar sign
-
-					strcpy(active[server][usercount].current_dir_tail, active[server][usercount].root_dir_tail);
-					strcpy(active[server][usercount].current_dir, active[server][usercount].root_dir);
-					fs_store_tail_path(active[server][usercount].fhandles[active[server][usercount].current].acorntailpath, "$");
-					strcpy(active[server][usercount].fhandles[active[server][usercount].current].acornfullpath, active[server][usercount].fhandles[active[server][usercount].root].acornfullpath);
-
-				}
-
-				// Next, Library
-
-				if (users[server][counter].lib[0] != '\0')
-					strncpy((char * ) lib, (const char * ) users[server][counter].lib, 96);
-				else	strcpy((char *) lib, "$.Library");
-
-				lib[96] = '\0';
-				for (count = 0; count < 80; count++) if (lib[count] == 0x20) lib[count] = '\0'; // Remove spaces and null terminate
-
-				if (!fs_normalize_path(server, usercount, lib, -1, &p) || p.ftype != FS_FTYPE_DIR) // NOTE: because fs_normalize might look up current or home directory, home must be a complete path from $
-				{
-
-					// TODO - Search across all discs here
-
-					// In default, go for root on disc 0
-
-					fs_debug (0, 1, "%12sfrom %3d.%3d Login attempt - cannot find lib dir %s", "", net, stn, lib);
-					if (!fs_normalize_path(server, usercount, "$", -1, &p)) // Use root as library directory instead
-					{
-						fs_error (server, reply_port, net, stn, 0xA8, "Unable to map library");
-						active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
-					}
-
-				}
-						
-				if (p.ftype != FS_FTYPE_DIR) // Libdir wasn't a directory!
-				{
-					fs_error (server, reply_port, net, stn, 0xA8, "Bad library directory.");
-					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
-				}
-					
-				/* Don't need to do this for lib - only URD
-				if ((p.owner == active[server][usercount].userid && (p.perm & FS_PERM_OWN_R) == 0) && ((p.perm & FS_PERM_OTH_R) == 0)) // Unreadable directory
-				{
-					fs_error (server, reply_port, net, stn, 0xA8, "Unreadable lib directory.");
-					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
-				}
-				*/
-
-				internal_handle = fs_open_interlock(server, p.unixpath, 1, active[server][usercount].userid);
-
-				if ((active[server][usercount].lib = fs_allocate_user_dir_channel(server, usercount, internal_handle)) == 0) // Can't allocate
-				{
-					fs_error (server, reply_port, net, stn, 0xDE, "Library dir channel ?");
-					//fs_close_dir_handle(server, internal_handle);
-					fs_close_interlock(server, internal_handle, 1);
-					fs_close_interlock(server, active[server][usercount].fhandles[active[server][usercount].root].handle, 1);
-					fs_close_interlock(server, active[server][usercount].fhandles[active[server][usercount].current].handle, 1);
-					fs_deallocate_user_dir_channel(server, usercount, active[server][usercount].root);	
-					fs_deallocate_user_dir_channel(server, usercount, active[server][usercount].current);	
-					active[server][usercount].net = 0; active[server][usercount].stn = 0; return;
-				}
-
-				fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, active[server][usercount].lib, internal_handle);
-				strcpy(active[server][usercount].fhandles[active[server][usercount].lib].acornfullpath, p.acornfullpath);
-				fs_store_tail_path(active[server][usercount].fhandles[active[server][usercount].lib].acorntailpath, p.acornfullpath);
-				active[server][usercount].fhandles[active[server][usercount].lib].mode = 1;
-
-				strncpy((char * ) active[server][usercount].lib_dir, (const char * ) p.path_from_root, 255);
-				if (p.npath == 0)
-					strcpy((char * ) active[server][usercount].lib_dir_tail, (const char * ) "$         ");
-				else
-					sprintf(active[server][usercount].lib_dir_tail, "%-80s", p.path[p.npath-1]); // WAS 10
-
-#ifdef BRIDGE_V2
-				// Notify bridge if we have a Bridge priv user
-
-				if (users[server][counter].priv2 & FS_PRIV2_BRIDGE) // Bridge priv user
-				{
-					eb_fast_priv_notify(fs_devices[server], net, stn, 1);
-					fs_debug (0, 1, "%12sfrom %3d.%3d User %s has bridge privileges", "", net, stn, username);
-				}
-			
-#endif
-				fs_debug (0, 1, "            from %3d.%3d Login as %s, index %d, id %d, disc %d, URD %s, CWD %s, LIB %s, priv 0x%02x", net, stn, username, usercount, active[server][usercount].userid, active[server][usercount].current_disc, home, home, lib, active[server][usercount].priv);
-
-				// Tell the station
-			
-				reply.p.ptype = ECONET_AUN_DATA;
-				reply.p.port = reply_port;
-				reply.p.ctrl = 0x80;
-				reply.p.pad = 0x00;
-				//reply.p.seq = (fs_stations[server].seq += 4);
-				reply.p.seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
-				reply.p.data[0] = 0x05;
-				reply.p.data[1] = 0x00;
-				reply.p.data[2] = FS_MULHANDLE(active[server][usercount].root);
-				reply.p.data[3] = FS_MULHANDLE(active[server][usercount].current);
-				reply.p.data[4] = FS_MULHANDLE(active[server][usercount].lib);
-				reply.p.data[5] = active[server][usercount].bootopt;
-				
-				fs_aun_send(&reply, server, 6, net, stn);
+				sprintf(home, "$.%s", f->server->users[counter].username);
+				home[80] = '\0';
+				if (strchr(home, ' ')) *(strchr(home, ' ')) = '\0';
 			}
+			
+
+			err = fsop_move_disc (f, a->current_disc);
+
+			if (err != FSOP_MOVE_DISC_SUCCESS)
+			{
+				/* fsop_move_disc will have cleared down the handles */
+
+				unsigned char	which[5],	error[20];
+				unsigned char	errstr[40];
+
+				switch((err & 0x0F))
+				{
+					case FSOP_MOVE_DISC_URD:	strcpy(which, "URD"); break;
+					case FSOP_MOVE_DISC_CWD:	strcpy(which, "CWD"); break;
+					case FSOP_MOVE_DISC_LIB:	strcpy(which, "LIB"); break;
+				}
+
+				switch ((err & 0xF0))
+				{
+					case FSOP_MOVE_DISC_NOTFOUND:	strcpy(error, "Not found"); break;
+					case FSOP_MOVE_DISC_NOTDIR:	strcpy(error, "Not a directory"); break;
+					case FSOP_MOVE_DISC_UNREADABLE:	strcpy(error, "Unreadable"); break;
+					case FSOP_MOVE_DISC_UNMAPPABLE:	strcpy(error, "Unmappable"); break;
+					case FSOP_MOVE_DISC_CHANNEL:	strcpy(error, "No available channel"); break;
+					case FSOP_MOVE_DISC_INVIS:	strcpy(error, "Disc invisible to user"); break;
+				}
+
+				fs_debug (0, 1, "%12sfrom %3d.%3d Login attempt - %s %s for userid %04X", "", f->net, f->stn, which, error, a->userid);
+
+				sprintf(errstr, "%s %s", which, error);
+				fsop_error (f, 0xFF, errstr);
+				FS_LIST_SPLICEFREE(f->server->actives, a, "FS", "Freeing active struct when cannot mount disc");
+				return;
+			}
+
+			if (f->server->users[a->userid].priv2 & FS_PRIV2_CHROOT) // Fudge the root directory information so that $ maps to URD
+			{
+				char *dollar;
+
+				sprintf(a->root_dir_tail, "$         ");
+				snprintf(a->root_dir, 2600, "$.");
+				fs_store_tail_path(a->fhandles[a->root].acorntailpath, "$");
+				dollar = strchr(a->fhandles[a->root].acornfullpath, '$');
+
+				*(dollar+1) = 0; // Drop everything after the '.' after the dollar sign
+
+				strcpy(a->current_dir_tail, a->root_dir_tail);
+				strcpy(a->current_dir, a->root_dir);
+				fs_store_tail_path(a->fhandles[a->current].acorntailpath, "$");
+				strcpy(a->fhandles[a->current].acornfullpath, a->fhandles[a->root].acornfullpath);
+
+			}
+
+			// Notify bridge if we have a Bridge priv user
+
+			if (a->user->priv2 & FS_PRIV2_BRIDGE) // Bridge priv user
+			{
+				eb_fast_priv_notify(a->server->fs_device, f->net, f->stn, 1);
+				fs_debug (0, 1, "%12sfrom %3d.%3d User %s has bridge privileges", "", f->net, f->stn, username);
+			}
+		
+			fs_debug (0, 1, "            from %3d.%3d Login as %s, id %04X, disc %d, URD %s, CWD %s, LIB %s, priv 0x%02x", f->net, f->stn, username, a->userid, a->current_disc, a->root, a->current, a->lib, a->user->priv);
+
+			// Tell the station
+		
+			reply.p.data[0] = 0x05;
+			reply.p.data[2] = FS_MULHANDLE(a->root);
+			reply.p.data[3] = FS_MULHANDLE(a->current);
+			reply.p.data[4] = FS_MULHANDLE(a->lib);
+			reply.p.data[5] = a->bootopt;
+			
+			fsop_aun_send(&reply, 6, f);
 		}
-
 	}
 	else
 	{
-		fs_debug (0, 1, "            from %3d.%3d Login attempt - username '%s' - Unknown user", net, stn, username);
-		fs_error(server, reply_port, net, stn, 0xBC, "User not known");
+		fs_debug (0, 1, "            from %3d.%3d Login attempt - username '%s' - Unknown user", f->net, f->stn, username);
+		fsop_error(f, 0xBC, "User not known");
 	}
 
 }
 
-void fs_read_user_env(int server, unsigned short reply_port, unsigned char net, unsigned char stn, unsigned int active_id)
+void fsop_read_user_env(struct fsop_data *f)
 {
 
-	struct __econet_packet_udp r;
-	int replylen = 0, count, termfound;
+	FS_R_DATA(0x80);
+
+	int replylen = 2, count, termfound;
 	unsigned short disclen;
+	unsigned char	discname[17];
+	struct __fs_active	*a;
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d Read user environment - current user handle %d, current lib handle %d", "", net, stn, active[server][active_id].current, active[server][active_id].lib);
+	a = f->active;
 
-	r.p.port = reply_port;
-	r.p.ctrl = 0x80;
-	r.p.ptype = ECONET_AUN_DATA;
-
-	r.p.data[replylen++] = 0;
-	r.p.data[replylen++] = 0;
+	fs_debug (0, 2, "%12sfrom %3d.%3d Read user environment - current user handle %d, current lib handle %d", "", f->net, f->stn, f->active->current, f->active->lib);
 
 	// If either current or library handle is invalid, barf massively.
 
 	//fs_debug (0, 2, "Current.is_dir = %d, handle = %d, Lib.is_dir = %d, handle = %d\n", active[server][active_id].fhandles[active[server][active_id].current].is_dir, active[server][active_id].fhandles[active[server][active_id].current].handle, active[server][active_id].fhandles[active[server][active_id].lib].is_dir, active[server][active_id].fhandles[active[server][active_id].lib].handle);
 
-	if (!(active[server][active_id].fhandles[active[server][active_id].current].is_dir) ||
-	    !(active[server][active_id].fhandles[active[server][active_id].lib].is_dir) ||
-	    (active[server][active_id].fhandles[active[server][active_id].current].handle == -1) ||
-	    (active[server][active_id].fhandles[active[server][active_id].lib].handle == -1))
+	if (!(a->fhandles[a->current].is_dir)
+	||  !(a->fhandles[a->lib].is_dir)
+	||  !(a->fhandles[a->current].handle)
+	||  !(a->fhandles[a->lib].handle))
 	{
-		fs_error(server, reply_port, net, stn, 0xDE, "Channel ?");
+		fsop_error(f, 0xDE, "Channel ?");
 		return;
 	}
 
 	disclen = r.p.data[replylen++] = 16; // strlen(fs_discs[server][active[server][active_id].disc].name);
 
-	sprintf (&(r.p.data[replylen]), "%-16s", fs_discs[server][active[server][active_id].current_disc].name);
+	fsop_get_disc_name(f->server, a->current_disc, discname);
+
+	sprintf (&(r.p.data[replylen]), "%-16s", discname);
 
 	replylen += disclen;
 
-	memcpy(&(r.p.data[replylen]), &(active[server][active_id].fhandles[active[server][active_id].current].acorntailpath), 10);
+	memcpy(&(r.p.data[replylen]), &(a->fhandles[a->current].acorntailpath), 10);
+
 	termfound = 0;
+
 	for (count = 0; count < 10; count++)
 		if (termfound || r.p.data[replylen+count] == 0) 
 		{
@@ -5103,112 +4403,64 @@ void fs_read_user_env(int server, unsigned short reply_port, unsigned char net, 
 			termfound = 1;
 		}
 
-	//snprintf (&(r.p.data[replylen]), 10, "%-10s", active[server][active_id].fhandles[active[server][active_id].current].acorntailpath);
-	//sprintf (&(r.p.data[replylen]), "%-10s", active[server][active_id].current_dir_tail);
 	replylen += 10;
 
-	memcpy(&(r.p.data[replylen]), &(active[server][active_id].fhandles[active[server][active_id].lib].acorntailpath), 10);
+	memcpy(&(r.p.data[replylen]), &(a->fhandles[a->lib].acorntailpath), 10);
+
 	termfound = 0;
-	for (count = 0; count < 10; count++)
-		if (termfound || r.p.data[replylen+count] == 0)
-		{
-			r.p.data[replylen+count] = ' ';
-			termfound = 1;
-		}
 
-	//snprintf (&(r.p.data[replylen]), 10, "%-10s", active[server][active_id].fhandles[active[server][active_id].lib].acorntailpath);
-	//sprintf (&(r.p.data[replylen]), "%-10s", active[server][active_id].lib_dir_tail);
+	for (count = 0; count < 10; count++)
+	if (termfound || r.p.data[replylen+count] == 0)
+	{
+		r.p.data[replylen+count] = ' ';
+		termfound = 1;
+	}
+
 	replylen += 10;
 
-	fs_aun_send (&r, server, replylen, net, stn);
+	fsop_aun_send (&r, replylen, f);
 	
 }
 
-void fs_examine(int server, unsigned short reply_port, unsigned char net, unsigned char stn, unsigned int active_id, unsigned char *data, unsigned int datalen)
+void fsop_examine(struct fsop_data *f)
 {
-	unsigned short relative_to, arg, start, n;
+	FS_REPLY_DATA(0x80);
+
+	uint8_t relative_to, arg, start, n;
 	unsigned char path[1024]; // Was 256 before long filenames
 	struct path p;
 	struct path_entry *e;
-	struct __econet_packet_udp r;
 	int replylen, replyseglen;
 	unsigned short examined, dirsize;
-	// Next 4 lines only used in the old non-wildcard code
-	//DIR *d;
-	//struct dirent *entry;
-	//struct objattr attr;
-	//char unixpath[1024];
 	char acornpathfromroot[1024];
 
-	relative_to = *(data+3);
-	arg = (char) *(data+5);
-	start = (char) *(data+6);
-	n = (char) *(data+7);
+	relative_to = FSOP_CWD;
+	arg = FSOP_ARG;
+	start = *(f->data + 6);
+	n = *(f->data + 7);
 
-	fs_copy_to_cr(path, (data + 8), 255);
+	fs_copy_to_cr(path, (f->data + 8), 255);
 
-	/* This next bit looks like rubbish
-
-	if (arg == 2) // If arg = 2, it looks like the path to examine starts at data + 9 and ends with the end of the packet, not 0x0d
-	{
-		unsigned short p;
-
-		strncpy(path, (data + 9), datalen - 9);
-		path[datalen - 9] = '\0';	
-		// But sometimes it sticks 0x0d on the end
-		// So ferret it out and remove
-
-		p = 0;
-	
-		while (p <= datalen - 9)
-		{
-			if (path[p] == 0x0d) path[p] = '\0';
-			p++;
-		}
-		
-	}
-
-	*/
-
-	fs_debug (0, 2, "%12sfrom %3d.%3d Examine %s relative to %d, start %d, extent %d, arg = %d", "", net, stn, path,
+	fs_debug (0, 2, "%12sfrom %3d.%3d Examine %s relative to %d, start %d, extent %d, arg = %d", "", f->net, f->stn, path,
 		relative_to, start, n, arg);
 
-	replylen = 0;
+	replylen = 2;
 
-	r.p.ptype = ECONET_AUN_DATA;
-	r.p.port = reply_port;
-	r.p.ctrl = 0x80;
+	examined = reply.p.data[replylen++] = 0; // Repopulate data[2] at end
+	dirsize = reply.p.data[replylen++] = 0; // Dir size (but this might be wrong). Repopulate later if correct
 
-	r.p.data[replylen++] = 0;
-	r.p.data[replylen++] = 0;
-	
-	examined = r.p.data[replylen++] = 0; // Repopulate data[2] at end
-	dirsize = r.p.data[replylen++] = 0; // Dir size (but this might be wrong). Repopulate later if correct
-
-	if (!fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1) || p.ftype == FS_FTYPE_NOTFOUND)
+	if (!fsop_normalize_path_wildcard(f, path, relative_to, &p, 1) || p.ftype == FS_FTYPE_NOTFOUND)
 	{
 
 		if (arg == 0)
 		{
-			r.p.data[replylen++] = 0x80;
-			fs_aun_send(&r, server, replylen, net, stn);
+			reply.p.data[replylen++] = 0x80;
+			fsop_aun_send(&reply, replylen, f);
 		}
 		else
-			fs_error(server, reply_port, net, stn, 0xD6, "Not found");
+			fsop_error(f, 0xD6, "Not found");
 		return;
 
-/*
-
-		struct __econet_packet_udp reply;
-	
-		reply.p.ptype = ECONET_AUN_DATA;
-		reply.p.port = reply_port;
-		reply.p.ctrl = 0x80;
-		reply.p.data[0] = reply.p.data[1] = reply.p.data[2] = 0; // This is apparently how you flag not found on an examine...
-	
-		fs_aun_send(&reply, server, 2, net, stn);
-		return;
-*/
 	}
 
 	// Add final entry onto path_from_root (because normalize doesn't do it on a wildcard call)
@@ -5222,41 +4474,42 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 
 	if (p.ftype != FS_FTYPE_DIR)
 	{
-		fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
+		fsop_error(f, 0xAF, "Types don't match");
 		return;
 	}
 
 
 	// Wildcard code
+
 	strcpy(acornpathfromroot, path);
+
 	if (strlen(acornpathfromroot) != 0) strcat(acornpathfromroot, ".");
+
 	strcat(acornpathfromroot, "*"); // It should already have $ on it if root.
 
 	// Wildcard renormalize - THE LONG FILENAMES MODS CAUSE THIS TO RETURN NOT FOUND ON AN EMPTY DIRECTORY
-	if (!fs_normalize_path_wildcard(server, active_id, acornpathfromroot, relative_to, &p, 1)) // || p.ftype == FS_FTYPE_NOTFOUND)
+	
+	if (!fsop_normalize_path_wildcard(f, acornpathfromroot, relative_to, &p, 1)) // || p.ftype == FS_FTYPE_NOTFOUND)
 	{
 		if (arg == 0)
 		{
-			r.p.data[replylen++] = 0x80;
-			fs_aun_send(&r, server, replylen, net, stn);
+			reply.p.data[replylen++] = 0x80;
+			fsop_aun_send(&reply, replylen, f);
 		}
 		else
-		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
+			fsop_error(f, 0xD6, "Not found");
 		return;
 	}
 
 	e = p.paths;
+
 	while (dirsize < start && (e != NULL))
 	{
-		if ((e->perm & FS_PERM_H) == 0 || (e->owner == active[server][active_id].userid)) // not hidden
+		if ((e->perm & FS_PERM_H) == 0 || (e->owner == f->userid)) // not hidden
 			dirsize++;
+
 		e = e->next;
 	}
-
-/* This is wrong. FS3 puts out 27 bytes per entry. If we put the cycle number in each time, it's 28.
-	if (arg == 0) // Looks like the cycle number gets repeated in arg=0 replies
-		replylen--;
-*/
 
 	/* Add a check here to make sure we don't tip over a 255 byte packet */
 
@@ -5270,9 +4523,7 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 
 	while (examined < n && (e != NULL) && (replylen < (255-replyseglen)))
 	{	
-		//fs_debug (0, 3, "Examining '%s'", e->acornname);
-
-		if (FS_ACTIVE_SYST(server, active_id) || (e->perm & FS_PERM_H) == 0 || (e->owner == active[server][active_id].userid)) // not hidden or we are the owner
+		if (FS_ACTIVE_SYST(f->active) || (e->perm & FS_PERM_H) == 0 || (e->owner == f->userid)) // not hidden or we are the owner
 		{
 			switch (arg)
 			{
@@ -5281,39 +4532,41 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 
 					int le_count;
 
-					//r.p.data[replylen++] = examined; // "Cycle number";	
-					snprintf(&(r.p.data[replylen]), 11, "%-10.10s", e->acornname); // 11 because the 11th byte (null) gets overwritten two lines below because we only add 10 to replylen.
+					snprintf(&(reply.p.data[replylen]), 11, "%-10.10s", e->acornname); // 11 because the 11th byte (null) gets overwritten two lines below because we only add 10 to replylen.
+
 					replylen += 10;
 
 					for (le_count = 0; le_count <= 3; le_count++)
 					{
-						r.p.data[replylen + le_count] = ((e->ftype == FS_FTYPE_DIR ? 0 : htole32(e->load)) >> (8 * le_count)) & 0xff;
-						r.p.data[replylen + 4 + le_count] = ((e->ftype == FS_FTYPE_DIR ? 0 : htole32(e->exec)) >> (8 * le_count)) & 0xff;
+						reply.p.data[replylen + le_count] = ((e->ftype == FS_FTYPE_DIR ? 0 : htole32(e->load)) >> (8 * le_count)) & 0xff;
+						reply.p.data[replylen + 4 + le_count] = ((e->ftype == FS_FTYPE_DIR ? 0 : htole32(e->exec)) >> (8 * le_count)) & 0xff;
 					}
 
 					replylen += 8; // Skip past the load / exec that we just filled in
 
-					r.p.data[replylen++] = fs_perm_to_acorn(server, e->perm, e->ftype);
-					r.p.data[replylen++] = e->day;
-					r.p.data[replylen++] = e->monthyear;
+					reply.p.data[replylen++] = fsop_perm_to_acorn(f->server, e->perm, e->ftype);
+					reply.p.data[replylen++] = e->day;
+					reply.p.data[replylen++] = e->monthyear;
 
-					if (fs_config[server].fs_sjfunc) // Next three bytes are ownership information - main & aux. We always set aux to 0 for now.
+					if (f->server->config->fs_sjfunc) // Next three bytes are ownership information - main & aux. We always set aux to 0 for now.
 					{
-						r.p.data[replylen++] = (e->owner & 0xff);
-						r.p.data[replylen++] = ((e->owner & 0x700) >> 3);
-						r.p.data[replylen++] = 0; // Aux account number	
+						reply.p.data[replylen++] = (e->owner & 0xff);
+						reply.p.data[replylen++] = ((e->owner & 0x700) >> 3);
+						reply.p.data[replylen++] = 0; // Aux account number	
 					}
 					else
 					{
-						r.p.data[replylen++] = e->internal & 0xff;
-						r.p.data[replylen++] = (e->internal & 0xff00) >> 8;
-						r.p.data[replylen++] = (e->internal & 0xff0000) >> 16;
+						reply.p.data[replylen++] = e->internal & 0xff;
+						reply.p.data[replylen++] = (e->internal & 0xff00) >> 8;
+						reply.p.data[replylen++] = (e->internal & 0xff0000) >> 16;
 					}
 
 					if (e->ftype == FS_FTYPE_DIR)	e->length = 0x200; // Dir length in FS3
-					r.p.data[replylen++] = e->length & 0xff;
-					r.p.data[replylen++] = (e->length & 0xff00) >> 8;
-					r.p.data[replylen++] = (e->length & 0xff0000) >> 16;
+
+					reply.p.data[replylen++] = e->length & 0xff;
+					reply.p.data[replylen++] = (e->length & 0xff00) >> 8;
+					reply.p.data[replylen++] = (e->length & 0xff0000) >> 16;
+
 				} break;
 				case 1: // Human readable format
 				{
@@ -5323,26 +4576,25 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 					unsigned char hr_fmt_string[80];
 					uint8_t		is_owner;
 
-					is_owner = FS_PERM_EFFOWNER(server, active_id, e->owner);
+					is_owner = FS_PERM_EFFOWNER(f->active, e->owner);
 	
-					if (fs_config[server].fs_mask_dir_wrr && e->ftype == FS_FTYPE_DIR && (e->perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == FS_ACORN_DIR_MASK)
+					if (f->server->config->fs_mask_dir_wrr && e->ftype == FS_FTYPE_DIR && (e->perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == FS_ACORN_DIR_MASK)
 						e->perm &= ~(FS_ACORN_DIR_MASK);
 
 					sprintf(permstring_l, "%s%s%s%s",
 						(e->ftype == FS_FTYPE_DIR ? "D" : e->ftype == FS_FTYPE_SPECIAL ? "S" : ""),
 						((e->perm & FS_PERM_L) ? "L" : ""),
-						((e->perm & FS_PERM_OWN_W) ? (is_owner ? "W" : fs_config[server].fs_mdfsinfo ? "w": "W") : ""),
-						((e->perm & FS_PERM_OWN_R) ? (is_owner ? "R" : fs_config[server].fs_mdfsinfo ? "r" : "R") : "") );
+						((e->perm & FS_PERM_OWN_W) ? (is_owner ? "W" : FS_CONFIG(f->server,fs_mdfsinfo) ? "w": "W") : ""),
+						((e->perm & FS_PERM_OWN_R) ? (is_owner ? "R" : FS_CONFIG(f->server,fs_mdfsinfo) ? "r" : "R") : "") );
 
 					sprintf(permstring_r, "%s%s", 
-						((e->perm & FS_PERM_OTH_W) ? (fs_config[server].fs_mdfsinfo ? (is_owner ? "w" : "W") : "W") : ""),
-						((e->perm & FS_PERM_OTH_R) ? (fs_config[server].fs_mdfsinfo ? (is_owner ? "r" : "R") : "R") : "") );
+						((e->perm & FS_PERM_OTH_W) ? (FS_CONFIG(f->server,fs_mdfsinfo) ? (is_owner ? "w" : "W") : "W") : ""),
+						((e->perm & FS_PERM_OTH_R) ? (FS_CONFIG(f->server,fs_mdfsinfo) ? (is_owner ? "r" : "R") : "R") : "") );
 
 					sprintf(permstring_both, "%s/%s", permstring_l, permstring_r);
 
 					sprintf (hr_fmt_string, "%%-%ds %%08lX %%08lX   %%06lX   %%-7s     %%02d/%%02d/%%02d %%06lX", ECONET_MAX_FILENAME_LENGTH);
 
-					//sprintf (tmp, "%-10s %08lX %08lX   %06lX   %4s/%-2s     %02d/%02d/%02d %06lX", 
 					sprintf (tmp, hr_fmt_string, 
 						e->acornname,
 						e->load, e->exec, e->length,
@@ -5353,66 +4605,55 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 						e->internal
 						);
 						
-					strcpy((char * ) &(r.p.data[replylen]), (const char * ) tmp);
+					strcpy((char * ) &(reply.p.data[replylen]), (const char * ) tmp);
 					replylen += strlen(tmp);
-					r.p.data[replylen++] = '\0';
+					reply.p.data[replylen++] = '\0';
 
 				} break;
+
 				case 2: // 10 character filename format (short)
 				{
 					unsigned char hr_fmt_string[20];
 
 					sprintf(hr_fmt_string, "%%-%d.%ds", ECONET_MAX_FILENAME_LENGTH, ECONET_MAX_FILENAME_LENGTH);
 
-					//r.p.data[replylen++] = 0x0a;
-					r.p.data[replylen++] = ECONET_MAX_FILENAME_LENGTH;
-					//sprintf((char *) &(r.p.data[replylen]), "%-10.10s", e->acornname);
-					sprintf((char *) &(r.p.data[replylen]), hr_fmt_string, e->acornname);
-					//replylen += 10;
+					reply.p.data[replylen++] = ECONET_MAX_FILENAME_LENGTH;
+					sprintf((char *) &(reply.p.data[replylen]), hr_fmt_string, e->acornname);
 					replylen += ECONET_MAX_FILENAME_LENGTH;
 
 				} break;
+
 				case 3: // 10 character filename format (long) - this can only do 10 characters according to the spec, but FS4 exceeds this, and it causes problems with RISC OS but Acorn didn't seem that bothered...!
 				{
 					char tmp[256];
 					char permstring_l[10], permstring_r[10];
 					uint8_t		is_owner;
 
-					is_owner = FS_PERM_EFFOWNER(server, active_id, e->owner);
+					is_owner = FS_PERM_EFFOWNER(f->active, e->owner);
 
-					//unsigned char hr_fmt_string[20];
-
-					if (fs_config[server].fs_mask_dir_wrr && e->ftype == FS_FTYPE_DIR && (e->perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == FS_ACORN_DIR_MASK)
+					if (f->server->config->fs_mask_dir_wrr && e->ftype == FS_FTYPE_DIR && (e->perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == FS_ACORN_DIR_MASK)
 						e->perm &= ~(FS_ACORN_DIR_MASK);
 
 					sprintf(permstring_l, "%s%s%s%s",
 						(e->ftype == FS_FTYPE_DIR ? "D" : e->ftype == FS_FTYPE_SPECIAL ? "S" : ""),
 						((e->perm & FS_PERM_L) ? "L" : ""),
-						((e->perm & FS_PERM_OWN_W) ? (is_owner ? "W" : fs_config[server].fs_mdfsinfo ? "w": "W") : ""),
-						((e->perm & FS_PERM_OWN_R) ? (is_owner ? "R" : fs_config[server].fs_mdfsinfo ? "r" : "R") : "") );
-						//((e->perm & FS_PERM_OWN_W) ? "W" : ""),
-						//((e->perm & FS_PERM_OWN_R) ? "R" : "") );
+						((e->perm & FS_PERM_OWN_W) ? (is_owner ? "W" : f->server->config->fs_mdfsinfo ? "w": "W") : ""),
+						((e->perm & FS_PERM_OWN_R) ? (is_owner ? "R" : f->server->config->fs_mdfsinfo ? "r" : "R") : "") );
 
 					sprintf(permstring_r, "%s%s", 
-						((e->perm & FS_PERM_OTH_W) ? (fs_config[server].fs_mdfsinfo ? (is_owner ? "w" : "W") : "W") : ""),
-						((e->perm & FS_PERM_OTH_R) ? (fs_config[server].fs_mdfsinfo ? (is_owner ? "r" : "R") : "R") : "") );
-						//((e->perm & FS_PERM_OTH_W) ? "W" : ""),
-						//((e->perm & FS_PERM_OTH_R) ? "R" : "") );
-
-					//sprintf (hr_fmt_string, "%%-%ds %%4s/%%-2s", ECONET_MAX_FILENAME_LENGTH);
-					//sprintf (tmp, hr_fmt_string, e->acornname,
-
-					//if (strlen(e->acornname) > 10) e->acornname[10] = 0; // Limit to 10 chars
-					//
+						((e->perm & FS_PERM_OTH_W) ? (f->server->config->fs_mdfsinfo ? (is_owner ? "w" : "W") : "W") : ""),
+						((e->perm & FS_PERM_OTH_R) ? (f->server->config->fs_mdfsinfo ? (is_owner ? "r" : "R") : "R") : "") );
 
 					sprintf (tmp, "%-10s %4s/%-2s", e->acornname,
 						permstring_l, permstring_r
-					);
-					strcpy((char * ) &(r.p.data[replylen]), (const char * ) tmp);
-					//fprintf (stderr, "hr_fmt_string = '%s', tmp = '%s', r.p.data[replylen] = '%s'\n", hr_fmt_string, tmp, (char *) &(r.p.data[replylen]));
+						);
+
+					strcpy((char * ) &(reply.p.data[replylen]), (const char * ) tmp);
 					replylen += strlen(tmp) + 1; // +1 for the 0 byte
+
 				} break;
 			}
+
 			examined++;
 			dirsize++;
 		}
@@ -5423,169 +4664,20 @@ void fs_examine(int server, unsigned short reply_port, unsigned char net, unsign
 
 	fs_free_wildcard_list(&p);
 
-// OLD non-wildcard code
-/*
+	reply.p.data[replylen++] = 0x80;
+	reply.p.data[2] = (examined & 0xff);
+	reply.p.data[3] = (dirsize & 0xff); // Can't work out how L3 is calculating this number
 
-	if (!(d = opendir(p.unixpath)))
-	{
-		fs_error(server, reply_port, net, stn, 0xA8, "Broken dir");
-		return;
-	}
-
-	// Skip to start entry
-
-	while ((dirsize < start) && (entry = readdir(d)))
-	{
-		// Ignore special files
-		if ((strlen(entry->d_name) <= 10) && (strcmp(entry->d_name, ".")) && (strcmp(entry->d_name, "..")) && strcasecmp(entry->d_name, "lost+found"))
-		{
-			strcpy((char * ) unixpath, (const char * ) p.unixpath);
-			strcat(unixpath, "/");
-			strcat(unixpath, entry->d_name);	
-
-			fs_read_xattr(unixpath, &attr);
-
-			if ((attr.perm & FS_PERM_H) == 0 || (attr.owner == active[server][active_id].userid)) // not hidden
-				dirsize++;
-		}
-	}
-
-
-	while ((examined < n) && (entry = readdir(d)))
-	{
-		struct path file;
-		char acorn_name[11];
-		char fullpath[1024];
-
-		if ((strlen(entry->d_name) <= 10) && (strcmp(entry->d_name, ".")) && (strcmp(entry->d_name, "..")) && strcasecmp(entry->d_name, "lost+found"))
-		{
-			strncpy ((char * ) acorn_name, (const char * ) entry->d_name, 10);
-			fs_unix_to_acorn(acorn_name); // Starts in unix format; this puts it into acorn format, as the variable name suggests.
-	
-			sprintf(fullpath, ":%s.%s%s%s", p.discname, p.path_from_root, (p.npath > 0) ? "." : "", acorn_name);
-
-			if (!fs_normalize_path(server, active_id, fullpath, -1, &file))
-			{
-				fs_error(server, reply_port, net, stn, 0xA8, "Broken dir");
-				closedir(d);
-				return;
-			}
-
-			if ((file.perm & FS_PERM_H) == 0 || (file.owner == active[server][active_id].userid)) // not hidden or we are the owner
-			{
-				switch (arg)
-				{
-					case 0: // Machine readable format
-					{
-						r.p.data[replylen] = htole32(file.load); replylen += 4;
-						r.p.data[replylen] = htole32(file.exec); replylen += 4;
-						r.p.data[replylen++] = file.perm;
-						r.p.data[replylen++] = file.day;
-						r.p.data[replylen++] = file.monthyear;
-						r.p.data[replylen++] = file.internal & 0xff;
-						r.p.data[replylen++] = (file.internal & 0xff00) >> 8;
-						r.p.data[replylen++] = (file.internal & 0xff0000) >> 16;
-						r.p.data[replylen++] = file.length & 0xff;
-						r.p.data[replylen++] = (file.length & 0xff00) >> 8;
-						r.p.data[replylen++] = (file.length & 0xff0000) >> 16;
-					} break;
-					case 1: // Human readable format
-					{
-						unsigned char tmp[256];
-						unsigned char permstring_l[10], permstring_r[10];
-		
-						sprintf(permstring_l, "%s%s%s%s",
-							(file.ftype == FS_FTYPE_DIR ? "D" : file.ftype == FS_FTYPE_SPECIAL ? "S" : ""),
-							((file.perm & FS_PERM_L) ? "L" : ""),
-							((file.perm & FS_PERM_OWN_W) ? "W" : ""),
-							((file.perm & FS_PERM_OWN_R) ? "R" : "") );
-
-						sprintf(permstring_r, "%s%s", 
-							((file.perm & FS_PERM_OTH_W) ? "W" : ""),
-							((file.perm & FS_PERM_OTH_R) ? "R" : "") );
-
-						sprintf (tmp, "%-10s %08lX %08lX   %06lX   %4s/%-2s     %02d/%02d/%02d %06lX", (file.npath == 0) ? (char *) "$" : (char *) file.path[file.npath - 1],
-							file.load, file.exec, file.length,
-							permstring_l, permstring_r,
-							file.day, file.monthyear & 0x0f, ((file.monthyear & 0xf0) >> 4) + 81,
-							file.internal
-							);
-							
-						strcpy((char * ) &(r.p.data[replylen]), (const char * ) tmp);
-						replylen += strlen(tmp);
-						r.p.data[replylen++] = '\0';
-
-					} break;
-					case 2: // 10 character filename format (short)
-					{
-						r.p.data[replylen++] = 0x0a;
-						sprintf((char *) &(r.p.data[replylen]), "%-10s", (file.npath == 0) ? (char *) "$" : (char *) file.path[file.npath - 1]);
-						replylen += 10;
-
-					} break;
-					case 3: // 10 character filename format (long)
-					{
-						char tmp[256];
-						char permstring_l[10], permstring_r[10];
-
-						sprintf(permstring_l, "%s%s%s%s",
-							(file.ftype == FS_FTYPE_DIR ? "D" : file.ftype == FS_FTYPE_SPECIAL ? "S" : ""),
-							((file.perm & FS_PERM_L) ? "L" : ""),
-							((file.perm & FS_PERM_OWN_W) ? "W" : ""),
-							((file.perm & FS_PERM_OWN_R) ? "R" : "") );
-
-						sprintf(permstring_r, "%s%s", 
-							((file.perm & FS_PERM_OTH_W) ? "W" : ""),
-							((file.perm & FS_PERM_OTH_R) ? "R" : "") );
-
-						sprintf (tmp, "%-10s %4s/%-2s", (file.npath == 0) ? (char *) "$" : (char *) file.path[file.npath - 1],
-							permstring_l, permstring_r
-						);
-						strcpy((char * ) &(r.p.data[replylen]), (const char * ) tmp);
-						replylen += strlen(tmp) + 1; // +1 for the 0 byte
-					} break;
-				}
-				examined++;
-				dirsize++;
-			}
-
-		}
-
-	}
-
-	while ((entry = readdir(d))) // Count any remaining entries
-	{
-
-		if ((strcmp(entry->d_name, ".")) && (strcmp(entry->d_name, "..")))
-		{
-			strcpy((char * ) unixpath, (const char * ) p.unixpath);
-			strcat(unixpath, "/");
-			strcat(unixpath, entry->d_name);	
-			fs_read_xattr(unixpath, &attr);
-
-			if ((attr.perm & FS_PERM_H) == 0) // not hidden
-				dirsize++;
-		}
-	}
-*/	
-	r.p.data[replylen++] = 0x80;
-	r.p.data[2] = (examined & 0xff);
-	r.p.data[3] = (dirsize & 0xff); // Can't work out how L3 is calculating this number
-
-/* OLD non-wildcard code
-	closedir (d);
-*/
-
-	fs_aun_send(&r, server, replylen, net, stn);
+	fsop_aun_send(&reply, replylen, f);
 
 }
 
-void fs_set_object_info(int server, unsigned short reply_port, unsigned char net, unsigned char stn, unsigned int active_id, unsigned char *data, unsigned int datalen)
+void fsop_set_object_info(struct fsop_data *f)
 {
 
-	unsigned short relative_to;
+	FS_REPLY_DATA(0x80);
 
-	struct __econet_packet_udp r;
+	unsigned short relative_to;
 
 	unsigned short command;
 
@@ -5595,12 +4687,18 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 		
 	struct path p;
 
-	command = *(data+5);
-	relative_to = *(data+3);
+	struct __fs_active *a;
 
-	if (command == 0x40 && !(fs_config[server].fs_sjfunc))
+	unsigned char *data = f->data; // Saves changing loads of stuff from the old version
+	
+	a = f->active;
+
+	command = FSOP_ARG;
+	relative_to = FSOP_CWD;
+
+	if (command == 0x40 && !(f->server->config->fs_sjfunc))
 	{
-		fs_error(server, reply_port, net, stn, 0xff, "MDFS Unsupported");
+		fsop_error(f, 0xff, "MDFS Unsupported");
 		return;
 	}
 
@@ -5613,39 +4711,34 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 		case 5: filenameposition = 8; break;
 		case 0x40: filenameposition = 16; *(data+datalen) = 0x0d; break; // Artificially terminate the filename on a 0x40 call - clients don't seem to
 		default:
-			fs_error(server, reply_port, net, stn, 0xFF, "FS Error");
+			fsop_error(f, 0xFF, "FS Error");
 			return;
 			break;
 	}
 
-	fs_copy_to_cr(path, (data+filenameposition), 1023);
+	fs_copy_to_cr(path, (f->data+filenameposition), 1023);
 
 	if (command != 4)
-		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d", "", net, stn, path, relative_to == active[server][active_id].root ? "Root" : relative_to == active[server][active_id].lib ? "Library" : "Current", command);
+		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d", "", f->net, f->stn, path, relative_to == a->root ? "Root" : relative_to == a->lib ? "Library" : "Current", command);
 	else
-		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d, attribute &%02X", "", net, stn, path, relative_to == active[server][active_id].root ? "Root" : relative_to == active[server][active_id].lib ? "Library" : "Current", command, (*(data + 6)));
+		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d, attribute &%02X", "", f->net, f->stn, path, relative_to == a->root ? "Root" : relative_to == a->lib ? "Library" : "Current", command, (*(f->data + 6)));
 	
-	if (!fs_normalize_path(server, active_id, path, relative_to, &p) || p.ftype == FS_FTYPE_NOTFOUND)
-		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
-	else if (((!FS_ACTIVE_SYST(server, active_id))) && 
-			(p.owner != active[server][active_id].userid) &&
-			(p.parent_owner != active[server][active_id].userid)
+	if (!fsop_normalize_path(f, a, path, relative_to, &p) || p.ftype == FS_FTYPE_NOTFOUND)
+		fsop_error(f, 0xD6, "Not found");
+	else if (((!FS_ACTIVE_SYST(a))) && 
+			(p.owner != a->userid) &&
+			(p.parent_owner != a->userid)
 		)
-		fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
+		fsop_error(f, 0xBD, "Insufficient access");
 	else if (command != 1 && command != 4 && (p.perm & FS_PERM_L)) // Locked
 	{
-		fs_error(server, reply_port, net, stn, 0xC3, "Entry Locked");
+		fsop_error(f, 0xC3, "Entry Locked");
 	}
 	else
 	{
 		struct objattr attr;
 	
-		r.p.ptype = ECONET_AUN_DATA;
-		r.p.port = reply_port;
-		r.p.ctrl = 0x80;
-		r.p.data[0] = r.p.data[1] = 0;
-
-		fs_read_xattr(p.unixpath, &attr, server);
+		fsop_read_xattr(p.unixpath, &attr, f);
 
 		switch (command)
 		{
@@ -5653,21 +4746,16 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 			
 				attr.load = (*(data+6)) + (*(data+7) << 8) + (*(data+8) << 16) + (*(data+9) << 24);
 				attr.exec = (*(data+10)) + (*(data+11) << 8) + (*(data+12) << 16) + (*(data+13) << 24);
-				// We need to make sure our bitwise stuff corresponds with Acorns before we do this...
-				// 20240520 Altered
-				//attr.perm = fs_perm_from_acorn(server, *(data+14)) | ((*(data+14) & 0x0c) == 0) ? (FS_PERM_OWN_W | FS_PERM_OWN_R) : 0;
-				attr.perm = fs_perm_from_acorn(server, *(data+14));
+				attr.perm = fsop_perm_from_acorn(f->server, *(data+14));
 
 				// If it's a directory whose attributes we're setting, add in WR/r if no attributes are specified
 
 				if (((*(data+14) & 0x0F) == 0))
 				{
 					if (p.ftype == FS_FTYPE_DIR)
-						attr.perm |= FS_CONF_DEFAULT_DIR_PERM(server);
-					else	attr.perm |= FS_CONF_DEFAULT_FILE_PERM(server);
+						attr.perm |= FS_CONF_DEFAULT_DIR_PERM(f->server);
+					else	attr.perm |= FS_CONF_DEFAULT_FILE_PERM(f->server);
 				}
-
-					//attr.perm |= (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R); 
 
 				// It would appear RISC PCs will send Acorn attrib &05 (r/r) when the user selects WR/r
 
@@ -5685,10 +4773,8 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 				break;
 	
 			case 4: // Set attributes only
-				// Need to convert acorn to PiFS
-				// 20240520 Altered
-				//attr.perm = fs_perm_from_acorn(server, *(data+6)) | (((*(data+6) & 0x0c) == 0) ? (FS_PERM_OWN_W | FS_PERM_OWN_R) : 0);
-				attr.perm = fs_perm_from_acorn(server, *(data+6));
+
+				attr.perm = fsop_perm_from_acorn(f->server, *(data+6));
 
 				// If it's a directory whose attributes we're setting, add in WR/r if no attributes are specified
 
@@ -5701,7 +4787,6 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 
 				if ((p.ftype == FS_FTYPE_DIR)) // It would appear Owner Write and World Read are always implied on dirs from RISC OS
 					attr.perm |= FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R;
-
 
 				break;
 
@@ -5721,15 +4806,17 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 			// No default needed - we caught it above
 		}
 
-		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d, writing to path %s, owner %04X, perm %02X, load %08X, exec %08X, homeof %04X", "", net, stn, path, relative_to == active[server][active_id].root ? "Root" : relative_to == active[server][active_id].lib ? "Library" : "Current", command, p.unixpath, attr.owner, attr.perm, attr.load, attr.exec, attr.homeof);
-		fs_write_xattr(p.unixpath, attr.owner, attr.perm, attr.load, attr.exec, attr.homeof, server);
+		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d, writing to path %s, owner %04X, perm %02X, load %08X, exec %08X, homeof %04X", "", f->net, f->stn, path, relative_to == a->root ? "Root" : relative_to == a->lib ? "Library" : "Current", command, p.unixpath, attr.owner, attr.perm, attr.load, attr.exec, attr.homeof);
+
+		fs_write_xattr(p.unixpath, attr.owner, attr.perm, attr.load, attr.exec, attr.homeof, f);
 
 		// If we get here, we need to send the reply
 
-		fs_aun_send(&r, server, 2, net, stn);
+		fsop_aun_send(&r, 2, f);
 
 	}
 }
+#endif
 
 int fs_scandir_regex(const struct dirent *d)
 {
@@ -5752,14 +4839,16 @@ void fs_free_dirent(struct dirent **list, int entries)
 // Counts number of Acorn-compatible entries in unixpath.
 // Returns the number found, or -1 for failure
 
-short fs_get_acorn_entries(int server, int active_id, char *unixpath)
+int16_t fsop_get_acorn_entries(struct fsop_data *f, unsigned char *unixpath)
 {
 
-	int entries;
-	char regex[1024];
+	int16_t entries;
+
+	unsigned char regex[1024];
+
 	struct dirent **list;
 
-	if (fs_config[server].fs_infcolon)
+	if (f->server->config->fs_infcolon)
 		sprintf(regex, "^(%s{1,%d})", FSDOTREGEX, ECONET_MAX_FILENAME_LENGTH);
 	else
 		sprintf(regex, "^(%s{1,%d})", FSREGEX, ECONET_MAX_FILENAME_LENGTH);
@@ -5782,28 +4871,25 @@ short fs_get_acorn_entries(int server, int active_id, char *unixpath)
 
 }
 
-void fs_get_object_info(int server, unsigned short reply_port, unsigned char net, unsigned char stn, unsigned int active_id, unsigned char *data, unsigned int datalen)
+
+#if 0
+/* Moved to new infrastructure */
+void fs_get_object_info(struct fsop_data *f)
 {
 
+	FS_REPLY_DATA(0x80);
+
 	unsigned short replylen = 0, relative_to;
-
-	struct __econet_packet_udp r;
-
 	unsigned short command;
-	
-
 	unsigned short norm_return;
 	char path[1024];
-		
 	struct path p;
+	unsigned char *data = f->data; /* Saves time */
 
-	command = *(data+5);
-	relative_to = *(data+3);
+	command = FSOP_ARG;
+	relative_to = FSOP_CWD;
 
-	memset(r.p.data, 0, 30);
-	r.p.port = reply_port;
-	r.p.ctrl = 0;
-	r.p.ptype = ECONET_AUN_DATA;
+	memset(reply.p.data, 0, 30);
 
 	// Use replylen as a temporary counter
 
@@ -5815,86 +4901,81 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 
 	path[replylen] = '\0'; // Null terminate instead of 0x0d in the packet
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d Get Object Info %s relative to %02X, command %d", "", net, stn, path, relative_to, command);
+	fs_debug (0, 2, "%12sfrom %3d.%3d Get Object Info %s relative to %02X, command %d", "", f->net, f->stn, path, relative_to, command);
 
-	norm_return = fs_normalize_path_wildcard(server, active_id, path, relative_to, &p, 1);
+	norm_return = fsop_normalize_path_wildcard(f, path, relative_to, &p, 1);
 
 	fs_free_wildcard_list(&p); // Not interested in anything but first entry, which will be in main struct
 
 	if (!norm_return && (p.error != FS_PATH_ERR_NODIR))
 	{
-		fs_error(server, reply_port, net, stn, 0xcc, "Bad filename");
+		fsop_error(f, 0xcc, "Bad filename");
 		return;
 	}
 
 	if ((!norm_return && p.error == FS_PATH_ERR_NODIR) || (/* norm_return && */ p.ftype == FS_FTYPE_NOTFOUND))
 	{
-		struct __econet_packet_udp reply;
-	
-		reply.p.ptype = ECONET_AUN_DATA;
-		reply.p.port = reply_port;
-		reply.p.ctrl = 0x80;
-		reply.p.data[0] = reply.p.data[1] = 0; // This is apparently how you flag not found on an examine...
+		FS_REPLY_DATA(0x80);
+
 		if (command == 6) // Longer error block
 		{
-			fs_error(server, reply_port, net, stn, 0xd6, "Not found");
+			fsop_error(f, 0xd6, "Not found");
 		}
 		else
 		{
 			reply.p.data[2] = 0; // not found.
-			fs_aun_send(&reply, server, 3, net, stn); // This will return a single byte of &00, which from the MDFS spec means 'not found' for arg = 1-5. 6 returns a hard error it seems.
+			fsop_aun_send(&reply, 3, f); // This will return a single byte of &00, which from the MDFS spec means 'not found' for arg = 1-5. 6 returns a hard error it seems.
 		}
 		return;
 
 	}
 
-	// 20240520 Stop read of directory we cannot read
-	
-	//if (p.ftype == FS_FTYPE_DIR && !((p.my_perm & FS_PERM_OWN_R) || FS_ACTIVE_SYST(server, active_id)))
-	if (p.ftype == FS_FTYPE_DIR && !((FS_PERM_EFFOWNER(server, active_id, p.owner) && (p.perm & FS_PERM_OWN_R)) || (p.perm & FS_PERM_OTH_R) || FS_ACTIVE_SYST(server, active_id)))
+	/* Prevent reading a dir we cannot read */
+
+	if (p.ftype == FS_FTYPE_DIR && !((FS_PERM_EFFOWNER(f->active, p.owner) && (p.perm & FS_PERM_OWN_R)) || (p.perm & FS_PERM_OTH_R) || FS_ACTIVE_SYST(f->active)))
 	{
-		fs_error(server, reply_port, net, stn, 0xbc, "Insufficient access");
+		fsop_error(f, 0xbc, "Insufficient access");
 		return;
 	}
 
 	replylen = 0; // Reset after temporary use above
 
-	r.p.data[replylen++] = 0;
-	r.p.data[replylen++] = 0;
-	r.p.data[replylen++] = p.ftype;
+	reply.p.data[replylen++] = 0;
+	reply.p.data[replylen++] = 0;
+	reply.p.data[replylen++] = p.ftype;
 
 	if (command == 2 || command == 5 || command == 96)
 	{
-		r.p.data[replylen++] = (p.load & 0xff);
-		r.p.data[replylen++] = (p.load & 0xff00) >> 8;
-		r.p.data[replylen++] = (p.load & 0xff0000) >> 16;
-		r.p.data[replylen++] = (p.load & 0xff000000) >> 24;
-		r.p.data[replylen++] = (p.exec & 0xff);
-		r.p.data[replylen++] = (p.exec & 0xff00) >> 8;
-		r.p.data[replylen++] = (p.exec & 0xff0000) >> 16;
-		r.p.data[replylen++] = (p.exec & 0xff000000) >> 24;
+		reply.p.data[replylen++] = (p.load & 0xff);
+		reply.p.data[replylen++] = (p.load & 0xff00) >> 8;
+		reply.p.data[replylen++] = (p.load & 0xff0000) >> 16;
+		reply.p.data[replylen++] = (p.load & 0xff000000) >> 24;
+		reply.p.data[replylen++] = (p.exec & 0xff);
+		reply.p.data[replylen++] = (p.exec & 0xff00) >> 8;
+		reply.p.data[replylen++] = (p.exec & 0xff0000) >> 16;
+		reply.p.data[replylen++] = (p.exec & 0xff000000) >> 24;
 	}
 
 	if (command == 3 || command == 5 || command == 96)
 	{
-		r.p.data[replylen++] = (p.length & 0xff);
-		r.p.data[replylen++] = (p.length & 0xff00) >> 8;
-		r.p.data[replylen++] = (p.length & 0xff0000) >> 16;
+		reply.p.data[replylen++] = (p.length & 0xff);
+		reply.p.data[replylen++] = (p.length & 0xff00) >> 8;
+		reply.p.data[replylen++] = (p.length & 0xff0000) >> 16;
 	}
 
 	if (command == 4 || command == 5 || command == 96)
 	{
-		r.p.data[replylen++] = fs_perm_to_acorn(server, p.perm, p.ftype);
+		reply.p.data[replylen++] = fsop_perm_to_acorn(f->server, p.perm, p.ftype);
 	}
 
 	if (command == 1 || command == 5 || command == 96)
 	{
-		r.p.data[replylen++] = p.day;
-		r.p.data[replylen++] = p.monthyear;
+		reply.p.data[replylen++] = p.day;
+		reply.p.data[replylen++] = p.monthyear;
 	}
 
 	if (command == 4 || command == 5 || command == 96) // arg 4 doesn't request ownership - but the RISC OS PRM says it does, so we'll put this back
-		r.p.data[replylen++] = ((FS_ACTIVE_UID(server,active_id) == p.owner) || FS_ACTIVE_SYST(server,active_id)) ? 0x00 : 0xff; 
+		reply.p.data[replylen++] = ((FS_ACTIVE_UID(f->active) == p.owner) || FS_ACTIVE_SYST(f->active)) ? 0x00 : 0xff; 
 
 	if (command == 6)
 	{
@@ -5903,22 +4984,18 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 
 		if (p.ftype != FS_FTYPE_DIR)
 		{
-			fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
+			fsop_error(f, 0xAF, "Types don't match");
 			return;
 		}
 
-		r.p.data[replylen++] = 0; // Undefined on this command
-		r.p.data[replylen++] = 10; // Dir name length - Sounds like FSOp 18cmd6 can only take 10 characters
-		//r.p.data[replylen++] = ECONET_MAX_FILENAME_LENGTH; // Dir name length - 20231230 This is meant to be 0! // Seems to break things though....
-		//r.p.data[replylen++] = 0; // Undefined on this command
+		reply.p.data[replylen++] = 0; // Undefined on this command
+		reply.p.data[replylen++] = 10; // Dir name length - Sounds like FSOp 18cmd6 can only take 10 characters
 
-		memset ((char *) &(r.p.data[replylen]), 32, ECONET_MAX_FILENAME_LENGTH); // Pre-fill with spaces in case this is the root dir
+		memset ((char *) &(reply.p.data[replylen]), 32, ECONET_MAX_FILENAME_LENGTH); // Pre-fill with spaces in case this is the root dir
 	
 		if (p.npath == 0) // Root
 		{
-			strncpy((char * ) &(r.p.data[replylen]), (const char * ) "$         ", 11);
-			//r.p.data[replylen] = '$';
-			//r.p.data[replylen+ECONET_MAX_FILENAME_LENGTH+1] = '\0';
+			strncpy((char * ) &(reply.p.data[replylen]), (const char * ) "$         ", 11);
 		}
 		else
 		{
@@ -5927,76 +5004,75 @@ void fs_get_object_info(int server, unsigned short reply_port, unsigned char net
 			memcpy(shortname, p.acornname, 10);
 			shortname[10] = '\0';
 
-			// sprintf (hr_fmt_string, "%%-%ds", ECONET_MAX_FILENAME_LENGTH); // This format can only take a maximum of 10 chars (FS Op 18 arg 6)
-			snprintf(&(r.p.data[replylen]), 11, "%-10s", (const char * ) shortname);
-			//snprintf(&(r.p.data[replylen]), ECONET_MAX_FILENAME_LENGTH+1, hr_fmt_string, (const char * ) p.acornname);
+			snprintf(&(reply.p.data[replylen]), 11, "%-10s", (const char * ) shortname);
 		}
 
 		replylen += 10;
-		//replylen += ECONET_MAX_FILENAME_LENGTH;
 
-		r.p.data[replylen++] = (active[server][active_id].userid == p.owner) ? 0x00 : 0xff; 
+		reply.p.data[replylen++] = (f->userid == p.owner) ? 0x00 : 0xff; 
 
-		r.p.data[replylen++] = fs_get_acorn_entries(server, active_id, p.unixpath); // Number of directory entries
+		reply.p.data[replylen++] = fsop_get_acorn_entries(f, p.unixpath); // Number of directory entries
 
 	}
 
 	if (command == 64) // SJ Research function
 	{
 
-		if (!(fs_config[server].fs_sjfunc))
+		if (!(f->server->config->fs_sjfunc))
 		{
-			fs_error(server, reply_port, net, stn, 0xff, "SJR Not enabled");
+			fsop_error(f, 0xff, "Not enabled");
 			return;
 		}
 
 		// Create date. (File type done for all replies above)
-		r.p.data[replylen++] = p.c_day;
-		r.p.data[replylen++] = p.c_monthyear;
-		r.p.data[replylen++] = p.c_hour;
-		r.p.data[replylen++] = p.c_min;
-		r.p.data[replylen++] = p.c_sec;
+		reply.p.data[replylen++] = p.c_day;
+		reply.p.data[replylen++] = p.c_monthyear;
+		reply.p.data[replylen++] = p.c_hour;
+		reply.p.data[replylen++] = p.c_min;
+		reply.p.data[replylen++] = p.c_sec;
 
 		// Modification date / time
-		r.p.data[replylen++] = p.day;
-		r.p.data[replylen++] = p.monthyear;
-		r.p.data[replylen++] = p.hour;
-		r.p.data[replylen++] = p.min;
-		r.p.data[replylen++] = p.sec;
+		reply.p.data[replylen++] = p.day;
+		reply.p.data[replylen++] = p.monthyear;
+		reply.p.data[replylen++] = p.hour;
+		reply.p.data[replylen++] = p.min;
+		reply.p.data[replylen++] = p.sec;
 
 	}
 
 	if (command == 65) // Not yet implemented
 	{
-		fs_error(server, reply_port, net, stn, 0x85, "FS Error");
-	return;
+		fsop_error(f, 0x85, "FS Error");
+		return;
 	}
 
 	if (command == 96) // PiFS canonicalize object name function
 	{
-		memcpy(&(r.p.data[replylen]), p.acornfullpath, strlen(p.acornfullpath));
-		r.p.data[replylen+strlen(p.acornfullpath)] = '.';
-		memcpy(&(r.p.data[replylen+strlen(p.acornfullpath)+1]), p.acornname, strlen(p.acornname));
-		r.p.data[replylen+strlen(p.acornfullpath)+strlen(p.acornname)+1] = 0x0D;
+		memcpy(&(reply.p.data[replylen]), p.acornfullpath, strlen(p.acornfullpath));
+		reply.p.data[replylen+strlen(p.acornfullpath)] = '.';
+		memcpy(&(reply.p.data[replylen+strlen(p.acornfullpath)+1]), p.acornname, strlen(p.acornname));
+		reply.p.data[replylen+strlen(p.acornfullpath)+strlen(p.acornname)+1] = 0x0D;
 		replylen += strlen(p.acornfullpath) + 1 + strlen(p.acornname) + 1;
 	}
 
-	fs_aun_send(&r, server, replylen, net, stn);
+	fsop_aun_send(&reply, replylen, f);
 		
 }
 
 // Save file
-void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned char stn, unsigned int active_id, unsigned char *data, int datalen, unsigned char rx_ctrl)
+void fs_save(struct fsop_data *f)
 {
 
-	unsigned char incoming_port, ack_port;
-	unsigned long load, exec, length;
-	unsigned char create_only;
-	char filename[1024];
+	FS_R_DATA(0x80);
 
-	struct __econet_packet_udp r;
+	unsigned char 	*data = f->data; /* Just convenient - don't have to change them all to f->data! */
+	unsigned char 	incoming_port, ack_port;
+	uint32_t	load, exec, length;
+	uint8_t 	create_only;
+	char 		filename[1024];
 
 	create_only = (*(data+1) == 0x1d ? 1 : 0); // Function 29 just creates a file of the requisite length - no data transfer phase.
+
 	ack_port = *(data+2);	
 	
 	// Anyone know what the bytes at data+3, 4 are?
@@ -6009,54 +5085,51 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 	
 	length = (*(data+13)) + ((*(data+14)) << 8) + ((*(data+15)) << 16);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d %s %s %08lx %08lx %06lx", "", net, stn, (create_only ? "CREATE" : "SAVE"), filename, load, exec, length);
+	fs_debug (0, 1, "%12sfrom %3d.%3d %s %s %08lx %08lx %06lx", "", f->net, f->stn, (create_only ? "CREATE" : "SAVE"), filename, load, exec, length);
 
-	if (create_only || (incoming_port = fs_find_bulk_port(server)))
+	if (create_only || (incoming_port = fsop_find_bulk_port(f->server)))
 	{
 		struct path p;
 
-		if (fs_normalize_path(server, active_id, filename, active[server][active_id].current, &p))
+		if (fsop_normalize_path(f, filename, f->active->current, &p))
 		{
 			// Path found
 	
 			if (p.ftype == FS_FTYPE_FILE && p.perm & FS_PERM_L) // Locked - cannot write
 			{
-				fs_error(server, reply_port, net, stn, 0xC0, "Entry Locked");
+				fsop_error(f, 0xC0, "Entry Locked");
 			}
 			else if (p.ftype == FS_FTYPE_DIR)
-				fs_error(server, reply_port, net, stn, 0xFF, "Wrong object type");
+				fsop_error(f, 0xFF, "Wrong object type");
 			else if (p.ftype != FS_FTYPE_FILE && p.ftype != FS_FTYPE_NOTFOUND) // Not a file!
-				fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
+				fsop_error(f, 0xBD, "Insufficient access");
 			else
 			{
 				if (	((p.ftype != FS_FTYPE_NOTFOUND) && (p.my_perm & FS_PERM_OWN_W)) || 
 					(
 						p.ftype == FS_FTYPE_NOTFOUND && 
-						(	(	FS_PERM_EFFOWNER(server, active_id, p.parent_owner) // Owner & SYST can always write to a parent directory - at least for now - stuffs up RISC OS otherwise.
-								//(p.parent_perm & FS_PERM_OWN_W) && 
-								//(
-									//(p.parent_owner == active[server][active_id].userid) || (FS_ACTIVE_SYST(server,active_id))
-								//)
+						(	(	FS_PERM_EFFOWNER(f->active, p.parent_owner) // Owner & SYST can always write to a parent directory - at least for now - stuffs up RISC OS otherwise.
 							) ||
 							(p.parent_perm & FS_PERM_OTH_W)
 						)
 					)
-					|| FS_ACTIVE_SYST(server, active_id)
+					|| FS_ACTIVE_SYST(f->active)
 				)
 				{
-					short internal_handle;
+					struct __fs_file 	*internal_handle;
+					int8_t			err;
 
 					// Can write to it one way or another
 		
 					// Use interlock function here
-					internal_handle = fs_open_interlock(server, p.unixpath, 3, active[server][active_id].userid);
+					internal_handle = fsop_open_interlock(f, p.unixpath, 3, &err, 0);
 
-					if (internal_handle == -3)
-						fs_error(server, reply_port, net, stn, 0xC0, "Too many open files");
-					else if (internal_handle == -2)
-						fs_error(server, reply_port, net, stn, 0xc2, "Already open"); // Interlock failure
-					else if (internal_handle == -1)
-						fs_error(server, reply_port, net, stn, 0xFF, "FS Error"); // File didn't open when it should
+					if (err == -3)
+						fsop_error(f, 0xC0, "Too many open files");
+					else if (err == -2)
+						fsop_error(f, 0xc2, "Already open"); // Interlock failure
+					else if (err == -1)
+						fsop_error(f, 0xFF, "FS Error"); // File didn't open when it should
 					else
 					{
 
@@ -6065,25 +5138,21 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 						perm = FS_PERM_PRESERVE;
 
 						if (create_only)
-							perm = FS_CONF_DEFAULT_FILE_PERM(server);
+							perm = FS_CONF_DEFAULT_FILE_PERM(f->server);
 
-						fs_write_xattr(p.unixpath, active[server][active_id].userid, perm, load, exec, 0, server);  // homeof = 0 because it's a file
+						fs_write_xattr(p.unixpath, f->userid, perm, load, exec, 0, f);  // homeof = 0 because it's a file
 
-						r.p.port = reply_port;
-						r.p.ctrl = rx_ctrl; // Copy from request
-						r.p.ptype = ECONET_AUN_DATA;
-			
-						r.p.data[0] = r.p.data[1] = 0;
+						r.p.ctrl = f->ctrl; // Copy from request
 						r.p.data[2] = incoming_port;
 						r.p.data[3] = (1280 & 0xff); // maximum tx size
 						r.p.data[4] = (1280 & 0xff00) >> 8;
 				
-						if (!create_only) fs_aun_send (&r, server, 5, net, stn);
+						if (!create_only) fsop_aun_send (&r, 5, f);
 						else
 						{
 							// Write 'length' bytes of garbage to the file (probably nulls)
 
-							ftruncate(fileno(fs_files[server][internal_handle].handle), length);
+							ftruncate(fileno(internal_handle->handle), length);
 						}
 						
 						if (create_only || length == 0)
@@ -6101,183 +5170,61 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 							{
 								localtime_r(&(s.st_mtime), &t);
 								fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(monthyear), &(day));
-								//day = t.tm_mday;
-								//monthyear = (((t.tm_year - 81 - 40) & 0x0f) << 4) | ((t.tm_mon+1) & 0x0f);	
 							}	
 								
-							fs_close_interlock(server, internal_handle, 3);
-							r.p.port = reply_port;
-							r.p.ctrl = rx_ctrl;
-							r.p.ptype = ECONET_AUN_DATA;
-							r.p.data[0] = r.p.data[1] = 0;
-							//r.p.data[2] = FS_PERM_OWN_R | FS_PERM_OWN_W;
-							r.p.data[2] = fs_perm_to_acorn(server, FS_CONF_DEFAULT_FILE_PERM(server), FS_FTYPE_FILE);
+							fsop_close_interlock(f, internal_handle, 3);
+
+							r.p.ctrl = f->ctrl;
+							r.p.data[2] = fsop_perm_to_acorn(f->server, FS_CONF_DEFAULT_FILE_PERM(f->server), FS_FTYPE_FILE);
 							r.p.data[3] = day;
 							r.p.data[4] = monthyear;
 
-							fs_aun_send (&r, server, 5, net, stn);
+							fsop_aun_send (&r, 5, f);
 						}
 						else
 						{
-							fs_bulk_ports[server][incoming_port].handle = internal_handle;
-							fs_bulk_ports[server][incoming_port].net = net;
-							fs_bulk_ports[server][incoming_port].stn = stn;
-							fs_bulk_ports[server][incoming_port].ack_port = ack_port;
-							fs_bulk_ports[server][incoming_port].length = length;
-							fs_bulk_ports[server][incoming_port].received = 0; // Initialize
-							fs_bulk_ports[server][incoming_port].reply_port = reply_port;
-							fs_bulk_ports[server][incoming_port].rx_ctrl = rx_ctrl;
-							fs_bulk_ports[server][incoming_port].mode = 3;
-							fs_bulk_ports[server][incoming_port].user_handle = 0; // Rogue for no user handle, because never hand out user handle 0. This stops the bulk transfer routine trying to increment a cursor on a user handle which doesn't exist.
-							strncpy(fs_bulk_ports[server][incoming_port].acornname, p.acornname, 12);
-							fs_bulk_ports[server][incoming_port].last_receive = (unsigned long long) time(NULL);
+
+							struct __fs_bulk_port	*bp;
+
+							/* We are required to make up the struct and put it in the list */
+
+							FS_LIST_MAKENEW(struct __fs_bulk_port,f->server->bulkports,1,bp,"FS","Allocate new bulk port structure");
+							bp->bulkport = incoming_port;
+							bp->handle = internal_handle;
+							bp->active = f->active;
+							bp->ack_port = ack_port;
+							bp->length = length;
+							bp->received = 0; /* Initialie */
+							bp->rx_ctrl = f->ctrl;
+							bp->mode = 3;
+							bp->is_gbpb = 0;
+							bp->user_handle = 0; // Rogue for no user handle, because never hand out user handle 0. This stops the bulk transfer routine trying to increment a cursor on a user handle which doesn't exist.
+							strncpy(bp->acornname, p.acornname, 12);
+							bp->last_receive = (unsigned long long) time(NULL);
 						}
 					}
 				}
 				else
 		  		{
-					fs_debug (0, 2, "%12sfrom %3d.%3d %s %s ftype=%02X, parent_perm=%02X, my_perm=%02X, parent_owner=%04X, uid=%04X", "", net, stn, (create_only ? "CREATE" : "SAVE"), filename, p.ftype, p.parent_perm, p.my_perm, p.parent_owner, active[server][active_id].userid);
-				        fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
+					fs_debug (0, 2, "%12sfrom %3d.%3d %s %s ftype=%02X, parent_perm=%02X, my_perm=%02X, parent_owner=%04X, uid=%04X", "", f->net, f->stn, (create_only ? "CREATE" : "SAVE"), filename, p.ftype, p.parent_perm, p.my_perm, p.parent_owner, f->userid);
+				        fsop_error(f, 0xBD, "Insufficient access");
 			 	}
 
 
 			}
 
 		}
-		else fs_error(server, reply_port, net, stn, 0xCC, "Bad path");
+		else fsop_error(f, 0xCC, "Bad path");
 	}
 	else
-		fs_error(server, reply_port, net, stn, 0xC0, "Too many open files");
+		fsop_error(f, 0xC0, "Too many open files");
 	
 	
 }
 
-/*
- * Read free space.
- *
- * Now done in new structure
- */
+/* Moved to new structure */
+/* This is probably best moved stright to the fsop/ folder - can easily be re-written to be far shorter */
 
-/*
-void fs_free(int server, unsigned short reply_port, unsigned char net, unsigned char stn, int active_id, unsigned char *data, int datalen)
-{
-
-	struct __econet_packet_udp r;
-	unsigned char path[1024];
-	unsigned short disc;
-	unsigned char discname[17], tmp[17];
-
-	r.p.port = reply_port;
-	r.p.ctrl = 0x80;
-	r.p.ptype = ECONET_AUN_DATA;
-	r.p.data[0] = r.p.data[1] = 0;
-
-	fs_copy_to_cr(tmp, data+5, 16);
-	snprintf((char * ) discname, 17, "%-16s", (const char * ) tmp);
-
-	fs_debug (0, 2, "%12sfrom %3d.%3d Read free space on %s", "", net, stn, discname);
-
-	disc = 0;
-	while (disc < ECONET_MAX_FS_DISCS)
-	{
-		char realname[20];
-		snprintf(realname, 17, "%-16s", (const char * ) fs_discs[server][disc].name);
-
-		if (!strcasecmp((const char *) discname, (const char *) realname))
-		{	
-			struct statvfs s;
-
-			snprintf((char * ) path, 1024, "%s/%1d%s",(const char * ) fs_stations[server].directory, disc, (const char * ) fs_discs[server][disc].name);
-	
-			if (!statvfs((const char * ) path, &s))
-			{
-				unsigned long long f; // free space
-				unsigned long long e; // extent of filesystem
-
-				f = (s.f_bsize >> 8) * s.f_bavail;
-				e = (s.f_bsize >> 8) * s.f_blocks;
-
-				// This is well dodgy and probably no use unless you put the filestore on a smaller filing system
-
-				if (f > 0xffffff) f = 0x7fffff;
-
-				r.p.data[2] = (f % 256) & 0xff;
-				r.p.data[3] = ((f >> 8) % 256) & 0xff;
-				r.p.data[4] = ((f >> 16) % 256) & 0xff;
-
-				if (e > 0xffffff) e = 0x7fffff;
-
-				r.p.data[5] = (e % 256) & 0xff;
-				r.p.data[6] = ((e >> 8) % 256) & 0xff;
-				r.p.data[7] = ((e >> 16) % 256) & 0xff;
-
-				fs_aun_send(&r, server, 8, net, stn);
-				return;
-
-			}
-			else fs_error(server, reply_port, net, stn, 0xFF, "FS Error");	
-		}
-		disc++;
-	}
-	
-	fs_error(server, reply_port, net, stn, 0xFF, "No such disc");
-
-	
-}
-*/
-
-/* Moved to new structure
- *
-// Return error specifying who owns a file
-void fs_owner(int server, unsigned short reply_port, int active_id, uint8_t relative_to, unsigned char net, unsigned char stn, unsigned char *command)
-{
-
-	struct path p;
-	unsigned char path[256];
-	unsigned char result[30];
-	unsigned char username[11];
-	unsigned short ptr_file, ptr;
-
-	fs_copy_to_cr(path, command, 1023);
-
-	fs_debug (0, 1, "%12sfrom %3d.%3d *OWNER %s", "", net, stn, path);
-
-	ptr = 0;
-
-	while (*(command + ptr) == ' ' && ptr < strlen((const char *) command))
-		ptr++;
-
-	if (ptr == strlen((const char *) command))
-		fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
-
-	ptr_file = ptr;
-
-	while (*(command + ptr) != ' ' && ptr < strlen((const char *) command))
-		ptr++;
-
-	*(command + ptr) = '\0';
-
-	strncpy((char * ) path, (const char * ) &(command[ptr_file]), 255);
-
-	//if (!fs_normalize_path(server, active_id, path, active[server][active_id].current, &p) || p.ftype == FS_FTYPE_NOTFOUND)
-	if (!fs_normalize_path(server, active_id, path, relative_to, &p) || p.ftype == FS_FTYPE_NOTFOUND)
-		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
-	else
-	{
-		if (!((FS_ACTIVE_SYST(server, active_id)) || (p.owner == active[server][active_id].userid) || (p.parent_owner == active[server][active_id].userid))) // Not system user, and doesn't own parent directory
-		{
-			fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
-			return;
-		}
-
-		snprintf(username, 11, "%-10s", users[server][p.owner].username);
-		snprintf(result, 30, "Owner: %-10s %04d", username, p.owner);
-
-		fs_error(server, reply_port, net, stn, 0xFF, result);		
-
-	}
-}
-*/
 // Change ownership
 void fs_chown(int server, unsigned short reply_port, int active_id, unsigned char net, unsigned char stn, unsigned char *command)
 {
@@ -6408,6 +5355,7 @@ void fs_chown(int server, unsigned short reply_port, int active_id, unsigned cha
 		
 	}
 }
+#endif
 
 // Is a file open for reading or writing?
 // This is the Econet locking mechanism.
@@ -6417,87 +5365,93 @@ void fs_chown(int server, unsigned short reply_port, int active_id, unsigned cha
 // Returns -3 for too many files, -1 for file didn't exist when it should or can't open, or internal handle for OK. This will also attempt to open the file 
 // -2 = interlock failure
 // The path is a unix path - we look it up in the tables of file handles
-short fs_open_interlock(int server, unsigned char *path, unsigned short mode, unsigned short userid)
+struct __fs_file * fsop_open_interlock(struct fsop_data *f, unsigned char *path, uint8_t mode, int8_t *err, uint8_t dir)
 {
 
-	unsigned short count;
+	struct __fs_file	*file;
 
-	fs_debug (0, 2, "%12sInterlock on server %d attempting to open path %s, mode %d, userid %d", "", server, path, mode, userid);
+	*err = 0; /* initialize */
 
-	count = 0;
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "Interlock attempting to open path %s, mode %d, userid %04X", path, mode, f->userid);
 
-	while (count < ECONET_MAX_FS_FILES)
+	file = f->server->files;
+
+	while (file)
 	{
-		if (fs_files[server][count].handle && !strcmp(fs_files[server][count].name, path)) // Handle check ensures this is an active entry
+		if (!strcmp(file->name, path)) // Handle check ensures this is an active entry
 		{
 			if (mode >= 2) // We want write
-				return -2; // If there is an active entry, someone must be reading or writing, so we can't write.
+			{
+				// If there is an active entry, someone must be reading or writing, so we can't write.
+				
+				*err = -2;
+				return NULL;
+			}
 			else
-				if (fs_files[server][count].writers == 0) // We can open this existing handle for reading
+				if (file->writers == 0) // We can open this existing handle for reading
 				{
-					fs_files[server][count].readers++;
-					fs_debug (0, 2, "%12sInterlock opened internal dup handle %d, mode %d. Readers = %d, Writers = %d, path %s", "", count, mode, fs_files[server][count].readers, fs_files[server][count].writers, fs_files[server][count].name);
-					return count; // Return the index into fs_files
+					file->readers++;
+					fs_debug_full (0, 2, f->server, f->net, f->stn, "Interlock opened internal dup handle, mode %d. Readers = %d, Writers = %d, path %s", mode, file->readers, file->writers, file->name);
+					return file; // Return the index into fs_files
 				}
 				else // We can't open for reading because someone else has it open for writing
-					return -2;
+				{
+					*err = -2;
+					return NULL;
+				}
 		}
-		else 	count++;
+		else 	file = file->next;
 	}
 
 	// If we've got here, then there is no existing handle for *path. Create one
 
-	count = 0;
+	FS_LIST_MAKENEW(struct __fs_file,f->server->files,1,file,"FS","New internal file descriptor struct");
 
-	while (count  < ECONET_MAX_FS_FILES)
+	file->handle = fopen(path, (mode == 1 ? "r" : (mode == 2 ? "r+" : "w+"))); // These correspond to OPENIN, OPENUP and OPENOUT. OPENUP can only be used if the file exists, so this line fails if it doesn't. Whereas w+ == OPENOUT, which can create a file.
+
+	if (!file->handle) /* Can't open */
 	{
-		if (fs_files[server][count].handle == NULL) // Empty descriptor
-		{
-			fs_files[server][count].handle = fopen(path, (mode == 1 ? "r" : (mode == 2 ? "r+" : "w+"))); // These correspond to OPENIN, OPENUP and OPENOUT. OPENUP can only be used if the file exists, so this line fails if it doesn't. Whereas w+ == OPENOUT, which can create a file.
-
-			if (!fs_files[server][count].handle)
-				return -1; // Failure
-	
-			strcpy(fs_files[server][count].name, path);
-			if (mode == 1)	fs_files[server][count].readers = 1;
-			else		fs_files[server][count].writers = 1;
-
-			if (mode == 3) // Take ownereship on OPENOUT
-			{
-				// 20240516 - modified - line below preserves existing permissions fs_write_xattr(path, userid, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0, 0, server);
-				fs_write_xattr(path, userid, FS_PERM_PRESERVE, 0, 0, 0, server);
-			}
-	
-			fs_debug (0, 2, "%12sInterlock opened internal handle %d, mode %d. Readers = %d, Writers = %d, path %s", "", count, mode, fs_files[server][count].readers, fs_files[server][count].writers, fs_files[server][count].name);
-			return count;
-		}
-		else count++;
+		*err = -1;
+		return NULL;
 	}
+	
+	strcpy(file->name, path);
 
-	// If we got here, then we couldn't find a spare descriptor - return 0
+	file->readers = file->writers = 0;
 
-	return 0;
+	if (mode == 1)	file->readers = 1;
+	else		file->writers = 1;
+
+	if (mode == 3) // Take ownereship on OPENOUT
+	{
+		// 20240516 - modified - line below preserves existing permissions fs_write_xattr(path, userid, FS_PERM_OWN_W | FS_PERM_OWN_R, 0, 0, 0, server);
+		fsop_write_xattr(path, f->userid, FS_PERM_PRESERVE, 0, 0, 0, f);
+	}
+	
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "Interlock opened internal handle: mode %d. Readers = %d, Writers = %d, path %s", mode, file->readers, file->writers, file->name);
+	return file;
 
 }
 
 // Reduces the reader/writer count by 1 and, if both are 0, closes the file handle
-void fs_close_interlock(int server, unsigned short index, unsigned short mode)
+// Note, this is different to open_interlock because it takes a server struct. 
+// That's because it may be called by the load dequeuer dump function
+void fsop_close_interlock(struct __fs_station *s, struct __fs_file * file, uint8_t mode)
 {
 	if (mode == 1) // Reader close
-		fs_files[server][index].readers--;
-	else	fs_files[server][index].writers--;
+		file->readers--;
+	else	file->writers--;
 
-	fs_debug (0, 2, "%12sInterlock close internal handle %d, mode %d. Readers now = %d, Writers now = %d, path %s", "", index, mode, fs_files[server][index].readers, fs_files[server][index].writers, fs_files[server][index].name);
+	fs_debug (0, 2, "%12s Interlock close internal handle: mode %d. Readers now = %d, Writers now = %d, path %s", "", mode, file->readers, file->writers, file->name);
 
 	// Safety valve here - only close when both are 0, not <= 0
 	// Otherwise we sometimes overclose - e.g. in the fs_garbage_collect() routine
 	
-	// if (fs_files[server][index].readers <= 0 && fs_files[server][index].writers <= 0)
-	if (fs_files[server][index].readers == 0 && fs_files[server][index].writers == 0)
+	if (file->readers == 0 && file->writers == 0)
 	{
-		fs_debug (0, 2, "%12sInterlock closing internal handle %d in operating system", "", index);
-		fclose(fs_files[server][index].handle);
-		fs_files[server][index].handle = NULL; // Flag unused
+		fs_debug (0, 2, "%12s Interlock closing internal handle for %s in operating system", "", file->name);
+		fclose(file->handle);
+		FS_LIST_SPLICEFREE(s->files,file,"FS","Freeing internal file structure");
 	}
 
 }
@@ -6521,6 +5475,8 @@ unsigned int fs_count_dir_entries(char *path)
 
 }
 
+#if 0
+/* Moved to new structure */
 // Copy file(s)
 void fs_copy(int server, unsigned short reply_port, int active_id, unsigned char net, unsigned char stn, unsigned char *command)
 {
@@ -6616,7 +5572,7 @@ void fs_copy(int server, unsigned short reply_port, int active_id, unsigned char
 			return;
 		}
 
-		fs_read_xattr(e->unixpath, &a, server);
+		fsop_read_xattr(e->unixpath, &a, server);
 
 		if (p_dst.ftype == FS_FTYPE_DIR)
 			sprintf(destfile, "%s/%s", p_dst.unixpath, e->unixfname);
@@ -7094,9 +6050,6 @@ void fs_rename(int server, unsigned short reply_port, int active_id, unsigned ch
 		return;
 	}
 
-	//fs_debug (0, 1, "Rename parms: from locked: %s, from_owner %04x, from_parent_owner %04x, to_ftype %02x, to_owner %04x, to_parent_owner %04x, to_perm %02x, to_parent_perm %02x", 
-			//(p_from.perm & FS_PERM_L ? "Yes" : "No"), p_from.owner, p_from.parent_owner, p_to.ftype, p_to.owner, p_to.parent_owner, p_to.perm, p_to.parent_perm);
-
 	if (p_from.perm & FS_PERM_L) // Source locked
 	{
 		fs_error(server, reply_port, net, stn, 0xC3, "Entry Locked");
@@ -7193,7 +6146,6 @@ void fs_rename(int server, unsigned short reply_port, int active_id, unsigned ch
 
 }
 	
-
 // Delete a file
 void fs_delete(int server, unsigned short reply_port, int active_id, unsigned char net, unsigned char stn, int relative_to, unsigned char *command)
 {
@@ -7431,7 +6383,6 @@ void fs_info(int server, unsigned short reply_port, int active_id, unsigned char
 
 }
 
-
 // Change permissions
 void fs_access(int server, unsigned short reply_port, int active_id, unsigned char net, unsigned char stn, unsigned char *command)
 {
@@ -7510,91 +6461,6 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 			
 
 	}
-			
-	
-	/* OLD NON-SSCANF CODE
-	ptr = 0;
-
-	while (ptr < strlen((const char *) command) && *(command+ptr) == ' ')
-		ptr++;
-
-	if (ptr == strlen((const char *) command)) // No filespec
-	{
-		fs_error(server, reply_port, net, stn, 0xFC, "Bad file name");
-		return;
-	}
-
-	path_ptr = ptr;
-
-	while (ptr < strlen((const char *) command) && *(command+ptr) != ' ')
-		ptr++;
-
-	if (ptr == strlen((const char *) command)) // No access string given
-	{
-		fs_error(server, reply_port, net, stn, 0xCF, "Bad attribute");
-		return;
-	}
-
-
-	//fs_debug (0, 1, "Command: %s, path_ptr = %d, ptr = %d", command, path_ptr, ptr);
-
-	strncpy((char * ) path, (const char * ) command + path_ptr, (ptr - path_ptr));
-
-	path[ptr - path_ptr] = '\0'; // Terminate the path
-
-
-	ptr++;
-
-	while (ptr < strlen((const char *) command) && *(command+ptr) == ' ') // Skip spaces again
-		ptr++;
-
-	if (ptr == strlen((const char *) command)) // No access string given
-	{
-		fs_error(server, reply_port, net, stn, 0xCF, "Bad attribute");
-		return;
-	}
-
-	perm = 0;
-
-	while (ptr < strlen((const char *) command) && *(command+ptr) != '/')
-	{
-		switch (*(command+ptr))
-		{
-			case 'W': perm |= FS_PERM_OWN_W; break;
-			case 'R': perm |= FS_PERM_OWN_R; break;
-			case 'H': perm |= FS_PERM_H; break; // Hidden from directory listings
-			case 'L': perm |= FS_PERM_L; break; // Locked
-			default:
-			{
-				fs_error(server, reply_port, net, stn, 0xCF, "Bad attribute");
-				return;
-			}
-		}
-		ptr++;
-
-	}
-
-	if (ptr != strlen((const char *) command))
-	{
-		ptr++; // Skip the '/'
-
-		while (ptr < strlen((const char *) command) && (*(command+ptr) != ' ')) // Skip trailing spaces too
-		{
-			switch (*(command+ptr))
-			{
-				case 'W': perm |= FS_PERM_OTH_W; break;
-				case 'R': perm |= FS_PERM_OTH_R; break;
-				default: 
-				{
-					fs_error(server, reply_port, net, stn, 0xCF, "Bad attribute");
-					return;
-				}
-			}
-			ptr++;
-		}
-	}
-			
-	*/
 
 	// Normalize the path
 
@@ -7651,6 +6517,7 @@ void fs_access(int server, unsigned short reply_port, int active_id, unsigned ch
 	fs_reply_success(server, reply_port, net, stn, 0, 0);
 }
 
+// Moved to new structure
 // Read discs
 void fs_read_discs(int server, unsigned short reply_port, unsigned char net, unsigned char stn, int active_id, unsigned char *data, int datalen)
 {
@@ -7676,15 +6543,6 @@ void fs_read_discs(int server, unsigned short reply_port, unsigned char net, uns
 
 	fs_debug (0, 2, "%12sfrom %3d.%3d Read Discs from %d (up to %d)", "", net, stn, start, number);
 
-	/* This appears to be wrong. 'start' as delivered by NFS is not, for example, 3 for the 3rd existent disc, it's 3 for disc number 3. 
-	while (disc_ptr < ECONET_MAX_FS_DISCS && found < start)
-	{
-		if (fs_discs[server][disc_ptr].name[0] != '\0') // Found an active disc
-			found++;
-		disc_ptr++;
-	}
-	*/
-
 	disc_ptr = start;
 
 	if (disc_ptr < ECONET_MAX_FS_DISCS) // See if there are any to insert
@@ -7708,7 +6566,6 @@ void fs_read_discs(int server, unsigned short reply_port, unsigned char net, uns
 
 }
 
-/* Moved to new structure
 // Read time
 void fs_read_time(int server, unsigned short reply_port, unsigned char net, unsigned char stn, int active_id, unsigned char *data, int datalen)
 {
@@ -7741,7 +6598,6 @@ void fs_read_time(int server, unsigned short reply_port, unsigned char net, unsi
 	fs_aun_send(&r, server, 7, net, stn);
 
 }
-*/
 
 // Read logged on users
 void fs_read_logged_on_users(int server, unsigned short reply_port, unsigned char net, unsigned char stn, int active_id, unsigned char *data, int datalen)
@@ -7819,7 +6675,6 @@ void fs_read_logged_on_users(int server, unsigned short reply_port, unsigned cha
 	fs_aun_send (&r, server, ptr, net, stn);
 }
 
-/* Now in separate file
 // Read user information
 void fs_read_user_info(int server, unsigned short reply_port, unsigned char net, unsigned char stn, int active_id, unsigned char *data, int datalen)
 {
@@ -7866,9 +6721,7 @@ void fs_read_user_info(int server, unsigned short reply_port, unsigned char net,
 		fs_error(server, reply_port, net, stn, 0xBC, "No such user or not logged on");
 
 }
-*/
 
-/*
 // Read fileserver version number
 void fs_read_version(int server, unsigned short reply_port, unsigned char net, unsigned char stn, unsigned char *data, int datalen)
 {
@@ -7886,7 +6739,6 @@ void fs_read_version(int server, unsigned short reply_port, unsigned char net, u
 	fs_aun_send(&r, server, strlen(FS_VERSION_STRING)+3, net, stn);
 
 }
-*/
 
 // Read catalogue header
 void fs_cat_header(int server, unsigned short reply_port, int active_id, unsigned char net, unsigned char stn, unsigned char *data, int datalen)
@@ -7929,6 +6781,7 @@ void fs_cat_header(int server, unsigned short reply_port, int active_id, unsigne
 	}
 	
 }
+#endif
 
 // Load queue enque, deque functions
 
@@ -7952,96 +6805,81 @@ void fs_cat_header(int server, unsigned short reply_port, int active_id, unsigne
 // -1 Failure - malloc
 // 1 Success
 
+/* Moved to fs.h */
+#if 0
 #define FS_ENQUEUE_LOAD 1
 #define FS_ENQUEUE_GETBYTES 2
+#endif
 
-char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigned char net, unsigned char stn, unsigned char internal_handle, unsigned char mode, uint32_t seq, uint8_t qtype, uint16_t delay)
+struct load_queue * fsop_load_enqueue(struct fsop_data *f, struct __econet_packet_udp *p, uint16_t len, struct __fs_file *h, uint8_t mode, uint32_t seq, uint8_t qtype, uint16_t delay)
 {
 
 	struct __econet_packet_udp *u; // Packet we'll put into the queue
 	struct __pq *q; // Queue entry within a host
 	struct load_queue *l, *l_parent, *n; // l_ used for searching, n is a new entry if we need one
+	struct __fs_active *a;
 
-	fs_debug (0, 3, "to %3d.%3d              Enqueue packet length %04X type %d", net, stn, len, p->p.ptype);
+	a = f->active;
+
+	fs_debug (0, 3, "to %3d.%3d              Enqueue packet length %04X type %02X", f->net, f->stn, len, p->p.ptype);
 
 	u = malloc(len + 8);
 	memcpy(u, p, len + 8); // Copy the packet data off
 
 	q = malloc(sizeof(struct __pq)); // Make a new packet entry
 
-	if (!u || !q) return -1;
+	if (!u || !q) return NULL;
 
 	//fs_debug (0, 2, "malloc() and copy succeeded");
 
 	// First, see if there is an existing queue entry for this server to this destination, to which we will add the packet.
 	// If there is, there is no need to build a new load_queue entry.
 
-	l = fs_load_queue;
+	l = f->server->fs_load_queue;
 	l_parent = NULL;
 
-	while (l && (l->server < server))
+	// Find a queue for destination network
+
+	while (l && (l->active != a))
 	{
 		l_parent = l;
 		l = l->next;
 	}
 
-	// So by here, if there were any entries at all, l points to the first one which is >= our server number.
-
-	// Now see about the network.
-
-	while (l && (l->server == server) && (l->net < net))
-	{
-		l_parent = l;
-		l = l->next;
-	}
-
-	// And likewise station number. If we get here, though, either l points to first entry where l->server > server, or first entry where l->server == server BUT l->net >= l->net - or we fell off the end of the list
-
-	while (l && (l->server == server) && (l->net == net) && (l->stn < stn))
-	{
-		l_parent = l;
-		l = l->next;
-	}
-
-	// And similarly here, we will either have (l->server > server), or (servers equal but net >), or (servers and net equal, but stn >) or (servers and net and stn equal) or fell off end.
-
-	//fs_debug (0, 2, "Existing queue%s found at %p", (l ? "" : " not"), l);
-
-	if (seq || !l || (l->server != server || l->net != net || l->stn != stn)) // No entry found - make a new one
+	if (seq || !l || l->active != a) // No entry found - make a new one
 	{
 
 		// Make a new load queue entry
 
-		fs_debug (0, 4, "Making new packet queue entry for this server/net/src triple ");
+		fs_debug (0, 4, "Making new packet queue entry for this net/stn tuple");
 
 		n = malloc(sizeof(struct load_queue));
 
 		if (!n)
 		{
-			free (u); free (q); return -1;
+			free (u); free (q); return NULL;
 		}
 
 		fs_debug (0, 4, " - at %p ", n);
 
-		n->net = net;
-		n->stn = stn;
-		n->server = server;
-		//n->queue_type = 1; // 2 will be getbytes()
+		n->active = a;
+		// No longer required - one queue per server: n->server = server;
 		n->queue_type = qtype; // See defines above
 		n->mode = mode;
-		n->internal_handle = internal_handle;
+		n->internal_handle = h;
 		n->ack_seq_trigger = seq;
 		n->last_ack_rx = time(NULL); // Now
 		n->pq_head = NULL;
 		n->pq_tail = NULL;
+		n->server = f->server; // Upward link
 		n->next = NULL; // Applies whether there was no list at all, or we fell off the end of it. We'll fix it below if we're inserting
 
-		fs_debug (0, 3, " - new fs_load_queue = %p, l = %p ", fs_load_queue, l);
+		fs_debug (0, 3, " - new fs_load_queue = %p, l = %p ", f->server->fs_load_queue, l);
 
-		if (!fs_load_queue) // There was no queue at all
+		if (!f->server->fs_load_queue) // There was no queue at all
 		{
 			fs_debug (0, 4, " - as a new fs_load_queue");
-			fs_load_queue = n;
+			f->server->fs_load_queue = n;
 		}
 		else // We are inserting, possibly at the end
 		{
@@ -8054,9 +6892,9 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 			{
 				if (!l_parent)
 				{
-					n->next = fs_load_queue;
+					n->next = f->server->fs_load_queue;
 					fs_debug (0, 3, " - by inserting at queue head");
-					fs_load_queue = n;
+					f->server->fs_load_queue = n;
 					
 				}
 				else
@@ -8076,6 +6914,7 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 	q->packet = u;
 	q->len = len; // Data len only
 	q->delay = delay; // Delay in ms before TX when asked
+	q->server = f->server; // Upward link to server for when we transmit
 	q->next = NULL; // Always adding to end
 
 	if (!(n->pq_head)) // No existing packet in the queue for this transaction
@@ -8086,7 +6925,7 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 		n->pq_tail = q;
 	}
 
-	fs_debug (0, 3, "Queue state for %d to %3d.%3d trigger seq %08X: Load queue head at %p", server, net, stn, n->ack_seq_trigger , n);
+	fs_debug (0, 3, "Queue state for %3d.%3d to %3d.%3d trigger seq %08X: Load queue head at %p", f->server->net, f->server->stn, f->net, f->stn, n->ack_seq_trigger , n);
 	q = n->pq_head;
 
 	while (q)
@@ -8095,22 +6934,22 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 		q = q->next;
 	}
 
-	return 1;
+	return n;
 
 }
 
 // fs_enqueue_dump - dump a load queue entry and update the table as necessary
-void fs_enqueue_dump(struct load_queue *l)
+void fsop_enqueue_dump(struct load_queue *l)
 {
 
 	struct load_queue *h, *h_parent;
 	struct __pq *p, *p_next;
 
-	h = fs_load_queue;
+	h = l->server->fs_load_queue;
 	h_parent = NULL;
 
 	if (l->queue_type == FS_ENQUEUE_LOAD) // *LOAD operation
-		fs_close_interlock(l->server, l->internal_handle, l->mode); // Mode should always be one in this instance
+		fsop_close_interlock(l->server, l->internal_handle, l->mode); // Mode should always be one in this instance
 
 	while (h && (h != l))
 	{
@@ -8139,6 +6978,8 @@ void fs_enqueue_dump(struct load_queue *l)
 
 	}
 	
+	/* TODO: PROBABLY CHANGE THIS TO SPLICEFREE IN THE FUTURE */
+
 	if (h_parent) // Mid chain, not at start
 	{
 		fs_debug (0, 3, "Freed structure was not at head of chain. Spliced between %p and %p", h_parent, h->next);
@@ -8147,7 +6988,7 @@ void fs_enqueue_dump(struct load_queue *l)
 	else
 	{
 		fs_debug (0, 3, "Freed structure was at head of chain. fs_load_queue now %p", h->next);
-		fs_load_queue = h->next; // Drop this one off the beginning of the chain
+		l->server->fs_load_queue = h->next; // Drop this one off the beginning of the chain
 	}
 
 	fs_debug (0, 3, "Freeing bulk transfer transaction queue head at %p", h);
@@ -8168,56 +7009,63 @@ void fs_enqueue_dump(struct load_queue *l)
 // 0 - Failure - No packet(!)
 // -1 - No ack - dumped
 
-char fs_load_dequeue(int server, unsigned char net, unsigned char stn, uint32_t seq)
+char fsop_load_dequeue(struct __fs_station *s, uint8_t net, uint8_t stn, uint32_t seq)
 {
 
 	struct load_queue *l, *l_parent; // Search variable
 	uint32_t	new_seq;
+	struct __fs_active	*a;
 
-	l = fs_load_queue;
+	l = s->fs_load_queue;
 	l_parent = NULL;
 
+	fs_debug (0, 3, "to %3d.%3d from %3d.%3d bulk transfer queue head found at %p for trigger sequence %08X", net, stn, s->net, s->stn, l, (l ? l->ack_seq_trigger : 0));
 
-	// fs_debug (0, 3, "to %3d.%3d from %3d.%3d de-queuing bulk transfer", net, stn, fs_stations[server].net, fs_stations[server].stn);
 
-	while (l && (l->server != server || l->net != net || l->stn != stn || l->ack_seq_trigger != seq))
+	a = fsop_find_active(s, net, stn);
+
+	if (!a) 	return 0; // This user isn't here!
+
+	while (l && (l->active != a))
 	{
 		l_parent = l;
 		l = l->next;
 	}
 
-	if (!l) return 0; // Nothing found
-
-	fs_debug (0, 3, "to %3d.%3d from %3d.%3d bulk transfer queue head found at %p for trigger sequence %08X", net, stn, fs_stations[server].net, fs_stations[server].stn, l, l->ack_seq_trigger);
+	if (!l) 	return 0; // Not found
 
 	if (!(l->pq_head)) // There was an entry, but it had no packets in it!
 	{
 		// Take this one out of the chain
 		if (l_parent)
 			l_parent->next = l->next;
-		else	fs_load_queue = l->next;
+		else	s->fs_load_queue = l->next;
 
 		free(l);
 
 		return 0;
 	}
 
+	if (l->ack_seq_trigger != seq) /* Not what we were waiting for */
+		return 0;
+
 	// Insert sequence number
 	
-	new_seq = get_local_seq(fs_stations[server].net, fs_stations[server].stn);
+	new_seq = eb_get_local_seq(s->fs_device);
+
 	l->pq_head->packet->p.seq = new_seq;
 
-	fs_debug (0, 3, "to %3d.%3d from %3d.%3d Sending packet from __pq %p, length %04X with new sequence number %08X", net, stn, fs_stations[server].net, fs_stations[server].stn, l->pq_head, l->pq_head->len, l->pq_head->packet->p.seq);
+	fs_debug (0, 3, "to %3d.%3d from %3d.%3d Sending packet from __pq %p, length %04X with new sequence number %08X", net, stn, s->net, s->stn, l->pq_head, l->pq_head->len, l->pq_head->packet->p.seq);
 
 	if (l->pq_head->delay)
 		usleep (1000 * l->pq_head->delay); // Usually 0, but we have a facility to delay packets because sometimes RISC OS isn't listening...(!) Usually used on first packet of a databurst
 
 	// Send without inserting a sequence number
 
-	if ((fs_aun_send_noseq(l->pq_head->packet, server, l->pq_head->len, l->net, l->stn) <= 0)) // If this fails, dump the rest of the enqueued traffic
+	if ((raw_fsop_aun_send_noseq(l->pq_head->packet, l->pq_head->len, l->server, l->active->net, l->active->stn) <= 0)) // If this fails, dump the rest of the enqueued traffic
 	{
 		fs_debug (0, 3, "fs_aun_send() failed in fs_load_sequeue() - dumping rest of queue");
-		fs_enqueue_dump(l); // Also closes file
+		fsop_enqueue_dump(l); // Also closes file
 		return -1;
 
 	}
@@ -8239,7 +7087,7 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn, uint32_t 
 		{
 			fs_debug (0, 3, "End of packet queue - dumping queue head at %p", l);
 			l->pq_tail = NULL;
-			fs_enqueue_dump(l);
+			fsop_enqueue_dump(l);
 			return 2;
 		}
 		else
@@ -8258,72 +7106,7 @@ char fs_load_dequeue(int server, unsigned char net, unsigned char stn, uint32_t 
 	return 1; // Success - but still more packets to come
 }
 
-/* All deprecated now - ACK triggered.
- 
-// Function called by the bridge when it knows there are things to dequeue
-// Dumps out one packet per bulk transfer per server->{net,stn} combo each time.
-#ifdef BRIDGE_V2
-void fs_dequeue(int server)
-#else
-void fs_dequeue(void) 
-#endif
-{
-	struct load_queue *l;
-
-	fs_debug (0, 4, "fs_dequeue() called");
-	l = fs_load_queue;
-
-	while (l)
-	{
-		fs_debug (0, 4, "Dequeue from %p", l);
-
-#ifdef BRIDGE_V2
-		if (l->server == server)
-			while (fs_load_dequeue(l->server, l->net, l->stn) == 1);
-#else
-		fs_load_dequeue(l->server, l->net, l->stn);
-#endif
-		l = l->next;
-	}
-
-}
-
-// Ca#lled by the bridge to see if there is traffic
-#ifdef BRIDGE_V2
-short fs_dequeuable(int server)
-#else
-short fs_dequeuable(void)
-#endif
-{
-	struct load_queue *l;
-
-	unsigned short count = 0;
-
-	l = fs_load_queue;
-
-	while (l)
-	{
-#ifdef BRIDGE_V2
-		if (l->server == server)
-#endif
-			count++;
-		l = l->next;
-	}
-
-	fs_debug (0, 4, "There is%s data in the bulk transfer queue (%d entries)", (fs_load_queue ? "" : " no"), count);
-
-#ifdef BRIDGE_V2
-	if (count)
-#else
-	if (fs_load_queue)
-#endif
-		 return 1;
-	
-	return 0;
-}
-
-*/
-
+#if 0
 // Load file, & cope with 'Load as command'
 void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned char stn, unsigned int active_id, unsigned char *data, int datalen, unsigned short loadas, unsigned char rxctrl)
 {
@@ -8475,13 +7258,14 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 
 	}
 	
-	//fs_close_interlock(server, internal_handle, 1); // Now closed by the dequeuer
 }
 
+
+/* This function moved to fsop_08 */
 // Determine if received ctrl-byte sequence number is what we were expecting - returns non-zero if it was. 
 // Since the rogue (set at file open) is 0x02, we check bottom *two* bits
 
-unsigned char fs_check_seq(unsigned char a, unsigned char b)
+uint8_t fs_check_seq(uint8_t a, uint8_t b)
 {
 	return ((a ^ b) & 0x03);
 }
@@ -8867,7 +7651,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	bytes = (((*(data+7))) + ((*(data+8)) << 8) + (*(data+9) << 16));
 	offset = (((*(data+10))) + ((*(data+11)) << 8) + (*(data+12) << 16));
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX (%s) by user %04x on handle %02x, ctrl seq is %s (stored: %02X, received: %02X)", "", net, stn, bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), active[server][active_id].userid, handle,
+	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX (%s) by user %04x on handle %02x, ctrl seq is %s (stored: %02X, received: %02X)", "", net, stn, bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), f->userid, handle,
 		fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl) ? "OK" : "WRONG", active[server][active_id].fhandles[handle].sequence, ctrl);
 
 	if (active[server][active_id].fhandles[handle].handle == -1) // Invalid handle
@@ -9148,7 +7932,7 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 	if (bytes == 0) // No data expected
 	{	
-		/* ERROR ? fs_close_interlock(server, fs_bulk_ports[server][incoming_port].handle, 3); //
+		/* LOOKS LIKE AN ERROR fs_close_interlock(server, fs_bulk_ports[server][incoming_port].handle, 3); */
 		fs_bulk_ports[server][incoming_port].handle = -1; // Make the port available again
 		r.p.port = reply_port;
 		r.p.ctrl = ctrl;
@@ -9202,6 +7986,7 @@ void fs_eof(int server, unsigned char reply_port, unsigned char net, unsigned ch
 	}
 
 }
+
 // Close a specific user handle. Abstracted out to allow fs_close to cycle through all handles and close them when requested close handle is 0
 void fs_close_handle(int server, unsigned char reply_port, unsigned char net, unsigned char stn, unsigned int active_id, unsigned short handle)
 {
@@ -9456,11 +8241,20 @@ int8_t fs_get_user_printer(int server, unsigned char net, unsigned char stn)
 
 	return active[server][active_id].printer;
 }
+#endif
 
-#ifdef EB_VERSION
+int8_t fsop_get_user_printer(struct __fs_active *a)
+{
+	uint8_t	p;
 
-	#if EB_VERSION >= 0x21
+	pthread_mutex_lock(&(a->server->fs_mutex));
+	p = a->printer;
+	pthread_mutex_unlock(&(a->server->fs_mutex));
 
+	return p;
+}
+
+#if 0
 void fs_printout(int server, uint8_t reply_port, unsigned int active_id, uint8_t net, uint8_t stn, char *file, uint8_t relative_to)
 {
 
@@ -9553,38 +8347,30 @@ void fs_printout(int server, uint8_t reply_port, unsigned int active_id, uint8_t
 	}
 
 }
-	#endif
-
-#endif /* EB_VERSION */
 
 // Handle *PRINTER from authenticated users
-void fs_select_printer(int server, unsigned char reply_port, unsigned int active_id, unsigned char net, unsigned char stn, char *pname)
+void fsop_select_printer(struct fsop_data *f, char *pname)
 {
 
 	int printerindex = 0xff;
-	struct __econet_packet_udp reply;
 
-	reply.p.ptype = ECONET_AUN_DATA;
-	reply.p.port = reply_port;
-	reply.p.ctrl = 0x80;
-	reply.p.data[0] = reply.p.data[1] = 0;
+	printerindex = get_printer(f->server->net, f->server->stn, pname);
 
-	printerindex = get_printer(fs_stations[server].net, fs_stations[server].stn, pname);
-
-	fs_debug (0, 1, "%12sfrom %3d.%3d Select printer %s - %s", "", net, stn, pname, (printerindex == -1) ? "UNKNOWN" : "Succeeded");
+	fs_debug (0, 1, "%12sfrom %3d.%3d Select printer %s - %s", "", f->net, f->stn, pname, (printerindex == -1) ? "UNKNOWN" : "Succeeded");
 
 	if (printerindex == -1) // Failed
-		fs_error(server, reply_port, net, stn, 0xFF, "Unknown printer");
+		fsop_error(f, 0xFF, "Unknown printer");
 	else
 	{
-		active[server][active_id].printer = printerindex;
-		fs_aun_send(&reply, server, 2, net, stn);
+		f->active->printer = printerindex;
+		fsop_reply_ok(f);
 	}
 
 }
+#endif
 
 // Check if a user exists. Return index into users[server] if it does; -1 if not
-int fs_user_exists(int server, unsigned char *username)
+int fsop_user_exists(struct __fs_station *s, unsigned char *username)
 {
 	int count;
 	unsigned short found = 0;
@@ -9596,7 +8382,7 @@ int fs_user_exists(int server, unsigned char *username)
 
 	while (!found && count < ECONET_MAX_FS_USERS)
 	{
-		if (!strncasecmp((const char *) users[server][count].username, username_padded, 10) && (users[server][count].priv != FS_PRIV_INVALID))
+		if (!strncasecmp((const char *) s->users[count].username, username_padded, 10) && (s->users[count].priv != FS_PRIV_INVALID))
 			found = 1;
 		else count++;
 	}
@@ -9607,7 +8393,7 @@ int fs_user_exists(int server, unsigned char *username)
 }
 
 // Returns -1 if there are no user slots available, or the slot number if there are
-short fs_find_new_user(int server)
+short fsop_find_new_user(struct __fs_station *s)
 {
 
 	int count = 0;
@@ -9615,7 +8401,7 @@ short fs_find_new_user(int server)
 
 	while (!found && count < ECONET_MAX_FS_USERS)
 	{
-		if (users[server][count].priv == FS_PRIV_INVALID)
+		if (s->users[count].priv == FS_PRIV_INVALID)
 			found = 1;
 		else count++;
 	}
@@ -9625,187 +8411,202 @@ short fs_find_new_user(int server)
 
 }
 
-// Handle incoming file / data transfers
-void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, unsigned char port, unsigned char ctrl, unsigned char *data, unsigned int datalen)
+/*
+ * fsop_handle_bulk_traffic()
+ *
+ * This is a handler routine registered with the HPB
+ * when we get & register a bulk port. So it will not have
+ * the fs_mutex lock held when called.
+ */
+
+void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t datalen, void *param)
 {
 
-	struct __econet_packet_udp r;
+	struct __econet_packet_udp	r;
+	struct __fs_bulk_port	*bp;
+	struct __fs_station 	*s = (struct __fs_station *) param;
+
+	off_t	 writeable, remaining, old_cursor, new_cursor, new_cursor_read;
+	FILE 	*h;
+
+	r.p.ptype = ECONET_AUN_DATA;
+	r.p.data[0] = r.p.data[1] = 0;
 
 	// If the server is not enabled, return and ignore the packet
 	
-	if (!fs_enabled[server])
-		return;
+	pthread_mutex_lock(&(s->fs_mutex));
 
-	// Do you know this man?
-
-	if (		(fs_bulk_ports[server][port].handle != -1) && 
-			(fs_bulk_ports[server][port].net == net) &&
-			(fs_bulk_ports[server][port].stn == stn) 
-	)
+	if (!s->enabled)
 	{
-		int writeable, remaining, old_cursor, new_cursor, new_cursor_read;
+		pthread_mutex_unlock(&(s->fs_mutex));
 
-		// We can deal with this data
+		return;
+	}
+
+	bp = s->bulkports;
+
+	while (bp && bp->bulkport != p->p.port)
+		bp = bp->next;
+
+	if (!bp)
+	{
+		pthread_mutex_unlock(&(s->fs_mutex));
+
+		return; /* No idea what this traffic is */
+	}
+
+	// We can deal with this data
 	
-		remaining = fs_bulk_ports[server][port].length - fs_bulk_ports[server][port].received; // How much more are we expecting?
+	remaining = bp->length - bp->received; /* How much more are we expecting ? */
 
-		writeable = (remaining > datalen ? datalen : remaining);
- 
-		if (fs_bulk_ports[server][port].user_handle != 0) // This is a putbytes transfer not a fs_save; in the latter there is no user handle. Seek to correct point in file
-			fseek(fs_files[server][fs_bulk_ports[server][port].handle].handle, SEEK_SET, (old_cursor = active[server][fs_bulk_ports[server][port].active_id].fhandles[fs_bulk_ports[server][port].user_handle].cursor));
+	writeable = (remaining > datalen ? datalen : remaining);
 
-		fwrite(data, writeable, 1, fs_files[server][fs_bulk_ports[server][port].handle].handle);
+	h = bp->handle->handle;
 
-		fflush(fs_files[server][fs_bulk_ports[server][port].handle].handle);
-	
-		fs_bulk_ports[server][port].received += datalen;
+	if (bp->is_gbpb) // This is a putbytes transfer not a fs_save; in the latter there is no user handle. Seek to correct point in file
+		fseek(h, SEEK_SET, (old_cursor = bp->active->fhandles[bp->user_handle].cursor));
 
-		if (fs_bulk_ports[server][port].user_handle != 0) // This is a putbytes transfer not a fs_save; in the latter there is no user handle
+	fwrite(p->p.data, writeable, 1, h);
+
+	fflush(h);
+
+	bp->received += datalen;
+
+	if (bp->is_gbpb) // This is a putbytes transfer not a fs_save; in the latter there is no user handle
+	{
+		bp->active->fhandles[bp->user_handle].cursor += writeable;
+		new_cursor = bp->active->fhandles[bp->user_handle].cursor;
+		new_cursor_read = ftell(h);
+	}
+
+	fs_debug (0, 2, "%12sfrom %3d.%3d Bulk transfer in on port %02X data length &%04X, expected total length &%04lX, writeable &%04X", "", bp->active->net, bp->active->stn, bp->bulkport, datalen, bp->length, writeable
+			);
+	if (bp->is_gbpb) // Produce additional debug
+		fs_debug (0, 2, "%12sfrom %3d.%3d Bulk trasfer on port %02X old cursor = %06X, new cursor in FS = %06X, new cursor from OS = %06X - %s", "", bp->active->net, bp->active->stn, bp->bulkport, old_cursor, new_cursor, new_cursor_read, (new_cursor == new_cursor_read) ? "CORRECT" : " *** ERROR ***");
+
+	bp->last_receive = (unsigned long long) time(NULL);
+
+	if (bp->received == bp->length) // Finished
+	{
+
+		// Send a closing ACK
+
+		struct tm t; 
+		unsigned char day, monthyear;
+		time_t now;
+
+		now = time(NULL);
+		t = *localtime(&now);
+
+		fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &monthyear, &day);
+							
+		r.p.port = bp->reply_port;
+		r.p.ctrl = bp->rx_ctrl;
+		r.p.ptype = ECONET_AUN_DATA;
+		r.p.data[0] = r.p.data[1] = 0;
+
+		// 20240404 Insert delay. Looks like some beebs aren't listening for the close packet immediately
+		// after sending the last packet in a data burst and then when the bridge eventually 
+		// gets to transmit it on retry, they've sent another command and everything goes one
+		// packet out of sequence.
+
+		usleep(20000); // Try 20ms to start with.
+
+		if (bp->is_gbpb)
 		{
-			active[server][fs_bulk_ports[server][port].active_id].fhandles[fs_bulk_ports[server][port].user_handle].cursor += writeable;
-			new_cursor = active[server][fs_bulk_ports[server][port].active_id].fhandles[fs_bulk_ports[server][port].user_handle].cursor;
-			new_cursor_read = ftell(fs_files[server][fs_bulk_ports[server][port].handle].handle);
+			r.p.data[2] = bp->bulkport;
+			r.p.data[3] = bp->received & 0xff;
+			r.p.data[4] = (bp->received & 0xff00) >> 8;
+			r.p.data[5] = (bp->received & 0xff0000) >> 16;
+			r.p.seq = eb_get_local_seq(s->fs_device);
+			raw_fsop_aun_send (&r, 6, s, bp->active->net, bp->active->stn);
 		}
-	
-		fs_debug (0, 2, "%12sfrom %3d.%3d Bulk transfer in on port %02X data length &%04X, expected total length &%04lX, writeable &%04X", "", net, stn, port, datalen, fs_bulk_ports[server][port].length, writeable
-				);
-		if (fs_bulk_ports[server][port].user_handle != 0) // Produce additional debug
-			fs_debug (0, 2, "%12sfrom %3d.%3d Bulk trasfer on port %02X old cursor = %06X, new cursor in FS = %06X, new cursor from OS = %06X - %s", "", net, stn, port, old_cursor, new_cursor, new_cursor_read, (new_cursor == new_cursor_read) ? "CORRECT" : " *** ERROR ***");
-
-		fs_bulk_ports[server][port].last_receive = (unsigned long long) time(NULL);
-
-		if (fs_bulk_ports[server][port].received == fs_bulk_ports[server][port].length) // Finished
+		else // Was a save
 		{
+			
+			uint8_t counter = 0;
 
-			// Send a closing ACK
+			fsop_close_interlock(s, bp->handle, 3); // We don't close on a putbytes - file stays open!
 
-			struct tm t; 
-			unsigned char day, monthyear;
-			time_t now;
+			r.p.data[0] = 3; // This appears to be what FS3 does!
+			r.p.data[2] = fsop_perm_to_acorn(s, FS_CONF_DEFAULT_FILE_PERM(s), FS_FTYPE_FILE);
+			r.p.data[3] = day;
+			r.p.data[4] = monthyear;
 
-			now = time(NULL);
-			t = *localtime(&now);
+			/* Per @arg's remark from the EcoIPFS - whilst the specs say pad the filename to 12 characters and terminate with &0d,
+			   in fact existing servers pad to 12 characters with spaces and terminate it with a negative byte "(plus 3 bytes of
+			   junk!)". So we'll try that. */
 
-			fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &monthyear, &day);
-								
-			r.p.port = fs_bulk_ports[server][port].reply_port;
-			r.p.ctrl = fs_bulk_ports[server][port].rx_ctrl;
-			r.p.ptype = ECONET_AUN_DATA;
-			r.p.data[0] = r.p.data[1] = 0;
+			memset(&(r.p.data[5]), 32, 15); 
 
-			// 20240404 Insert delay. Looks like some beebs aren't listening for the close packet immediately
-			// after sending the last packet in a data burst and then when the bridge eventually 
-			// gets to transmit it on retry, they've sent another command and everything goes one
-			// packet out of sequence.
-
-			usleep(20000); // Try 20ms to start with.
-
-			if (fs_bulk_ports[server][port].user_handle) // This was PutBytes, not save
+			while (bp->acornname[counter] != 0)
 			{
-				r.p.data[2] = port;
-				r.p.data[3] = fs_bulk_ports[server][port].received & 0xff;
-				r.p.data[4] = (fs_bulk_ports[server][port].received & 0xff00) >> 8;
-				r.p.data[5] = (fs_bulk_ports[server][port].received & 0xff0000) >> 16;
-				fs_aun_send (&r, server, 6, net, stn);
-			}
-			else // Was a save
-			{
-				
-				fs_close_interlock(server, fs_bulk_ports[server][port].handle, 3); // We don't close on a putbytes - file stays open!
-
-				r.p.data[0] = 3; // This appears to be what FS3 does!
-				r.p.data[2] = fs_perm_to_acorn(server, fs_config[server].fs_default_file_perm, FS_FTYPE_FILE);
-				r.p.data[3] = day;
-				r.p.data[4] = monthyear;
-
-				/* Per @arg's remark from the EcoIPFS - whilst the specs say pad the filename to 12 characters and terminate with &0d,
-				   in fact existing servers pad to 12 characters with spaces and terminate it with a negative byte "(plus 3 bytes of
-				   junk!)". So we'll try that. */
-
-				//memset(&(r.p.data[5]), 0, 15); // 10 char filename code
-
-				memset(&(r.p.data[5]), 32, 15); 
-
-				//snprintf(&(r.p.data[5]), 13, "%-12s", fs_bulk_ports[server][port].acornname); // Commented out for long filenames
-				{
-					uint8_t counter = 0;
-
-					while (fs_bulk_ports[server][port].acornname[counter] != 0)
-					{
-						r.p.data[5+counter] = fs_bulk_ports[server][port].acornname[counter];
-						counter++;
-					}
-				}
-
-				r.p.data[17] = 0x80;
-				// And the 'junk'
-				r.p.data[18] = 0x20; r.p.data[19] = 0xA9; r.p.data[20] = 0x24;
-
-				fs_aun_send (&r, server, 21, net, stn);
-				// OLD fs_aun_send (&r, server, 5, net, stn);
+				r.p.data[5+counter] = bp->acornname[counter];
+				counter++;
 			}
 
-			fs_bulk_ports[server][port].handle = -1; // Make the bulk port available again
+			r.p.data[17] = 0x80;
+			// And the 'junk'
+			r.p.data[18] = 0x20; r.p.data[19] = 0xA9; r.p.data[20] = 0x24;
 
-		}
-		else // Send an intermediate ACK.
-		{	
-			r.p.port = fs_bulk_ports[server][port].ack_port;
-			r.p.ctrl = ctrl;
-			r.p.ptype = ECONET_AUN_DATA;
-			r.p.data[0] = r.p.data[1] = 0; // was FS_PERM_OWN_R | FS_PERM_OWN_W;
-			fs_aun_send (&r, server, 2, net, stn);
+			raw_fsop_aun_send (&r, 21, s, bp->active->net, bp->active->stn);
 		}
 
-		
+		FS_LIST_SPLICEFREE(s->bulkports, bp, "FS", "Freeing completed bulk port structure");
 
 	}
-	// Otherwise, er.... ignore it?
-	
+	else // Send an intermediate ACK.
+	{	
+		r.p.port = bp->ack_port;
+		r.p.ctrl = p->p.ctrl;
+		raw_fsop_aun_send (&r, 2, s, bp->active->net, bp->active->stn);
+	}
+
+	pthread_mutex_unlock(&(s->fs_mutex));
 }
 
 /* Garbage collect stale incoming bulk handles - This is called from the main loop in the bridge code */
 
-void fs_garbage_collect(int server)
+void fsop_garbage_collect(struct __fs_station *s)
 {
 
-	int count; // == Bulk port number
 	struct load_queue *l; // Load queue pointer
+	struct __fs_bulk_port	*p; // Bulk port pointer
 
-	for (count = 1; count < 255; count++) // Start at 1 because port 0 is immediates...
+	p = s->bulkports;
+
+	while (p)
 	{
-		if (fs_bulk_ports[server][count].handle != -1) // Operating handle
+		struct __fs_bulk_port *n; /* N(ext) */
+
+		n = p->next;
+
+		if (p->last_receive < ((unsigned long long) time(NULL) - 10)) // 10s and no traffic
 		{
-			if (fs_bulk_ports[server][count].last_receive < ((unsigned long long) time(NULL) - 10)) // 10 seconds and no traffic
+			fs_debug (0, 2, "%12sfrom %3d.%3d Garbage collecting stale incoming bulk port %d used %lld seconds ago", "", 
+				p->active->net, p->active->stn, p->bulkport, ((unsigned long long) time(NULL) - p->last_receive));
+
+			eb_port_deallocate(s->fs_device, p->bulkport);
+
+			if (!(p->is_gbpb)) /* This was not GBPB but was a *SAVE */
 			{
-				fs_debug (0, 2, "%12sfrom %3d.%3d Garbage collecting stale incoming bulk port %d used %lld seconds ago", "", 
-					fs_bulk_ports[server][count].net, fs_bulk_ports[server][count].stn, count, ((unsigned long long) time(NULL) - fs_bulk_ports[server][count].last_receive));
-
-				// fs_close_interlock(server, fs_bulk_ports[server][count].handle, fs_bulk_ports[server][count].mode); // Commented so that bulk transfers to ordinary files don't close the file
-
-				if (fs_bulk_ports[server][count].active_id != 0) // No user handle = this was a SAVE operation, so if non zero we need to close the file & a user handle
-				{
-					// TODO: This is overclosing. Either update the last_receive on a close, or check the handle is still live here.
-					// This possibly occurs on a putbytes where there is a bulk port set up but in fact putbytes extends the file for some reason?
-					if (fs_files[server][fs_bulk_ports[server][count].handle].handle != NULL) // Problem above solved - if already fully closed, don't close it again
-					{
-						fs_close_interlock(server, fs_bulk_ports[server][count].handle, fs_bulk_ports[server][count].mode);
-						fs_deallocate_user_file_channel(server, fs_bulk_ports[server][count].active_id, fs_bulk_ports[server][count].user_handle);
-					}
-					else
-						fs_debug (0, 2, "%12sfrom %3d.%3d Garbage collector did not close bulk port %d because it had already closed.", "", fs_bulk_ports[server][count].net, fs_bulk_ports[server][count].stn, count);
-				}
-
-				fs_bulk_ports[server][count].handle = -1;
+				fsop_close_interlock(s, p->handle, p->mode);
+				fsop_deallocate_user_file_channel(p->active, p->user_handle);
 			}
-
+			else
+			{
+				fs_debug (0, 2, "%12sfrom %3d.%3d Garbage collector did not close bulk port %d because it had already closed.", "", p->active->net, p->active->stn, p->bulkport);
+			}
+			FS_LIST_SPLICEFREE(s->bulkports, p, "FS", "Deallocate bulk port on garbage collect");
 		}
+
+		p = n;
 
 	}
 
 	// Next look through our load queues and see if one has gone stale
 	
-	l = fs_load_queue;
+	l = s->fs_load_queue;
 
 	while (l)
 	{
@@ -9813,11 +8614,8 @@ void fs_garbage_collect(int server)
 
 		m = l->next;
 
-		if (l->server == server) // It's one of ours
-		{
-			if (l->last_ack_rx < (time(NULL) - 10)) // Hard 10s timeout for now - config later
-				fs_enqueue_dump(l);
-		}
+		if (l->last_ack_rx < (time(NULL) - 10)) /* 10s time out on load dequeue */
+			fsop_enqueue_dump(l);
 
 		l = m; // Move to next, use stored value in case we dumped the queue
 	}
@@ -9825,30 +8623,31 @@ void fs_garbage_collect(int server)
 }
 
 // Find any servers this station is logged into and eject them in case the station is dynamically reallocated
-void fs_eject_station(unsigned char net, unsigned char stn)
+// What's this for? Seems to kick a station off every server there is on this system
+void fsop_eject_station(struct __fs_station *s, uint8_t net, uint8_t stn)
 {
-	int count = 0; // Fileservers
 
-	fs_debug (0, 1, "%12s             Ejecting station %3d.%3d", "", net, stn);
+	struct __fs_active *a;
 
-	while (count < fs_count)
+	a = s->actives;
+
+	fs_debug (0, 1, "%12s             Ejecting station %3d.%3d from server at %3d.%3d", "", net, stn, a->server->net, a->server->stn);
+
+	while (a)
 	{
-		int user = 0;
-
-		while (user < ECONET_MAX_FS_ACTIVE)
+		if (a->stn == stn && a->net == net)
 		{
-			if (active[count][user].net == net && active[count][user].stn == stn)
-				fs_bye(count, 0, net, stn, 0); // Silent bye
-			user++;
-
+			fsop_bye_internal(a, 0, 0); // Silent bye
+			break;
 		}
 
-		count++;
-
+		a = a->next;
 	}
 
 }
 
+#if 0
+/* Not required in new structure */
 /* Parse command line with abbreviation. 
    Command must have a minimum of 'min' characters followed either by the full command word,
    or at some stage a '.'.
@@ -9866,8 +8665,6 @@ void fs_eject_station(unsigned char net, unsigned char stn)
 
 uint8_t fs_parse_cmd (char *parse, char *cmd, unsigned short min, char **param_idx)
 {
-
-
 	uint8_t found = 0;
 	char *ptr, *tmp;
 	char workstr[256];
@@ -9937,49 +8734,45 @@ uint8_t fs_parse_cmd (char *parse, char *cmd, unsigned short min, char **param_i
 
 }
 
-void fs_write_readable_config (int server)
-{
-	struct fsop_data f;
+#endif
 
-	f.server = &(fs_stations[server]);
-	f.server->config = &(fs_config[server]);
-	f.server->discs = &(fs_discs[server][0]);
-
-	fsop_write_readable_config(&f);
-
-}
-
-void fsop_write_readable_config(struct fsop_data *f)
+void fsop_write_readable_config(struct __fs_station *s)
 {
 
 	unsigned char	configfile[1024];
 	FILE		*out;
-	uint8_t		count;
 
-	sprintf(configfile, "%s/Configuration.txt", f->server->directory);
+	sprintf(configfile, "%s/Configuration.txt", s->directory);
 
 	out = fopen(configfile, "w");
 
 	if (out)
 	{
-		fprintf (out, "Fileserver configuration for station %d.%d\n\n", f->server->net, f->server->stn);
-		fprintf (out, "%-25s %s\n\n", "Root directory", f->server->directory);
-		fprintf (out, "%-25s %d\n", "Total no. of discs", f->server->total_discs);
+		struct __fs_disc 	*disc;
 
-		for (count = 0; count < ECONET_MAX_FS_DISCS; count++)
-			if (f->server->discs[count].name[0]) fprintf (out, "Disc %2d                   %s\n", count, f->server->discs[count].name);
+		fprintf (out, "Fileserver configuration for station %d.%d\n\n", s->net, s->stn);
+		fprintf (out, "%-25s %s\n\n", "Root directory", s->directory);
+		fprintf (out, "%-25s %d\n", "Total no. of discs", s->total_discs);
+
+		disc = s->discs;
+
+		while (disc)
+		{
+			fprintf (out, "Disc %2d                   %s\n", disc->index, disc->name);
+			disc = disc->next;
+		}
 
 		fprintf (out, "\n");
 
-		fprintf (out, "%-25s %-3s\n", "Acorn Home semantics", (f->server->config->fs_acorn_home ? "On" : "Off"));
-		fprintf (out, "%-25s %-3s\n", "SJ Res'ch functions", (f->server->config->fs_sjfunc ? "On" : "Off"));
-		fprintf (out, "%-25s %-3s\n", "Big Chunks", (f->server->config->fs_bigchunks ? "On" : "Off"));
-		fprintf (out, "%-25s %-4s\n", "10 char pw conversion", (f->server->config->fs_pwtenchar ? "Done" : "No"));
-		fprintf (out, "%-25s %-3s\n", "Max filename length", (f->server->config->fs_fnamelen ? "On" : "Off"));
-		fprintf (out, "%-25s %-3s\n", "Inf files are :inf", (f->server->config->fs_infcolon ? "On" : "Off"));
-		fprintf (out, "%-25s %-3s\n", "> 8 file handles", (f->server->config->fs_manyhandle ? "On" : "Off"));
-		fprintf (out, "%-25s %-3s\n", "MDFS-style *INFO", (f->server->config->fs_mdfsinfo ? "On" : "Off"));
-		fprintf (out, "%-25s %-3s\n", "Acornd Directory Display", (f->server->config->fs_mask_dir_wrr ? "On" : "Off"));
+		fprintf (out, "%-25s %-3s\n", "Acorn Home semantics", (s->config->fs_acorn_home ? "On" : "Off"));
+		fprintf (out, "%-25s %-3s\n", "SJ Res'ch functions", (s->config->fs_sjfunc ? "On" : "Off"));
+		fprintf (out, "%-25s %-3s\n", "Big Chunks", (s->config->fs_bigchunks ? "On" : "Off"));
+		fprintf (out, "%-25s %-4s\n", "10 char pw conversion", (s->config->fs_pwtenchar ? "Done" : "No"));
+		fprintf (out, "%-25s %-3s\n", "Max filename length", (s->config->fs_fnamelen ? "On" : "Off"));
+		fprintf (out, "%-25s %-3s\n", "Inf files are :inf", (s->config->fs_infcolon ? "On" : "Off"));
+		fprintf (out, "%-25s %-3s\n", "> 8 file handles", (s->config->fs_manyhandle ? "On" : "Off"));
+		fprintf (out, "%-25s %-3s\n", "MDFS-style *INFO", (s->config->fs_mdfsinfo ? "On" : "Off"));
+		fprintf (out, "%-25s %-3s\n", "Acornd Directory Display", (s->config->fs_mask_dir_wrr ? "On" : "Off"));
 
 		fclose(out);
 
@@ -9988,18 +8781,20 @@ void fsop_write_readable_config(struct fsop_data *f)
 }
 
 /* Handle locally arriving fileserver traffic to server #server, from net.stn, ctrl, data, etc. - port will be &99 for FS Op */
-void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsigned char ctrl, unsigned char *data, unsigned int datalen)
+void fsop_port99 (struct __fs_station *s, struct __econet_packet_aun *packet, uint16_t datalen)
 {
 
-	unsigned char fsop, reply_port; 
-	unsigned int userid;
-	int active_id;
+	uint8_t	 	fsop;
+	uint8_t		net = packet->p.srcnet, stn = packet->p.srcstn;
 
-	struct fsop_data	fsop_param; 	/* Holds data to pass to our new structured list of fsop handlers */
+	struct fsop_data	fsop_param, *f; 	/* Holds data to pass to our new structured list of fsop handlers */
+	struct __fs_active	*active;
+
+	f = &fsop_param;
 
 	// If server disabled, return without doing anything
 	
-	if (!fs_enabled[server])
+	if (!s->enabled)
 		return;
 
 	if (datalen < 1) 
@@ -10008,67 +8803,51 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		return;
 	}
 
-	reply_port = *data;
-	fsop = *(data+1);
+	active = fsop_stn_logged_in(s, packet->p.srcnet, packet->p.srcstn);
 
-	if (fsop != 0x60 && fsop >= 64 && !(fs_config[server].fs_sjfunc)) // SJ Functions turned off
-	{
-		fs_error(server, reply_port, net, stn, 0xFF, "Unsupported");
-		return;
-	}
+	/* Set up 'param' */
 
-	active_id = fs_stn_logged_in(server, net, stn);
-	userid = fs_find_userid(server, net, stn);
+	fsop_param.net = packet->p.srcnet;
+	fsop_param.stn = packet->p.srcstn;
+	fsop_param.active = active;
+	fsop_param.user = active ? &(s->users[active->userid]) : NULL;
+	fsop_param.userid = active ? active->userid : 0xFFFF;
+	fsop_param.server = s;
+	fsop_param.data = &(packet->p.data[0]);
+	fsop_param.datalen = datalen - 12;
+	fsop_param.port = packet->p.port;
+	fsop_param.ctrl = packet->p.ctrl;
+	fsop_param.seq = packet->p.seq;
+	fsop_param.reply_port = *(fsop_param.data);
 
-	// Only do this if the FS Call actually presents file handles - some of them don't and we hadn't spotted that in earlier versions
+	fsop = *(fsop_param.data+1);
+
+	/* Where the FS call presents us with filehandles, do DIVHANDLE on them if need be. Some FSOPs don't. */
 
 	if ((fsop != 8) && (fsop != 9)) // 8 & 9 are Getbyte / Putbyte which do not pass the usual three handles in the tx block
         {
                 /* Modify the three handles that are in every packet - assuming the packet is long enough - if we are not in manyhandle mode */
 
-                if (!fs_config[server].fs_manyhandle) // NFS 3 / BBC B compatible handles
+                if (!FS_CONFIG(s,fs_manyhandle)) // NFS 3 / BBC B compatible handles
                 {
-                        if (!(fsop == 1 || fsop == 2 || (fsop == 5) || (fsop >=10 && fsop <= 11))) if (datalen >= 3) *(data+2) = FS_DIVHANDLE(*(data+2)); // Don't modify for LOAD, SAVE, RUNAS, (GETBYTE, PUTBYTE - not in this loop), GETBYTES, PUTBYTES - all of which either don't have the usual three handles in the tx block or use the URD for something else
-                        if (datalen >= 4) *(data+3) = FS_DIVHANDLE(*(data+3));
-                        if (datalen >= 5) *(data+4) = FS_DIVHANDLE(*(data+4));
+			// Don't modify for LOAD, SAVE, RUNAS, (GETBYTE, PUTBYTE - not in this loop), GETBYTES, PUTBYTES - all of which either don't have the usual three handles in the tx block or use the URD for something else
+                        if (	!(fsop == 1 || fsop == 2 || (fsop == 5) || (fsop >=10 && fsop <= 11)) ) 
+				if (datalen >= 3) *(f->data+2) = FS_DIVHANDLE(*(f->data+2)); 
+
+                        if (datalen >= 4) *(f->data+3) = FS_DIVHANDLE(*(f->data+3));
+                        if (datalen >= 5) *(f->data+4) = FS_DIVHANDLE(*(f->data+4));
                 }
 
-                if (active_id >= 0) // If logged in, update handles from the incoming packet
-                {
-                        if (!(fsop == 1 || fsop == 2 || (fsop >= 8 && fsop <= 11))) active[server][active_id].root = *(data+2);
-                        if (datalen >= 4) active[server][active_id].current = *(data+3);
-                        if (datalen >= 5) active[server][active_id].lib = *(data+4);
-
-                        if (fsop != 0x09) // Not a putbyte
-                                active[server][active_id].sequence = 2; // Reset so that next putbyte will be taken to be in sequence.
-                }
         }
 
-	/* Set up 'param' */
+	fsop_param.urd = *(fsop_param.data+2); // NB sometimes this isn't the root handle and is used for something else (fsop 1,2,5,10,11 we think)
+	fsop_param.cwd = *(fsop_param.data+3);
+	fsop_param.lib = *(fsop_param.data+4);
 
-	fsop_param.net = net;
-	fsop_param.stn = stn;
-	fsop_param.active = (active_id >= 0 ? &(active[server][active_id]) : NULL);
-	fsop_param.active_id = active_id; // Ultimately in the new structure, this should never be needed because we have the pointer above
-	fsop_param.user = (active_id >= 0 ? &(users[server][userid]) : NULL);
-	fsop_param.user_id = userid;
-	fsop_param.server = &(fs_stations[server]);
-	fsop_param.server_id = server;
-	fsop_param.server->config = &(fs_config[server]);
-	fsop_param.server->discs = &(fs_discs[server][0]);
-	fsop_param.server->files = &(fs_files[server][0]);
-	fsop_param.server->dirs = &(fs_dirs[server][0]);
-	fsop_param.server->enabled = fs_enabled[server];
-	fsop_param.server->users = &(users[server][0]);
-	fsop_param.server->actives = &(active[server][0]);
-	fsop_param.data = data;
-	fsop_param.datalen = datalen;
-	fsop_param.ctrl = ctrl;
-	fsop_param.flags = 0; // Initialize, but it'll be copied from the array
-	fsop_param.reply_port = *data;
-	fsop_param.urd = *(data+2); // NB sometimes this isn't the root handle and is used for something else (fsop 1,2,5,10,11 we think)
-	fsop_param.cwd = *(data+3);
-	fsop_param.lib = *(data+4);
+	/* Reset sequence number to rogue if not fsop &09 - i.e. not a putbyte operation */
+
+	if (active && fsop != 0x09 && fsop != 0x08)
+		active->sequence = 2;
 
 	/* Handle new FSOP list */
 
@@ -10087,49 +8866,26 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		return;
 
 	}
+	else
+	{
+		fs_debug (0, 1, "Unsupported operation %02X", fsop);
 
+		fsop_error(&fsop_param, 0xFF, "Unsupported operation");
+		return;
+	}
+
+#if 0
 	/* This bit will go when everything's in the new structure */
 
 	if (fsop != 0 && fsop != 0x0e && fsop != 0x19) // Things we can do when not logged in
 	{
-		if ((active_id < 0)) // Not logged in and not OSCLI (so can't be *I AM) or two opcodes which are fine for unauthenticated users
+		if (!active)
 		{
-			fs_error(server, reply_port, net, stn, 0xbf, "Who are you?");
-			return;
-		}
-
-		if (userid < 0)
-		{
-			fs_error(server, reply_port, net, stn, 0xBC, "User not known");
+			fsop_error(&fsop_param, 0xbf, "Who are you?");
 			return;
 		}
 	}
 
-/* Moved above
-	// Only do this if the FS Call actually presents file handles - some of them don't and we hadn't spotted that in earlier versions 
-	
-	if ((fsop != 8) && (fsop != 9)) // 8 & 9 are Getbyte / Putbyte which do not pass the usual three handles in the tx block
-	{
-		// Modify the three handles that are in every packet - assuming the packet is long enough - if we are not in manyhandle mode 
-	
-		if (!fs_config[server].fs_manyhandle) // NFS 3 / BBC B compatible handles
-		{
-			if (!(fsop == 1 || fsop == 2 || (fsop == 5) || (fsop >=10 && fsop <= 11))) if (datalen >= 3) *(data+2) = FS_DIVHANDLE(*(data+2)); // Don't modify for LOAD, SAVE, RUNAS, (GETBYTE, PUTBYTE - not in this loop), GETBYTES, PUTBYTES - all of which either don't have the usual three handles in the tx block or use the URD for something else
-			if (datalen >= 4) *(data+3) = FS_DIVHANDLE(*(data+3));
-			if (datalen >= 5) *(data+4) = FS_DIVHANDLE(*(data+4));
-		}
-	
-		if (active_id >= 0) // If logged in, update handles from the incoming packet
-		{
-			if (!(fsop == 1 || fsop == 2 || (fsop >= 8 && fsop <= 11))) active[server][active_id].root = *(data+2);
-			if (datalen >= 4) active[server][active_id].current = *(data+3);
-			if (datalen >= 5) active[server][active_id].lib = *(data+4);
-		
-			if (fsop != 0x09) // Not a putbyte
-				active[server][active_id].sequence = 2; // Reset so that next putbyte will be taken to be in sequence.
-		}
-	}
-*/
 	switch (fsop)
 	{
 		case 0: // OSCLI
@@ -10189,9 +8945,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			//else if ((!strncasecmp("LOGIN ", (const char *) command, 6)) || (!strncasecmp("LOGON ", (const char *) command, 6))) fs_login(server, reply_port, net, stn, command + 6);
 			//else if (!strncasecmp("IAM ", (const char *) command, 4)) fs_login(server, reply_port, net, stn, command + 4);
 			//else if (!strncasecmp("I .", (const char *) command, 3)) fs_login(server, reply_port, net, stn, command + 3);
-			else if (fs_stn_logged_in(server, net, stn) < 0)
-				fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
-/* Moved to new structure
+			/* else */ if (!active)
+				fsop_error(&fsop_param, 0xbf, "Who are you ?");
 			else if (fs_parse_cmd(command, "CAT", 2, &param) || fs_parse_cmd(command, ".", 1, &param))
 			{
 
@@ -10310,38 +9065,36 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 			}
 			else if (fs_parse_cmd(command, "BYE", 3, &param)) fs_bye(server, reply_port, net, stn, 1);
-*/
 			else if (fs_parse_cmd(command, "SETLIB", 4, &param))
 			{ // Permanently set library directory
 				unsigned char libdir[97], username[11], params[256];
 				short uid;
 
-				if (active[server][active_id].priv & FS_PRIV_LOCKED)
-					fs_error(server, reply_port, net, stn, 0xbd, "Insufficient access");
+				if (active->priv & FS_PRIV_LOCKED)
+					fsop_error(f, 0xbd, "Insufficient access");
 				else
 				{
 					struct path p;
-					//fs_copy_to_cr(params, param, 255); // There's no CR at the end of param...
 					strncpy(params, param, 255);
 
-					if ((active[server][active_id].priv & FS_PRIV_SYSTEM) && (sscanf(params, "%10s %80s", username, libdir) == 2)) // System user with optional username
+					if ((active->priv & FS_PRIV_SYSTEM) && (sscanf(params, "%10s %80s", username, libdir) == 2)) // System user with optional username
 					{
-						if ((uid = fs_get_uid(server, username)) < 0)
+						if ((uid = fsop_get_uid(s, username)) < 0)
 						{
-							fs_error(server, reply_port, net, stn, 0xFF, "No such user");
+							fsop_error(f, 0xFF, "No such user");
 							return;
 						}
 
 						// Can't specify a disc on library set - it will search (eventually!)
 						if (libdir[0] == ':')
 						{
-							fs_error(server, reply_port, net, stn, 0xFF, "Can't specify disc");
+							fsop_error(f, 0xFF, "Can't specify disc");
 							return;
 						}
 					}
 					else if (strchr(params, ' ')) // Non-privileged user attempting something with a space, or otherwise a pattern mismatch
 					{
-						fs_error(server, reply_port, net, stn, 0xFF, "Bad parameters");
+						fsop_error(f, 0xFF, "Bad parameters");
 						return;
 					}
 					else
@@ -10352,31 +9105,35 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 					fs_debug (0, 1, "%12sfrom %3d.%3d SETLIB for uid %04X to %s", "", net, stn, uid, libdir);
 
-					if (libdir[0] != '%' && fs_normalize_path(server, active_id, libdir, *(data+3), &p) && (p.ftype == FS_FTYPE_DIR) && strlen((const char *) p.path_from_root) < 94 && (p.disc == users[server][userid].home_disc))
+					if (libdir[0] != '%' && fsop_normalize_path(f, libdir, *(data+3), &p) && (p.ftype == FS_FTYPE_DIR) && strlen((const char *) p.path_from_root) < 94 && (p.disc == f->user->home_disc))
 					{
 						if (strlen(p.path_from_root) > 0)
 						{
-							users[server][uid].lib[0] = '$';
-							users[server][uid].lib[1] = '.';
-							users[server][uid].lib[2] = '\0';
+							f->user->lib[0] = '$';
+							f->user->lib[1] = '.';
+							f->user->lib[2] = '\0';
 						}
-						else	strcpy(users[server][uid].lib, "");
+						else	strcpy(f->user->lib, "");
 
-						strncat((char * ) users[server][uid].lib, (const char * ) p.path_from_root, 79);
+						strncat((char * ) f->user->lib, (const char * ) p.path_from_root, 79);
+						/* No longer needed - mmaped 
 						fs_write_user(server, uid, (unsigned char *) &(users[server][uid]));
-						fs_reply_ok(server, reply_port, net, stn);
+						*/
+						fsop_reply_ok(f);
 					}
 					else if (libdir[0] == '%') // Blank off the library
 					{
-						strncpy((char *) users[server][uid].lib, "", 79);
+						strncpy((char *) f->user->lib, "", 79);
+						/* No longer needed - mmaped
 						fs_write_user(server, uid, (unsigned char *) &(users[server][uid]));
-						fs_reply_ok(server, reply_port, net, stn);
+						*/
+						fsop_reply_ok(f);
 					}
-					else	fs_error(server, reply_port, net, stn, 0xA8, "Bad library");
+					else	fsop_error(f, 0xA8, "Bad library");
 				}
 			}
 			else if (fs_parse_cmd(command, "PRINTER", 6, &param))
-				fs_select_printer(server, reply_port, active_id, net, stn, param);
+				fsop_select_printer(f, param);
 #ifdef EB_VERSION
 	#if EB_VERSION >= 0x21
 			else if (fs_parse_cmd(command, "PRINTOUT", 6, &param))
@@ -10387,7 +9144,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				fs_change_pw(server, reply_port, userid, net, stn, param);
 			else if (fs_parse_cmd(command, "CHOWN", 3, &param) || fs_parse_cmd(command, "SETOWNER", 5, &param))
 				fs_chown(server, reply_port, active_id, net, stn, param);
-/* Moved to new structure
 			else if (fs_parse_cmd(command, "OWNER", 3, &param))
 				fs_owner(server, reply_port, active_id, *(data+3), net, stn, param);
 			else if (fs_parse_cmd(command, "BRIDGEVER", 7, &param))
@@ -10395,7 +9151,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				fs_error(server, reply_port, net, stn, 0xFF, "Ver " GIT_VERSION);
 				return;
 			}
-*/
 			else if (fs_parse_cmd(command, "ACCESS", 3, &param))
 				fs_access(server, reply_port, active_id, net, stn, param);
 			else if (fs_parse_cmd(command, "INFO", 1, &param)) // For some reason *I. is an abbreviation for *INFO...
@@ -10412,9 +9167,10 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				fs_copy(server, reply_port, active_id, net, stn, param);
 			else if (fs_parse_cmd(command, "LIB", 3, &param))
 			{
-				int found;
-				struct path p;
-				unsigned short l, n_handle;
+				int 		found;
+				struct path 	p;
+				struct __fs_file *l;
+				uint8_t		n_handle;
 				unsigned char	dirname[1024];
 
 				fs_debug (0, 1, "%12sfrom %3d.%3d LIB %s", "", net, stn, param);
@@ -10433,44 +9189,40 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 				}
 
-				if ((found = fs_normalize_path(server, active_id, dirname, *(data+3), &p)) && (p.ftype != FS_FTYPE_NOTFOUND)) // Successful path traverse
+				if ((found = fsop_normalize_path(f, dirname, *(data+3), &p)) && (p.ftype != FS_FTYPE_NOTFOUND)) // Successful path traverse
 				{
 					if (p.ftype != FS_FTYPE_DIR)
-						fs_error(server, reply_port, net, stn, 0xAF, "Types don't match");
-					/* 
-					if (p.disc != active[server][active_id].current_disc)
-						fs_error(server, reply_port, net, stn, 0xFF, "Not on current disc");
-					*/
-					else if (FS_PERM_EFFOWNER(server, active_id, p.owner) || (p.perm & FS_PERM_OTH_R)) // Owner and SYST always have read access to directories even if the perm is not set
+						fsop_error(f, 0xAF, "Types don't match");
+					else if (FS_PERM_EFFOWNER(f->active, p.owner) || (p.perm & FS_PERM_OTH_R)) // Owner and SYST always have read access to directories even if the perm is not set
 					{	
+						int8_t	err;
 						/* l = fs_get_dir_handle(server, active_id, p.unixpath); */
-						l = fs_open_interlock(server, p.unixpath, 1, active[server][active_id].userid);
-						if (l != -1) // Found
+						l = fsop_open_interlock(f, p.unixpath, 1, &err, 1);
+						if (err >= 0) // Found
 						{
-							n_handle = fs_allocate_user_dir_channel(server, active_id, l);
+							n_handle = fsop_allocate_user_dir_channel(f->active, l);
 							if (n_handle > 0)
 							{
 								int old;
 								struct __econet_packet_udp r;
 
-								old = active[server][active_id].lib;
+								old = active->lib;
 
-								active[server][active_id].lib = n_handle;
-								fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated for internal handle %d", "", net, stn, n_handle, l);
-								strncpy((char * ) active[server][active_id].lib_dir, (const char * ) p.path_from_root, 255);
-								if (p.npath == 0)	strcpy((char * ) active[server][active_id].lib_dir_tail, (const char * ) "$         ");
-								else			sprintf(active[server][active_id].lib_dir_tail, "%-80s", p.path[p.npath-1]); // Was 10
+								active->lib = n_handle;
+								fs_debug (0, 2, "%12sfrom %3d.%3d User handle %d allocated ", "", f->net, f->stn, n_handle);
+								strncpy((char * ) active->lib_dir, (const char * ) p.path_from_root, 255);
+								if (p.npath == 0)	strcpy((char * ) active->lib_dir_tail, (const char * ) "$         ");
+								else			sprintf(active->lib_dir_tail, "%-80s", p.path[p.npath-1]); // Was 10
 								
-								strcpy(active[server][active_id].fhandles[n_handle].acornfullpath, p.acornfullpath);
-								fs_store_tail_path(active[server][active_id].fhandles[n_handle].acorntailpath, p.acornfullpath);
-								active[server][active_id].fhandles[n_handle].mode = 1;
+								strcpy(active->fhandles[n_handle].acornfullpath, p.acornfullpath);
+								fs_store_tail_path(active->fhandles[n_handle].acorntailpath, p.acornfullpath);
+								active->fhandles[n_handle].mode = 1;
 
-								//if (old > 0 && (old != active[server][active_id].current) && (old != active[server][active_id].lib) && (old != active[server][active_id].root))
 								if (old > 0) // Matches what *dir does. The interlock close will not close internally if something is still using it.
 								{
-									fs_debug (0, 2, "%12sfrom %3d.%3d Closing old user handle %d allocated for internal handle %d", "", net, stn, old, active[server][active_id].fhandles[old].handle);
-									fs_close_interlock(server, active[server][active_id].fhandles[old].handle, active[server][active_id].fhandles[old].mode);
-									fs_deallocate_user_dir_channel(server, active_id, old);
+									fs_debug (0, 2, "%12sfrom %3d.%3d Closing old user handle %d", "", f->net, f->stn, old);
+									fsop_close_interlock(f->server, old, 1);
+									fsop_deallocate_user_dir_channel(f->server, old);
 								}
 
 								r.p.ptype = ECONET_AUN_DATA;
@@ -10479,19 +9231,17 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 								r.p.data[0] = 0x09; // Changed directory;
 								r.p.data[1] = 0x00;
 								r.p.data[2] = FS_MULHANDLE(n_handle);
-								fs_aun_send (&r, server, 3, net, stn);
+								fsop_aun_send (&r, 3, f);
 							
 							}
-							else	fs_error(server, reply_port, net, stn, 0xC0, "Too many open directories");
+							else	fsop_error(f, 0xC0, "Too many open directories");
 						}
-						else	fs_error(server, reply_port, net, stn, 0xD6, "Dir unreadable");
+						else	fsop_error(f, 0xD6, "Dir unreadable");
 					}
-					else	fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
+					else	fsop_error(f, 0xBD, "Insufficient access");
 				}
-				else	fs_error(server, reply_port, net, stn, 0xFE, "Not found");
+				else	fsop_error(f, 0xFE, "Not found");
 			}
-			//else if (!strncasecmp("DIR ", (const char *) command, 4) || (!strncasecmp("DIR", (const char *) command, 3) && (*(command + 3) == 0x0d))) // Change working directory
-			//else if (!strncasecmp("DIR", (const char *) command, 3) && (*(command + 3) == '\0' || *(command + 3) == ' ')) // The code above has already null terminated the command
 			else if (fs_parse_cmd(command, "DIR", 3, &param) || fs_parse_cmd(command, "DIR^", 4, &param))
 			{
 				int found;
@@ -10590,9 +9340,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 				// System commands here
 
-
-				// Wonder why the regexec was commented out?
-				//if (0)
 				if (regexec(&fs_netconf_regex_one, command, 3, matches, 0) == 0) // Found a NETCONF
 				{
 					char configitem[100];
@@ -10842,7 +9589,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 					}
 				}
-				//else if (!strncasecmp("SETHOME ", (const char *) command, 8))
 				else if (fs_parse_cmd(command, "SETHOME", 4, &param))
 				{ // Permanently set home directory
 					unsigned char params[256], dir[96], username[11];
@@ -10881,8 +9627,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							sprintf(homepath, ":%s.%s", fs_discs[server][users[server][uid].home_disc].name, users[server][uid].home);
 							if (fs_normalize_path(server, active_id, homepath, *(data+3), &p) && (p.ftype == FS_FTYPE_DIR))
 							{
-								fs_read_xattr(p.unixpath, &oa, server);
-								fs_write_xattr(p.unixpath, oa.owner, oa.perm, oa.load, oa.exec, 0, server); // Set homeof = 0
+								fsop_read_xattr(p.unixpath, &oa, server);
+								fsop_write_xattr(p.unixpath, oa.owner, oa.perm, oa.load, oa.exec, 0, server); // Set homeof = 0
 							}
 						}
 			
@@ -10909,8 +9655,8 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 							// Set homeof attribute
 							if (strlen(p.path_from_root)) // Don't set it on root!
 							{
-								fs_read_xattr(p.unixpath, &oa, server);
-								fs_write_xattr(p.unixpath, oa.owner, oa.perm, oa.load, oa.exec, uid, server);
+								fsop_read_xattr(p.unixpath, &oa, server);
+								fsop_write_xattr(p.unixpath, oa.owner, oa.perm, oa.load, oa.exec, uid, server);
 							}
 
 							fs_reply_ok(server, reply_port, net, stn);
@@ -11277,7 +10023,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					}
 
 				}
-				//else if (!strncasecmp("PRIV ", (const char *) command, 5)) // Set user privilege
 				else if (fs_parse_cmd(command, "PRIV", 4, &param) || fs_parse_cmd(command, "REMUSER", 4, &param))
 				{
 					char username[11], priv, priv_byte, priv2_byte;
@@ -11457,7 +10202,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						fs_error(server, reply_port, net, stn, 0xfe, "Bad command");
 					
 				}
-
 				else // Unknown command
 				{
 
@@ -11552,11 +10296,9 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		case 0x0f: // Read logged on users
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_logged_on_users(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
-/* moved to new structure
 		case 0x10: // Read time
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_time(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
-*/
 		case 0x11: // Read end of file status 
 			//if (fs_stn_logged_in(server, net, stn) >= 0) fs_eof(server, reply_port, net, stn, active_id, *(data+2)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_eof(server, reply_port, net, stn, active_id, FS_DIVHANDLE(*(data+5))); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?"); // this used to be data+2 for the handle, but I reckon it's really meant to be byte 5.
@@ -11576,7 +10318,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		case 0x16: // Set boot opts
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_set_bootopt(server, reply_port, userid, net, stn, data); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
-/* Moved to new structure
 		case 0x17: // BYE
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_bye(server, reply_port, net, stn, 1); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
@@ -11589,7 +10330,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		case 0x1a: // Read free space
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_free(server, reply_port, net, stn, active_id, data, datalen); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
-*/
 		case 0x1b: // Create directory ??
 			if (fs_stn_logged_in(server, net, stn) >= 0) fs_cdir(server, reply_port, active_id, net, stn, *(data+3), (data+6)); else fs_error(server, reply_port, net, stn, 0xbf, "Who are you ?");
 			break;
@@ -11642,7 +10382,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				fs_reply_success(server, reply_port, net, stn, 0, 0);
 			}
 			break;
-/* Moved to new structure
 		case 0x20: // Read client ID
 			if (fs_stn_logged_in(server, net, stn) >= 0)
 			{
@@ -11659,7 +10398,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				
 				fs_aun_send (&reply, server, counter+1, net, stn);
 			}
-*/
 /* NOT YET IMPLEMENTED
 		case 0x21: if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_user_info_extended_multi(server, reply_port, net, stn, *(data+5), *(data+6)); break;
 		case 0x22: if (fs_stn_logged_in(server, net, stn) >= 0) fs_read_user_info_extended_single(server, reply_port, net, stn, data+5); break;
@@ -11669,7 +10407,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 			}
 			break;
 */
-/* Moved to new structure 
 		case 0x40: // Read account information (SJ Only) - i.e. free space on a particular disc
 			{
 				if (fs_stn_logged_in(server, net, stn) >= 0)
@@ -11709,7 +10446,6 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 			}
 			break;
-*/
 		case 0x41: // Read/write system information (SJ Only)
 			{
 				// Read operations are unprivileged; write operations are privileged
@@ -11930,19 +10666,16 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 					}	
 
-					//fprintf (stderr, "*** GOT HERE *** Calling fs_aun_send() with server = %d, reply_length = %d, to %d.%d\n", server, reply_length, net, stn);
 					fs_aun_send (&reply, server, reply_length, net, stn);
 				}
 				else
 					fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 			}
 			break;
-/* Moved to master table
 		case 0x60: // PiBridge calls
 		{
 			fs_pibridge(server, reply_port, active_id, net, stn, data, datalen);
 		} break;
-*/
 		default: // Send error
 		{
 			fs_debug (0, 1, "to %3d.%3d FS Error - Unknown operation 0x%02x", net, stn, fsop);
@@ -11951,11 +10684,10 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 		break;
 
 	}
+#endif
 }
 
 // Bridge V2 packet handler code
-
-#ifdef BRIDGE_V2
 
 /* This code has to detect bulk transfer ports.
    d is the device struct of containing this fileserver.
@@ -11966,77 +10698,71 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 
 */
 
-void eb_handle_fs_traffic (uint8_t server, struct __econet_packet_aun *p, uint16_t length)
+void fsop_handle_traffic (struct __econet_packet_aun *p, uint16_t length, void *param)
 {
 
-	switch (p->p.aun_ttype)
-	{
-		case ECONET_AUN_NAK: // If there's an extant queue and we got a NAK matching its trigger sequence, dump the queue - the station has obviously stopped wanting our stuff
-			{
-				struct load_queue *l;
+	struct __econet_packet_aun	*mypacket;
+	struct __eb_packetqueue		*q, *new_q;
+	struct __fs_station		*server = (struct __fs_station *) param;
 
-				l = fs_load_queue;
+	mypacket = eb_malloc(__FILE__, __LINE__, "BRIDGE", "New packet structure for FS packet", length);
+	new_q = eb_malloc(__FILE__, __LINE__, "BRIDGE", "New packet structure for FS packetqueue", sizeof(struct __eb_packetqueue));
 
-				// See if there is a matching queue
+	memcpy(mypacket, p, length);
 
-				while (l)
-				{
-					if (l->net == p->p.srcnet
-					&& l->stn == p->p.srcstn
-					&& l->server == server
-					&& l->ack_seq_trigger == p->p.seq
-					)
-					{
-						if (l->queue_type == FS_ENQUEUE_LOAD)
-							fs_close_interlock(l->server, l->internal_handle, l->mode);
+	new_q->p = mypacket;
+	new_q->length = length;
+	new_q->n = NULL;
 
-						fs_enqueue_dump(l);
-						break;
-					}
-					else
-						l = l->next;
+	fs_debug (0, 3, "FS at %d.%d processing traffic at %p lenght %d from %d.%d", server->net, server->stn, p, length, p->p.srcnet, p->p.srcstn);
 
-				}
-			}
-			break;
-		case ECONET_AUN_ACK: 
-			fs_load_dequeue(server, p->p.srcnet, p->p.srcstn, p->p.seq);
-			break;
-		case ECONET_AUN_BCAST:
-			{
-				if (p->p.port == 0x99) // Ordinary FS traffic
-					handle_fs_traffic (server, p->p.srcnet, p->p.srcstn, p->p.ctrl, (char *) &(p->p.data), length);
-			} break;
-		case ECONET_AUN_DATA:
-			{
-				if (p->p.port == 0x99) // Ordinary FS traffic
-					handle_fs_traffic (server, p->p.srcnet, p->p.srcstn, p->p.ctrl, (char *) &(p->p.data), length);
-				else
-					handle_fs_bulk_traffic (server, p->p.srcnet, p->p.srcstn, p->p.port, p->p.ctrl, (char *) &(p->p.data), length);
-			} break;
-	}
+	pthread_mutex_lock(&(server->fs_mutex));
 
-	fs_garbage_collect(server); // See what might need cleaning up
+	q = server->fs_workqueue;
+
+	while (q && q->n)
+		q = q->n;
+
+	if (!q)
+		server->fs_workqueue = new_q;
+	else
+		q->n = new_q;
+
+	fs_debug (0, 3, "FS at %d.%d processing traffic at %p length %d from %d.%d - now on queue (%p)", server->net, server->stn, p, length, p->p.srcnet, p->p.srcstn, server->fs_workqueue);
+
+	pthread_mutex_unlock(&(server->fs_mutex));
+
+	fs_debug (0, 3, "FS at %d.%d waking worker thread", server->net, server->stn);
+	pthread_cond_signal(&(server->fs_condition));
+
+	return;
+
 }
 
 // Used for *FAST - NB, doesn't rename the directory: the *FAST handler has to do that.
 
-void fs_set_disc_name (uint8_t server, uint8_t disc, unsigned char *discname)
+void fsop_set_disc_name (struct __fs_station *s, uint8_t disc, unsigned char *discname)
 {
 
 	char	old_dirname[1024], new_dirname[1024];
+	struct __fs_disc *d;
 
-	if (disc <= ECONET_MAX_FS_DISCS)
+	d = s->discs;
+
+	while (d && d->index != disc)
+		d = d->next;
+
+	if (d)
 	{
-		sprintf (new_dirname, "%s/%1d%s", fs_stations[server].directory, disc, discname);
-		sprintf (old_dirname, "%s/%1d%s", fs_stations[server].directory, disc, fs_discs[server][disc].name);
+		sprintf (new_dirname, "%s/%1d%s", s->directory, disc, discname);
+		sprintf (old_dirname, "%s/%1d%s", s->directory, disc, d->name);
 
-		if (fs_discs[server][disc].name[0]) // Exists - rename it
+		if (d->name[0]) // Exists - rename it
 			rename (old_dirname, new_dirname);
 		else // Create it
 			mkdir (new_dirname, 0755);
 
-		memcpy(&(fs_discs[server][disc].name), discname, 17);
+		memcpy(&(d->name), discname, 17);
 	}
 
 
@@ -12050,10 +10776,17 @@ uint8_t	fs_get_maxdiscs()
 }
 
 // Used for *FAST
-void fs_get_disc_name (uint8_t server, uint8_t disc, unsigned char *discname)
+void fsop_get_disc_name (struct __fs_station *s, uint8_t disc, unsigned char *discname)
 {
-	if (disc <= ECONET_MAX_FS_DISCS)
-		memcpy(discname, &(fs_discs[server][disc].name), 17);
+	struct __fs_disc	*d;
+
+	d = s->discs;
+
+	while (d && d->index != disc)
+		d = d->next;
+
+	if (d)
+		memcpy(discname, &(d->name), 17);
 	else
 		*discname = 0;
 
@@ -12062,26 +10795,23 @@ void fs_get_disc_name (uint8_t server, uint8_t disc, unsigned char *discname)
 }
 
 // used for *VIEW
-uint8_t fs_writedisclist (uint8_t server, unsigned char *addr)
+uint8_t fsop_writedisclist (struct __fs_station *s, unsigned char *addr)
 {
 
-	uint8_t	found = 0, count = 0;
+	struct __fs_disc	*d;
 
-	while (count < ECONET_MAX_FS_DISCS)
+	d = s->discs;
+
+	uint8_t	found = 0;
+
+	while (d)
 	{
-		if (fs_discs[server][count].name[0]) // Found one
-		{
-
-			memcpy (addr+(found * 20), fs_discs[server][count].name, strlen(fs_discs[server][count].name));
-			found++;
-		}
-
-		count++;
+		memcpy (addr+(found * 20), d->name, strlen(d->name));
+		found++;
 	}
 
 	return ((found/2) + ((found%2 == 0) ? 0 : 1));
 }
-#endif
 
 /*
  * fs_setup
@@ -12089,37 +10819,395 @@ uint8_t fs_writedisclist (uint8_t server, unsigned char *addr)
  * Called by econet-hpbridge.c to get the 
  * once-off stuff set up in the fileserver
  *
+ * Doesn't actually instantiate any servers, but it does NULL-off the server list
+ *
  */
 
-void fs_setup(void)
+void fsop_setup(void)
 {
+
+	unsigned char	regex[128];
 
 	/* Initialize list of tabled FSOP handler functions */
 
+	fileservers = NULL;
+
 	memset (&fsops, 0, sizeof(fsops));
 
+	FSOP_SET (00, (FSOP_F_NONE));
+	FSOP_SET (01, (FSOP_F_LOGGEDIN)); /* Save */
+	FSOP_SET (02, (FSOP_F_LOGGEDIN)); /* Load */
+	FSOP_SET (03, (FSOP_F_LOGGEDIN)); /* Examine */
+	FSOP_SET (04, (FSOP_F_LOGGEDIN)); /* Read catalogue header */
+	FSOP_SET (05, (FSOP_F_LOGGEDIN)); /* Load as command */
+	FSOP_SET (06, (FSOP_F_LOGGEDIN)); /* Open file */
+	FSOP_SET (07, (FSOP_F_LOGGEDIN)); /* Close handle */
+	FSOP_SET (08, (FSOP_F_LOGGEDIN)); /* Get byte */
+	FSOP_SET (09, (FSOP_F_LOGGEDIN)); /* Put byte */
+	FSOP_SET (0a, (FSOP_F_LOGGEDIN)); /* Get bytes */
+	FSOP_SET (0b, (FSOP_F_LOGGEDIN)); /* Put bytes */
+	FSOP_SET (0c, (FSOP_F_LOGGEDIN)); /* Get Random Access Info 24-bit */
+	FSOP_SET (0d, (FSOP_F_LOGGEDIN)); /* Set Random Access Info 24-bit */
+	FSOP_SET (0e, (FSOP_F_LOGGEDIN)); /* Read disc names */
+	FSOP_SET (0f, (FSOP_F_LOGGEDIN)); /* Read logged on users */
 	FSOP_SET (10, (FSOP_F_NONE)); /* Read time */
-	FSOP_SET (1a, (FSOP_F_LOGGEDIN)); /* Read free space */
+	FSOP_SET (11, (FSOP_F_LOGGEDIN)); /* Read EOF status */
+	FSOP_SET (12, (FSOP_F_LOGGEDIN)); /* Read object info */
+	FSOP_SET (13, (FSOP_F_LOGGEDIN)); /* Set object info */
+	FSOP_SET (14, (FSOP_F_LOGGEDIN)); /* Delete object(s) */
+	FSOP_SET (15, (FSOP_F_LOGGEDIN)); /* Read user env */
 	FSOP_SET (17, (FSOP_F_LOGGEDIN)); /* Bye */
 	FSOP_SET (18, (FSOP_F_LOGGEDIN)); /* Read user information */
 	FSOP_SET (19, (FSOP_F_NONE)); /* Read FS Version */
+	FSOP_SET (1a, (FSOP_F_LOGGEDIN)); /* Read free space */
+	FSOP_SET (1b, (FSOP_F_LOGGEDIN)); /* Create directory */
+	FSOP_SET (1c, (FSOP_F_LOGGEDIN | FSOP_F_SYST)); /* Set RTC */
+	FSOP_SET (1d, (FSOP_F_LOGGEDIN)); /* Create */
+	FSOP_SET (1e, (FSOP_F_LOGGEDIN)); /* Read user free space */
+	FSOP_SET (1f, (FSOP_F_LOGGEDIN | FSOP_F_SYST)); /* Set user free space */
 	FSOP_SET (20, (FSOP_F_LOGGEDIN)); /* Read Client Information */
-	FSOP_SET (40, (FSOP_F_LOGGEDIN | FSOP_F_MDFS)); /* Read SJ Information - Not yet implemented */
-	FSOP_SET (60, (FSOP_F_LOGGEDIN | FSOP_F_SYST)); /* PiBridge functions */
 
+	/*
+	 * Functions &21, &22, &24 are manager functions - not implemented (yet)
+	 */
+
+	FSOP_SET (26, (FSOP_F_LOGGEDIN)); /* 32 bit save */
+	FSOP_SET (27, (FSOP_F_LOGGEDIN)); /* 32 bit create */
+	FSOP_SET (28, (FSOP_F_LOGGEDIN)); /* 32 bit load */
+	FSOP_SET (29, (FSOP_F_LOGGEDIN)); /* 32 bit Get Random Access Info */
+	FSOP_SET (2a, (FSOP_F_LOGGEDIN)); /* 32 bit Set Random Access Info */
+	FSOP_SET (2b, (FSOP_F_LOGGEDIN)); /* 32 bit Get bytes */
+	FSOP_SET (2c, (FSOP_F_LOGGEDIN)); /* 32 bit Put bytes */
+	FSOP_SET (40, (FSOP_F_LOGGEDIN | FSOP_F_MDFS)); /* Read SJ Information - Not yet implemented */
+	FSOP_SET (41, (FSOP_F_LOGGEDIN | FSOP_F_MDFS | FSOP_F_SYST)); /* Read/write SJ SYstem information */
+	FSOP_SET (60, (FSOP_F_LOGGEDIN | FSOP_F_SYST)); /* PiBridge functions */
 	/* Initialize known command list */
 
 	/* Catalogue done as a special case */
 	fsop_00_addcmd(fsop_00_mkcmd(".", FSOP_00_LOGGEDIN, 0, 1, 1, fsop_00_catalogue));
 	fsop_00_addcmd(fsop_00_mkcmd("CAT", FSOP_00_LOGGEDIN, 0, 1, 2, fsop_00_catalogue));
 
+	/* Some aliases for *I AM */
+	fsop_00_addcmd(fsop_00_mkcmd("IAM", FSOP_00_ANON, 1, 3, 2, fsop_00_LOGIN));
+	fsop_00_addcmd(fsop_00_mkcmd("I\x80""AM", FSOP_00_ANON, 1, 3, 4, fsop_00_LOGIN));
+	fsop_00_addcmd(fsop_00_mkcmd("I\x80.", FSOP_00_ANON, 1, 3, 3, fsop_00_LOGIN));
+	fsop_00_addcmd(fsop_00_mkcmd("LOGON", FSOP_00_ANON, 1, 3, 4, fsop_00_LOGIN));
+
 	/* The rest of the commands */
 
+	FSOP_OSCLI(ACCESS, (FSOP_00_LOGGEDIN), 1, 2, 3);
+	FSOP_OSCLI(BRIDGEUSER, (FSOP_00_LOGGEDIN | FSOP_00_BRIDGE), 1, 1, 7);
 	FSOP_OSCLI(BRIDGEVER, (FSOP_00_LOGGEDIN | FSOP_00_BRIDGE),0,0,7);
 	FSOP_OSCLI(BYE,(FSOP_00_LOGGEDIN),0,0,2);
+	FSOP_OSCLI(CHOWN,(FSOP_00_ANON), 1, 2, 5);
+	FSOP_OSCLI(COPY,(FSOP_00_LOGGEDIN), 1, 2, 3);
+	FSOP_OSCLI(DELETE,(FSOP_00_LOGGEDIN), 1, 1, 3);
+	FSOP_OSCLI(DIR,(FSOP_00_LOGGEDIN), 0, 1, 2);
+	FSOP_OSCLI(DISCMASK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 5);
+	FSOP_OSCLI(DISKMASK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 5);
+	FSOP_OSCLI(FSCONFIG,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 1, 2, 4);
+	FSOP_OSCLI(INFO,(FSOP_00_LOGGEDIN), 1, 1, 2);
+	FSOP_OSCLI(LIB,(FSOP_00_LOGGEDIN), 0, 1, 3);
+	FSOP_OSCLI(LINK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 4);
 	FSOP_OSCLI(LOAD,(FSOP_00_LOGGEDIN),1,2,2);
+	FSOP_OSCLI(LOGIN,(FSOP_00_ANON),1,3,4);
+	FSOP_OSCLI(LOGOFF,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 1, 1, 4);
+	FSOP_OSCLI(MKLINK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 4);
+	FSOP_OSCLI(NEWUSER,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 1, 2, 4);
 	FSOP_OSCLI(OWNER,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM),1,1,3);
+	FSOP_OSCLI(PASS,(FSOP_00_LOGGEDIN),2,2,2);
+	FSOP_OSCLI(PRINTER,(FSOP_00_LOGGEDIN),1,1,6);
+	FSOP_OSCLI(PRINTOUT,(FSOP_00_LOGGEDIN), 1, 1, 6);
+	FSOP_OSCLI(PRIV,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM),1,2,3);
+	FSOP_OSCLI(RENUSER,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 4);
 	FSOP_OSCLI(SAVE,(FSOP_00_LOGGEDIN), 3, 5, 2);
+	FSOP_OSCLI(SDISC,(FSOP_00_LOGGEDIN), 0, 1, 3);
+	FSOP_OSCLI(SETHOME,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 4);
+	FSOP_OSCLI(SETLIB,(FSOP_00_LOGGEDIN), 1, 2, 4);
+	FSOP_OSCLI(SETOPT,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 4);
+	FSOP_OSCLI(SETOWNER,(FSOP_00_ANON), 1, 2, 5);
+	FSOP_OSCLI(SETPASS,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 4);
+	FSOP_OSCLI(UNLINK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 1, 1, 4);
+
+	sprintf(regex, "^(%s{1,16})", FSREGEX);
+
+	if (regcomp(&r_discname, regex, REG_EXTENDED) != 0)
+		fs_debug (1, 0, "Unable to compile regex for disc names.");
+
+	fs_debug (0, 1, "Fileserver infrastructure set up");
 
 }
 
+/* 
+ * fsop_run()
+ *
+ * Called by the HPB when it wants to start up
+ * a particular server. Returns 0 if the server
+ * wouldn't start, 1 if it started successfully,
+ * and -1 if the server was already enabled.
+ *
+ * Returns -2 if the pointer was not a server.
+ *
+ */
+
+/* Quick definition - the function is below */
+
+void *fsop_thread (void *);
+
+int8_t fsop_run (struct __fs_station *s)
+{
+
+	int	err;
+	uint8_t	port;
+
+	if (!s)	return -2;
+
+	/* Test to see if server already enabled */
+
+	fs_debug (0, 1, "FS at %d.%d Attempting to enable server", s->net, s->stn);
+
+	pthread_mutex_lock (&(s->fs_mutex));
+
+	if (s->enabled)
+	{
+		fs_debug (0, 1, "FS at %d.%d Server already enabled! Not bothering to start.", s->net, s->stn);
+		pthread_mutex_unlock (&(s->fs_mutex));
+		return -1;
+	}
+
+	port = eb_port_allocate(s->fs_device, 0x99, fsop_handle_traffic, (void *) s);
+
+	if (port != 0x99)
+	{
+		pthread_mutex_unlock (&(s->fs_mutex));
+		fs_debug (1, 0, "FS at %d.%d (%s) could not start - port &99 not available", s->net, s->stn, s->directory);
+		return 0;
+	}
+
+	s->enabled = 1; /* Turn it on */
+	
+	pthread_mutex_unlock (&(s->fs_mutex));
+
+	/* Create the thread & detach */
+
+	err = pthread_create(&(s->fs_thread), NULL, fsop_thread, (void *) s);
+
+	if (err)
+	{
+		fs_debug (1, 0, "FS at %d.%d (%s) could not start - thread creation failed: %s", s->net, s->stn, s->directory, strerror(err));
+		return 0;
+	}
+
+	pthread_detach(s->fs_thread);
+
+	fs_debug (0, 1, "FS at %d.%d Server enabled", s->net, s->stn);
+
+	return 1;
+}
+
+/*
+ * fs_thread()
+ *
+ * Main fileserver thread.
+ *
+ * Takes mutex, initializes config, sets up discs, users, etc.
+ *
+ * In time, it will also
+ * call the HPB function to request port &99 and
+ * other ports which are fileserver-related.
+ *
+ * Sets enabled = 1
+ *
+ * Checks work queue & then does a pthread_cond_wait waiting
+ * for traffic. It's timed, so that every 10 seconds it can
+ * do a garbage collect as a minimum, and check to see whether
+ * something changed enabled to 0, in which case it closes
+ * all its handles and kicks everyone off (does fsop_shutdown()
+ * essentially).
+ *
+ */
+
+void *fsop_thread(void *p)
+{
+	struct __fs_station *s;
+
+	s = (struct __fs_station *) p;
+
+	pthread_mutex_lock (&(s->fs_mutex));
+
+	fs_debug (0, 1, "FS at %d.%d (%s) running", s->net, s->stn, s->directory);
+
+	/* Load config, initialize users (actives should be NULL anyway, either from fsop_initialize, or on fsop_shutdown),
+	 * likewise files, bulkports should be null, and the load queue.
+	 *
+	 * Probably worth emptying the workqueue if there's anything on it (but there shouldn't be), then grab port
+	 * &99 within the bridge and sit and wait for traffic.
+	 *
+	 * Loop round with a cond_wait 10 seconds, check for enabled going to 0 (and if so, do a clean shutdown and
+	 * exit the thread), deal with any traffic on the queue, garbage collect... and then sleep again.
+	 *
+	 * The main HPB will need to spot MachinePeek replies destined for this machine and call the function
+	 * below to register the user's machine type & NFS version.
+	 */
+
+	while (1)
+	{
+		struct timespec		cond_time;
+		struct __eb_packetqueue	*pq, *pqnext;
+		struct __fs_active	*a;
+
+		/* At top of loop, the lock is held - either because of the cond_wait, or because we grabbed it above */
+
+		if (!s->enabled)
+		{
+			/* Something wants us to shut down - so sort that out */
+
+			fs_debug (0, 1, "FS at %d.%d (%s) shutting down on request", s->net, s->stn, s->directory);
+			
+			fsop_shutdown(s);
+
+			pthread_mutex_unlock(&(s->fs_mutex));
+
+			eb_free (__FILE__, __LINE__, "FS", "Free FS config memory", s->config);
+
+			/* Note, don't free the __fs_station - that stays around while the bridge is running. 
+			 * Otherwise we can't tell if enabled is set or not! 
+			 */
+
+			return NULL;
+
+		}
+
+		/* Handle work on the workqueue here - which will include ACK & NAK for load_queue traffic triggers */
+		 
+		pq = s->fs_workqueue;
+
+		fs_debug (0, 4, "FS at %d.%d processing work queue at %p", s->net, s->stn, pq);
+
+		while (pq)
+		{
+			pqnext = pq->n;
+
+			a = fsop_stn_logged_in(s, pq->p->p.srcnet, pq->p->p.srcstn);
+
+			fs_debug (0, 4, "FS at %d.%d processing work queue at %p - packet at %p length %d from %d.%d", s->net, s->stn, pq, pq->p, pq->length, pq->p->p.srcnet, pq->p->p.srcstn);
+
+			switch (pq->p->p.aun_ttype)
+			{
+		   		case ECONET_AUN_NAK: // If there's an extant queue and we got a NAK matching its trigger sequence, dump the queue - the station has obviously stopped wanting our stuff
+				{
+					struct load_queue *l;
+	
+					l = s->fs_load_queue;
+	
+					// See if there is a matching queue
+	
+					while (l && a)
+					{
+						if (l->active == a 
+						&& l->ack_seq_trigger == pq->p->p.seq
+						)
+						{
+							/* GOT HERE */
+							if (l->queue_type == FS_ENQUEUE_LOAD)
+								fsop_close_interlock(s, l->internal_handle, l->mode);
+	
+							fsop_enqueue_dump(l);
+
+							break;
+						}
+						else
+							l = l->next;
+	
+					}
+				}
+				break;
+
+				case ECONET_AUN_ACK:
+				{
+					fsop_load_dequeue(s, pq->p->p.srcnet, pq->p->p.srcstn, pq->p->p.seq);
+				}
+					break;
+
+				case ECONET_AUN_BCAST:
+				case ECONET_AUN_DATA:
+					fsop_port99(s, pq->p, pq->length);
+					break;
+	
+			}
+
+			eb_free(__FILE__, __LINE__, "FS", "Free FS packet after processing", pq->p);
+			eb_free(__FILE__, __LINE__, "FS", "Free FS packet queue entry after processing", pq);
+
+			s->fs_workqueue = pq = pqnext;
+	
+		}
+
+		/* Garbage collect here */
+
+		fsop_garbage_collect(s);
+
+		/* Cond wait 10 seconds */
+
+		fs_debug (0, 4, "FS at %d.%d sleeping", s->net, s->stn);
+
+		clock_gettime(CLOCK_REALTIME, &cond_time);
+		cond_time.tv_sec += 10;
+		pthread_cond_timedwait(&(s->fs_condition), &(s->fs_mutex), &cond_time);
+	}
+
+}
+
+/*
+ * fsop_register_machine()
+ *
+ * Called by HPB when it sees a MachinePeek reply coming to this emulated machine.
+ *
+ * Helps the FS to ascertain machine type at logon
+ *
+ */
+
+void * fsop_register_machine(struct __fs_machine_peek_reg *p)
+{
+	struct __fs_machine_peek_reg	*search;
+
+	/* We need the lock. Considered if this risked deadlock, but
+	 * I don't think it does because the FS will eventually unlock this and
+	 * that will free up this routine to complete and return to the HPB
+	 *
+	 * Plus, most such replies will arrive in the snooze period while the FS
+	 * thread is waiting on the condition after sending the MachinePeek
+	 * query, whilst nothing is really going on in the FS.
+	 *
+	 */
+
+	fs_debug_full (0, 2, p->s, p->net, p->stn, "Registering machine type %08X", p->mtype);
+
+	pthread_mutex_lock(&(p->s->fs_mpeek_mutex));
+
+	search = p->s->peeks;
+
+	/* If this station is still in the peeks list for this server,
+	 * update the mytype from our info.
+	 */
+
+	while (search)
+	{
+		if (search->net == p->net && search->stn == p->stn)
+		{
+			search->mtype = p->mtype;
+			break;
+		}
+		else
+			search = search->next;
+	}
+
+	pthread_mutex_unlock(&(p->s->fs_mpeek_mutex));
+
+	pthread_cond_signal(&(p->s->fs_condition));
+
+	eb_free (__FILE__, __LINE__, "FS", "Freeing machine peek structure we just registered", p);
+
+	return NULL;
+
+}

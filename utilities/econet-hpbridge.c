@@ -136,7 +136,7 @@ uint32_t	bridgewide_seq = 0x4000;
 
 /* Some function defines - but not all of them because I couldn't be bothered */
 
-uint8_t eb_enqueue_input (struct __eb_device *, struct __econet_packet_aun *, uint16_t);
+// Now in the header: uint8_t eb_enqueue_input (struct __eb_device *, struct __econet_packet_aun *, uint16_t);
 void eb_set_whole_wire_net (uint8_t, struct __eb_device *);
 void eb_set_single_wire_host (uint8_t, uint8_t);
 void eb_clr_single_wire_host (uint8_t, uint8_t);
@@ -145,7 +145,7 @@ void eb_clear_zero_hosts (struct __eb_device *);
 uint8_t eb_firewall (struct __econet_packet_aun *);
 void eb_reset_tables(void);
 void eb_debug (uint8_t, uint8_t, char *, char *, ...);
-uint32_t get_local_seq (unsigned char, unsigned char);
+uint32_t eb_get_local_seq (struct __eb_device *);
 static void * eb_statistics (void *);
 static void * eb_fs_statistics (void *);
 extern void fs_dump_handle_list (FILE *, int);
@@ -366,7 +366,7 @@ void * eb_malloc (char *file, int line, char *module, char *purpose, size_t size
 		eb_debug (0, 2, "MEM MGT", "%-8s         %s:%d seeking malloc(%d) for purpose %s", module, file, line, size, purpose);
 		*/
 
-	r = malloc(size);
+	r = calloc(1, size);
 
 	/* res = posix_memalign(&r, 256, size); */
 	if (EB_DEBUG_MALLOC)
@@ -376,6 +376,8 @@ void * eb_malloc (char *file, int line, char *module, char *purpose, size_t size
 		return r;
 	else	return NULL;
 	*/
+
+	/* memset(r, 0, size); // Zero everything out - Now done using calloc() */
 
 	return r;
 
@@ -1034,11 +1036,21 @@ struct __eb_device * eb_device_init (uint8_t net, uint16_t type, uint8_t config)
 		if (pthread_cond_init(&(p->qwake), NULL) == -1)
 			eb_debug (1, 0, "CONFIG", "Cannot initialize queue wake condition for net %d", net);
 
+		if (pthread_mutex_init(&(p->aun_out_mutex), NULL) == -1)
+			eb_debug (1, 0, "CONFIG", "Cannot initialize AUN output mutex for net %d", net);
+
+		if (pthread_cond_init(&(p->aun_out_cond), NULL) == -1)
+			eb_debug (1, 0, "CONFIG", "Cannot initialize AUN output condition for net %d", net);
+
 		if (pthread_mutex_init(&(p->priority_mutex), NULL) == -1)
 			eb_debug (1, 0, "CONFIG", "Cannot initialize priority mutex for net %d", net);
 
 		p->out = NULL; // Init queues
 		p->in = NULL;
+
+		// AUN output queues
+
+		p->aun_out_head = p->aun_out_tail = NULL;
 
 		// Clear priority
 
@@ -1130,8 +1142,19 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 			existing->local.print_handler = NULL;
 			existing->local.seq = 0x4000;
 			strcpy (existing->local.ip.tunif, ""); // Rogue for uninitialized
-			existing->local.fs.index = -1; // Flag as unset
+			existing->local.fs.server = NULL; // No station
 			strcpy(existing->local.ip.tunif, ""); // Flag as no IP gateway
+			pthread_mutex_init(&existing->local.ports_mutex, NULL);
+			memset(&(existing->local.ports), 0, sizeof(existing->local.ports)); // Clear ports in use
+			memset(&(existing->local.reserved_ports), 0, sizeof(existing->local.reserved_ports)); // Clear ports in use
+			existing->local.last_port = 0;
+			/* Insert some reserved ports to the port allocator */
+			EB_PORT_SET(existing, reserved_ports, 0x99, NULL, NULL); /* FS */
+			EB_PORT_SET(existing, reserved_ports, 0x9E, NULL, NULL); /* PS ? */
+			EB_PORT_SET(existing, reserved_ports, 0x9F, NULL, NULL); /* PS Query */
+			EB_PORT_SET(existing, reserved_ports, 0xA0, NULL, NULL); /* *FAST */
+			EB_PORT_SET(existing, reserved_ports, 0xD1, NULL, NULL); /* PS Data */
+			EB_PORT_SET(existing, reserved_ports, 0xD2, NULL, NULL); /* IP/Econet */
 		}
 		else if (newtype == EB_DEF_PIPE)
 		{
@@ -2265,7 +2288,7 @@ void eb_send_broadcast_diverted (struct __eb_device *s, struct __eb_device *d, s
 	{
 		for (count = 1; count < 255; count++)
 			if ((dev = d->wire.divert[count]))
-				if ((dev->type == EB_DEF_AUN && e) || (dev->type != EB_DEF_AUN))
+				if ((dev->type == EB_DEF_AUN && e) || (dev->type != EB_DEF_AUN && ((dev->type != EB_DEF_PIPE) || (dev->pipe.skt_write != -1))))
 					eb_send_broadcast(s, dev, p, length);
 	}
 
@@ -3631,12 +3654,14 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 
 					eb_debug (0, 4, "QUEUE", "%-8s %3d.%3d Acquiring lock for incoming search of outq for packet to %3d.%3d P:&%02X C: &%02X Length 0x%04X, combo = 0x%04X, e->parent = %p", eb_type_str(my_parent->type), incoming.p.dstnet, incoming.p.dststn, incoming.p.srcnet, incoming.p.srcstn, incoming.p.port, incoming.p.ctrl, length, combo, my_parent);
 
-					pthread_mutex_lock (&(my_parent->qmutex_out));
+					//pthread_mutex_lock (&(my_parent->qmutex_out));
+					pthread_mutex_lock (&(my_parent->aun_out_mutex));
 
 					eb_debug (0, 4, "QUEUE", "%-8s %3d.%3d Locks acquired for incoming search of outq for packet to %3d.%3d P:&%02X C: &%02X Seq: 0x%08X Length 0x%04X, combo = 0x%04X", eb_type_str(my_parent->type), incoming.p.dstnet, incoming.p.dststn, incoming.p.srcnet, incoming.p.srcstn, incoming.p.port, incoming.p.ctrl, incoming.p.seq, length, combo);
 
 					outq_parent = NULL;
-					outq = my_parent->out;
+					//outq = my_parent->out;
+					outq = my_parent->aun_out_head;
 
 					while (outq && outq->destcombo != combo)
 					{
@@ -3714,13 +3739,17 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 							if (outq_parent) // This wasn't the first in the queue
 								outq_parent->next = outq->next;
 							else // Was the first in the queue
-								my_parent->out = outq->next;
+							{
+								//my_parent->out = outq->next;
+								my_parent->aun_out_head = outq->next;
+							}
 	
 							eb_free (__FILE__, __LINE__, "AUN-EXP", "Free outq after locating packet to splice out because of ACK/NAK", outq);
 						}
 					}
 
-					pthread_mutex_unlock (&(my_parent->qmutex_out));
+					//pthread_mutex_unlock (&(my_parent->qmutex_out));
+					pthread_mutex_unlock (&(my_parent->aun_out_mutex));
 		
 					pthread_cond_signal (&(my_parent->qwake));
 
@@ -4073,7 +4102,7 @@ void eb_fast_input_ready(struct __eb_device *d, uint8_t net, uint8_t stn, uint8_
 
 	reply->p.port = 0x00; 
 	reply->p.ctrl = 0x84;
-	reply->p.seq = get_local_seq(d->net, d->local.stn);
+	reply->p.seq = eb_get_local_seq(d);
 	reply->p.dstnet = net;
 	reply->p.dststn = stn;
 	reply->p.srcnet = d->net;
@@ -4154,7 +4183,7 @@ static void * eb_fast_io_handler (void *device)
 				p->p.aun_ttype = ECONET_AUN_DATA;
 				p->p.port = 0xA0;
 				p->p.ctrl = 0x80 | d->local.fastbit; d->local.fastbit ^= 0x01;
-				p->p.seq = get_local_seq(d->net, d->local.stn);
+				p->p.seq = eb_get_local_seq(d);
 				memcpy(&(p->p.data), t, s);
 
 				eb_debug (0, 3, "FAST", "Fast Handler Loop - if(ready) succeeded - transmitting output to device %p, packet at %p, length %d to %d.%d", d, p, s, p->p.dstnet, p->p.dststn);
@@ -4264,9 +4293,9 @@ uint8_t eb_fast_printdiscs (struct __eb_device *d)
 
 	for (count = 0; count < max_discs; count++)
 	{
-		char	discname[128];
+		unsigned char	discname[128];
 
-		fs_get_disc_name (d->local.fs.index, count, discname);
+		fsop_get_disc_name (d->local.fs.server, count, discname);
 
 		fastprintf (d, "%1x: %02d - %s\r\n", count, count, discname);
 	}
@@ -4320,7 +4349,7 @@ fast_handler_reset:
 
 		fastprintf (d, "  A: Alter fileserver parameters\r\n");
 		fastprintf (d, "  F: Display fileserver info\r\n");
-		if (fs_is_active(d->local.fs.index))
+		if (fsop_is_enabled(d->local.fs.server))
 			fastprintf (d, "  S: Shut down file server\r\n");
 		else
 		{
@@ -4357,7 +4386,7 @@ fast_handler_reset:
 						uint8_t		fnlength;
 
 						pthread_mutex_lock(&fs_mutex);
-						fs_get_parameters (d->local.fs.index, &params, &fnlength);
+						fsop_get_parameters (d->local.fs.server, &params, &fnlength);
 						pthread_mutex_unlock(&fs_mutex);
 
 						while (!finished)
@@ -4425,7 +4454,7 @@ fast_handler_reset:
 										if ((key2 & 0xDF) == 'Y')
 										{
 											pthread_mutex_lock(&fs_mutex);
-											fs_set_parameters(d->local.fs.index, params, fnlength);
+											fsop_set_parameters(d->local.fs.server, params, fnlength);
 											pthread_mutex_unlock(&fs_mutex);
 										}
 
@@ -4452,9 +4481,9 @@ fast_handler_reset:
 
 						for (count = 0; count < max_discs; count++)
 						{
-							char	discname[128];
+							unsigned char	discname[128];
 
-							fs_get_disc_name (d->local.fs.index, count, discname);
+							fsop_get_disc_name (d->local.fs.server, count, discname);
 							if (discname[0]) fastprintf (d, "%02d:%-16s ", count, discname);
 						}
 
@@ -4482,14 +4511,13 @@ fast_handler_reset:
 					} break;
 				case 'S': // Shut down local fileserver
 				case 'B': // Start up fileserver (the code does both depending on fileserver state, but only one of the two options is displayed on screen)
-					pthread_mutex_lock(&fs_mutex);
-					if (fs_is_active(d->local.fs.index))
+					if (fsop_is_enabled(d->local.fs.server))
 					{
 						if (key == 'B')
 							fastprintf (d, "\r\n\n*** ERROR: Fileserver on %d.%d already startedr\n\n", d->net, d->local.stn);
 						else
 						{
-							fs_shutdown (d->local.fs.index);
+							fsop_shutdown (d->local.fs.server);
 							fastprintf (d, "\r\n\n*** Fileserver on %d.%d has shut down\r\n\n", d->net, d->local.stn);
 						}
 					}	
@@ -4499,16 +4527,17 @@ fast_handler_reset:
 							fastprintf (d, "\r\n\n*** ERROR: Fileserver on %d.%d not active\r\n\n", d->net, d->local.stn);
 						else
 						{
-							int r;
-							r = fs_initialize (d, d->net, d->local.stn, d->local.fs.rootpath, d->local.fs.index);
-							if (r)
+							d->local.fs.server = fsop_initialize (d, d->local.fs.rootpath);
+							if (d->local.fs.server)
+							{
+								fsop_run(d->local.fs.server);
 								fastprintf (d, "\r\n\n*** Fileserver on %d.%d booted\r\n\n", d->net, d->local.stn);
+							}
 							else
 								fastprintf (d, "\r\n\n*** ERROR: Fileserver on %d.%d BOOT FAILED\r\n\n", d->net, d->local.stn);
 
 						}
 					}
-					pthread_mutex_unlock(&fs_mutex);
 					fastprintf (d, "Press any key...");
 					key2 = eb_fast_getkey(d);
 					break;
@@ -4527,13 +4556,11 @@ fast_handler_reset:
 						if (key2 == 'Y')
 						{
 							// Do stuff here
-							pthread_mutex_lock (&fs_mutex);
-							if (fs_clear_syst_pw(d->local.fs.index))
+							if (fsop_clear_syst_pw(d->local.fs.server))
 								fastprintf (d, "\r\n\n*** SYST password cleared.");
 							else
 								fastprintf (d, "\r\n\n*** ERROR: SYST password not cleared.");
 
-							pthread_mutex_unlock (&fs_mutex);
 							fastprintf (d, "\r\n\nPress any key...");
 
 							key2 = eb_fast_getkey(d);
@@ -4579,7 +4606,7 @@ fast_handler_reset:
 						}
 						else
 						{
-							char		discname[128], new_discname[17];
+							unsigned char		discname[128], new_discname[17];
 							uint8_t		discnumber;
 
 							fastprintf (d, "%c\r\n\n", key2);
@@ -4588,17 +4615,17 @@ fast_handler_reset:
 							if (discnumber > 9)
 								discnumber -= 7;
 
-							fs_get_disc_name (d->local.fs.index, discnumber, discname);
-							if (key == 'R' && strlen(discname) == 0)
+							fsop_get_disc_name (d->local.fs.server, discnumber, discname);
+							if (key == 'R' && strlen((char *) discname) == 0)
 								fastprintf (d, "*** ERROR: Disc does not exist.");
-							else if (key == 'C' && strlen(discname) > 0)
+							else if (key == 'C' && strlen((char *) discname) > 0)
 								fastprintf (d, "*** ERROR: Disc already formatted.");
 							else
 							{
 								uint8_t	discname_len;
 
 								fastprintf (d, "New name for disc %d: ", discnumber);
-								discname_len = eb_fast_getstring (d, s, 16, new_discname);
+								discname_len = eb_fast_getstring (d, s, 16, (char *) new_discname);
 
 								if (discname_len == 0xff) // Connection sever
 									break;
@@ -4608,7 +4635,7 @@ fast_handler_reset:
 								{
 									fastprintf (d, "\r\n\n%s disc %d as %s\r\n", (key == 'C' ? "Creating" : "Renaming"), discnumber, new_discname);
 
-									fs_set_disc_name (d->local.fs.index, discnumber, new_discname);
+									fsop_set_disc_name (d->local.fs.server, discnumber, new_discname);
 								}
 							}
 
@@ -4732,6 +4759,382 @@ static void * eb_notify_watcher (void * device)
 	return NULL;
 }
 
+/* Put a packetqueue entry on the AUN output queue for a device */
+/*
+ * Returns:
+ *
+ * 0 - Free your packet queue - it's going nowhere
+ * 1 - Success
+ */
+
+
+uint8_t eb_aunpacket_to_aun_queue (struct __eb_device *d, struct __eb_device *destdevice, struct __econet_packet_aun *p, uint16_t length)
+{
+
+	struct __eb_aun_exposure	*exp;
+	struct __eb_outq		*aun_out;
+	struct __eb_packetqueue 	*pq, *skip;
+
+	/* Put it on our AUN queue and wake the AUN sender */
+
+	exp = eb_is_exposed(p->p.srcnet, p->p.srcstn, 1); /* 1 = must be active */
+
+	if (exp) /* Exposed. If not, packet gets dumped anyway */
+	{
+		eb_debug (0, 4, "DESPATCH", "%-8s %3d     Traffic from %3d.%3d to %3d.%3d being put on AUN Output queue", 
+				eb_type_str(d->type),
+				d->net,
+				p->p.srcnet,
+				p->p.srcstn,
+				p->p.dstnet,
+				p->p.dststn);
+
+		pthread_mutex_lock(&(d->aun_out_mutex));
+
+		aun_out = d->aun_out_head;
+
+		/* Find queue for this device */
+
+		while (aun_out)
+		{
+			if (aun_out->destdevice == destdevice)	/* Found it */
+				break;
+			else
+				aun_out = aun_out->next;
+		}
+
+		if (!aun_out) /* No outq for this device, make one */
+		{
+			aun_out = eb_malloc (__FILE__, __LINE__, "DESPATCH", "Create new AUN outq entry", sizeof(struct __eb_outq));
+
+			/* eb_malloc() does a zero-out */
+
+			aun_out->next = d->aun_out_head;
+			d->aun_out_head = aun_out;
+			aun_out->destdevice = destdevice;
+			aun_out->p = NULL;
+			aun_out->destcombo = (p->p.dstnet << 8) | (p->p.dststn); // Used by the AUN listener to take things out of the outbound queue
+
+			/* is_aun_output not used - this is an AUN queue, we just do it by device */
+		}
+
+		pq = eb_malloc (__FILE__, __LINE__, "DESPATCH", "Create new AUN packetqueue entry", sizeof(struct __eb_packetqueue));
+
+		pq->p = p;
+		pq->last_tx.tv_sec = 0;
+		pq->tx = 0;
+		pq->errors = 0;
+		pq->length = length;
+		pq->n = NULL;
+
+		skip = aun_out->p;
+
+		while (skip && skip->n)
+			skip = skip->n;
+
+		if (skip)
+			skip->n = pq;
+		else
+			aun_out->p = pq;
+
+		eb_dump_packet (d, EB_PKT_DUMP_PRE_O, pq->p, pq->length);
+
+		/* Unlock */
+
+		pthread_mutex_unlock(&(d->aun_out_mutex));
+
+		/* Wake up the AUN thread */
+
+		pthread_cond_signal(&(d->aun_out_cond));
+
+		/* Job done */
+
+		return 1;
+	}
+	else	return 0;
+
+}
+
+/* 
+ * Generic AUN tx thread
+ */
+
+static void * eb_device_aun_sender (void *device)
+{
+	struct __eb_device		*d = device;
+	char				devstring[20];
+
+	/* 
+	 * The device as an AUN outqueue (head, tail pointed to by d->aun_out_head, aun_out_tail).
+	 *
+	 * The main despatcher puts outbound AUN on that outqueue, locked by aun_out_mutex.
+	 *
+	 * This loop reads that queue, sleeping on aun_out_cond for the minimum time before
+	 * another packet remaining on the queue needs to be retransmitted. It then
+	 * loops down the queue and does the retransmissions.
+	 *
+	 * The timeout will always be the AUN retransmission time (set in config).
+	 * But when the condition sleep wakes early (because it is told of new traffic
+	 * on the queue head), the loop will detect that remaining packets on the queue
+	 * have not expired their timer and will keep track of the lowest time to sleep
+	 * until one of them needs another re-tx. It will then sleep for that lower time
+	 * rather than the usual inter-packet gap.
+	 *
+	 * Packets are taken off the queue in two circumstances:
+	 *
+	 * (a) Maximum re-tx limit reached
+	 * (b) An ACK, NAK or INK (special packet for bridge to bridge signalling of an
+	 * Econet Immediate which got 'Not listening' on a distant wire) arrives.
+	 */
+
+	eb_thread_ready();
+
+	/* GOT HERE */
+	if (d->type == EB_DEF_WIRE || d->type == EB_DEF_TRUNK || d->type == EB_DEF_POOL)
+		sprintf(devstring, "%-8s %3d    ", eb_type_str(d->type), d->type != EB_DEF_TRUNK ? d->net : d->trunk.local_port);
+	else
+		sprintf(devstring, "%-8s %3d.%3d", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE) ? d->pipe.stn : d->local.stn);
+		
+	eb_debug (0, 2, "AUNSEND", "%16s AUN Sender thread starting", devstring);
+
+	pthread_mutex_lock (&d->aun_out_mutex);
+
+	while (1)
+	{
+		struct timespec		wait;
+		uint16_t		min_sleep;
+		struct __eb_outq	*o, *o_next, *o_parent; /* List of output queues for this thread */
+		struct __eb_packetqueue	*p, *p_next, *p_parent; /* Packet queue within the outq */
+
+		/* On entry to this loop, mutex is locked - either at the start before
+		 * the while(), or by the return from the cond_wait
+		 */
+
+		eb_debug (0, 4, "AUNSEND", "%16s Loop starting", devstring);
+
+		min_sleep = EB_CONFIG_AUN_RETX; // Main AUN retransmit interval in ms 
+
+		o = d->aun_out_head;
+		o_parent = NULL;
+
+		/* Clear out outqueues where the device has gone away */
+
+		while (o)
+		{
+			eb_debug (0, 4, "AUNSEND", "%16s Loop looking at outq %p to see if device has gone away", devstring, o);
+
+			o_next = o->next;
+
+			if (!o->destdevice) /* Destination went away - dump this queue */
+			{
+				eb_debug (0, 4, "AUNSEND", "%-8s     %3d Exposure not known - dumping this queue (%p)", eb_type_str(d->type), d->net, o);
+
+				p = o->p;
+
+				while (p)
+				{
+					p_next = p->n;
+					if (d->type == EB_DEF_PIPE || d->type == EB_DEF_LOCAL)
+						eb_debug (0, 4, "AUNSEND", "%-8s %3d.%3d Thread freeing packet data at %p in packetqueue %p", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE ? d->pipe.stn : d->local.stn), p->p, p);
+					else
+						eb_debug (0, 4, "AUNSEND", "%-8s %3d     Thread freeing packet data at %p in packetqueue %p", eb_type_str(d->type), d->net, p->p, p); 
+
+					eb_free (__FILE__, __LINE__, "AUNSEND", "Freeing packet w ithin packet queue - Destination device unknown", p->p);
+
+					if (d->type == EB_DEF_PIPE || d->type == EB_DEF_LOCAL)
+						eb_debug (0, 4, "AUNSEND", "%-8s %3d.%3d Thread freeing packetqueue %p", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE ? d->pipe.stn : d->local.stn), p);
+					else
+						eb_debug (0, 4, "AUNSEND", "%-8s %3d     Thread freeing packetqueue %p", eb_type_str(d->type), d->net, p); 
+
+					eb_free (__FILE__, __LINE__, "AUNSEND", "Freeing packetq - Destination device unknown", p);
+
+					p = p_next;
+				}
+
+				if (o_parent)
+					o_parent->next = o_next;
+				else
+					d->aun_out_head = o_next;
+
+				if (d->type == EB_DEF_PIPE || d->type == EB_DEF_LOCAL)
+					eb_debug (0, 4, "AUNSEND", "%-8s %3d.%3d Thread freeing outq at %p", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE ? d->pipe.stn : d->local.stn), o);
+				else
+					eb_debug (0, 4, "AUNSEND", "%-8s %3d     Thread freeing outq at %p", eb_type_str(d->type), d->net, o);
+
+				eb_free (__FILE__, __LINE__, "AUNSEND", "Freeing outq when destination unknown", o);
+
+			}
+			else	o_parent = o; /* This entry's device hasn't gone away, so update parent */
+				
+			o = o_next; // Move to next in queue
+
+		}
+
+		d->aun_out_tail = o_parent;
+
+		/* Now send what's left */
+
+		o = d->aun_out_head;
+		o_parent = NULL;
+
+		eb_debug (0, 4, "AUNSEND", "%16s Output queue head is %p", devstring, o);
+
+		while (o)
+		{
+			o_next = o->next;
+
+			p = o->p;
+			p_parent = NULL;
+			
+			eb_debug (0, 4, "AUNSEND", "%16s Looking at outq %p to send traffic, packetqueue head is %p", devstring, o, p);
+
+			while (p)
+			{
+				struct __eb_aun_exposure	*exp;
+
+				uint16_t	timediff;
+				struct timeval	now;
+
+				gettimeofday (&now, 0);
+
+				p_next = p->n;
+
+				exp = eb_is_exposed (p->p->p.srcnet, p->p->p.srcstn, 1); /* 1 = must be active */
+
+				if (!exp || (p->tx++ == EB_CONFIG_AUN_RETRIES)) /* Too many attempts - splice */
+				{
+					eb_dump_packet (d, EB_PKT_DUMP_DUMPED, p->p, p->length);
+
+					if (d->type == EB_DEF_PIPE || d->type == EB_DEF_LOCAL)
+						eb_debug (0, 4, "AUNSEND", "%-8s %3d.%3d Freeing packet data at %p in packetqueue %p on outq %p (TX attempts exceeded or not exposed)", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE ? d->pipe.stn : d->local.stn), p->p, p, o);
+					else
+						eb_debug (0, 4, "AUNSEND", "%-8s %3d     Freeing packet data at %p in packetqueue %p on outq %p (TX attempts exceeded or not exposed)", eb_type_str(d->type), d->net, p->p, p, o); 
+
+					eb_free (__FILE__, __LINE__, "AUNSEND", "Freeing packet w ithin packet queue - TX attempts exceeded or not exposed", p->p);
+
+					if (d->type == EB_DEF_PIPE || d->type == EB_DEF_LOCAL)
+						eb_debug (0, 4, "AUNSEND", "%-8s %3d.%3d Freeing packetqueue %p (TX attempts exceeded or not exposed)", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE ? d->pipe.stn : d->local.stn), p);
+					else
+						eb_debug (0, 4, "AUNSEND", "%-8s %3d     Freeing packetqueue %p (TX attempts exceeded or not exposed)", eb_type_str(d->type), d->net, p); 
+
+					eb_free (__FILE__, __LINE__, "AUNSEND", "Freeing packetq - TX attempts exceeded or not exposed", p);
+
+					if (p_parent)
+						p_parent->n = p_next;
+					else
+						o->p = p_next;
+				}
+				else if ((timediff = timediffmsec(&(p->last_tx), &now)) >= EB_CONFIG_AUN_RETX)
+				{
+					/* Send it! */
+
+					struct sockaddr_in	dest;
+
+					gettimeofday(&(p->last_tx), 0);
+
+					dest.sin_family = AF_INET;
+					dest.sin_port = htons(o->destdevice->aun->port);
+					dest.sin_addr.s_addr = htonl(o->destdevice->aun->addr);
+
+					p->p->p.ctrl &= 0x7F; /* Strip high bit on True AUN */
+
+					if (
+						(
+						 !((o->destdevice->config & EB_DEV_CONF_AUTOACK) && (p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK))
+						) 
+					&& 	(p->p->p.aun_ttype != ECONET_AUN_INK)
+					) // Don't send ACK / NAK to AUTOACK stations because they'll already have had one ; and NEVER send INK packets to AUN stations, because they won't understand them
+					{
+						int	r;
+
+						eb_debug (0, 4, "AUNSEND", "%16s Looking at outq %p, packet %p - Sending (time diff = %d)", devstring, o, p, timediff);
+
+						eb_dump_packet (o->destdevice, EB_PKT_DUMP_POST_O, p->p, p->length);
+
+						eb_add_stats(&(o->destdevice->statsmutex), &(o->destdevice->b_in), p->length);
+
+						if ((r = sendto (exp->socket, &(p->p->p.aun_ttype), p->length + 8, MSG_DONTWAIT, (struct sockaddr *) &dest, sizeof(dest))) < 0)
+							eb_debug (0, 1, "AUNSEND", "%16s Packet at %p AUN transmission failed: %s", devstring, p->p, strerror(errno));
+
+
+						if (p->p->p.aun_ttype != ECONET_AUN_DATA) // && p->p->p.aun_ttype != ECONET_AUN_IMM) // Everything else only gets a single shot tx
+							p->tx = EB_CONFIG_AUN_RETRIES; /* Cheat by flagging max retries */
+					}
+					else
+						eb_debug (0, 4, "AUNSEND", "%16s Looking at outq %p, packet %p - NOT Sending ACK/NAK/INK", devstring, o, p);
+
+
+					p_parent = p;
+
+				}
+				else /* Time not expired */
+				{
+					eb_debug (0, 4, "AUNSEND", "%16s Looking at outq %p, packet %p - not sending (time diff = %d)", devstring, o, p, timediff);
+
+					if (timediff < min_sleep)	min_sleep = timediff; /* Shorten our snooze because this packet needs to go sooner */
+
+					p_parent = p;
+
+				}
+
+				p = p_next;
+			}
+
+			if (o->p) /* Packets remain */
+				o_parent = o; /* Otherwise if nothing remains, we'll splice this out and parent needs to be unaltered */
+			else
+			{
+				/* No packets remain - splice outq off queue */
+
+				if (d->type == EB_DEF_PIPE || d->type == EB_DEF_LOCAL)
+					eb_debug (0, 4, "AUNSEND", "%-8s %3d.%3d Freeing outq at %p", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE ? d->pipe.stn : d->local.stn), o);
+				else
+					eb_debug (0, 4, "AUNSEND", "%-8s %3d     Freeing outq at %p", eb_type_str(d->type), d->net, o);
+
+				eb_free (__FILE__, __LINE__, "AUNSEND", "Freeing outq when destination unknown", o);
+
+				if (o_parent)
+					o_parent->next = o_next;
+				else
+					d->aun_out_head = o_next;
+			}
+
+			o = o_next;
+		}
+
+		d->aun_out_tail = o_parent;
+
+		/* Snooze off for a while */
+
+		if (!d->aun_out_head) /* Infinite wait - nothing to re-tx */
+		{
+
+			eb_debug (0, 4, "AUNSEND", "%16s Permanent sleep - no traffic left", devstring, min_sleep);
+			pthread_cond_wait(&(d->aun_out_cond), &(d->aun_out_mutex));
+		}
+		else
+		{
+			eb_debug (0, 4, "AUNSEND", "%16s Timed wait for %d ms", devstring, min_sleep);
+	
+			clock_gettime(CLOCK_REALTIME, &wait);
+	
+			wait.tv_nsec += (min_sleep * 1000000);
+	
+			if (wait.tv_nsec > 1000000000)
+			{
+				wait.tv_nsec -= 1000000000;
+				wait.tv_sec++;
+			}
+
+			pthread_cond_timedwait(&(d->aun_out_cond), &(d->aun_out_mutex), &wait);
+		}
+
+
+	}
+
+	return NULL;
+}
+
 /* Generic inter-device transmission loop
  */
 
@@ -4755,6 +5158,7 @@ static void * eb_device_despatcher (void * device)
 	struct __eb_imm_clear 		*imm_sleeper; // Control structure for imm_clear sleeper thread to reset ADLC if no immediate arrives
 
 	// Initializes and starts a device.
+	
 	// Starts a separate listener thread for the device (to read packets from it)
 	// Also responsible for starting all known diverts for this device if there are any
 	// Where a destination is a remote AUN machine (diverted or just one we know about), this loop also does transmit / retransmit, using the exposure list
@@ -4888,11 +5292,9 @@ static void * eb_device_despatcher (void * device)
 
 			if (d->local.fs.rootpath) // Active FS
 			{
-				pthread_mutex_lock (&fs_mutex);
-				d->local.fs.index = fs_initialize (d, d->net, d->local.stn, d->local.fs.rootpath, -1); // -1 means allocate new number if successful
-				pthread_mutex_unlock (&fs_mutex);
-				if (d->local.fs.index >= 0)
-					eb_debug (0, 2, "FS", "                 Fileserver %d initialized at %s", d->local.fs.index, d->local.fs.rootpath);
+				d->local.fs.server = fsop_initialize (d, d->local.fs.rootpath);
+				if (d->local.fs.server && (fsop_run(d->local.fs.server) >= 1))
+					eb_debug (0, 2, "FS", "                 Fileserver initialized at %s", d->local.fs.rootpath);
 				else
 					eb_debug (1, 0, "FS", "                 Fileserver at %s FAILED to initialize", d->local.fs.rootpath);
 			}
@@ -5118,6 +5520,28 @@ static void * eb_device_despatcher (void * device)
 		if ((err = pthread_create (&(d->listen), NULL, eb_device_listener, d))) // NULL has nothing to listen for - its diverts do it; Local devices don't either - they are hard coded devices which inject directly into the queue & wake the despatcher thread
 			eb_debug (1, 0, "DESPATCH", "Unable to start device listener thread for net %d: %s", d->net, strerror(err));
 		pthread_detach(d->listen);
+		eb_thread_started();
+	}
+
+	// Start the AUN sender thread
+	
+	if (d->type != EB_DEF_AUN && d->type != EB_DEF_NULL)
+	{
+
+		int 	err;
+		char	devstring[20];
+
+		if (d->type == EB_DEF_WIRE || d->type == EB_DEF_TRUNK || d->type == EB_DEF_POOL)
+			sprintf(devstring, "%s %d", eb_type_str(d->type), d->type != EB_DEF_TRUNK ? d->net : d->trunk.local_port);
+		else
+			sprintf(devstring, "%s %d.%d", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE) ? d->pipe.stn : d->local.stn);
+
+		if ((err = pthread_create (&(d->aun_out_thread), NULL, eb_device_aun_sender, d)))
+			eb_debug (1, 0, "DESPATCH", "Cannot start AUN sender for %s: %s", devstring, strerror(err));
+		else
+			eb_debug (0, 2, "DESPATCH", "%-8s Started AUN sender thread for %s", eb_type_str (d->type), devstring);
+		
+		pthread_detach(d->aun_out_thread);
 		eb_thread_started();
 	}
 
@@ -5808,68 +6232,133 @@ static void * eb_device_despatcher (void * device)
 
 							remove = packetfree = 0;
 
+							/*
+							 * JOB:
+							 *
+							 * Move this whole routine into an 'eb_trf_to_input()' routine
+							 * which
+							 * (a) Moves AUN outbound to a new thread which does the re-tx's
+							 * (b) otherwise moves to the desired input queue.
+							 *
+							 * Then change eb_enqueue_input so that if the dest device is
+							 * WIRE then that routine dumps the packet if it's ACK, NAK, INK.
+							 *
+							 * Then this routine in the despatcher can remove *all* packets
+							 * immediately because they only remain here for AUN re-transmit
+							 * purposes, so it's cleaner. BUT also the FS can use eb_trf_to_input()
+							 * to queue its output so that we don't risk it sitting in the
+							 * output queue of this device when it's a local FS. Instead they'll
+							 * go straight to the destination device or AUN. 
+							 *
+							 * That also clens up this lump of code quite a bit.
+							 *
+							 * Note though, that this code doesn't duplicate the packet data -
+							 * it doesn't eb_free() it if it's gone on an input queue, 
+							 * but it will when it's finished doing an AUN re-transmit. So
+							 * any routine which calls eb_trf_to_input() needs to make sure
+							 * that it is providing a copy of the packet which can be passed
+							 * around the bridge, and certainly not a statically allocated
+							 * one from a calling routine's heap.
+							 *
+							 * This probably has another side-effect in that we could
+							 * more easily create a broadcast listener device, which can
+							 * take in traffic and figure out where it's supposed to go
+							 * if anywhere. The AUN transmit thread can also *send*
+							 * broadcasts to the local LAN, so that the broadcast
+							 * handler can send traffic there rather than to individual
+							 * AUN hosts on the local net. It could identify which IP
+							 * networks are reachable by local broadcast with (one or more)
+							 * config lines along the lines of 'LOCAL BROADCAST n.n.n.n/mask'.
+							 * Anything not in that list has to be sent a broadcast in a 
+							 * unicast AUN packet. 
+							 *
+							 * The AUN transmit thread needs to track how long it needs
+							 * to sleep on its condwait by keeping a decreasing counter
+							 * of how long to wait as it loops through its (probably
+							 * one) output queue. That would probably also mean we ca
+							 * get rid of 'aun_output_pending' logic in this routine. Yay!
+							 *
+							 * Yet another bonus is that the eb_trf_to_input() routine
+							 * would then be being used pretty ubiquitously, and could
+							 * be the location for the pipe tap interface.
+							 *
+							 */
+
 							if (o->destdevice->type == EB_DEF_AUN)
 							{
-								struct timeval	now;
-								struct __eb_aun_exposure *exp;
-	
-								gettimeofday (&now, 0);
+								if (!eb_aunpacket_to_aun_queue(d, o->destdevice, p->p, p->length))
+									packetfree = 1;
 
-								eb_debug (0, 4, "QUEUE", "%-8s %3d.%3d Last tx = %u.%u, Now = %u.%u", eb_type_str(o->destdevice->type), p->p->p.srcnet, p->p->p.srcstn, p->last_tx.tv_sec, p->last_tx.tv_usec, now.tv_sec, now.tv_usec);
-								exp = eb_is_exposed (p->p->p.srcnet, p->p->p.srcstn, 1);
+								remove = 1; /* Either way we want it off our queue */
+							}
+#if 0
+							/* Old code */
+							{
+								struct __eb_aun_exposure	*exp;
+								struct __eb_outq	*aun_out;
+								struct __eb_packetqueue	*pq;
 
-								if (!exp)
-									packetfree = remove = 1;
-		
-								else if ((timediffmsec(&(p->last_tx), &now) >= EB_CONFIG_AUN_RETX) && exp && ((p->tx)++ < EB_CONFIG_AUN_RETRIES))
+								/* Put it on our AUN queue and wake the AUN sender */
+
+								exp = eb_is_exposed(p->p->p.srcnet, p->p->p.srcstn, 1); /* 1 = must be active */
+
+								if (exp) /* Exposed. If not, packet gets dumped anyway */
 								{
-									struct sockaddr_in	dest;
-
-									gettimeofday (&(p->last_tx), 0);
-									
-									dest.sin_family	= AF_INET;
-									dest.sin_port = htons(o->destdevice->aun->port);
-									dest.sin_addr.s_addr = htonl(o->destdevice->aun->addr);
-
-									p->p->p.ctrl &= 0x7f; // Strip high bit from ctrl 
-
-
-									if ((!((o->destdevice->config & EB_DEV_CONF_AUTOACK) && (p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK))) && (p->p->p.aun_ttype != ECONET_AUN_INK)) // Don't send ACK / NAK to AUTOACK stations because they'll already have had one ; and NEVER send INK packets to AUN stations, because they won't understand them
+									pthread_mutex_lock(&(d->aun_out_mutex));
+	
+									aun_out = d->aun_out_head;
+	
+									/* Find queue for this device */
+	
+									while (aun_out)
 									{
-										eb_dump_packet (o->destdevice, EB_PKT_DUMP_POST_O, p->p, p->length);
-	
-										eb_add_stats(&(o->destdevice->statsmutex), &(o->destdevice->b_in), p->length);
-	
-										sendto (exp->socket, &(p->p->p.aun_ttype), p->length + 8, MSG_DONTWAIT, (struct sockaddr *) &dest, sizeof(dest));
-								
-										if (p->p->p.aun_ttype != ECONET_AUN_DATA) // && p->p->p.aun_ttype != ECONET_AUN_IMM) // Everything else only gets a single shot tx
-										{
-											packetfree = remove = 1;
-
-											if (p->n) aun_output_pending++; // We did have this as new_output = 1 at one stage, but that makes little sense. This version says there's more AUN output on the queue, so don't sleep indefinitely.
-										}
+										if (aun_out->destdevice == o->destdevice)	 /* Found it */
+											break;
 										else
-											aun_output_pending++; 
+											aun_out = aun_out->next;
 									}
-									else	packetfree = remove = 1;
+
+									if (!aun_out) /* No outq for this device, make one */
+									{
+										aun_out = eb_malloc (__FILE__, __LINE__, "DESPATCH", "Create new AUN outq entry", sizeof(struct __eb_outq));
+
+										/* eb_malloc() does a zero-out */
+
+										aun_out->next = d->aun_out_head;
+										d->aun_out_head = aun_out;
+										aun_out->destdevice = o->destdevice;
+										aun_out->p = NULL;
+										
+										/* Destcombo and is_aun_output not used - this is an AUN queue, we just do it by device */
+									}
+
+									pq = eb_malloc (__FILE__, __LINE__, "DESPATCH", "Create new AUN packetqueue entry", sizeof(struct __eb_packetqueue));
+
+									pq->p = p->p;
+									pq->last_tx.tv_sec = 0;
+									pq->tx = 0;
+									pq->errors = 0;
+									pq->length = p->length;
+									pq->n = aun_out->p; /* Join on head of queue */
+									aun_out->p = pq;
+
+									/* Unlock */
+
+									pthread_mutex_unlock(&(d->aun_out_mutex));
+
+									/* Wake up the AUN thread */
+
+									pthread_cond_signal(&(d->aun_out_cond)); 
+
+									/* Job done */
 
 								}
-								else
-								{
-									if (p->tx <= EB_CONFIG_AUN_RETRIES)
-									{
-										aun_output_pending++;
+								else	packetfree = 1; /* Get rid of the packet data as well */
 
-										eb_debug (0, 4, "QUEUE", "%-8s %3d.%3d Retransmit timer for packetqueue entry %p has not expired", eb_type_str(o->destdevice->type), p->p->p.dstnet, p->p->p.dststn, p);
-									}
-									else
-									{
-										eb_dump_packet (d, EB_PKT_DUMP_DUMPED, p->p, p->length);
-										packetfree = remove = 1;
-									}
-								}
+								remove = 1; /* Take it off our output queue, but if packetfree not set then that's been sent elsewhere - i.e. onto the AUN queue */
 
 							}
+#endif
 							else
 							{
 								// Move it and wake the in queue
@@ -6441,7 +6930,7 @@ static void * eb_device_despatcher (void * device)
 						// in case there's a load queue waiting.
 
 /* NOt effective
-						if (p->p->p.aun_ttype == ECONET_AUN_ACK && (d->local.fs.index >= 0) && fs_load_dequeue(d->local.fs.index, p->p->p.srcnet, p->p->p.srcstn))
+						if (p->p->p.aun_ttype == ECONET_AUN_ACK && (d->local.fs.server) && fs_load_dequeue(d->local.fs.server, p->p->p.srcnet, p->p->p.srcstn))
 							new_output = 1;
 */
 						
@@ -6500,10 +6989,10 @@ static void * eb_device_despatcher (void * device)
 
 								yline += (2 + (found / 10));
 
-								if (d->local.fs.index >= 0)
+								if (d->local.fs.server)
 								{
 									beeb_print (yline++, 0, "FS Discs:");
-									yline += 1 + fs_writedisclist (d->local.fs.index, &(beebmem[0x7c00 + (yline * 40)]));
+									yline += 1 + fsop_writedisclist (d->local.fs.server, &(beebmem[0x7c00 + (yline * 40)]));
 								}
 
 								if ((printer = d->local.printers)) // Is a print server
@@ -6562,10 +7051,12 @@ static void * eb_device_despatcher (void * device)
 							eb_free (__FILE__, __LINE__, "BRIDGE", "Freeing PEEK reply packet", reply);
 							
 						}
-						else if ((d->local.fs.index < 0) && (p->p->p.aun_ttype == ECONET_AUN_NAK || p->p->p.aun_ttype == ECONET_AUN_ACK)) // Don't pass these to local devices except a fileserver
+						/* Breaks load_dequeue
+						else if ((d->local.fs.server) && (p->p->p.aun_ttype == ECONET_AUN_NAK || p->p->p.aun_ttype == ECONET_AUN_ACK)) // Don't pass these to local devices except a fileserver
 						{
 			
 						}
+						*/
 						else if (p->p->p.aun_ttype == ECONET_AUN_DATA && p->p->p.port == 0x00 && p->p->p.ctrl == 0x84 && d->local.fs.rootpath && (ECONET_DEV_STATION(d->local.fast_priv_stns, p->p->p.srcnet, p->p->p.srcstn)) && (p->p->p.data[0] == 0xff && p->p->p.data[1] == 0xff)) // USRPROC &FFFF Immediate to a local emulator - but only bother if we are an FS and would have started the *FAST handler - and ignore anything that isn't from a privileged station
 						{
 							pthread_mutex_lock (&(d->local.fast_io_mutex));
@@ -6603,7 +7094,7 @@ static void * eb_device_despatcher (void * device)
 								r->p.aun_ttype = ECONET_AUN_DATA;
 								r->p.port = 0x00;
 								r->p.ctrl = 0x84;
-								r->p.seq = get_local_seq(d->net, d->local.stn);
+								r->p.seq = eb_get_local_seq(d);
 								memset(&(r->p.data), 0xff, 4);
 								r->p.data[4] = 0x80;
 
@@ -6696,7 +7187,7 @@ static void * eb_device_despatcher (void * device)
 							reply->p.aun_ttype = ECONET_AUN_DATA;
 							reply->p.port = 0x9e;
 							reply->p.ctrl = 0x80;
-							reply->p.seq = get_local_seq(d->net, d->local.stn);
+							reply->p.seq = eb_get_local_seq(d);
 							reply->p.data[0] = reply->p.data[1] = reply->p.data[2] = 0;
 
 							if (reply->p.dstnet == 0)
@@ -6741,7 +7232,7 @@ static void * eb_device_despatcher (void * device)
 									eb_enqueue_output (d, reply, 6, NULL);
 									new_output = 1;
 									printer = printer->next;
-									reply->p.seq = get_local_seq(d->net, d->local.stn);
+									reply->p.seq = eb_get_local_seq(d);
 								}
 
 							}
@@ -6793,9 +7284,9 @@ static void * eb_device_despatcher (void * device)
 									eb_debug (0, 1, "PRINTER", "Local    %3d.%3d Unable to make temporary print spool file for new job", d->net, d->local.stn);
 								else
 								{
-									int		fs_activeid;
 									int8_t		printerindex;
 									char *		space;
+									struct __fs_active	*a;
 
 									job = eb_malloc (__FILE__, __LINE__, "PRINTER", "Create new printjob", sizeof (struct __eb_printjob));
 
@@ -6813,13 +7304,12 @@ static void * eb_device_despatcher (void * device)
 									job->stn = p->p->p.srcstn;
 									job->ctrlbit = (p->p->p.ctrl & 0x01) ^ 0x01; // Stores what we're expecting next time round
 
-									fs_activeid = -1;
 									printerindex = 0xff;
 
-									if (d->local.fs.index >= 0 && (fs_activeid = fs_stn_logged_in(d->local.fs.index, (job->net == d->net ? 0 : job->net), job->stn)) != -1) // Is fileserver
+									if (d->local.fs.server && (a = fsop_stn_logged_in_lock(d->local.fs.server, (job->net == d->net ? 0 : job->net), job->stn))) // Is fileserver
 									{
-										fs_get_username(d->local.fs.index, fs_activeid, job->username);
-										printerindex = fs_get_user_printer(d->local.fs.index, p->p->p.srcnet, p->p->p.srcstn); // Returns 0xff for not known
+										fsop_get_username_lock(a, job->username);
+										printerindex = fsop_get_user_printer(a);
 									}
 									else	
 										strcpy(job->username, "ANONYMOUS");
@@ -6860,7 +7350,7 @@ static void * eb_device_despatcher (void * device)
 								reply->p.aun_ttype = ECONET_AUN_DATA;
 								reply->p.port = 0xd1;
 								reply->p.ctrl = p->p->p.ctrl;
-								reply->p.seq = get_local_seq(d->net, d->local.stn);
+								reply->p.seq = eb_get_local_seq(d);
 
 								if (reply->p.dstnet == 0)
 									reply->p.dstnet = d->net;
@@ -6956,7 +7446,7 @@ static void * eb_device_despatcher (void * device)
 							reply->p.aun_ttype = ECONET_AUN_DATA;
 							reply->p.port = 0xb1;
 							reply->p.ctrl = p->p->p.ctrl;
-							reply->p.seq = get_local_seq(d->net, d->local.stn);
+							reply->p.seq = eb_get_local_seq(d);
 			
 							reply->p.data[0] = 0;
 							reply->p.data[2] = EB_VERSION;
@@ -6977,7 +7467,7 @@ static void * eb_device_despatcher (void * device)
 							eb_debug (0, 1, "FIND", "%-8s %3d.%3d FindServer request received - type '%-8s'",
 								eb_type_str(d->type), d->net, d->local.stn, findserver_type);
 
-							if (d->local.fs.index >= 0) // Is fileserver
+							if (d->local.fs.server && (fsop_is_enabled(d->local.fs.server))) // Is fileserver
 							{
 								strcpy (server_type, "FILE    ");	
 								if (!strcasecmp(findserver_type, "FILE    ") || !strcasecmp(findserver_type, "        "))
@@ -7080,24 +7570,62 @@ static void * eb_device_despatcher (void * device)
 								} break;
 							}
 						}
-						else if (d->local.fs.index >= 0) // Must be fileserver traffic - NB, this also sends ACKs & NAKs now, just in case there's a need to dequeue
+						else
+						{
+							/* Check to see if this is a handled port */
+
+							eb_debug (0, 3, "BRIDGE", "%-8s %3d.%3d Looking for handler for port &%02X", eb_type_str(d->type), d->net, d->local.stn,p->p->p.port);
+
+							if (EB_PORT_ISSET(d,ports,p->p->p.port))
+							{
+								eb_debug (0, 3, "BRIDGE", "%-8s %3d.%3d FOUND handler for port &%02X, traffic type %02X, length %04X", eb_type_str(d->type), d->net, d->local.stn,p->p->p.port, p->p->p.aun_ttype, p->length);
+								eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
+								(d->local.port_funcs[p->p->p.port])(p->p, p->length + 12, d->local.port_param[p->p->p.port]);
+							}
+							/* JOB : If it's ECONET_AUN_DATA and we get here, send a NAK - port not handled - e.g. fileserver shut down. */
+							/* JOB : Probably want to handle requests for port &00 here - we'll need a *list* of functions we need to send them to because it'll be more than one bit of code - but the list will be port ctrl byte, within port &00 - logically only one bit of code can handle each type of immediate. */
+							else if (p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK)
+							{
+								/* Send ACK & NAK to fileserver, if active */
+
+								if (EB_PORT_ISSET(d,ports,0x99))
+								{
+									eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
+									(d->local.port_funcs[0x99])(p->p, p->length + 12, d->local.port_param[0x99]);
+								}
+							}
+							if (p->p->p.aun_ttype == ECONET_AUN_IMMREP && d->local.fs.server)
+							{
+								struct __fs_machine_peek_reg *m;
+
+								eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
+								m = eb_malloc(__FILE__, __LINE__, "Internal", "New machine peek registration struct", sizeof (struct __fs_machine_peek_reg));
+
+								m->s = d->local.fs.server;
+								m->net = p->p->p.srcnet;
+								m->stn = p->p->p.srcstn;
+								m->mtype = (p->p->p.data[0] << 24) 
+									|  (p->p->p.data[1] << 16) 
+									|  (p->p->p.data[2] << 8) 
+									|  (p->p->p.data[3]);
+
+								eb_debug (0, 2, "BRIDGE", "%-8s %3d.%3d from %3d.%3d MachinePeek reply received - sending type %08X to FS", eb_type_str(d->type), d->net, d->local.stn, m->net, m->stn, m->mtype);
+
+								fsop_register_machine (m); /* this function will free the struct */
+
+							}
+							else
+								eb_debug (0, 3, "BRIDGE", "%-8s %3d.%3d NO HANDLER found for port &%02X type 0x%02X", eb_type_str(d->type), d->net, d->local.stn,p->p->p.port, p->p->p.aun_ttype);
+						}
+#if 0
+						else if (d->local.fs.server) // Must be fileserver traffic - NB, this also sends ACKs & NAKs now, just in case there's a need to dequeue
 						{
 
-							pthread_mutex_lock(&fs_mutex);
 							eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
-							// if (p->p->p.port == 0x99 && p->p->p.data[1] == 0x19) fprintf (stderr, "\n\n%3d.%3d FS VERSION QUERY RECEIVED ****\n\n", d->net, d->local.stn);
-							eb_handle_fs_traffic(d->local.fs.index, p->p, p->length);
-
-							/* No longer required - done by FS 
-							if (fs_dequeuable(d->local.fs.index))
-								fs_dequeue(d->local.fs.index); // For now. We'll adjust that to send straight out on BRIDGE_V2 later.
-							fs_garbage_collect(d->local.fs.index);
-							*/
-
-							pthread_mutex_unlock(&fs_mutex);
-							// Not effective fs_load_dequeue (d->local.fs.index, p->p->p.srcnet, p->p->p.srcstn); // Incase there was a load dequeue to do
+							eb_handle_fs_traffic(d->local.fs.server, p->p, p->length);
 							new_output = 1; // We'll guess there was a response. No harm if not
 						}
+#endif
 						
 					} break;
 
@@ -9124,7 +9652,7 @@ int main (int argc, char **argv)
 	/* Set up some initial config
 	*/
 
-	fs_setup();
+	fsop_setup();
 
 	max_fds.rlim_cur = max_fds.rlim_max = 0;
 
@@ -9835,16 +10363,18 @@ int main (int argc, char **argv)
 /* Get sequence number for locally emulated station
 */
 
-uint32_t get_local_seq (unsigned char net, unsigned char stn)
+uint32_t eb_get_local_seq (struct __eb_device *d)
 {
 
-	struct __eb_device *network;
-
-	if (!(network = eb_get_network(net)))
-		return 0;
+	/* Old code
+	struct __eb_device *network = d;
+	*/
 
 	// if it's a local station, it must exist as a divert in a wire or Null driver
 
+	if (d->type != EB_DEF_LOCAL)
+		return 0;
+/* Old code
 	if (network->type != EB_DEF_NULL && network->type != EB_DEF_WIRE)
 		return 0;
 
@@ -9862,6 +10392,9 @@ uint32_t get_local_seq (unsigned char net, unsigned char stn)
 
 		return (network->wire.divert[stn]->local.seq += 4);
 	}
+	*/
+
+	return (d->local.seq += 4);
 
 }
 
@@ -10046,8 +10579,6 @@ static void * eb_fs_statistics (void *nothing)
 
 		connection = accept(stat_socket, (struct sockaddr *) NULL, NULL);
 
-		pthread_mutex_lock (&fs_mutex);
-
 		output = fdopen(connection, "w");
 
 		fprintf (output, "#Pi Econet Bridge FS Statistics Socket\n");
@@ -10076,16 +10607,13 @@ static void * eb_fs_statistics (void *nothing)
 						local = device->wire.divert[stn];
 					else if (device->type == EB_DEF_NULL && device->null.divert[stn])
 						local = device->null.divert[stn];
-					//else	fprintf (output, "Not interesting.\n");
 
 					if (local && local->type == EB_DEF_LOCAL)
 					{
-						if (local->local.fs.index >= 0)
+						if (local->local.fs.server)
 						{
-							//fprintf (output, "Found a fileserver.\n");
-							fs_dump_handle_list (output, local->local.fs.index);
+							fsop_dump_handle_list (output, local->local.fs.server);
 						}
-						//else	fprintf (output, "No fileserver here.\n");
 
 					}
 				}
@@ -10094,8 +10622,6 @@ static void * eb_fs_statistics (void *nothing)
 			device = device->next;
 
 		}
-
-		pthread_mutex_unlock (&fs_mutex);
 
 		fclose(output);
 	}
@@ -10299,7 +10825,7 @@ static void * eb_statistics (void *nothing)
 						{
 							case EB_DEF_AUN:	stn = divert->aun->stn; if (divert->aun->port == -1) sprintf (info, "Inactive"); else sprintf(info, "%d.%d.%d.%d:%d", (divert->aun->addr & 0xff000000) >> 24, (divert->aun->addr & 0x00ff0000) >> 16, (divert->aun->addr & 0x0000ff00) >> 8, (divert->aun->addr & 0x000000ff), divert->aun->port); break;
 							case EB_DEF_LOCAL:	stn = divert->local.stn; sprintf(info, "%c%c%c", ((divert->local.printers) ? 'P' : ' '),
-								((divert->local.fs.index >= 0) ? 'F' : ' '),
+								((divert->local.fs.server) ? 'F' : ' '),
 								((divert->local.ip.tunif[0] != '\0') ? 'I' : ' ')); break;
 							case EB_DEF_PIPE:	stn = divert->pipe.stn; sprintf(info, "%s", divert->pipe.base); break;
 							default:		stn = 0; break;
@@ -10432,5 +10958,66 @@ static void * eb_statistics (void *nothing)
 
 	return NULL;
 	
+
+}
+
+/* Port allocator for local emulators */
+/* If req_port != 0, asking for specific port, so we ignore the reserved flag */
+
+uint8_t	eb_port_allocate(struct __eb_device *d, uint8_t req_port, port_func func, void *param)
+{
+
+	uint8_t		port, start, last;
+
+	last = d->local.last_port;
+	start = d->local.last_port + 1;
+	port = start;
+
+	if (req_port != 0)
+		port = req_port;
+
+	if (d->type != EB_DEF_LOCAL) /* Should noly be local emulators asking! */
+	{
+		eb_debug (0, 1, "BRIDGE", "%-8s %3d.%3d Impermissible non-local request to allocate port &%02X", eb_type_str(d->type), d->net, d->local.stn, req_port);
+		return 0;
+	}
+
+	eb_debug (0, 2, "BRIDGE", "%-8s %3d.%3d Request to allocate port &%02X", eb_type_str(d->type), d->net, d->local.stn, req_port);
+
+	pthread_mutex_lock(&(d->local.ports_mutex));
+
+	while (port != last)
+	{
+		if (!EB_PORT_ISSET(d,ports,port) && (!EB_PORT_ISSET(d,reserved_ports,port) || req_port != 0))
+		{
+			EB_PORT_SET(d,ports,port,func,param);
+			pthread_mutex_unlock(&(d->local.ports_mutex));
+			eb_debug (0, 2, "BRIDGE", "%-8s %3d.%3d Port &%02X allocated", eb_type_str(d->type), d->net, d->local.stn, req_port);
+			return port;
+		}
+
+		if (req_port != 0) /* No use if we got here */
+			break;
+
+		port++;
+
+		if (port == 0xFF) port = 0x01; /* Skip port 0 */
+	}
+
+	pthread_mutex_unlock(&(d->local.ports_mutex));
+
+	/* If we get here, no port */
+
+	return 0;
+}
+
+void eb_port_deallocate(struct __eb_device *d, uint8_t port)
+{
+
+	pthread_mutex_lock(&(d->local.ports_mutex));
+	EB_PORT_CLR(d,port);
+	pthread_mutex_unlock(&(d->local.ports_mutex));
+
+	eb_debug (0, 2, "BRIDGE", "%-8s %3d.%3d Port &%02X de-allocated", eb_type_str(d->type), d->net, d->local.stn, port);
 
 }

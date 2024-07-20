@@ -17,12 +17,28 @@
 
 #include "fs.h"
 
-FSOP(17)
+/*
+ * Implements *PRINTER <printer>
+ */
+
+FSOP_00(PRINTER)
 {
+        int printerindex = 0xff;
+	unsigned char	pname[7];
 
-	fsop_bye_internal(f->active, 1, FSOP_REPLY_PORT); /* Do reply */
+	FSOP_EXTRACT(f,0,pname,6);
 
-	return;
+        printerindex = get_printer(f->server->net, f->server->stn, pname);
+
+        fs_debug (0, 1, "%12sfrom %3d.%3d Select printer %s - %s", "", f->net, f->stn, pname, (printerindex == -1) ? "UNKNOWN" : "Succeeded");
+
+        if (printerindex == -1) // Failed
+                fsop_error(f, 0xFF, "Unknown printer");
+        else
+        {
+                f->active->printer = printerindex;
+                fsop_reply_ok(f);
+        }
 
 }
 

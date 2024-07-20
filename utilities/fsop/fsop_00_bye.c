@@ -20,6 +20,6 @@
 
 FSOP_00(BYE)
 {
-	fsop_bye_internal(f, 1);
+	fsop_bye_internal(f->active, 1, FSOP_REPLY_PORT);
 }
 
