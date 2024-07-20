@@ -43,8 +43,7 @@ FSOP_00(RENUSER)
 		{
 			fs_toupper(new_padded);
 
-			memcpy(f->server->users[uid].username, new_name, 10);
-			//fs_write_user(server, uid, (unsigned char *) &(users[server][uid]));
+			memcpy(f->server->users[uid].username, new_padded, 10);
 
 			fs_debug (0, 1, "%12sfrom %3d.%3d Rename user %s to %s (uid %d)", "", f->net, f->stn, username, new_padded, uid);
 

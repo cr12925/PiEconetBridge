@@ -363,9 +363,14 @@ FSOP_00(LOGIN)
 
 	while (counter < f->server->total_users && !found)
 	{
-		//fprintf (stderr, "Looking at user %d - %s\n", counter, f->server->users[counter].username);
+		unsigned char	pwuser[11];
 
-		if (!strncasecmp(f->server->users[counter].username, username, 10) && (f->server->users[counter].priv != 0))
+		memcpy (pwuser, &(f->server->users[counter].username), 10);
+		pwuser[10] = '\0';
+
+		fprintf (stderr, "Looking at user %d - '%s' vs '%s'\n", counter, pwuser, username);
+
+		if (!strncasecmp(pwuser, username, 10) && (f->server->users[counter].priv != 0))
 			found = 1;
 		else
 			counter++;

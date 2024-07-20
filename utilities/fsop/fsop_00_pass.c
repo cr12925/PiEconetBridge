@@ -23,6 +23,7 @@
 FSOP_00(PASS)
 {
 	unsigned char pw_cur[11], pw_new[13], pw_new_unq[11], pw_old[11]; // pw_new is 13 to cope with 10 character password in quotes
+	unsigned char pw_new_padded[11];
 
 	if (f->server->users[f->userid].priv & FS_PRIV_NOPASSWORDCHANGE)
 	{
@@ -30,15 +31,20 @@ FSOP_00(PASS)
 		return;
 	}
 
-	// Possibly replace with memcpy() ?
 	memcpy(pw_cur, f->server->users[f->userid].password, 10);
 	pw_cur[10] = '\0';
 
 	FSOP_EXTRACT(f,0,pw_old,10);
-	FSOP_EXTRACT(f,1,pw_new,12);
+	if (num > 1)
+		FSOP_EXTRACT(f,1,pw_new,12);
+	else
+		strcpy(pw_new, "          ");
 
 	if (pw_new[0] == '\"' && pw_new[strlen(pw_new)-1] == '\"')
+	{
 		memcpy(pw_new_unq, &(pw_new[1]), strlen(pw_new)-2);
+		pw_new_unq[strlen(pw_new)-2] = '\0';
+	}
 	else if (
 			(pw_new[0] == '\"' && pw_new[strlen(pw_new)-1] != '\"')
 		||	
@@ -48,6 +54,10 @@ FSOP_00(PASS)
 	else
 		strcpy(pw_new_unq, pw_new);
 
+	fs_copy_padded(pw_new_padded, pw_new_unq, 10);
+
+	fprintf (stderr, "pw_old = '%s', pw_new = '%s', pw_new_unq = '%s', pw_new_padded = '%s'\n", pw_old, pw_new, pw_new_unq, pw_new_padded);
+
 	if (
 			(!strcmp(pw_old, "\"\"") && !strcmp(pw_cur, "          "))
 		||	(!strncasecmp(pw_cur, pw_old, 10))
@@ -56,23 +66,17 @@ FSOP_00(PASS)
 		unsigned char username[10];
 		unsigned char blank_pw[11];
 
-		strcpy ((char * ) blank_pw, (const char * ) "	  ");
+		strcpy ((char * ) blank_pw, (const char * ) "          ");
 
 		// Correct current password
-		if (!strncmp(pw_new, "\"\"	", 10)) // user wants to change to blank password
-			strncpy((char *) f->server->users[f->userid].password, (const char * ) blank_pw, 10);
-		else
-			strncpy((char *) f->server->users[f->userid].password, (const char * ) pw_new, 10);
-
-		/* Should be unnecessary now - MMAPed
-		fs_write_user(server, userid, (char *) &(users[server][userid]));
-		*/
+		
+		memcpy(&(f->server->users[f->userid].password), pw_new_padded, 10);
 
 		fsop_reply_success(f, 0, 0);
 
 		strncpy((char *) username, (const char *) f->server->users[f->userid].username, 10);
 		username[10] = 0;
-		fs_debug (0, 1, "User %s changed password", username);
+		fs_debug_full (0, 1, f->server, f->net, f->stn, "User %s changed password", username);
 	}
 	else    
 		fsop_error(f, 0xB9, "Bad password");
