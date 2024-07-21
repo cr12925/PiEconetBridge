@@ -5540,15 +5540,17 @@ static void * eb_device_despatcher (void * device)
 		int 	err;
 		char	devstring[20];
 
-		if (d->type == EB_DEF_WIRE || d->type == EB_DEF_TRUNK || d->type == EB_DEF_POOL)
-			sprintf(devstring, "%s %d", eb_type_str(d->type), d->type != EB_DEF_TRUNK ? d->net : d->trunk.local_port);
+		if (d->type == EB_DEF_WIRE || d->type == EB_DEF_POOL)
+			sprintf(devstring, "%-8s %3d   ", eb_type_str(d->type), d->net);
+		if (d->type == EB_DEF_TRUNK)
+			sprintf(devstring, "%-8s %5d", eb_type_str(d->type), d->trunk.local_port);
 		else
-			sprintf(devstring, "%s %d.%d", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE) ? d->pipe.stn : d->local.stn);
+			sprintf(devstring, "%-8s %3d.%3d", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE) ? d->pipe.stn : d->local.stn);
 
 		if ((err = pthread_create (&(d->aun_out_thread), NULL, eb_device_aun_sender, d)))
-			eb_debug (1, 0, "DESPATCH", "Cannot start AUN sender for %s: %s", devstring, strerror(err));
+			eb_debug (1, 0, "DESPATCH", "%-16s Cannot start AUN sender: %s", devstring, strerror(err));
 		else
-			eb_debug (0, 2, "DESPATCH", "%-8s Started AUN sender thread for %s", eb_type_str (d->type), devstring);
+			eb_debug (0, 2, "DESPATCH", "%-16s Started AUN sender thread", eb_type_str (d->type), devstring);
 		
 		pthread_detach(d->aun_out_thread);
 		eb_thread_started();

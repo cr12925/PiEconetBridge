@@ -76,15 +76,17 @@
 #define FS_DIVHANDLE(x)	((fs_config[server].fs_manyhandle == 0) ? (  (  ((x) == 128) ? 8 : ((x) == 64) ? 7 : ((x) == 32) ? 6 : ((x) == 16) ? 5 : ((x) == 8) ? 4 : ((x) == 4) ? 3 : ((x) == 2) ? 2 : ((x) == 1) ? 1 : (x))) : (x))
 #define FS_MULHANDLE(x) ((fs_config[server].fs_manyhandle != 0) ? (x) : (1 << ((x) - 1)))
 */
-
+#if 0
 regex_t fs_netconf_regex_one;
 short fs_netconf_regex_initialized = 0;
+#endif
+
 uint8_t fs_set_syst_bridgepriv = 0; // If set to 1 by the HP Bridge, then on initialization, each FS will enable the bridge priv on its SYST user
 short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for extra year information
 short use_xattr=1 ; // When set use filesystem extended attributes, otherwise use a dotfile
 short normalize_debug = 0; // Whether we spew out loads of debug about filename normalization
 
-struct __fs_station	*fileservers; /* Set to NULL in fs_setup() */
+//struct __fs_station	*fileservers; /* Set to NULL in fs_setup() */
 
 /* Moved to econet-fs-hpbridge-common.h */
 #if 0
@@ -717,15 +719,19 @@ void fs_copy_padded(unsigned char *dst, unsigned char *src, uint16_t maxlen)
 {
 	uint16_t	count;
 
-	strncpy(dst, src, maxlen);
+	memcpy(dst, src, strlen(src));
+	//strncpy(dst, src, maxlen);
 
 	*(dst + maxlen) = '\0';
 
-	if (maxlen < ECONET_ABS_MAX_FILENAME_LENGTH)
-	{
+	for (count = maxlen-1; count > 0; count--)
+		if (*(dst + count) == '\0') *(dst + count) = ' ';
+
+	//if (maxlen < ECONET_ABS_MAX_FILENAME_LENGTH)
+	//{
 		for (count = strlen(src); count < maxlen; count++)
 			*(dst+count) = ' ';
-	}
+	//}
 }
 
 // Convert our perm storage to Acorn / MDFS format
@@ -2261,7 +2267,9 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 		}
 		else
 		{
-			if (regexec(&(f->server->r_pathname), adjusted + ptr, 1, matches, 0) == 0)
+			int error;
+
+			if ((error = regexec(&(f->server->r_pathname), adjusted + ptr, 1, matches, 0)) == 0)
 			{
 				strncpy((char * ) result->path[result->npath], (const char * ) adjusted + ptr, matches[0].rm_eo - matches[0].rm_so);
 				*(result->path[result->npath++] + matches[0].rm_eo - matches[0].rm_so) = '\0';
@@ -2269,17 +2277,30 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 			}
 			else
 			{
+				unsigned char 	errstr[1024];
+				regerror(error, &(f->server->r_pathname), errstr, 1024);
+
 				result->error = FS_PATH_ERR_FORMAT;
+				if (normalize_debug) fs_debug (0, 1, "Returning path format error - regex match failed matching: error string: %s, adjusted = '%s', +ptr = '%s' (len: %d)", errstr, adjusted, adjusted + ptr, strlen(adjusted + ptr));
+				/*
+				{
+					int c;
+					for (c = 0; c < strlen(adjusted + ptr); c++)
+						fs_debug (0, 1, "%02d = %02X %c", c, *(adjusted + ptr+ c), *(adjusted + ptr + c));
+				}
+				*/
 				return 0; // bad path	
 			}
 	
 			if (ptr != strlen((const char *) adjusted) && *(adjusted + ptr) != '.') // Bad path - must have a dot next, otherwise the path element must be more than ten characters
 			{
+				if (normalize_debug) fs_debug (0, 1, "Returning path format error");
 				result->error = FS_PATH_ERR_FORMAT;
 				return 0;
 			}
 			else if (ptr != strlen((const char *) adjusted) && strlen((const char *) adjusted) == (ptr + 1)) // the '.' was at the end
 			{
+				if (normalize_debug) fs_debug (0, 1, "Returning path format error - trailing '.'");
 				result->error = FS_PATH_ERR_FORMAT;
 				return 0;
 			}
@@ -2289,6 +2310,7 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 
 	if (ptr < strlen((const char *) adjusted))
 	{
+		if (normalize_debug) fs_debug (0, 1, "Returning path length error");
 		result->error = FS_PATH_ERR_LENGTH;
 		return 0; // Path too long!
 	}
@@ -2956,7 +2978,8 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 	
 	struct __fs_station *server;
 
-	FS_LIST_MAKENEW(struct __fs_station, fileservers, 1, server, "FS", "Initialize new server struct");
+	server = eb_malloc(__FILE__,__LINE__,"FS","New fileserver struct", sizeof(struct __fs_station));
+	//FS_LIST_MAKENEW(struct __fs_station, fileservers, 1, server, "FS", "Initialize new server struct");
         server->net = device->net;
         server->stn = device->local.stn;
         strcpy (server->directory, directory);
@@ -2979,7 +3002,8 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 	// Ensure serverparam begins with /
 	if (*directory != '/')
 	{
-		FS_LIST_SPLICEFREE(fileservers,server,"FS","Destroy FS struct on failed init");
+		//FS_LIST_SPLICEFREE(fileservers,server,"FS","Destroy FS struct on failed init");
+		eb_free(__FILE__, __LINE__, "FS","Destroy FS struct on failed init", server);
 
 		fs_debug (0, 1, "Bad directory name %s", directory);
 		return NULL;
@@ -3002,15 +3026,20 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
 	free(autoinf);
 
+#if 0
+	/* No longer required - code obsolete */
 	if (!fs_netconf_regex_initialized)
 	{
 		if (regcomp(&fs_netconf_regex_one, FS_NETCONF_REGEX_ONE, REG_EXTENDED | REG_ICASE) != 0)
 			fs_debug (1, 0, "Unable to compile netconf regex.");
 		fs_netconf_regex_initialized = 1;
 	}
+#endif
 
 	d = opendir(server->directory);
 
+	fs_debug (0, 1, "Directory opened");
+	
 	if (!d)
 		fs_debug(1, 1, "Unable to open root directory %s", server->directory);
 	else
@@ -3033,6 +3062,8 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
 		sprintf(passwordfile, "%s/Configuration", server->directory);
 		cfgfile = fopen(passwordfile, "r+");
+
+		//fs_debug (0, 1, "Configuration at %s opened", passwordfile);
 
 		if (!cfgfile) // Config file not present
 		{
@@ -3058,6 +3089,8 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 				fs_debug (0, 2, "Configuration file loaded");
 			}
 
+			//fs_debug (0, 1, "Configuration at %s being processed", passwordfile);
+
 			// Install some defaults if they need setting
 			if (FS_CONF_DEFAULT_DIR_PERM(server) == 0x00) 
 				FS_CONF_DEFAULT_DIR_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R;
@@ -3080,7 +3113,11 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 		// the normalize routine sifts out maximum length for each individual server and there is only one regex compiled
 		// because the scandir filter uses it, and that routine cannot take a server number as a parameter.
 
+		//fs_debug (0, 1, "Compiling Acorn name regex");
+
 		sprintf(regex, "^(%s{1,%d})", FSACORNREGEX, ECONET_ABS_MAX_FILENAME_LENGTH);
+
+		//fprintf (stderr, "FS regex: %s\n", regex);
 
 		if (regcomp(&(server->r_pathname), regex, REG_EXTENDED) != 0)
 			fs_debug (1, 0, "Unable to compile regex for file and directory names.");
@@ -3115,6 +3152,8 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 				fwrite(&(u), 256, 1, passwd);
 			else fs_debug (0, 1, "Unable to write password file at %s - not initializing", passwordfile);
 		}
+
+		//fs_debug (0, 1, "Password file ready");
 
 		if (passwd) // Successful file open somewhere along the line
 		{
@@ -3191,6 +3230,8 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 				}
 
 				fclose (cfgfile);
+
+				//fs_debug (0, 1, "Making MDFS Password file");
 
 				// Make MDFS password file
 
@@ -3308,19 +3349,22 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
         if (pthread_mutex_init(&server->fs_mutex, NULL) == -1)
         {
-                FS_LIST_SPLICEFREE(fileservers, server, "FS", "Free fileserver control structure after failed mutex init");
+                //FS_LIST_SPLICEFREE(fileservers, server, "FS", "Free fileserver control structure after failed mutex init");
+		eb_free(__FILE__, __LINE__, "FS","Destroy FS struct on failed mutex init", server);
                 return NULL;
         }
 
         if (pthread_mutex_init(&server->fs_mpeek_mutex, NULL) == -1)
         {
-                FS_LIST_SPLICEFREE(fileservers, server, "FS", "Free fileserver control structure after failed mpeek mutex init");
+                //FS_LIST_SPLICEFREE(fileservers, server, "FS", "Free fileserver control structure after failed mpeek mutex init");
+		eb_free(__FILE__, __LINE__, "FS","Destroy FS struct on failed mpeek mutex init", server);
                 return NULL;
         }
 
         if (pthread_cond_init(&server->fs_condition, NULL) == -1)
         {
-                FS_LIST_SPLICEFREE(fileservers, server, "FS", "Free fileserver control structure after failed cond init");
+                //FS_LIST_SPLICEFREE(fileservers, server, "FS", "Free fileserver control structure after failed cond init");
+		eb_free(__FILE__, __LINE__, "FS","Destroy FS struct on failed condition init", server);
                 return NULL;
         }
 
@@ -3642,9 +3686,9 @@ struct __fs_active * fsop_stn_logged_in_lock(struct __fs_station *s, uint8_t net
 void fsop_bye_internal(struct __fs_active *a, uint8_t do_reply, uint8_t reply_port)
 {
 
-	struct __econet_packet_udp	reply;
 	int count;
 	struct __fs_station *s; 
+	struct __econet_packet_udp reply;
 
 	fs_debug_full (0, 1, a->server, a->net, a->stn, "Bye");
 
@@ -3653,6 +3697,7 @@ void fsop_bye_internal(struct __fs_active *a, uint8_t do_reply, uint8_t reply_po
 	reply.p.ptype = ECONET_AUN_DATA;
 	reply.p.ctrl = 0x80;
 	reply.p.port = reply_port;
+	reply.p.data[0] = reply.p.data[1] = 0;
 
 	// Close active files / handles
 	
@@ -10830,7 +10875,7 @@ void fsop_setup(void)
 
 	/* Initialize list of tabled FSOP handler functions */
 
-	fileservers = NULL;
+	//fileservers = NULL;
 
 	memset (&fsops, 0, sizeof(fsops));
 
@@ -10906,7 +10951,7 @@ void fsop_setup(void)
 	FSOP_OSCLI(DISCMASK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 5);
 	FSOP_OSCLI(DISKMASK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 5);
 	FSOP_OSCLI(FSCONFIG,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 1, 2, 4);
-	FSOP_OSCLI(INFO,(FSOP_00_LOGGEDIN), 1, 1, 2);
+	FSOP_OSCLI(INFO,(FSOP_00_LOGGEDIN), 1, 1, 1); /* Has to cope with stupid *i. from M128 */
 	FSOP_OSCLI(LIB,(FSOP_00_LOGGEDIN), 0, 1, 3);
 	FSOP_OSCLI(LINK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 4);
 	FSOP_OSCLI(LOAD,(FSOP_00_LOGGEDIN),1,2,2);
@@ -10915,10 +10960,12 @@ void fsop_setup(void)
 	FSOP_OSCLI(MKLINK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 4);
 	FSOP_OSCLI(NEWUSER,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 1, 2, 4);
 	FSOP_OSCLI(OWNER,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM),1,1,3);
-	FSOP_OSCLI(PASS,(FSOP_00_LOGGEDIN),2,2,2);
+	FSOP_OSCLI(PASS,(FSOP_00_LOGGEDIN),1,2,2);
 	FSOP_OSCLI(PRINTER,(FSOP_00_LOGGEDIN),1,1,6);
 	FSOP_OSCLI(PRINTOUT,(FSOP_00_LOGGEDIN), 1, 1, 6);
 	FSOP_OSCLI(PRIV,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM),1,2,3);
+	FSOP_OSCLI(RENAME,(FSOP_00_LOGGEDIN),2,2,3);
+	FSOP_OSCLI(REMUSER,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 1, 1, 4);
 	FSOP_OSCLI(RENUSER,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 4);
 	FSOP_OSCLI(SAVE,(FSOP_00_LOGGEDIN), 3, 5, 2);
 	FSOP_OSCLI(SDISC,(FSOP_00_LOGGEDIN), 0, 1, 3);
