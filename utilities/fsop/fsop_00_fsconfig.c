@@ -39,8 +39,11 @@ FSOP_00(FSCONFIG)
 
 			if (length < 10 || length > 80)
 			{
-
+				fsop_error(f, 0xFF, "Bad filename length");
 			}
+			else
+				f->server->config->fs_fnamelen = length;
+
 		}
 		else
 		{
@@ -48,10 +51,7 @@ FSOP_00(FSCONFIG)
 			return;
 		}
 
-		if (!fsop_write_server_config(f->server))
-			fsop_error(f, 0xFF, "Couldn't write server config");
-		else
-			fsop_reply_ok(f);
+		fsop_reply_ok(f);
 
 		return;
 
@@ -134,10 +134,7 @@ FSOP_00(FSCONFIG)
 		else
 			FS_CONF_DEFAULT_FILE_PERM(f->server) = perm;
 
-		if (!fsop_write_server_config(f->server))
-			fsop_error(f, 0xFF, "Unable to write FS Configuration");
-		else
-			fsop_reply_ok(f);
+		fsop_reply_ok(f);
 		
 		return;
 
@@ -169,8 +166,10 @@ FSOP_00(FSCONFIG)
 		f->server->config->fs_sjfunc = (operator == '+' ? 1 : 0);
 	else if (!strcasecmp("BIGCHUNKS", configitem))
 		f->server->config->fs_bigchunks = (operator == '+' ? 1 : 0);
+	/* No longer used
 	else if (!strcasecmp("BIGHANDLES", configitem))
 		f->server->config->fs_manyhandle = (operator == '+' ? 1 : 0);
+	*/
 	else if (!strcasecmp("MDFSINFO", configitem))
 		f->server->config->fs_mdfsinfo = (operator == '+' ? 1 : 0);
 	else if (!strcasecmp("ACORNDIR", configitem))
@@ -182,9 +181,6 @@ FSOP_00(FSCONFIG)
 		fsop_error(f, 0xFF, "Bad configuration entry name"); return;
 	}
 
-	if (!fsop_write_server_config(f->server))
-		fsop_error(f, 0xFF, "Couldn't write server config");
-	else
-		fsop_reply_ok(f);
+	fsop_reply_ok(f);
 }
 

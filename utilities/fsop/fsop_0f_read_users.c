@@ -40,7 +40,7 @@ FSOP(0f)
 
 	ptr = 3;
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d Read logged on users %d to %d", "", f->net, f->stn, start, number);
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "Read logged on users %d to %d", start, number);
 
 	// Get to the start entry in active[server][]
 
@@ -74,7 +74,7 @@ FSOP(0f)
 		{
 			char *space;
 
-			fs_copy_padded(username, f->server->users[a->userid].username, 10);
+			memcpy(username, f->server->users[a->userid].username, 10);
 			username[10] = '\0';
 
 			space = strchr(username, ' ');

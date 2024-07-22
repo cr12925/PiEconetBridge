@@ -24,7 +24,7 @@ FSOP(1a)
 
 	struct __fs_disc	*disc;
 	uint8_t 	path[1024];
-	unsigned char	discname[17], tmp[17];
+	unsigned char	discname[17];
 
 	fs_copy_to_cr(discname, f->data+5, 16);
 

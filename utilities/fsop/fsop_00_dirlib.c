@@ -105,7 +105,7 @@ void	fsop_00_dirlib_internal(struct fsop_data *f, uint8_t *user_handle, unsigned
 				strcpy(f->active->current_dir_tail, tail);
 				f->active->current_disc = p.disc;
 				reply.p.data[0] = 0x07; /* CWD change */
-				reply.p.data[2] = FS_MULHANDLE(handle);
+				reply.p.data[2] = FS_MULHANDLE(f->active,handle);
 			}
 			else
 			{
@@ -113,7 +113,7 @@ void	fsop_00_dirlib_internal(struct fsop_data *f, uint8_t *user_handle, unsigned
 				strncpy((char *) f->active->lib_dir, (const char *) new_dir, 255);
 				strcpy(f->active->lib_dir_tail, tail);
 				reply.p.data[0] = 0x09; /* LIB change */
-				reply.p.data[2] = FS_MULHANDLE(handle);
+				reply.p.data[2] = FS_MULHANDLE(f->active,handle);
 			}
 
 			fsop_aun_send(&reply, 3, f);

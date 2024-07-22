@@ -22,7 +22,7 @@
 
 FSOP_00(PASS)
 {
-	unsigned char pw_cur[11], pw_new[13], pw_new_unq[11], pw_old[11]; // pw_new is 13 to cope with 10 character password in quotes
+	unsigned char pw_cur[11], pw_new[13], pw_new_unq[11], tmp[11], pw_old[11]; // pw_new is 13 to cope with 10 character password in quotes
 	unsigned char pw_new_padded[11];
 
 	if (f->server->users[f->userid].priv & FS_PRIV_NOPASSWORDCHANGE)
@@ -34,11 +34,20 @@ FSOP_00(PASS)
 	memcpy(pw_cur, f->server->users[f->userid].password, 10);
 	pw_cur[10] = '\0';
 
-	FSOP_EXTRACT(f,0,pw_old,10);
+	FSOP_EXTRACT(f,0,tmp,10);
+
+	fs_copy_padded(pw_old, tmp, 10);
+
 	if (num > 1)
 		FSOP_EXTRACT(f,1,pw_new,12);
 	else
 		strcpy(pw_new, "          ");
+
+	if (!strcmp(pw_old, "\"\"        "))
+		strcpy(pw_old, "          ");
+
+	if (pw_new[strlen(pw_new)-1] == 0x0d)
+		pw_new[strlen(pw_new)-1] = 0x00;
 
 	if (pw_new[0] == '\"' && pw_new[strlen(pw_new)-1] == '\"')
 	{
@@ -50,13 +59,13 @@ FSOP_00(PASS)
 		||	
 			(pw_new[0] != '\"' && pw_new[strlen(pw_new)-1] == '\"')
 		)
-		fsop_error(f, 0xB9, "Bad password"); // Because it's quotes are unbalanced
+		fsop_error(f, 0xB9, "Unbalanced quotes"); // Because it's quotes are unbalanced
 	else
 		strcpy(pw_new_unq, pw_new);
 
 	fs_copy_padded(pw_new_padded, pw_new_unq, 10);
 
-	fprintf (stderr, "pw_old = '%s', pw_new = '%s', pw_new_unq = '%s', pw_new_padded = '%s'\n", pw_old, pw_new, pw_new_unq, pw_new_padded);
+	fprintf (stderr, "pw_old = '%s', pw_cur = '%s', pw_new = '%s', pw_new_unq = '%s', pw_new_padded = '%s'\n", pw_old, pw_cur, pw_new, pw_new_unq, pw_new_padded);
 
 	if (
 			(!strcmp(pw_old, "\"\"") && !strcmp(pw_cur, "          "))

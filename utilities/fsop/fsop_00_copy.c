@@ -51,11 +51,11 @@ FSOP_00(COPY)
 	fsop_00_oscli_extract(f->data, p, 0, source, 125, param_start);
 
 	if (num == 2)
-		fsop_00_oscli_extract(f->data, p, 0, destination, 125, param_start);
+		fsop_00_oscli_extract(f->data, p, 1, destination, 125, param_start);
 	else
 		strcpy(destination, f->active->fhandles[f->active->current].acornfullpath);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d *CAT %s %s", "", f->net, f->stn, source, destination);
+	fs_debug (0, 1, "%12sfrom %3d.%3d *COPY %s %s", "", f->net, f->stn, source, destination);
 
 	if (!fsop_normalize_path_wildcard(f, source, f->active->current, &p_src, 1))
 	{
@@ -68,7 +68,7 @@ FSOP_00(COPY)
 
 	while (e)
 	{
-		if (e->ftype == FS_FTYPE_FILE && (FS_PERM_EFFOWNER(f->active, e->owner) || (e->perm & FS_PERM_OTH_R)))
+		if (e->ftype == FS_FTYPE_FILE && ((FS_PERM_EFFOWNER(f->active, e->owner) || (e->perm & FS_PERM_OTH_R))))
 			to_copy++;
 		e = e->next;
 	}
@@ -84,7 +84,13 @@ FSOP_00(COPY)
 	{
 		fsop_error(f, 0xFF, "Bad destination");
 		fs_free_wildcard_list(&p_src);
-		fs_free_wildcard_list(&p_dst);
+		return;
+	}
+
+	if (p_dst.ftype == FS_FTYPE_NOTFOUND)
+	{
+		fsop_error(f, 0xFF, "Destination not found");
+		fs_free_wildcard_list(&p_src);
 		return;
 	}
 
@@ -92,7 +98,6 @@ FSOP_00(COPY)
 	{
 		fsop_error(f, 0xFF, "Destination not a directory");
 		fs_free_wildcard_list(&p_src);
-		fs_free_wildcard_list(&p_dst);
 		return;
 	}
 
@@ -122,21 +127,18 @@ FSOP_00(COPY)
 		{
 			fsop_error(f, 0xC0, "Too many open files");
 			fs_free_wildcard_list(&p_src);
-			fs_free_wildcard_list(&p_dst);
 			return;
 		}
 		else if (err == -2)
 		{
 			fsop_error(f, 0xC2, "Already open");
 			fs_free_wildcard_list(&p_src);
-			fs_free_wildcard_list(&p_dst);
 			return;
 		}
 		else if (err == -1)
 		{
 			fsop_error(f, 0xFF, "FS Error");
 			fs_free_wildcard_list(&p_src);
-			fs_free_wildcard_list(&p_dst);
 			return;
 		}
 
@@ -153,21 +155,18 @@ FSOP_00(COPY)
 		{
 			fsop_error(f, 0xC0, "Too many open files");
 			fs_free_wildcard_list(&p_src);
-			fs_free_wildcard_list(&p_dst);
 			return;
 		}
 		else if (err == -2) // Should never happen
 		{
 			fsop_error(f, 0xC2, "Already open");
 			fs_free_wildcard_list(&p_src);
-			fs_free_wildcard_list(&p_dst);
 			return;
 		}
 		else if (err == -1)
 		{
 			fsop_error(f, 0xFF, "FS Error");
 			fs_free_wildcard_list(&p_src);
-			fs_free_wildcard_list(&p_dst);
 			return;
 		}
 
@@ -188,7 +187,6 @@ FSOP_00(COPY)
 				fsop_close_interlock(f->server, in_handle, 1);
 				fsop_close_interlock(f->server, out_handle, 3);
 				fs_free_wildcard_list(&p_src);
-				fs_free_wildcard_list(&p_dst);
 				fsop_error(f, 0xFF, "FS Error in copy");
 				return;
 			}
@@ -204,7 +202,6 @@ FSOP_00(COPY)
 	}
 
 	fs_free_wildcard_list(&p_src);
-	fs_free_wildcard_list(&p_dst);
 
 	fsop_reply_ok(f);
 

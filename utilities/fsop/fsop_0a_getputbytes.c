@@ -45,7 +45,7 @@ FSOP(0a)
 
 	a = f->active;
 
-	handle = FS_DIVHANDLE(*(f->data+5));
+	handle = FS_DIVHANDLE(a,*(f->data+5));
 	ctrl = FSOP_CTRL;
 	txport = FSOP_URD; /* Takes URD slot */
 	offsetstatus = *(f->data+6);
@@ -218,7 +218,7 @@ FSOP(0b)
 	t = *localtime(&now);
 	a = f->active;
 
-	handle = FS_DIVHANDLE(*(f->data + 5));
+	handle = FS_DIVHANDLE(a,*(f->data + 5));
 	txport = *(f->data+2);
 	offsetstatus = *(f->data+6);
 	bytes = (((*(f->data+9)) << 16) + ((*(f->data+8)) << 8) + (*(f->data+7)));

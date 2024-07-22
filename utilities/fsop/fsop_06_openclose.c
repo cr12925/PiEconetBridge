@@ -200,7 +200,7 @@ FSOP(06)
 				strcpy(a->fhandles[userhandle].acornfullpath, realfullpath);
 				fs_store_tail_path(a->fhandles[userhandle].acorntailpath, realfullpath);
 
-				reply.p.data[2] = (unsigned char) (FS_MULHANDLE(userhandle) & 0xff);
+				reply.p.data[2] = (unsigned char) (FS_MULHANDLE(a, userhandle) & 0xff);
 
 				fs_debug (0, 2, "%12sfrom %3d.%3d Opened handle %02X (%s)", "", f->net, f->stn, userhandle, a->fhandles[userhandle].acornfullpath);
 				fsop_aun_send(&reply, 3, f);
@@ -222,7 +222,7 @@ FSOP(07)
 {
 
 	uint8_t 	count;
-	uint8_t		handle = FS_DIVHANDLE(*(f->data+5));
+	uint8_t		handle = FS_DIVHANDLE(f->active,*(f->data+5));
 	struct __fs_active	*a = f->active;
 
 	if (handle > FS_MAX_OPEN_FILES || (handle != 0 && !a->fhandles[handle].handle))

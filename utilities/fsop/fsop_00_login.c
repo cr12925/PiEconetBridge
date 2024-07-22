@@ -307,6 +307,7 @@ FSOP_00(LOGIN)
 	struct __fs_machine_peek_reg *stnpeek;
 	struct timespec peek_timeout;
 	uint32_t	mtype;
+	uint8_t		skip_first = 0; /* Skip first parameter if it's not the only one and it consists of net.stn or just stn */
 
 	// Notify not privileged on any login attempt, successful or otherwise. It'll get set to 1 below if need be
 
@@ -349,10 +350,16 @@ FSOP_00(LOGIN)
 
 	fsop_00_oscli_extract(f->data, p, 0, username_extract, 10, param_start);
 
-	if (num > 1)
-		fsop_00_oscli_extract(f->data, p, 1, password_extract, 10, param_start);
+	if (num > 1 && (atof(username_extract) > 0))
+	{
+		skip_first = 1;
+		fsop_00_oscli_extract(f->data, p, 1, username_extract, 10, param_start);
+	}
+
+	if (num > (1 + skip_first))
+		fsop_00_oscli_extract(f->data, p, 1+skip_first, password_extract, 10, param_start);
 	else
-		strcpy(password, "");
+		strcpy(password_extract, "");
 
 	fs_copy_padded(username, username_extract, 10);
 	fs_copy_padded(password, password_extract, 10);
@@ -368,7 +375,7 @@ FSOP_00(LOGIN)
 		memcpy (pwuser, &(f->server->users[counter].username), 10);
 		pwuser[10] = '\0';
 
-		fprintf (stderr, "Looking at user %d - '%s' vs '%s'\n", counter, pwuser, username);
+		//fprintf (stderr, "Looking at user %d - '%s' vs '%s'\n", counter, pwuser, username);
 
 		if (!strncasecmp(pwuser, username, 10) && (f->server->users[counter].priv != 0))
 			found = 1;
@@ -399,6 +406,7 @@ FSOP_00(LOGIN)
 
 			uint8_t err;
 			uint8_t	count;
+			uint16_t	machine, ver;
 
 			a = f->server->actives;
 
@@ -429,6 +437,17 @@ FSOP_00(LOGIN)
 			a->userid = counter;
 			a->current_disc = f->server->users[counter].home_disc; // Need to set here so that first normalize for URD works.
 			a->machinepeek = mtype;
+			machine = (mtype & 0xFF000000) >> 24;
+			ver = (mtype & 0xFF);
+			a->manyhandles = 0;
+			if (	(machine == 0x07) // Archimedes
+			||	(ver >= 4 && (machine == 0x05 || machine == 0x0A || machine == 0x0C)) // M128, Master ET, Master Compact & ANFS or greater
+			)
+			{
+				a->manyhandles = 1;
+				fs_debug_full(0, 1, f->server, a->net, a->stn, "32 Handle mode enabled");
+			}
+
 			a->server = f->server;
 			a->root = a->current = a->lib = 0; /* Rogue so things don't get closed when they aren't open */
 			f->active = a;
@@ -501,9 +520,9 @@ FSOP_00(LOGIN)
 			// Tell the station
 
 			reply.p.data[0] = 0x05;
-			reply.p.data[2] = FS_MULHANDLE(a->root);
-			reply.p.data[3] = FS_MULHANDLE(a->current);
-			reply.p.data[4] = FS_MULHANDLE(a->lib);
+			reply.p.data[2] = FS_MULHANDLE(a,a->root);
+			reply.p.data[3] = FS_MULHANDLE(a,a->current);
+			reply.p.data[4] = FS_MULHANDLE(a,a->lib);
 			reply.p.data[5] = a->bootopt;
 
 			fsop_aun_send(&reply, 6, f);
@@ -626,9 +645,9 @@ FSOP_00(SDISC)
 	}
 
 	r.p.data[0] = 0x06; /* SDISC Return */
-        r.p.data[2] = FS_MULHANDLE(a->root);
-        r.p.data[3] = FS_MULHANDLE(a->current);
-        r.p.data[4] = FS_MULHANDLE(a->lib);
+        r.p.data[2] = FS_MULHANDLE(a,a->root);
+        r.p.data[3] = FS_MULHANDLE(a,a->current);
+        r.p.data[4] = FS_MULHANDLE(a,a->lib);
         r.p.data[5] = a->bootopt;
 
         fsop_aun_send(&r, 6, f);

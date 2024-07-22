@@ -522,6 +522,7 @@ struct __fs_active {
         uint8_t priv; // Copy of priv bits from user info
 
 	uint32_t machinepeek; /* Machinepeek result if it's happened */
+	uint8_t manyhandles; /* 1 = 32 handles, 0 = 8 */
 
         uint8_t printer; // Index into this station's printer array which shows which printer has been selected - defaults to &ff to signal 'none'.
 
@@ -831,8 +832,8 @@ extern float timediffstart(void);
 #define FSDOTREGEX "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;\\.[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 #define FS_NETCONF_REGEX_ONE "^NETCONF(IG)?\\s+([\\+\\-][A-Z]+)\\s*"
 
-#define FS_DIVHANDLE(x) ((f->server->config->fs_manyhandle == 0) ? (  (  ((x) == 128) ? 8 : ((x) == 64) ? 7 : ((x) == 32) ? 6 : ((x) == 16) ? 5 : ((x) == 8) ? 4 : ((x) == 4) ? 3 : ((x) == 2) ? 2 : ((x) == 1) ? 1 : (x))) : (x))
-#define FS_MULHANDLE(x) ((f->server->config->fs_manyhandle != 0) ? (x) : (1 << ((x) - 1)))
+#define FS_DIVHANDLE(a,x) ((a->manyhandles == 0) ? (  (  ((x) == 128) ? 8 : ((x) == 64) ? 7 : ((x) == 32) ? 6 : ((x) == 16) ? 5 : ((x) == 8) ? 4 : ((x) == 4) ? 3 : ((x) == 2) ? 2 : ((x) == 1) ? 1 : (x))) : (x))
+#define FS_MULHANDLE(a,x) ((a->manyhandles != 0) ? (x) : (1 << ((x) - 1)))
 
 /* Some linked list manipulation macros */
 
@@ -841,19 +842,21 @@ extern float timediffstart(void);
  */
 
 #define FS_LIST_MAKENEW(t,l,head,p,module,descr) \
+{ \
+	fs_debug(0, 4, "Allocate %d for %s on list at %s in %s for %s", sizeof(t), #p, #l, module, descr);\
 	p = eb_malloc(__FILE__, __LINE__, module, descr, sizeof(t)); \
 	memset (p, 0, sizeof(t)); \
 	if (head) \
 	{ \
 		p->next = l; \
+		if (p->next) p->next->prev = p; \
 		p->prev = NULL; \
 		l = p; \
+		fs_debug(0,4,"List head is %p, allocated at %p, next = %p, prev = %p", l, p, p->next, p->prev); \
 	} \
 	else \
 	{ \
-		t       *tmp; \
-		tmp = l; \
-		if (!tmp) \
+		if (!(l)) \
 		{ \
 			l = p; \
 			p->next = NULL; \
@@ -861,14 +864,20 @@ extern float timediffstart(void);
 		} \
 		else \
 		{ \
+			t	*tmp; \
+			tmp = l; \
 			while (tmp->next) tmp=tmp->next;\
 			p->prev = tmp; \
 			tmp->next = p;\
 			p->next = NULL; \
 		} \
+		fs_debug(0,4,"List head is %p, allocated at %p, next = %p, prev = %p", l, p, p->next, p->prev); \
 	} \
+}
 
 #define FS_LIST_SPLICEFREE(l,p,module,descr) \
+{ \
+	fs_debug (0, 4, "Free %p on list at %p - %s %s", p, l, module, descr); \
 	if (p->prev) \
 		p->prev->next = p->next; \
 	else \
@@ -877,7 +886,10 @@ extern float timediffstart(void);
 	if (p->next) \
 		p->next->prev = p->prev; \
 	\
-	eb_free (__FILE__, __LINE__, module, descr, p)
+	fs_debug(0,4,"List head is %p, freeing %p, next = %p, prev = %p", l, p, p->next, p->prev); 	\
+	\
+	eb_free (__FILE__, __LINE__, module, descr, p); \
+}
 
 /* List of externs for FSOP functions */
 
@@ -953,6 +965,7 @@ FSOP_00_EXTERN(PASS);
 FSOP_00_EXTERN(PRINTER);
 FSOP_00_EXTERN(PRINTOUT);
 FSOP_00_EXTERN(PRIV);
+FSOP_00_EXTERN(RENAME);
 FSOP_00_EXTERN(REMUSER);
 FSOP_00_EXTERN(RENUSER);
 FSOP_00_EXTERN(SAVE);

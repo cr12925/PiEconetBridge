@@ -36,9 +36,9 @@ FSOP(0c)
 	struct __fs_file	*fl;
 	FILE *		h;
 
-	handle = FS_DIVHANDLE(*(f->data+5));
-	function = FS_DIVHANDLE(*(f->data+6));
 	a = f->active;
+	handle = FS_DIVHANDLE(a,*(f->data+5));
+	function = FS_DIVHANDLE(a,*(f->data+6));
 
 	if ((handle > FS_MAX_OPEN_FILES) || !(a->fhandles[handle].handle)) // Invalid handle
 	{
@@ -104,11 +104,11 @@ FSOP(0d)
 	struct __fs_active	*a;
 	struct __fs_file	*fl;
 
+	a = f->active;
 	is_32bit = ((*(f->data+1)) == 0x2A) ? 1 : 0;
-	handle = FS_DIVHANDLE(FSOP_ARG);
+	handle = FS_DIVHANDLE(a,FSOP_ARG);
 	function = *(f->data+6);
 	value = (*(f->data+7)) + ((*(f->data+8)) << 8) + ((*(f->data+9)) << 16);
-	a = f->active;
 
 	if (is_32bit)
 		value += (*(f->data+8)) << 24;
@@ -229,9 +229,9 @@ FSOP(29)
 	FILE *			h;
 	struct stat		s;
 
-	handle = FS_DIVHANDLE(*(f->data+5));
-	function = (*(f->data+6));
 	a = f->active;
+	handle = FS_DIVHANDLE(a,*(f->data+5));
+	function = (*(f->data+6));
 
 	if ((handle > FS_MAX_OPEN_FILES) || !(a->fhandles[handle].handle)) // Invalid handle
 	{

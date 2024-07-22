@@ -27,6 +27,7 @@ FSOP_00(ACCESS)
 	unsigned char perm;
 	unsigned short ptr;
 	char perm_str[10];
+	uint8_t		ps_len;
 	uint8_t		dirs = 0;
 
 	if (num == 1)
@@ -34,25 +35,42 @@ FSOP_00(ACCESS)
 	else
 		FSOP_EXTRACT(f,1,perm_str,9);
 
+	ps_len = strlen((char *) perm_str);
+
 	FSOP_EXTRACT(f,0,path,255);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d *ACCESS %s %s", "", f->net,f->stn, path, perm_str);
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "*ACCESS %s %s", path, perm_str);
+
+	for (ptr = 0; ptr < ps_len; ptr++)
+	{
+		if (perm_str[ptr] >= 'a' && perm_str[ptr] <= 'z')
+			perm_str[ptr] &= 0xDF; /* Capitalize */
+	}
 
 	perm = 0;
 	ptr = 0;
 
-	while (ptr < strlen((const char *) perm_str) && perm_str[ptr] != '/')
+	if (ps_len > 0 && perm_str[ptr] == 'D')
+	{
+		dirs = 1;
+		ptr = 1;
+	}
+	else if (ps_len >= 2 && (perm_str[0] == '+' || perm_str[0] == '-'))
+	{
+		if (perm_str[1] == 'D') dirs = (perm_str[0] == '+' ? 1 : 0);
+		ptr = 2;
+	}
+
+	while (ptr < ps_len && perm_str[ptr] != '/')
 	{
 		switch (perm_str[ptr])
 		{
-			case 'w': case 'W': perm |= FS_PERM_OWN_W; break;
-			case 'r': case 'R': perm |= FS_PERM_OWN_R; break;
-			case 'p': case 'P': perm |= FS_PERM_H; break; // Alternative to H for hidden
-			case 'h': case 'H': perm |= FS_PERM_H; break; // Hidden from directory listings
-			case 'l': case 'L': perm |= FS_PERM_L; break; // Locked
-			case 'e': case 'E': perm |= FS_PERM_EXEC; break; // Execute only
-			case 'd': case 'D': dirs = 1; break; // Only act on directories for this change
-
+			case 'W': perm |= FS_PERM_OWN_W; break;
+			case 'R': perm |= FS_PERM_OWN_R; break;
+			case 'P': perm |= FS_PERM_H; break; // Alternative to H for hidden
+			case 'H': perm |= FS_PERM_H; break; // Hidden from directory listings
+			case 'L': perm |= FS_PERM_L; break; // Locked
+			case 'E': perm |= FS_PERM_EXEC; break; // Execute only
 			default:
 			{
 				fsop_error(f, 0xCF, "Bad attribute");
@@ -62,11 +80,11 @@ FSOP_00(ACCESS)
 		ptr++;
 	}
 
-	if (ptr != strlen((const char *) perm_str))
+	if (ptr != ps_len)
 	{
 		ptr++; // Skip the '/'
 
-		while (ptr < strlen((const char *) perm_str) && (perm_str[ptr] != ' ')) // Skip trailing spaces too
+		while ((ptr < ps_len) && (perm_str[ptr] != ' ')) // Skip trailing spaces too
 		{
 			switch (perm_str[ptr])
 			{
@@ -122,18 +140,22 @@ FSOP_00(ACCESS)
 
 	while (e != NULL)
 	{
-		uint8_t	 internal_perm;
+		uint16_t	 internal_perm;
 
 		internal_perm = perm;
 
 		if (e->ftype == FS_FTYPE_DIR && (perm & (FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R | FS_PERM_OTH_W)) == 0)
 			internal_perm |= FS_CONF_DEFAULT_DIR_PERM(f->server);
-
+	
+		//fprintf (stderr, "File %s, Type %02X, Effowner (file: %02X, parent %02X)\n", e->unixpath, e->ftype, FS_PERM_EFFOWNER(f->active, e->owner), FS_PERM_EFFOWNER(f->active, e->parent_owner));
 		if (
-			((dirs && e->ftype == FS_FTYPE_DIR) || (e->ftype == FS_FTYPE_FILE || e->ftype == FS_FTYPE_SPECIAL))
+			((dirs && e->ftype == FS_FTYPE_DIR) || (!dirs && (e->ftype == FS_FTYPE_FILE || e->ftype == FS_FTYPE_SPECIAL)))
 		&&	(FS_PERM_EFFOWNER(f->active, e->owner) || FS_PERM_EFFOWNER(f->active, e->parent_owner))
 		)
+		{
+			//fprintf (stderr, "Updating attributes on %s to %02X\n", e->unixpath, internal_perm);
 			fsop_write_xattr(e->unixpath, e->owner, internal_perm, e->load, e->exec, e->homeof, f); // 'perm' because that's the *new* permission
+		}
 
 		e = e->next;
 

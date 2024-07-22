@@ -51,12 +51,15 @@ FSOP_00(DISCMASK)
 	else
 	{
 		if (sscanf(discs, "%04hX", &mask) != 1)
-			mask = f->user->discmask;
+		{
+			fsop_error(f, 0xFF, "Bad disk mask");
+			return;
+		}
 	}
 
-	if (mask != f->user->discmask)
+	if (mask != f->server->users[userid].discmask)
 	{
-		f->user->discmask = mask;
+		f->server->users[userid].discmask = mask;
 		fsop_reply_ok(f);
 	}
 	else

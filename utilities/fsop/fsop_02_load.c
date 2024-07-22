@@ -61,7 +61,7 @@ FSOP(02)
                 }
         }
 
-        fs_debug (0, 1, "from %3d.%3d %s %s", f->net, f->stn, (loadas ? "RUN" : "LOAD"), command);
+        fs_debug_full (0, 1, f->server, f->net, f->stn, "%s %s", (loadas ? "RUN" : "LOAD"), command);
 
         if (!(result = fsop_normalize_path(f, command, relative_to, &p)) && !loadas) // Try and find the file first, but don't barf here if we are trying to *RUN it.
         {
@@ -147,11 +147,11 @@ FSOP(02)
                 {
                         collected = fread(&(r.p.data), 1, 1280, fl);
 
-                        if (collected > 0) enqueue_result = fsop_load_enqueue(f, &r, collected, internal_handle, 1, sequence, FS_ENQUEUE_LOAD, 0); else enqueue_result = 0;
+                        if (collected > 0) enqueue_result = fsop_load_enqueue(f, &r, collected, internal_handle, 1, sequence, FS_ENQUEUE_LOAD, 0); 
 
-                        if (collected < 0 || !enqueue_result)
+                        if (collected < 0)
                         {
-                                fs_debug (0, 1, "Data burst enqueue failed");
+                                fs_debug_full (0, 1, f->server, f->net, f->stn, "Data burst enqueue failed (fread() error)");
                                 return; // Failed in some way
                         }
 

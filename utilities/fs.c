@@ -4489,9 +4489,9 @@ void fsop_login(struct fsop_data *f, unsigned char *command)
 			// Tell the station
 		
 			reply.p.data[0] = 0x05;
-			reply.p.data[2] = FS_MULHANDLE(a->root);
-			reply.p.data[3] = FS_MULHANDLE(a->current);
-			reply.p.data[4] = FS_MULHANDLE(a->lib);
+			reply.p.data[2] = FS_MULHANDLE(a, a->root);
+			reply.p.data[3] = FS_MULHANDLE(a, a->current);
+			reply.p.data[4] = FS_MULHANDLE(a, a->lib);
 			reply.p.data[5] = a->bootopt;
 			
 			fsop_aun_send(&reply, 6, f);
@@ -8976,14 +8976,15 @@ void fsop_port99 (struct __fs_station *s, struct __econet_packet_aun *packet, ui
         {
                 /* Modify the three handles that are in every packet - assuming the packet is long enough - if we are not in manyhandle mode */
 
-                if (!FS_CONFIG(s,fs_manyhandle)) // NFS 3 / BBC B compatible handles
+                //if (!FS_CONFIG(s,fs_manyhandle)) // NFS 3 / BBC B compatible handles
+		if (active)
                 {
 			// Don't modify for LOAD, SAVE, RUNAS, (GETBYTE, PUTBYTE - not in this loop), GETBYTES, PUTBYTES - all of which either don't have the usual three handles in the tx block or use the URD for something else
                         if (	!(fsop == 1 || fsop == 2 || (fsop == 5) || (fsop >=10 && fsop <= 11)) ) 
-				if (datalen >= 3) *(f->data+2) = FS_DIVHANDLE(*(f->data+2)); 
+				if (datalen >= 3) *(f->data+2) = FS_DIVHANDLE(active,*(f->data+2)); 
 
-                        if (datalen >= 4) *(f->data+3) = FS_DIVHANDLE(*(f->data+3));
-                        if (datalen >= 5) *(f->data+4) = FS_DIVHANDLE(*(f->data+4));
+                        if (datalen >= 4) *(f->data+3) = FS_DIVHANDLE(active,*(f->data+3));
+                        if (datalen >= 5) *(f->data+4) = FS_DIVHANDLE(active,*(f->data+4));
                 }
 
         }
@@ -9378,7 +9379,7 @@ void fsop_port99 (struct __fs_station *s, struct __econet_packet_aun *packet, ui
 								r.p.ctrl = 0x80;
 								r.p.data[0] = 0x09; // Changed directory;
 								r.p.data[1] = 0x00;
-								r.p.data[2] = FS_MULHANDLE(n_handle);
+								r.p.data[2] = FS_MULHANDLE(active, n_handle);
 								fsop_aun_send (&r, 3, f);
 							
 							}

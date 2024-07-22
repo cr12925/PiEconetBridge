@@ -25,7 +25,7 @@ FSOP(11)
 {
 
 	uint8_t result = 0;
-	uint8_t	handle = FS_DIVHANDLE(FSOP_ARG);
+	uint8_t	handle = FS_DIVHANDLE(f->active,FSOP_ARG);
 
 	struct stat     sb;
 

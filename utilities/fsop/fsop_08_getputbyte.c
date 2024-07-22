@@ -36,7 +36,7 @@ FSOP(08) /* Getbyte */
 	struct __fs_active *a;
 
 	a = f->active;
-	handle = FS_DIVHANDLE(FSOP_URD); /* Handle appears in URD slot */
+	handle = FS_DIVHANDLE(a,FSOP_URD); /* Handle appears in URD slot */
 	ctrl = f->ctrl;
 
 	if (handle < 1 || handle >= FS_MAX_OPEN_FILES || !a->fhandles[handle].handle)
@@ -122,7 +122,7 @@ FSOP(09) /* Putbyte */
 	struct __fs_active 	*a;
 
 	a = f->active;
-	handle = FS_DIVHANDLE(FSOP_URD); /* Handle appears in URD slot */
+	handle = FS_DIVHANDLE(a,FSOP_URD); /* Handle appears in URD slot */
 	ctrl = f->ctrl;
 	b = FSOP_CWD; /* Byte to put appears in the CWD slot - data+3 */
 

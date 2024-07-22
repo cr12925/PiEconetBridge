@@ -133,6 +133,7 @@ struct fsop_00_cmd * fsop_00_match (unsigned char *c, uint8_t *nextchar)
 		if (count == strlen(t->cmd)) // NB it will be strlen(t->cmd)+1 if no match
 		{
 			*nextchar = count+5;
+
 			//fprintf (stderr, " +++ Matched in full, returning nextchar = %d\n", *nextchar);
 			return t; /* Must have matched */
 		}
@@ -317,6 +318,13 @@ FSOP(00)
 
 		//fs_debug (0, 2, "FS Parser found %s with %d parameters", cmd->cmd, num);
 		
+		/* If there are parameters, they can't start in the character after the end of a complete command */
+
+		/*
+		if (param_start - 5 == strlen(cmd->cmd) && num > 0 && *(f->data + 5 + param_start) != ' ')
+			fsop_error (f, 0xff, "Bad command");
+			*/
+
 		if ((cmd->flags & FSOP_00_LOGGEDIN) && (!f->user))
 			fsop_error (f, 0xff, "Who are you?");
 		else if ((cmd->flags & FSOP_00_SYSTEM) && !(f->user->priv & FS_PRIV_SYSTEM))
