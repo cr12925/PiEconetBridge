@@ -4900,11 +4900,19 @@ static void * eb_device_aun_sender (void *device)
 
 	/* GOT HERE */
 	if (d->type == EB_DEF_WIRE || d->type == EB_DEF_TRUNK || d->type == EB_DEF_POOL)
+	{
 		sprintf(devstring, "%-8s %3d    ", eb_type_str(d->type), d->type != EB_DEF_TRUNK ? d->net : d->trunk.local_port);
+		if (d->type == EB_DEF_TRUNK)
+			eb_debug (0, 2, "AUNSEND", "%-8s %5d   AUN Sender thread starting", eb_type_str(d->type), d->trunk.local_port);
+		else
+			eb_debug (0, 2, "AUNSEND", "%16s AUN Sender thread starting", devstring);
+	}
 	else
+	{
 		sprintf(devstring, "%-8s %3d.%3d", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE) ? d->pipe.stn : d->local.stn);
+		eb_debug (0, 2, "AUNSEND", "%16s AUN Sender thread starting", devstring);
+	}
 		
-	eb_debug (0, 2, "AUNSEND", "%16s AUN Sender thread starting", devstring);
 
 	pthread_mutex_lock (&d->aun_out_mutex);
 
@@ -5303,9 +5311,9 @@ static void * eb_device_despatcher (void * device)
 			{
 				d->local.fs.server = fsop_initialize (d, d->local.fs.rootpath);
 				if (d->local.fs.server && (fsop_run(d->local.fs.server) >= 1))
-					eb_debug (0, 2, "FS", "                 Fileserver initialized at %s", d->local.fs.rootpath);
+					eb_debug (0, 2, "FS", "         %3d.%3d Fileserver initialized at %s", d->net, d->local.stn, d->local.fs.rootpath);
 				else
-					eb_debug (1, 0, "FS", "                 Fileserver at %s FAILED to initialize", d->local.fs.rootpath);
+					eb_debug (1, 0, "FS", "         %3d.%3d Fileserver at %s FAILED to initialize", d->net, d->local.stn, d->local.fs.rootpath);
 			}
 
 			if (d->local.ip.tunif[0] != '\0') // Active tunnel config

@@ -145,7 +145,11 @@ void fs_debug_full (uint8_t death, uint8_t level, struct __fs_station *s, uint8_
 	va_start (ap, fmt);
 
 	vsprintf (str, fmt, ap);
-	sprintf (padstr, "FS       %3d.%3d from %3d.%3d %s", s->net, s->stn, net, stn, str);
+	if (net != 0)
+		sprintf (padstr, "FS       %3d.%3d from %3d.%3d %s", s->net, s->stn, net, stn, str);
+	else
+		sprintf (padstr, "FS       %3d.%3d %s", s->net, s->stn, str);
+
 	eb_debug_fmt (death, level, "FS", padstr);
 
 	va_end(ap);
@@ -246,7 +250,7 @@ void fsop_set_parameters (struct __fs_station *server, uint32_t params, uint8_t 
 	server->config->fs_default_dir_perm = default_dir_perm;
 	server->config->fs_default_file_perm = default_file_perm;
 
-	fsop_write_server_config(server);
+	// No longer required - mmaped: fsop_write_server_config(server);
 
 }
 
@@ -1059,6 +1063,54 @@ int raw_fsop_aun_send(struct __econet_packet_udp *p, int len, struct __fs_statio
 	return raw_fsop_aun_send_noseq(p, len, s, net, stn);
 }
 
+/* Translate an mtype machine type to string *
+ *
+ */
+
+unsigned char * fsop_machine_type_str (uint16_t t)
+{
+
+	uint16_t	a;
+
+	a = ((t & 0xFF00) >> 8) | ((t & 0xFF) << 8);
+
+	switch (a)
+	{
+		case 0x0001: return "BBC Microcomputer"; break;
+		case 0x0002: return "Acorn Atom"; break;
+		case 0x0003: return "Acorn System 3 or 4"; break;
+		case 0x0004: return "Acorn System 5"; break;
+		case 0x0005: return "BBC Master 128"; break;
+		case 0x0006: return "Acorn Electron"; break;
+		case 0x0007: return "Acorn Archimedes"; break;
+		case 0x0008: return "Acorn (Reserved)"; break;
+		case 0x0009: return "Acorn Communicator"; break;
+		case 0x000A: return "Master ET"; break;
+		case 0x000B: return "Acorn Filestore"; break;
+		case 0x000C: return "Master 128 Compact"; break;
+		case 0x000D: return "Acorn Ecolink PC Card"; break;
+		case 0x000E: return "Acorn Unix(R) workstation"; break;
+		case 0x000F: return "Acorn RISC PC"; break;
+		case 0x0010: return "CTL Iyonix"; break;
+		case 0x0011: return "Acorn A9"; break;
+		case 0x1040: return "JGH Spectrum"; break;
+		case 0x1041: return "JGH Amstrad CPC"; break;
+		case 0x5050: return "PB Internet Gateway"; break;
+		case 0xEEEE: return "Raspbery Pi Econet Bridge"; break;
+		case 0xFFF8: return "SJ GP Server"; break;
+		case 0xFFF9: return "SJ 80386 Unix"; break;
+		case 0xFFFA: return "SCSI Interface"; break;
+		case 0xFFFB: return "SJ IBM PC Econet Interface"; break;
+		case 0xFFFC: return "Nascom 2"; break;
+		case 0xFFFD: return "Research Machines 480Z"; break;
+		case 0xFFFE: return "SJ Fileserver"; break;
+		case 0xFFFF: return "Z80 CP/M"; break;
+		default: return "Unknown machine"; break;
+	}
+
+	return "Unknown machine";
+}
+
 /* Procedure to dump all FS currently open files & directories
  * to the file descriptor provided. 
  * *
@@ -1113,8 +1165,18 @@ void fsop_dump_handle_list(FILE *out, struct __fs_station *s)
 		username[10] = 0;
 
 		found++;
-		fprintf (out, "\n\n    %04X %s %d.%d\n\n", active->userid, username, active->net, active->stn);
+		fprintf (out, "\n\n    %04X %s %d.%d", active->userid, username, active->net, active->stn);
 
+		if (active->machinepeek) // I.e. non-zero
+		{
+			fprintf (out, " (%s version %02X.%02X)",
+				fsop_machine_type_str ((active->machinepeek & 0xFFFF0000) >> 16),
+				(active->machinepeek & 0xFF),
+				(active->machinepeek & 0xFF00) >> 8
+				);
+		}
+
+		fprintf (out, "\n\n");
 		d = active->fhandles[active->root].handle;
 		fprintf (out, "       URD: %2d %s\n", active->root, d->name);
 
@@ -1524,6 +1586,10 @@ void fsop_write_xattr(unsigned char *path, uint16_t owner, uint16_t perm, uint32
 		fs_write_attr_to_file(path, owner, perm & 0xFF, load, exec, homeof, f);
 		return;
 	}
+
+	sprintf ((char * ) attrbuf, "%02X", (perm & 0xff));
+	if (setxattr((const char *) path, "user.econet_perm", (const void *) attrbuf, 2, 0)) // Flags = 0 means create if not exist, replace if does
+		fs_debug (0, 1, "Failed to set permission on %s\n", path);
 
 	sprintf((char * ) attrbuf, "%04X", owner);
 
@@ -2997,7 +3063,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
         /* Don't do anything with fs_thread - fsop_run() sets that up */
 
-	fs_debug (0, 2, "Attempting to initialize server on %d.%d at directory %s", server->net, server->stn, server->directory);
+	fs_debug_full (0, 2, server, 0, 0, "Attempting to initialize at %s", server->directory);
 
 	// Ensure serverparam begins with /
 	if (*directory != '/')
@@ -3020,45 +3086,25 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
 	if (access(autoinf, F_OK) == 0)
 	{
-		fs_debug (0, 1, "Automatically turned on -x mode because of %s", autoinf);
+		fs_debug_full (0, 1, server, 0, 0, "Automatically turned on -x mode because of %s", autoinf);
 		use_xattr = 0;
 	}
 
 	free(autoinf);
 
-#if 0
-	/* No longer required - code obsolete */
-	if (!fs_netconf_regex_initialized)
-	{
-		if (regcomp(&fs_netconf_regex_one, FS_NETCONF_REGEX_ONE, REG_EXTENDED | REG_ICASE) != 0)
-			fs_debug (1, 0, "Unable to compile netconf regex.");
-		fs_netconf_regex_initialized = 1;
-	}
-#endif
-
 	d = opendir(server->directory);
 
-	fs_debug (0, 1, "Directory opened");
-	
 	if (!d)
-		fs_debug(1, 1, "Unable to open root directory %s", server->directory);
+		fs_debug_full (1, 1, server, 0, 0, "Unable to open root directory %s", server->directory);
 	else
 	{
 
 		FILE * cfgfile;
+		uint8_t	setconfigdefaults = 0;
+		uint16_t configlen;
 
-		server->config = eb_malloc(__FILE__, __LINE__, "FS", "Allocate FS config struct", sizeof(struct __fs_config));
-		memset(server->config, 0, sizeof(struct __fs_config));
-
-		// Set up some defaults in case we are writing a new file
-		server->config->fs_acorn_home = 0;
-		server->config->fs_sjfunc = 1;
-		server->config->fs_pwtenchar = 1;
-		server->config->fs_fnamelen = FS_DEFAULT_NAMELEN;
-		server->config->fs_mask_dir_wrr = 1;
-		
-		FS_CONF_DEFAULT_DIR_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R;
-		FS_CONF_DEFAULT_FILE_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R;
+		//server->config = eb_malloc(__FILE__, __LINE__, "FS", "Allocate FS config struct", sizeof(struct __fs_config));
+		//memset(server->config, 0, sizeof(struct __fs_config));
 
 		sprintf(passwordfile, "%s/Configuration", server->directory);
 		cfgfile = fopen(passwordfile, "r+");
@@ -3069,42 +3115,50 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 		{
 			if ((cfgfile = fopen(passwordfile, "w+")))
 				fwrite(server->config, 256, 1, cfgfile);
-			else fs_debug (0, 1, "Unable to write configuration file at %s - not initializing", passwordfile);
+			else fs_debug_full (0, 1, server, 0, 0, "Unable to write configuration file at %s - not initializing", passwordfile);
+
+			setconfigdefaults = 1;
 
 			fsop_write_readable_config(server);
 		}
-		else
+
+		fseek(cfgfile, 0, SEEK_END);
+		configlen = ftell(cfgfile);
+		rewind(cfgfile);
+
+		if (configlen != 256)
+			fs_debug_full (1, 0, server, 0, 0, "FS Configuration file %s is incorrect length!", passwordfile);
+
+	 	server->config = mmap(NULL, 256, PROT_READ | PROT_WRITE, MAP_SHARED, fileno(cfgfile), 0);
+
+		if (server->config == MAP_FAILED)
+			fs_debug_full (1, 0, server, 0, 0, "Cannot mmap() FS config file %s (%s)", passwordfile, strerror(errno));
+		
+		fs_debug_full (0, 2, server, 0, 0, "Configuration file mapped");
+
+		fclose(cfgfile);
+
+		if (setconfigdefaults)
 		{
-			int configlen;
 
-			fseek(cfgfile, 0, SEEK_END);
-			configlen = ftell(cfgfile);
-			rewind(cfgfile);
-
-			if (configlen != 256)
-				fs_debug (0, 1, "Configuration file is incorrect length!");
-			else
-			{
-				fread (server->config, 256, 1, cfgfile);
-				fs_debug (0, 2, "Configuration file loaded");
-			}
-
-			//fs_debug (0, 1, "Configuration at %s being processed", passwordfile);
-
-			// Install some defaults if they need setting
-			if (FS_CONF_DEFAULT_DIR_PERM(server) == 0x00) 
-				FS_CONF_DEFAULT_DIR_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R;
-
-			if (FS_CONF_DEFAULT_FILE_PERM(server) == 0x00)
-				FS_CONF_DEFAULT_FILE_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R; // NB OTH_R added here for backward compatibility. If this is a server where this default was unconfigured, we configure it to match what PiFS v2.0 did
-
-			rewind(cfgfile);
-
-			// Write copy in case we've updated it
-			fwrite(server->config, 256, 1, cfgfile);
+			// Set up some defaults in case we are writing a new file
+			server->config->fs_acorn_home = 0;
+			server->config->fs_sjfunc = 1;
+			server->config->fs_pwtenchar = 1;
+			server->config->fs_fnamelen = FS_DEFAULT_NAMELEN;
+			server->config->fs_mask_dir_wrr = 1;
 			
-			fsop_write_readable_config(server);
+			FS_CONF_DEFAULT_DIR_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R;
+			FS_CONF_DEFAULT_FILE_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R;
 		}
+
+		// Install some defaults if they need setting
+		
+		if (FS_CONF_DEFAULT_DIR_PERM(server) == 0x00) 
+			FS_CONF_DEFAULT_DIR_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R;
+
+		if (FS_CONF_DEFAULT_FILE_PERM(server) == 0x00)
+			FS_CONF_DEFAULT_FILE_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R; // NB OTH_R added here for backward compatibility. If this is a server where this default was unconfigured, we configure it to match what PiFS v2.0 did
 
 		if (FS_CONFIG(server,fs_fnamelen) < 10 || FS_CONFIG(server,fs_fnamelen) > ECONET_ABS_MAX_FILENAME_LENGTH)
 			server->config->fs_fnamelen = 10;
@@ -3113,14 +3167,10 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 		// the normalize routine sifts out maximum length for each individual server and there is only one regex compiled
 		// because the scandir filter uses it, and that routine cannot take a server number as a parameter.
 
-		//fs_debug (0, 1, "Compiling Acorn name regex");
-
 		sprintf(regex, "^(%s{1,%d})", FSACORNREGEX, ECONET_ABS_MAX_FILENAME_LENGTH);
 
-		//fprintf (stderr, "FS regex: %s\n", regex);
-
 		if (regcomp(&(server->r_pathname), regex, REG_EXTENDED) != 0)
-			fs_debug (1, 0, "Unable to compile regex for file and directory names.");
+			fs_debug_full (1, 0, server, 0, 0, "Unable to compile regex for file and directory names.");
 
 		// Load / Create password file
 
@@ -3132,7 +3182,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 		{
 			struct __fs_user	u;
 
-			fs_debug (0, 1, "No password file - initializing %s with SYST", passwordfile);
+			fs_debug_full (0, 1, server, 0, 0, "No password file - initializing %s with SYST", passwordfile);
 			memset (&u, 0, sizeof(u));
 
 #pragma GCC diagnostic push
@@ -3150,10 +3200,8 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 			u.year = u.month = u.day = u.hour = u.min = u.sec = 0; // Last login time
 			if ((passwd = fopen(passwordfile, "w+")))
 				fwrite(&(u), 256, 1, passwd);
-			else fs_debug (0, 1, "Unable to write password file at %s - not initializing", passwordfile);
+			else fs_debug_full (0, 1, server, 0, 0, "Unable to write password file at %s - not initializing", passwordfile);
 		}
-
-		//fs_debug (0, 1, "Password file ready");
 
 		if (passwd) // Successful file open somewhere along the line
 		{
@@ -3162,9 +3210,9 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 			rewind(passwd);
 	
 			if ((length % 256) != 0)
-				fs_debug (0, 1, "Password file not a multiple of 256 bytes!");
+				fs_debug_full (0, 1, server, 0, 0, "Password file not a multiple of 256 bytes!");
 			else if ((length > (256 * ECONET_MAX_FS_USERS)))
-				fs_debug (0, 1, "Password file too long!");
+				fs_debug_full (0, 1, server, 0, 0, "Password file too long!");
 			else	
 			{
 				int discs_found = 0;
@@ -3180,10 +3228,10 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 				fseek(passwd, 0, SEEK_END);
 				length = ftell(passwd);
 				
-				fs_debug (0, 2, "Password file read - %d user(s)", (length / 256));
+				fs_debug_full (0, 2, server, 0, 0, "Password file read - %d user(s)", (length / 256));
 				server->users = mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_SHARED, fileno(passwd), 0);
 				if (server->users == MAP_FAILED)
-					fs_debug (1, 0, "Cannot mmap() password file (%s)", strerror(errno));
+					fs_debug_full (1, 0, server, 0, 0, "Cannot mmap() password file (%s)", strerror(errno));
 
 				server->total_users = (length / 256);
 				server->total_discs = 0;
@@ -3222,16 +3270,17 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
 					server->config->fs_pwtenchar = 1;
 
+					/* No longer required - now mmap()ed 
 					rewind(cfgfile);
 					fwrite (server->config, 256, 1, cfgfile);
 					rewind(cfgfile);
+					*/
 
-					fs_debug (0, 1, "Updated password file for 10 character passwords, and backed up password file to %s", passwordfilecopy);
+					fs_debug_full (0, 1, server, 0, 0, "Updated password file for 10 character passwords, and backed up password file to %s", passwordfilecopy);
 				}
 
-				fclose (cfgfile);
-
-				//fs_debug (0, 1, "Making MDFS Password file");
+				/* Closed above */
+				//fclose (cfgfile);
 
 				// Make MDFS password file
 
@@ -3250,9 +3299,11 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 					if (((entry->d_name[0] >= '0' && entry->d_name[0] <= '9') || (entry->d_name[0] >= 'A' && entry->d_name[0] <= 'F')) && (entry->d_type == DT_DIR || (entry->d_type == DT_LNK && (stat(fullname, &statbuf) == 0) && (S_ISDIR(statbuf.st_mode)))) && (strlen((const char *) entry->d_name) <= 17)) // Found a disc. Length 17 = index character + 16 name; we ignore directories which are longer than that because the disc name will be too long
 					{
 						uint8_t index, count;
-						struct __fs_disc	*d;
+						struct __fs_disc	*d, *p;
 
-						FS_LIST_MAKENEW(struct __fs_disc,server->discs,0,d,"FS","Create disc structure");
+						// readdir() doesn't guarantee ordering, so we need to do it ourselves
+
+						d = eb_malloc(__FILE__, __LINE__, "FS", "New disc structure", sizeof(struct __fs_disc));
 						
 						if (entry->d_name[0] > '9') 
 							index = (uint8_t) ((entry->d_name[0]) - ('A' - 10));
@@ -3271,17 +3322,66 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
 						d->name[count] = 0;
 					
-						fs_debug (0, 2, "Initialized disc name %s (%d)", d->name, index);
+						/* Put d into the list at the right place */
+
+						p = server->discs;
+
+						while (p && p->index < index)
+							p = p->next;
+
+						if (!server->discs)
+						{
+							d->next = d->prev = NULL;
+							server->discs = d;
+						}
+						else if (!p) /* Fell off end */
+						{
+							p = server->discs;
+							while (p && p->next)
+								p = p->next;
+							p->next = d;
+							d->prev = p;
+							d->next = NULL;
+						}
+						else
+						{
+							/* Splice in before this one */
+							 
+							if (p->prev) /* Not at head */
+							{
+								d->next = p;
+								d->prev = p->prev;
+								p->prev = d;
+								d->prev->next = d;
+							}
+							else /* p is head of queue */
+							{
+								server->discs = d;
+								d->prev = NULL;
+								d->next = p;
+								p->prev = d;
+							}
+						}
 
 						server->total_discs++;
 	
 					}
 				}
-				
+
 				closedir(d);
 		
 				if (server->total_discs > 0)
 				{
+					struct __fs_disc *d;
+
+					d = server->discs;
+
+					while (d)
+					{
+						fs_debug_full (0, 2, server, 0, 0, "Initialized disc name %s (%d)", d->name, d->index);
+						d = d->next;
+					}
+
 					// Load / Initialize groups file here - TODO
 					unsigned char groupfile[1024];
 					FILE *group;
@@ -3297,12 +3397,12 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
 						memset (&g, 0, sizeof(g));
 
-						fs_debug (0, 1, "No group file at %s - initializing", groupfile);
+						fs_debug_full (0, 1, server, 0, 0, "No group file at %s - initializing", groupfile);
 
 						if ((group = fopen(groupfile, "w+")))
 							fwrite(&g, sizeof(struct __fs_group), 256, group);
 
-						else fs_debug (0, 1, "Unable to write group file at %s - not initializing", groupfile);
+						else fs_debug_full (0, 1, server, 0, 0, "Unable to write group file at %s - not initializing", groupfile);
 					}
 
 					if (group) // Got it somehow - created or it existed
@@ -3315,7 +3415,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 						rewind(group);
 
 						if (length != 2560)
-							fs_debug (0, 1, "Group file is wrong length / corrupt - not initializing");
+							fs_debug_full (0, 1, server, 0, 0, "Group file is wrong length / corrupt - not initializing");
 						else
 						{
 							server->groups = mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_SHARED, fileno(group), 0);
@@ -3325,12 +3425,13 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
 						fclose(group);
 					}
-					else fs_debug (0, 1, "Server failed to initialize - cannot initialize or find Groups file!");
+					else fs_debug_full (0, 1, server, 0, 0, "Server failed to initialize - cannot initialize or find Groups file!");
 
 					// (If there was still no group file here, fs_count won't increment and we don't initialize)
 				}
-				else fs_debug (0, 1, "Server failed to find any discs!");
+				else fs_debug_full (0, 1, server, 0, 0, "Server failed to find any discs!");
 			}
+
 			fclose(passwd);
 	
 		}
@@ -3370,7 +3471,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
         /* Don't do anything with fs_thread - fsop_run() sets that up */
 
-	fs_debug (0, 2, "Server at %s successfully initialized on station %d.%d", server->directory, server->net, server->stn);
+	fs_debug_full (0, 2, server, 0, 0, "Server successfully initialized at %s", server->directory);
 
 	fsop_write_readable_config(server);
 
@@ -3457,7 +3558,9 @@ void fsop_shutdown (struct __fs_station *s)
 
 	/* Free the config struct */
 
-	eb_free (__FILE__, __LINE__, "FS", "Free config struct", s->config);
+	//eb_free (__FILE__, __LINE__, "FS", "Free config struct", s->config);
+	
+	munmap(s->config, 256);
 
 	/* Dump the various queues, if there's anything on them */
 
@@ -11011,13 +11114,13 @@ int8_t fsop_run (struct __fs_station *s)
 
 	/* Test to see if server already enabled */
 
-	fs_debug (0, 1, "FS at %d.%d Attempting to enable server", s->net, s->stn);
+	fs_debug_full (0, 1, s, 0, 0, "Attempting to enable server");
 
 	pthread_mutex_lock (&(s->fs_mutex));
 
 	if (s->enabled)
 	{
-		fs_debug (0, 1, "FS at %d.%d Server already enabled! Not bothering to start.", s->net, s->stn);
+		fs_debug_full (0, 1, s, 0, 0, "Server already enabled! Not bothering to start.");
 		pthread_mutex_unlock (&(s->fs_mutex));
 		return -1;
 	}
@@ -11027,7 +11130,7 @@ int8_t fsop_run (struct __fs_station *s)
 	if (port != 0x99)
 	{
 		pthread_mutex_unlock (&(s->fs_mutex));
-		fs_debug (1, 0, "FS at %d.%d (%s) could not start - port &99 not available", s->net, s->stn, s->directory);
+		fs_debug_full (1, 0, s, 0, 0, "Could not start - port &99 not available");
 		return 0;
 	}
 
@@ -11041,13 +11144,13 @@ int8_t fsop_run (struct __fs_station *s)
 
 	if (err)
 	{
-		fs_debug (1, 0, "FS at %d.%d (%s) could not start - thread creation failed: %s", s->net, s->stn, s->directory, strerror(err));
+		fs_debug_full (1, 0, s, 0, 0, "Could not start - thread creation failed: %s", strerror(err));
 		return 0;
 	}
 
 	pthread_detach(s->fs_thread);
 
-	fs_debug (0, 1, "FS at %d.%d Server enabled", s->net, s->stn);
+	fs_debug_full (0, 1, s, 0, 0, "Server enabled");
 
 	return 1;
 }
@@ -11082,7 +11185,7 @@ void *fsop_thread(void *p)
 
 	pthread_mutex_lock (&(s->fs_mutex));
 
-	fs_debug (0, 1, "FS at %d.%d (%s) running", s->net, s->stn, s->directory);
+	fs_debug_full (0, 1, s, 0, 0, "Server running");
 
 	/* Load config, initialize users (actives should be NULL anyway, either from fsop_initialize, or on fsop_shutdown),
 	 * likewise files, bulkports should be null, and the load queue.
@@ -11109,7 +11212,7 @@ void *fsop_thread(void *p)
 		{
 			/* Something wants us to shut down - so sort that out */
 
-			fs_debug (0, 1, "FS at %d.%d (%s) shutting down on request", s->net, s->stn, s->directory);
+			fs_debug_full (0, 1, s, 0, 0, "Shutting down on request");
 			
 			fsop_shutdown(s);
 
@@ -11129,7 +11232,7 @@ void *fsop_thread(void *p)
 		 
 		pq = s->fs_workqueue;
 
-		fs_debug (0, 4, "FS at %d.%d processing work queue at %p", s->net, s->stn, pq);
+		fs_debug_full (0, 4, s, 0, 0, "Processing work queue at %p", pq);
 
 		while (pq)
 		{
@@ -11137,7 +11240,7 @@ void *fsop_thread(void *p)
 
 			a = fsop_stn_logged_in(s, pq->p->p.srcnet, pq->p->p.srcstn);
 
-			fs_debug (0, 4, "FS at %d.%d processing work queue at %p - packet at %p length %d from %d.%d", s->net, s->stn, pq, pq->p, pq->length, pq->p->p.srcnet, pq->p->p.srcstn);
+			fs_debug_full (0, 4, s, 0, 0, "Processing work queue at %p - packet at %p length %d from %d.%d", pq, pq->p, pq->length, pq->p->p.srcnet, pq->p->p.srcstn);
 
 			switch (pq->p->p.aun_ttype)
 			{
@@ -11196,7 +11299,7 @@ void *fsop_thread(void *p)
 
 		/* Cond wait 10 seconds */
 
-		fs_debug (0, 4, "FS at %d.%d sleeping", s->net, s->stn);
+		fs_debug_full (0, 4, s, 0, 0, "Sleeping");
 
 		clock_gettime(CLOCK_REALTIME, &cond_time);
 		cond_time.tv_sec += 10;
