@@ -53,6 +53,10 @@ FSOP(06)
 	uint8_t		count, start;
 	struct __fs_file	*handle;
 	struct path 	p;
+	uint8_t		is_32bit = 0;
+
+	if (*(f->data+1) == 0x2E)
+		is_32bit = 1;
 
 	count = 7;
 
@@ -78,7 +82,7 @@ FSOP(06)
 		return;
 	}
 
-	fs_debug_full (0, 2, f->server, f->net, f->stn, "Open %s readonly %s, must exist? %s", filename, (readonly ? "yes" : "no"), (existingfile ? "yes" : "no"));
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "Open%s %s readonly %s, must exist? %s", (is_32bit ? "32" : ""), filename, (readonly ? "yes" : "no"), (existingfile ? "yes" : "no"));
 
 	// If the file must exist, then we can use wildcards; else no wildcards
 	// BUT we should be able to open a file for writing with wildcards in the path except the tail end
@@ -207,8 +211,20 @@ FSOP(06)
 
 				reply.p.data[2] = (unsigned char) (FS_MULHANDLE(a, userhandle) & 0xff);
 
+				if (is_32bit)
+				{
+					reply.p.data[3] = (p.ftype == FS_FTYPE_DIR ? 2 : 1);
+					reply.p.data[4] = fsop_perm_to_acorn(a->server, p.perm, p.ftype);
+					reply.p.data[5] = (FS_PERM_EFFOWNER(a, p.owner) ? 0 : 0xff);
+					reply.p.data[6] = (p.length & 0xFF);
+					reply.p.data[7] = (p.length & 0xFF00) >> 8;
+					reply.p.data[8] = (p.length & 0xFF0000) >> 16;
+					reply.p.data[9] = (p.length & 0xFF000000) >> 24;
+					memcpy(&(reply.p.data[10]), &(reply.p.data[6]), 4);
+				}
+
 				fs_debug_full (0, 2, f->server, f->net, f->stn, "Opened handle %02X (%s)", userhandle, a->fhandles[userhandle].acornfullpath);
-				fsop_aun_send(&reply, 3, f);
+				fsop_aun_send(&reply, (is_32bit ? 14 : 3), f);
 			}
 		}
 		else
@@ -262,4 +278,7 @@ FSOP(07)
 
 }
 
-
+FSOP(2e)
+{
+	fsop_06(f); /* 24-bit version figures out 32-bit functioning */
+}

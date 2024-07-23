@@ -46,7 +46,13 @@ void fsop_12_internal (struct fsop_data *f, uint8_t is_32bit)
 
         path[replylen] = '\0'; // Null terminate instead of 0x0d in the packet
 
-        fs_debug (0, 2, "from %3d.%3d Get Object Info '%s' relative to %02X, command %d", f->net, f->stn, path, relative_to, command);
+	if (command == 0xBC && (!strcmp(path, "") || !strcmp(path, "$$"))) /* NetFS 32 bit support probe */
+	{
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "NetFS 32 bit support probe");
+		fsop_reply_ok(f);
+	}
+
+        fs_debug_full (0, 2, f->server, f->net, f->stn, "Get Object Info '%s' relative to %02X, command %d", path, relative_to, command);
 
         norm_return = fsop_normalize_path_wildcard(f, path, relative_to, &p, 1);
 
@@ -116,11 +122,11 @@ void fsop_12_internal (struct fsop_data *f, uint8_t is_32bit)
                 reply.p.data[replylen++] = (p.load & 0xff);
                 reply.p.data[replylen++] = (p.load & 0xff00) >> 8;
                 reply.p.data[replylen++] = (p.load & 0xff0000) >> 16;
-                reply.p.data[replylen++] = (p.load & 0xff000000) >> 24;
+                if (command == 8) reply.p.data[replylen++] = (p.load & 0xff000000) >> 24;
                 reply.p.data[replylen++] = (p.exec & 0xff);
                 reply.p.data[replylen++] = (p.exec & 0xff00) >> 8;
                 reply.p.data[replylen++] = (p.exec & 0xff0000) >> 16;
-                reply.p.data[replylen++] = (p.exec & 0xff000000) >> 24;
+                if (command == 8) reply.p.data[replylen++] = (p.exec & 0xff000000) >> 24;
         }
 
         if (command == 3 || command == 5 || command == 8 || command == 96)

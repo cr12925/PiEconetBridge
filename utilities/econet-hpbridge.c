@@ -7628,7 +7628,7 @@ static void * eb_device_despatcher (void * device)
 									|  (p->p->p.data[2] << 8) 
 									|  (p->p->p.data[3]);
 
-								eb_debug (0, 2, "BRIDGE", "%-8s %3d.%3d from %3d.%3d MachinePeek reply received - sending type %08X to FS", eb_type_str(d->type), d->net, d->local.stn, m->net, m->stn, m->mtype);
+								eb_debug (0, 3, "BRIDGE", "%-8s %3d.%3d from %3d.%3d MachinePeek reply received - sending type %08X to FS", eb_type_str(d->type), d->net, d->local.stn, m->net, m->stn, m->mtype);
 
 								fsop_register_machine (m); /* this function will free the struct */
 

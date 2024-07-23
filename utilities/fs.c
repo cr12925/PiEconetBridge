@@ -3525,10 +3525,10 @@ void fsop_shutdown (struct __fs_station *s)
 	}
 
 	if (s->actives) /* This should not have anything in it! */
-		fs_debug (0, 1, "Server at %d.%d was left with one or more active users after shutdown!", s->net, s->stn);
+		fs_debug_full (0, 1, s, 0, 0, "Server was left with one or more active users after shutdown!");
 
 	if (s->files) /* This should not have anything in it after everyone has been logged off! */
-		fs_debug (0, 1, "Server at %d.%d was left with one or more open files after shutdown!", s->net, s->stn);
+		fs_debug_full (0, 1, s, 0, 0, "Server was left with one or more open files after shutdown!");
 
 	/* Unmap users and groups */
 
@@ -3573,14 +3573,14 @@ void fsop_shutdown (struct __fs_station *s)
 
 		ln = l->next;	
 
-		fs_debug (0, 3, "FS", "Server at %3d.%3d cleaning up load_queue at %p on shutdown", s->net, s->stn, l);
+		fs_debug_full (0, 3, s, 0, 0, "FS", "Server cleaning up load_queue at %p on shutdown", l);
 		packetq = l->pq_head;
 
 		while (packetq)
 		{
 			packetq_next = packetq->next;
 
-			fs_debug (0, 3, "FS", "Server at %3d.%3d freeing packetq entry at %p on load_queue at %p on shutdown", s->net, s->stn, packetq, l);
+			fs_debug_full (0, 3, s, 0, 0, "FS", "Server freeing packetq entry at %p on load_queue at %p on shutdown", packetq, l);
 			eb_free(__FILE__, __LINE__, "FS", "Free packet queue entry on shutdown", packetq);
 
 			packetq = packetq_next;
@@ -3605,7 +3605,7 @@ void fsop_shutdown (struct __fs_station *s)
 
 		eb_port_deallocate(s->fs_device, bulk->bulkport);
 
-		fs_debug (0, 3, "FS", "Server at %3d.%3d freeing bulk port entry at %p on shutdown", s->net, s->stn, bulk);
+		fs_debug_full (0, 3, s, 0, 0, "FS", "Server freeing bulk port entry at %p on shutdown", bulk);
 
 		bulk = bn;
 
@@ -3614,7 +3614,7 @@ void fsop_shutdown (struct __fs_station *s)
 	s->bulkports = NULL;
 
 	/* Next clean up the work queue */
-
+/*
 	pq = s->fs_workqueue;
 
 	while (pq)
@@ -3623,7 +3623,7 @@ void fsop_shutdown (struct __fs_station *s)
 
 		pqn = pq->n;
 
-		fs_debug (0, 3, "FS", "Server at %3d.%3d freeing work queue entry at %p on shutdown", s->net, s->stn, pq);
+		fs_debug_full (0, 3, s, 0, 0, "FS", "Server freeing work queue entry at %p on shutdown", pq);
 
 		eb_free(__FILE__, __LINE__, "FS", "Free packet on FS workqueue on shutdown", pq->p);
 		eb_free(__FILE__, __LINE__, "FS", "Free packet queue entry on work queue on shutdown", pq);
@@ -3633,8 +3633,8 @@ void fsop_shutdown (struct __fs_station *s)
 	}
 
 	s->fs_workqueue = NULL;
-
-	fs_debug (0, 1, "Server at %d.%d has shut down", s->net, s->stn);
+*/
+	fs_debug_full (0, 1, s, 0, 0, "             Server has shut down");
 
 	return;
 
@@ -10871,9 +10871,9 @@ void fsop_handle_traffic (struct __econet_packet_aun *p, uint16_t length, void *
 	new_q->length = length;
 	new_q->n = NULL;
 
-	fs_debug (0, 3, "FS at %d.%d processing traffic at %p lenght %d from %d.%d", server->net, server->stn, p, length, p->p.srcnet, p->p.srcstn);
-
 	pthread_mutex_lock(&(server->fs_mutex));
+
+	fs_debug_full (0, 3, server, p->p.srcnet, p->p.srcstn,"FS processing traffic at %p lenght %d", p, length);
 
 	q = server->fs_workqueue;
 
@@ -10885,11 +10885,12 @@ void fsop_handle_traffic (struct __econet_packet_aun *p, uint16_t length, void *
 	else
 		q->n = new_q;
 
-	fs_debug (0, 3, "FS at %d.%d processing traffic at %p length %d from %d.%d - now on queue (%p)", server->net, server->stn, p, length, p->p.srcnet, p->p.srcstn, server->fs_workqueue);
+	fs_debug_full (0, 3, server, p->p.srcnet, p->p.srcstn,"FS processing traffic at %p length %d - now on queue (%p)", p, length, server->fs_workqueue);
+
+	fs_debug_full (0, 3, server, p->p.srcnet, p->p.srcstn, "FS waking worker thread");
 
 	pthread_mutex_unlock(&(server->fs_mutex));
 
-	fs_debug (0, 3, "FS at %d.%d waking worker thread", server->net, server->stn);
 	pthread_cond_signal(&(server->fs_condition));
 
 	return;
@@ -11035,6 +11036,7 @@ void fsop_setup(void)
 	FSOP_SET (2a, (FSOP_F_LOGGEDIN)); /* 32 bit Set Random Access Info */
 	FSOP_SET (2b, (FSOP_F_LOGGEDIN)); /* 32 bit Get bytes */
 	FSOP_SET (2c, (FSOP_F_LOGGEDIN)); /* 32 bit Put bytes */
+	FSOP_SET (2e, (FSOP_F_LOGGEDIN)); /* 32 bit Open */
 	FSOP_SET (40, (FSOP_F_LOGGEDIN | FSOP_F_MDFS)); /* Read SJ Information - Not yet implemented */
 	FSOP_SET (41, (FSOP_F_LOGGEDIN | FSOP_F_MDFS | FSOP_F_SYST)); /* Read/write SJ SYstem information */
 	FSOP_SET (60, (FSOP_F_LOGGEDIN | FSOP_F_SYST)); /* PiBridge functions */
@@ -11219,21 +11221,17 @@ void *fsop_thread(void *p)
 
 		if (!s->enabled)
 		{
-			/* Something wants us to shut down - so sort that out */
-
 			fs_debug_full (0, 1, s, 0, 0, "Shutting down on request");
 			
 			fsop_shutdown(s);
 
 			pthread_mutex_unlock(&(s->fs_mutex));
 
-			eb_free (__FILE__, __LINE__, "FS", "Free FS config memory", s->config);
-
 			/* Note, don't free the __fs_station - that stays around while the bridge is running. 
 			 * Otherwise we can't tell if enabled is set or not! 
 			 */
 
-			return NULL;
+			pthread_exit(NULL);
 
 		}
 
@@ -11247,51 +11245,56 @@ void *fsop_thread(void *p)
 		{
 			pqnext = pq->n;
 
-			a = fsop_stn_logged_in(s, pq->p->p.srcnet, pq->p->p.srcstn);
-
-			fs_debug_full (0, 4, s, 0, 0, "Processing work queue at %p - packet at %p length %d from %d.%d", pq, pq->p, pq->length, pq->p->p.srcnet, pq->p->p.srcstn);
-
-			switch (pq->p->p.aun_ttype)
+			if (s->enabled)
 			{
-		   		case ECONET_AUN_NAK: // If there's an extant queue and we got a NAK matching its trigger sequence, dump the queue - the station has obviously stopped wanting our stuff
+			
+				a = fsop_stn_logged_in(s, pq->p->p.srcnet, pq->p->p.srcstn);
+
+				fs_debug_full (0, 4, s, 0, 0, "Processing work queue at %p - packet at %p length %d from %d.%d", pq, pq->p, pq->length, pq->p->p.srcnet, pq->p->p.srcstn);
+
+				switch (pq->p->p.aun_ttype)
 				{
-					struct load_queue *l;
-	
-					l = s->fs_load_queue;
-	
-					// See if there is a matching queue
-	
-					while (l && a)
+		   			case ECONET_AUN_NAK: // If there's an extant queue and we got a NAK matching its trigger sequence, dump the queue - the station has obviously stopped wanting our stuff
 					{
-						if (l->active == a 
-						&& l->ack_seq_trigger == pq->p->p.seq
-						)
+						struct load_queue *l;
+		
+						l = s->fs_load_queue;
+		
+						// See if there is a matching queue
+	
+						while (l && a)
 						{
-							/* GOT HERE */
-							if (l->queue_type == FS_ENQUEUE_LOAD)
-								fsop_close_interlock(s, l->internal_handle, l->mode);
+							if (l->active == a 
+							&& l->ack_seq_trigger == pq->p->p.seq
+							)
+							{
+								/* GOT HERE */
+								if (l->queue_type == FS_ENQUEUE_LOAD)
+									fsop_close_interlock(s, l->internal_handle, l->mode);
+		
+								fsop_enqueue_dump(l);
 	
-							fsop_enqueue_dump(l);
-
-							break;
+								break;
+							}
+							else
+								l = l->next;
+		
 						}
-						else
-							l = l->next;
-	
 					}
-				}
-				break;
-
-				case ECONET_AUN_ACK:
-				{
-					fsop_load_dequeue(s, pq->p->p.srcnet, pq->p->p.srcstn, pq->p->p.seq);
-				}
 					break;
-
-				case ECONET_AUN_BCAST:
-				case ECONET_AUN_DATA:
-					fsop_port99(s, pq->p, pq->length);
-					break;
+	
+					case ECONET_AUN_ACK:
+					{
+						fsop_load_dequeue(s, pq->p->p.srcnet, pq->p->p.srcstn, pq->p->p.seq);
+					}
+						break;
+	
+					case ECONET_AUN_BCAST:
+					case ECONET_AUN_DATA:
+						fsop_port99(s, pq->p, pq->length);
+						break;
+		
+				}
 	
 			}
 
@@ -11302,17 +11305,20 @@ void *fsop_thread(void *p)
 	
 		}
 
-		/* Garbage collect here */
+		if (s->enabled) /* Don't sleep if we have been asked to shut down */
+		{
+			/* Garbage collect here */
 
-		fsop_garbage_collect(s);
+			fsop_garbage_collect(s);
 
-		/* Cond wait 10 seconds */
+			/* Cond wait 10 seconds */
 
-		fs_debug_full (0, 4, s, 0, 0, "Sleeping");
+			fs_debug_full (0, 4, s, 0, 0, "Sleeping");
 
-		clock_gettime(CLOCK_REALTIME, &cond_time);
-		cond_time.tv_sec += 10;
-		pthread_cond_timedwait(&(s->fs_condition), &(s->fs_mutex), &cond_time);
+			clock_gettime(CLOCK_REALTIME, &cond_time);
+			cond_time.tv_sec += 10;
+			pthread_cond_timedwait(&(s->fs_condition), &(s->fs_mutex), &cond_time);
+		}
 	}
 
 }
@@ -11340,7 +11346,7 @@ void * fsop_register_machine(struct __fs_machine_peek_reg *p)
 	 *
 	 */
 
-	fs_debug_full (0, 2, p->s, p->net, p->stn, "Registering machine type %08X", p->mtype);
+	fs_debug_full (0, 3, p->s, p->net, p->stn, "Registering machine type %08X", p->mtype);
 
 	pthread_mutex_lock(&(p->s->fs_mpeek_mutex));
 

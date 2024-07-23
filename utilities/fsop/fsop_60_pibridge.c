@@ -179,9 +179,10 @@ FSOP(60)
                         char shutdown_msg[128];
 
                         snprintf (shutdown_msg, 127, "Fileserver at %d.%d shutting down\x0d", f->server->net, f->server->stn);
-                        fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 19 - Shut down fileserver", "", f->net, f->stn);
+                        fs_debug_full (0, 2, f->server, f->net, f->stn, "FS PiBridge call arg = 19 - Shut down fileserver");
                         fsop_reply_ok_with_data(f, (unsigned char *) shutdown_msg, strlen(shutdown_msg));
-                        fsop_shutdown(f->server);
+			f->server->enabled = 0; /* The fsop_thread() routine does the actual shutdown */
+                        //fsop_shutdown(f->server);
 
                 } break;
 
