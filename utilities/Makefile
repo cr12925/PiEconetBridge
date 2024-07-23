@@ -1,22 +1,23 @@
-#GIT_VERSION := "$(shell git branch) $(shell git rev-parse --short HEAD)"
-GIT_VERSION := "CR Build tree"
+GIT_VERSION := "$(shell git branch) $(shell git rev-parse --short HEAD)"
+#GIT_VERSION := "CR Build tree"
+#CFLAGS=-g
 
 fsop_objects := $(patsubst %.c,%.o,$(wildcard fsop/*.c))
 
 all:	econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers econet-poke econet-isnets
 
-econet-hpbridge:	econet-hpbridge.o fsv2.o $(fsop_objects)
-	if [ -f .noexplain ]; then cc -g -o econet-hpbridge econet-hpbridge.o fsv2.o $(fsop_objects) -lpthread -lssl -lcrypto; else cc -g -o econet-hpbridge econet-hpbridge.o fsv2.o $(fsop_objects) -lpthread -lssl -lcrypto -lexplain; fi
+econet-hpbridge:	Makefile econet-hpbridge.o fsv2.o $(fsop_objects)
+	if [ -f .noexplain ]; then cc $(CFLAGS) -o econet-hpbridge econet-hpbridge.o fsv2.o $(fsop_objects) -lpthread -lssl -lcrypto; else cc $(CFLAGS) -o econet-hpbridge econet-hpbridge.o fsv2.o $(fsop_objects) -lpthread -lssl -lcrypto -lexplain; fi
 	-chgrp econet econet-hpbridge
 
-$(fsop_objects): %.o: %.c ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
-	cc -g -DGIT_VERSION=\"$(GIT_VERSION)\" -I../include -c $< -Wall -Wno-pointer-sign -o $@
+$(fsop_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
+	cc $(CFLAGS) -DGIT_VERSION=\"$(GIT_VERSION)\" -I../include -c $< -Wall -Wno-pointer-sign -o $@
 
 econet-hpbridge.o:	Makefile econet-hpbridge.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-pserv.h
-	cc -g -I../include -DGIT_VERSION=\"$(GIT_VERSION)\" -c econet-hpbridge.c -Wall
+	cc $(CFLAGS) -I../include -DGIT_VERSION=\"$(GIT_VERSION)\" -c econet-hpbridge.c -Wall
 
 fsv2.o: Makefile fs.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/fs.h
-	cc -I../include -DGIT_VERSION=\"$(GIT_VERSION)\" -D BRIDGE_V2 -g -c fs.c -o fsv2.o -Wall -Wno-pointer-sign
+	cc $(CFLAGS) -I../include -DGIT_VERSION=\"$(GIT_VERSION)\" -D BRIDGE_V2 -c fs.c -o fsv2.o -Wall -Wno-pointer-sign
 
 econet-monitor: econet-monitor.o
 
@@ -77,4 +78,4 @@ econet-trace.o: econet-trace.c ../include/econet-gpio-consumer.h ../include/econ
 econet-poke.o: econet-poke.c econet-pipe.c ../include/econet-gpio-consumer.h
 
 clean:
-	rm -f *.o econet-imm econet-test econet-bridge econet-monitor pipe-eg econet-notify econet-remote eb2 econet-hpbridge econet-ledtest econet-clock econet-trace
+	rm -f *.o econet-imm econet-test econet-bridge econet-monitor pipe-eg econet-notify econet-remote eb2 econet-hpbridge econet-ledtest econet-clock econet-trace fsop/*.o
