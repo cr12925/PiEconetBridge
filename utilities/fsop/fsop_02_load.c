@@ -92,7 +92,7 @@ FSOP(02)
                 return;
         }
 
-	if (!(FS_ACTIVE_SYST(f->active)) && !loadas && (p.my_perm & FS_PERM_EXEC)) // Execute only bit set, and not SYST
+	if (!(FS_ACTIVE_SYST(f->active)) && !loadas && (p.perm & FS_PERM_EXEC)) // Execute only bit set, and not SYST
 	{
 		fsop_error(f, 0xFF, "Execute only");
 		return;

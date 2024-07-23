@@ -29,7 +29,7 @@
  * Error codes as per fsop_move_disc, but bottom nybble is 0
  */
 
-uint8_t fsop_openmap_dir(struct fsop_data *f, unsigned char *input_path, struct __fs_disc *d, unsigned char *which, uint8_t *handle, struct __fs_file **internal_handle)
+uint8_t fsop_openmap_dir(struct fsop_data *f, unsigned char *input_path, struct __fs_disc *d, unsigned char *which, uint8_t *handle, struct __fs_file **internal_handle, unsigned char *unixpath)
 {
 
 	//struct __fs_user	*user;
@@ -51,6 +51,8 @@ uint8_t fsop_openmap_dir(struct fsop_data *f, unsigned char *input_path, struct 
 		fsop_close_interlock(f->server, a->fhandles[*handle].handle, 1);
 		fsop_deallocate_user_dir_channel (a, *handle);
 	}
+
+	strcpy (unixpath, ""); /* initialize */
 
 	if (!(fsop_normalize_path(f, full_path, -1, &p)) || p.ftype == FS_FTYPE_NOTFOUND) // NOTE: because fs_normalize might look up current or home directory, home must be a complete path from $
 	{
@@ -103,6 +105,8 @@ uint8_t fsop_openmap_dir(struct fsop_data *f, unsigned char *input_path, struct 
 		return (FSOP_MOVE_DISC_CHANNEL);
 	}
 
+	strcpy(unixpath, p.unixpath);
+
 	a->fhandles[*handle].mode = 1;
 	strcpy(a->fhandles[*handle].acornfullpath, p.acornfullpath);
 	fs_store_tail_path(a->fhandles[*handle].acorntailpath, p.acornfullpath);
@@ -135,6 +139,7 @@ uint8_t fsop_move_disc (struct fsop_data *f, uint8_t index)
 {
 	unsigned char	urd[256], lib[256]; /* urd will also be cwd */
 	unsigned char	homedir[97], libdir[97];
+	unsigned char	unixpath[1024];
 	//unsigned char	padded[ECONET_ABS_MAX_FILENAME_LENGTH+1];
 	uint8_t		count;
 	uint8_t		res;
@@ -201,7 +206,7 @@ uint8_t fsop_move_disc (struct fsop_data *f, uint8_t index)
 	snprintf(urd, 255, ":%s.%s", d->name, homedir);
 	snprintf(lib, 255, ":%s.%s", d->name, libdir);
 
-	res = fsop_openmap_dir(f, urd, d, "URD", &(a->root), &h);
+	res = fsop_openmap_dir(f, urd, d, "URD", &(a->root), &h, unixpath);
 
 	if (res != FSOP_MOVE_DISC_SUCCESS)
 	{
@@ -217,9 +222,13 @@ uint8_t fsop_move_disc (struct fsop_data *f, uint8_t index)
 	strncpy ((char *) a->root_dir, a->fhandles[a->root].acornfullpath, 1023);
 	fs_copy_padded(a->root_dir_tail, a->fhandles[a->root].acorntailpath, f->server->config->fs_fnamelen);
 
+	if ((a->user->priv2 & FS_PRIV2_CHROOT) && (d->index == a->user->home_disc))
+		strcpy(a->urd_unix_path, unixpath);
+	else	strcpy(a->urd_unix_path, "");
+
 	/* Open URD as current */
 
-	res = fsop_openmap_dir(f, urd, d, "CWD", &(a->current), &h);
+	res = fsop_openmap_dir(f, urd, d, "CWD", &(a->current), &h, unixpath);
 
 	if (res != FSOP_MOVE_DISC_SUCCESS)
 	{
@@ -265,7 +274,7 @@ uint8_t fsop_move_disc (struct fsop_data *f, uint8_t index)
 
 	/* Open LIB */
 
-	res = fsop_openmap_dir(f, lib, d, "LIB", &(a->lib), &h);
+	res = fsop_openmap_dir(f, lib, d, "LIB", &(a->lib), &h, unixpath);
 
 	if (res != FSOP_MOVE_DISC_SUCCESS)
 	{
@@ -489,7 +498,7 @@ FSOP_00(LOGIN)
 				return;
 			}
 
-			if (f->server->users[a->userid].priv2 & FS_PRIV2_CHROOT) // Fudge the root directory information so that $ maps to URD
+			if (a->user->priv2 & FS_PRIV2_CHROOT) // Fudge the root directory information so that $ maps to URD
 			{
 				char *dollar;
 

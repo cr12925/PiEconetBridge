@@ -48,7 +48,7 @@ void fsop_save_internal(struct fsop_data *f, uint8_t is_32bit)
 
 	if (is_32bit) length += (*(data + 16) << 24);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d %s %s %08lx %08lx %06lx", "", f->net, f->stn, (create_only ? "CREATE" : "SAVE"), filename, load, exec, length);
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "%s %s %08lx %08lx %06lx", (create_only ? "CREATE" : "SAVE"), filename, load, exec, length);
 
 	if (create_only || (incoming_port = fsop_find_bulk_port(f->server)))
 	{
@@ -159,6 +159,7 @@ void fsop_save_internal(struct fsop_data *f, uint8_t is_32bit)
 							bp->length = length;
 							bp->received = 0; /* Initialie */
 							bp->rx_ctrl = f->ctrl;
+							bp->reply_port = FSOP_REPLY_PORT;
 							bp->mode = 3;
 							bp->is_gbpb = 0;
 							bp->user_handle = 0; // Rogue for no user handle, because never hand out user handle 0. This stops the bulk transfer routine trying to increment a cursor on a user handle which doesn't exist.

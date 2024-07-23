@@ -58,7 +58,7 @@ FSOP(0a)
 		return;
 	}
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX (%s) by user %04x on handle %02X", "", f->net, f->stn, bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), f->userid, handle);
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Get %04lX from offset %04lX (%s) by user %04x on handle %02X", bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), f->userid, handle);
 
 	internal_handle = a->fhandles[handle].handle;
 
@@ -85,7 +85,7 @@ FSOP(0a)
 		strerror_r(errno, error_str, 127);
 
 		fsop_error(f, 0xFF, "Cannot find file length");
-		fs_debug (0, 1, "%12s from %3d.%3d fs_getbytes() on channel %02X - error on finding length of file: %s", "", f->net, f->stn, handle, error_str);
+		fs_debug_full (0, 1, f->server, f->net, f->stn, "OSGBPB Get on channel %02X - error on finding length of file: %s", handle, error_str);
 		return;
 	}
 
@@ -94,7 +94,7 @@ FSOP(0a)
 	else
 		eofreached = 0;
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() offset %06lX, file length %06lX, beyond EOF %s", "", f->net, f->stn, offset, length, (eofreached ? "Yes" : "No"));
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Get offset %06lX, file length %06lX, beyond EOF %s", offset, length, (eofreached ? "Yes" : "No"));
 
 	fseek(h, offset, SEEK_SET);
 	a->fhandles[handle].cursor_old = offset; // Store old cursor
@@ -107,6 +107,8 @@ FSOP(0a)
 	seq = eb_get_local_seq(f->server->fs_device);
 
 	r.p.seq = seq;
+
+	r.p.ctrl = FSOP_CTRL;
 
 	fsop_aun_send_noseq(&r, 2, f);
 
@@ -122,7 +124,7 @@ FSOP(0a)
 
 		received = fread(readbuffer, 1, readlen, h);
 
-		fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() bulk transfer: bytes required %06lX, bytes already sent %06lX, buffer size %04X, ftell() = %06lX, bytes to read %06X, bytes actually read %06X", "", f->net, f->stn, bytes, sent, (uint16_t) sizeof(readbuffer), ftell(h), readlen, received);
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Get bulk transfer: bytes required %06lX, bytes already sent %06lX, buffer size %04X, ftell() = %06lX, bytes to read %06X, bytes actually read %06X", bytes, sent, (uint16_t) sizeof(readbuffer), ftell(h), readlen, received);
 
 		if (received != readlen) // Either FEOF or error
 		{
@@ -134,9 +136,9 @@ FSOP(0a)
 					clearerr(h);
 					#ifndef __NO_LIBEXPLAIN
 						// explain_ferror() is not threadsafe - so it requires the global fs mutex
-						fs_debug (0, 2, "%12sfrom %3d.%3d short file read returned %d, expected %d but not end of file - error flagged: %s", "", f->net, f->stn, received, readlen, explain_ferror(h));
+						fs_debug_full (0, 2, f->server, f->net, f->stn, "Short file read returned %d, expected %d but not end of file - error flagged: %s", received, readlen, explain_ferror(h));
 					#else
-						fs_debug (0, 2, "%12sfrom %3d.%3d short file read returned %d, expected %d but not end of file - error flagged: %s", "", f->net, f->stn, received, readlen, "Unknown (no libexplain)");
+						fs_debug_full (0, 2, f->server, f->net, f->stn, "Short file read returned %d, expected %d but not end of file - error flagged: %s", received, readlen, "Unknown (no libexplain)");
 					#endif
 
 				}
@@ -178,7 +180,7 @@ FSOP(0a)
 	{
 		// Send a completion message
 
-		fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() Acknowledging %04lX tx bytes, cursor now %06lX", "", f->net, f->stn, sent, a->fhandles[handle].cursor);
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Get Completion %04lX tx bytes, cursor now %06lX", sent, a->fhandles[handle].cursor);
 
 		r.p.port = FSOP_REPLY_PORT;
 		r.p.ctrl = ctrl; // Send the ctrl byte back to the station - MDFS does this on the close packet
@@ -247,15 +249,14 @@ FSOP(0b)
 	if (offsetstatus) // write to current position
 		offset = a->fhandles[handle].cursor;
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d fs_putbytes() %06lX at offset %06lX by user %04X on handle %02X",
-			"", f->net, f->stn,
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Put %06lX at offset %06lX by user %04X on handle %02X",
 			bytes, offset, f->userid,  handle);
 
 	if (offset > length) // Beyond EOF
 	{
 		off_t	count;
 
-		fs_debug (0, 2, "%12s %3d.%3d fs_putbytes() Attempt to write at offset %06X beyond file end (length %06X) - padding with nulls", "", f->net, f->stn, offset, length);
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Put Attempt to write at offset %06X beyond file end (length %06X) - padding with nulls", offset, length);
 
 		fseek(h, 0, SEEK_END);
 

@@ -178,7 +178,7 @@ FSOP(03)
 						e->perm &= ~(FS_ACORN_DIR_MASK);
 
 					sprintf(permstring_l, "%s%s%s%s",
-						(e->ftype == FS_FTYPE_DIR ? "D" : e->ftype == FS_FTYPE_SPECIAL ? "S" : ""),
+						(e->ftype == FS_FTYPE_DIR ? "D" : e->ftype == FS_FTYPE_SPECIAL ? "S" : (e->ftype == FS_FTYPE_FILE && (e->perm & FS_PERM_EXEC)) ? "E" : ""),
 						((e->perm & FS_PERM_L) ? "L" : ""),
 						((e->perm & FS_PERM_OWN_W) ? (is_owner ? "W" : FS_CONFIG(f->server,fs_mdfsinfo) ? "w": "W") : ""),
 						((e->perm & FS_PERM_OWN_R) ? (is_owner ? "R" : FS_CONFIG(f->server,fs_mdfsinfo) ? "r" : "R") : "") );
@@ -231,7 +231,7 @@ FSOP(03)
 						e->perm &= ~(FS_ACORN_DIR_MASK);
 
 					sprintf(permstring_l, "%s%s%s%s",
-						(e->ftype == FS_FTYPE_DIR ? "D" : e->ftype == FS_FTYPE_SPECIAL ? "S" : ""),
+						(e->ftype == FS_FTYPE_DIR ? "D" : e->ftype == FS_FTYPE_SPECIAL ? "S" : (e->ftype == FS_FTYPE_FILE && (e->perm & FS_PERM_EXEC)) ? "E" : ""),
 						((e->perm & FS_PERM_L) ? "L" : ""),
 						((e->perm & FS_PERM_OWN_W) ? (is_owner ? "W" : f->server->config->fs_mdfsinfo ? "w": "W") : ""),
 						((e->perm & FS_PERM_OWN_R) ? (is_owner ? "R" : f->server->config->fs_mdfsinfo ? "r" : "R") : "") );

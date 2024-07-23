@@ -1295,7 +1295,7 @@ uint8_t fsop_allocate_user_file_channel(struct __fs_active *a)
 
 	count = 1; // Don't want to feed the user a directory handle 0
 
-	while (!a->fhandles[count].handle && count < FS_MAX_OPEN_FILES)
+	while ((a->fhandles[count].is_dir || a->fhandles[count].handle) && count < FS_MAX_OPEN_FILES)
 		count++;
 
 	if (count >= (a->server->config->fs_manyhandle ? FS_MAX_OPEN_FILES : 9)) return 0; // No handle available - if not in manyhandle mode, >= 9 is what we need because we can allocate up to and including 8
@@ -5590,14 +5590,14 @@ void fsop_close_interlock(struct __fs_station *s, struct __fs_file * file, uint8
 		file->readers--;
 	else	file->writers--;
 
-	fs_debug (0, 2, "%12s Interlock close internal handle: mode %d. Readers now = %d, Writers now = %d, path %s", "", mode, file->readers, file->writers, file->name);
+	fs_debug_full (0, 2, s, 0, 0, "             Interlock close internal handle: mode %d. Readers now = %d, Writers now = %d, path %s", mode, file->readers, file->writers, file->name);
 
 	// Safety valve here - only close when both are 0, not <= 0
 	// Otherwise we sometimes overclose - e.g. in the fs_garbage_collect() routine
 	
 	if (file->readers == 0 && file->writers == 0)
 	{
-		fs_debug (0, 2, "%12s Interlock closing internal handle for %s in operating system", "", file->name);
+		fs_debug_full (0, 2, s, 0, 0, "             Interlock closing internal handle for %s in operating system", file->name);
 		fclose(file->handle);
 		FS_LIST_SPLICEFREE(s->files,file,"FS","Freeing internal file structure");
 	}
@@ -8567,7 +8567,7 @@ short fsop_find_new_user(struct __fs_station *s)
  * the fs_mutex lock held when called.
  */
 
-void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t datalen, void *param)
+void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t len, void *param)
 {
 
 	struct __econet_packet_udp	r;
@@ -8576,6 +8576,7 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t datalen, v
 
 	off_t	 writeable, remaining, old_cursor, new_cursor, new_cursor_read;
 	FILE 	*h;
+	uint16_t	datalen = (len - 12);
 
 	r.p.ptype = ECONET_AUN_DATA;
 	r.p.data[0] = r.p.data[1] = 0;
@@ -8600,6 +8601,7 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t datalen, v
 	{
 		pthread_mutex_unlock(&(s->fs_mutex));
 
+		fs_debug_full (0, 1, s, 0, 0, "Dumped traffic arriving on unknown bulk port &%02X", p->p.port);
 		return; /* No idea what this traffic is */
 	}
 
@@ -8627,10 +8629,10 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t datalen, v
 		new_cursor_read = ftell(h);
 	}
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d Bulk transfer in on port %02X data length &%04X, expected total length &%04lX, writeable &%04X", "", bp->active->net, bp->active->stn, bp->bulkport, datalen, bp->length, writeable
+	fs_debug_full (0, 2, s, bp->active->net, bp->active->stn, "Bulk transfer in on port &%02X data length &%04X, expected total length &%04lX, writeable &%04X", bp->bulkport, datalen, bp->length, writeable
 			);
 	if (bp->is_gbpb) // Produce additional debug
-		fs_debug (0, 2, "%12sfrom %3d.%3d Bulk trasfer on port %02X old cursor = %06X, new cursor in FS = %06X, new cursor from OS = %06X - %s", "", bp->active->net, bp->active->stn, bp->bulkport, old_cursor, new_cursor, new_cursor_read, (new_cursor == new_cursor_read) ? "CORRECT" : " *** ERROR ***");
+		fs_debug_full (0, 2, s, bp->active->net, bp->active->stn, "Bulk trasfer on port %02X old cursor = %06X, new cursor in FS = %06X, new cursor from OS = %06X - %s", bp->bulkport, old_cursor, new_cursor, new_cursor_read, (new_cursor == new_cursor_read) ? "CORRECT" : " *** ERROR ***");
 
 	bp->last_receive = (unsigned long long) time(NULL);
 
@@ -8699,6 +8701,12 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t datalen, v
 
 			raw_fsop_aun_send (&r, 21, s, bp->active->net, bp->active->stn);
 		}
+
+		/*
+		 * Deallocate the port
+		 */
+
+		eb_port_deallocate(bp->active->server->fs_device, bp->bulkport);
 
 		FS_LIST_SPLICEFREE(s->bulkports, bp, "FS", "Freeing completed bulk port structure");
 

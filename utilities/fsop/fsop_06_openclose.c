@@ -78,7 +78,7 @@ FSOP(06)
 		return;
 	}
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d Open %s readonly %s, must exist? %s", "", f->net, f->stn, filename, (readonly ? "yes" : "no"), (existingfile ? "yes" : "no"));
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "Open %s readonly %s, must exist? %s", filename, (readonly ? "yes" : "no"), (existingfile ? "yes" : "no"));
 
 	// If the file must exist, then we can use wildcards; else no wildcards
 	// BUT we should be able to open a file for writing with wildcards in the path except the tail end
@@ -116,6 +116,11 @@ FSOP(06)
 		fs_free_wildcard_list(&p);
 		fsop_error(f, 0xbd, "Insufficient access");
 	}
+	else if ((p.ftype == FS_FTYPE_FILE) && ((p.perm & FS_PERM_EXEC) && !FS_ACTIVE_SYST(f->active)))
+	{
+		fs_free_wildcard_list(&p);
+		fsop_error(f, 0xff, "Execute only");
+	}
 	else if (!readonly && 
 			(p.ftype == FS_FTYPE_NOTFOUND) && !FS_ACTIVE_SYST(f->active)
 		&&
@@ -125,7 +130,7 @@ FSOP(06)
 		)
 		)
 	{
-		fs_debug(0,2, "%12sfrom %3d.%3d Attempt to open %s for write - p.parent_owner = %d, p.parent_perm = %02X, p.perm = %02X, userid = %d", "", f->net, f->stn, filename, p.parent_owner, p.parent_perm, p.perm, f->userid);
+		fs_debug_full (0,2, f->server, f->net, f->stn, "Attempt to open %s for write - p.parent_owner = %d, p.parent_perm = %02X, p.perm = %02X, userid = %d", filename, p.parent_owner, p.parent_perm, p.perm, f->userid);
 		fs_free_wildcard_list(&p);
 		fsop_error(f, 0xbd, "Insufficient access");
 	}
@@ -202,7 +207,7 @@ FSOP(06)
 
 				reply.p.data[2] = (unsigned char) (FS_MULHANDLE(a, userhandle) & 0xff);
 
-				fs_debug (0, 2, "%12sfrom %3d.%3d Opened handle %02X (%s)", "", f->net, f->stn, userhandle, a->fhandles[userhandle].acornfullpath);
+				fs_debug_full (0, 2, f->server, f->net, f->stn, "Opened handle %02X (%s)", userhandle, a->fhandles[userhandle].acornfullpath);
 				fsop_aun_send(&reply, 3, f);
 			}
 		}
@@ -227,12 +232,12 @@ FSOP(07)
 
 	if (handle > FS_MAX_OPEN_FILES || (handle != 0 && !a->fhandles[handle].handle))
 	{
-		fs_debug (0, 2, "%12sfrom %3d.%3d Attempt to close bad/unknown handle %02X", "", f->net, f->stn, handle);
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "Attempt to close bad/unknown handle &%02X", handle);
 		fsop_error(f, 222, "Channel ?");
 		return;
 	}
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d Close handle %02X", "", f->net, f->stn, handle);
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "Close handle &%02X (%s)", handle, a->fhandles[handle].acornfullpath);
 
 	if (handle != 0)
 		fsop_close_handle(f, handle);

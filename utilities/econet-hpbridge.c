@@ -11004,8 +11004,6 @@ uint8_t	eb_port_allocate(struct __eb_device *d, uint8_t req_port, port_func func
 		return 0;
 	}
 
-	eb_debug (0, 2, "BRIDGE", "%-8s %3d.%3d Request to allocate port &%02X", eb_type_str(d->type), d->net, d->local.stn, req_port);
-
 	pthread_mutex_lock(&(d->local.ports_mutex));
 
 	while (port != last)
@@ -11013,8 +11011,9 @@ uint8_t	eb_port_allocate(struct __eb_device *d, uint8_t req_port, port_func func
 		if (!EB_PORT_ISSET(d,ports,port) && (!EB_PORT_ISSET(d,reserved_ports,port) || req_port != 0))
 		{
 			EB_PORT_SET(d,ports,port,func,param);
+			if (req_port == 0) d->local.last_port = port;
 			pthread_mutex_unlock(&(d->local.ports_mutex));
-			eb_debug (0, 2, "BRIDGE", "%-8s %3d.%3d Port &%02X allocated", eb_type_str(d->type), d->net, d->local.stn, req_port);
+			eb_debug (0, 2, "BRIDGE", "%-8s %3d.%3d Port &%02X allocated (%s)", eb_type_str(d->type), d->net, d->local.stn, port, (req_port == 0x00 ? "Dynamic" : "Static"));
 			return port;
 		}
 
@@ -11029,6 +11028,11 @@ uint8_t	eb_port_allocate(struct __eb_device *d, uint8_t req_port, port_func func
 	pthread_mutex_unlock(&(d->local.ports_mutex));
 
 	/* If we get here, no port */
+
+	if (req_port == 0x00)
+		eb_debug (0, 2, "BRIDGE", "%-8s %3d.%3d Failed request to allocate dynamic port", eb_type_str(d->type), d->net, d->local.stn);
+	else
+		eb_debug (0, 2, "BRIDGE", "%-8s %3d.%3d Failed request to allocate port &%02X", eb_type_str(d->type), d->net, d->local.stn, req_port);
 
 	return 0;
 }
