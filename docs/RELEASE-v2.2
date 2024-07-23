@@ -18,6 +18,23 @@ with this program.  If not, see <https://www.gnu.org/licenses/>.
 RELEASE NOTES FOR V2.2
 ----------------------
 
+- Fileserver restructured to be extensible, and a single thread per server
+- Limit on number of fileservers supported removed
+- Limit on number of logged on users and open files (at system level)
+  removed. (Limit on maximum number of handles for a logged in user
+  remains 30.)
+- Fileserver now dynamiccally allocates memory instead of statically,
+  which should save on RAM
+- *FLOG has been removed in favour of *LOGOFF
+- *PRIV will now take an expanded privilege parameter (see docs)
+- *NEWUSER takes a new privilege parameter to set privileges at user
+  creation time.
+- *NETCONF/*NETCONFIG have been retired in favour of *FSCONFIG
+- *FNLENGTH has been retired in favour of *FSCONFIG FNLENGTH <n>
+- *FSDEFPERM has been retired in favour of *FSCONFIG DEFPERM <(D)perm>
+- *NETCONF BIGHANDLE has been retired. The FS now determines how many
+  handles a user can have based on their machine type / NFS version.
+
 Roadmap to v2.2
 ---------------
 
@@ -47,11 +64,6 @@ Roadmap to v2.2
   catch all wire traffic - only that which goes through the bridge.)
 
 - Implement signals for increasing / decreasing debug (SIGUSR1/2?)
-
-- Make FS permissions mirror L3 plus extra directory permissions.
-  Add NETCONF tunable to imply WR/r on all directories and
-  mask the visible display of the same (so unlocked directories
-  simply appear as "D/" as they do in L3).
 
 - Add facilities for E permission in FS (execute only)
 
