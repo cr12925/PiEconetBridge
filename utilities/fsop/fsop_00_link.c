@@ -56,6 +56,7 @@ FSOP_00(MKLINK)
 
 	if (symlink(p_src.unixpath, p_dst.unixpath) == -1)
 	{
+		fs_debug_full (0, 1, f->server, f->net, f->stn, "Unable to link %s to %s", p_src.unixpath, p_dst.unixpath);
 		fsop_error(f, 0xFF, "Cannot create link");
 		fs_free_wildcard_list(&p_src);
 		fs_free_wildcard_list(&p_dst);

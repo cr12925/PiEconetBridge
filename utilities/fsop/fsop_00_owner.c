@@ -30,10 +30,22 @@ FSOP_00(OWNER)
 	unsigned char path[256];
 	unsigned char result[30];
 	unsigned char username[11];
+	uint32_t	mtype;
+	uint16_t	hw;
+
+	mtype = f->active->machinepeek;
+
+	hw = ((mtype & 0xFF000000) >> 24) | ((mtype & 0x00FF0000) >> 8);
+
+	if (hw > 0x000C || hw == 0x0007 || hw == 0x0008 || hw == 0x0009 || hw == 0x000B)
+	{
+		fsop_error (f, 0xFF, "Not supported on this platform");
+		return;
+	}
 
 	fsop_00_oscli_extract(f->data, p, 0, path, 240, param_start);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d *OWNER %s (length %d)", "", f->net, f->stn, path, strlen(path));
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "*OWNER %s from type", path);
 
 	if (!fsop_normalize_path(f, path, f->cwd, &pn) || pn.ftype == FS_FTYPE_NOTFOUND)
 		fsop_error(f, 0xD6, "Not found");

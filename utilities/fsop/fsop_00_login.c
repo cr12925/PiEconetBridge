@@ -353,7 +353,7 @@ FSOP_00(LOGIN)
 
 	mtype = stnpeek->mtype; /* If we got no reply, it'll be 0x0000 */
 
-	fs_debug_full (0, 1, f->server, f->net, f->stn, "Machine type received by login task %08X", mtype);
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "Maching type %s running %02X.%02X", fsop_machine_type_str(mtype >> 16), (mtype & 0xFF), (mtype & 0xFF00) >> 8);
 
 	FS_LIST_SPLICEFREE(f->server->peeks, stnpeek, "FS", "Freeing machinepeek probe structure");
 
