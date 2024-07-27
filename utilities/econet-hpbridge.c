@@ -10998,6 +10998,9 @@ uint8_t	eb_port_allocate(struct __eb_device *d, uint8_t req_port, port_func func
 
 	last = d->local.last_port;
 	start = d->local.last_port + 1;
+	if (start == 0xFF || start == 0x00)
+		start = 0x01;
+
 	port = start;
 
 	if (req_port != 0)
