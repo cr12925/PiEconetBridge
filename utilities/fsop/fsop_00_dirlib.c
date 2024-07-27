@@ -147,9 +147,9 @@ FSOP_00(LIB)
 	else
 		FSOP_EXTRACT(f,0,dirname,255);
 
-	fs_debug_full (0, 1, f->server, f->net, f->stn, "LIB %s (new handle &%02X)", dirname, f->active->lib);
-
 	fsop_00_dirlib_internal(f, &(f->active->lib), dirname, 0);
+
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "LIB %s (new handle &%02X)", dirname, f->active->lib);
 
 }
 
