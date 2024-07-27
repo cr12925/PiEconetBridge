@@ -149,7 +149,7 @@ FSOP(02)
 	alq->cursor = 0; /* Initialize */
 	alq->valid_bytes = 0; /* Initialize */
 	alq->pasteof = 0; /* Initialize */
-	alq->chunk_size = FS_MAX_BULK_SIZE; /* Try that */
+	alq->chunk_size = f->active->chunk_size; /* Copy from login process */
 
 	/* Send OK response and wait to see what happens */
 
