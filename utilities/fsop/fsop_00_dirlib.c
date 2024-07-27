@@ -62,8 +62,6 @@ void	fsop_00_dirlib_internal(struct fsop_data *f, uint8_t *user_handle, unsigned
 
 		fs_debug_full (0, 2, f->server, f->net, f->stn, "Closing old %s handle %d", is_dir ? "CWD" : "LIB", *user_handle);
 
-		// 20240720 - deallocate user dir channel also does close interlock
-		//fsop_close_interlock(f->server, f->active->fhandles[*user_handle].handle, 1);
 		fsop_deallocate_user_dir_channel(f->active, *user_handle);
 
 		/* Open the new dir */
@@ -134,9 +132,9 @@ FSOP_00(DIR)
 	else
 		FSOP_EXTRACT(f,0,dirname,255);
 
-	fs_debug_full (0, 1, f->server, f->net, f->stn, "DIR %s", dirname);
-
 	fsop_00_dirlib_internal(f, &(f->active->current), dirname, 1);
+
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "DIR %s (new handle &%02X)", dirname, f->active->current);
 
 }
 
@@ -149,7 +147,7 @@ FSOP_00(LIB)
 	else
 		FSOP_EXTRACT(f,0,dirname,255);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d LIB %s", "", f->net, f->stn, dirname);
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "LIB %s (new handle &%02X)", dirname, f->active->lib);
 
 	fsop_00_dirlib_internal(f, &(f->active->lib), dirname, 0);
 

@@ -35,7 +35,7 @@ FSOP_00(RENAME)
 
         fs_debug (0, 1, "%12sfrom %3d.%3d *RENAME %s %s", "", f->net, f->stn, from_path, to_path);
 
-        if (!fsop_normalize_path(f, from_path, f->active->current, &p_from) || !fsop_normalize_path(f,to_path, f->active->current, &p_to) || p_from.ftype == FS_FTYPE_NOTFOUND)
+        if (!fsop_normalize_path(f, from_path, FSOP_CWD, &p_from) || !fsop_normalize_path(f,to_path, FSOP_CWD, &p_to) || p_from.ftype == FS_FTYPE_NOTFOUND)
         {
                 fsop_error(f, 0xDC, "Not found");
                 return;

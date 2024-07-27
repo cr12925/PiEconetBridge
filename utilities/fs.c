@@ -3617,8 +3617,6 @@ void fsop_bye_internal(struct __fs_active *a, uint8_t do_reply, uint8_t reply_po
 	{
 		if (a->fhandles[count].handle)
 		{
-			/* TODO: Clean up any load_queue or bulk port entries here */
-
 			if (a->fhandles[count].is_dir) /* deallocator closes the internal handle */
 				fsop_deallocate_user_dir_channel(a, count);
 			else
@@ -3640,7 +3638,6 @@ void fsop_bye_internal(struct __fs_active *a, uint8_t do_reply, uint8_t reply_po
 	}
 
 	FS_LIST_SPLICEFREE(s->actives, a, "FS", "fsop_bye_internal() deallocate active struct");
-
 }
 
 int fs_scandir_regex(const struct dirent *d)

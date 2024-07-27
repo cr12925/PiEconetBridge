@@ -54,7 +54,7 @@ void fsop_save_internal(struct fsop_data *f, uint8_t is_32bit)
 	{
 		struct path p;
 
-		if (fsop_normalize_path(f, filename, f->active->current, &p))
+		if (fsop_normalize_path(f, filename, FSOP_CWD, &p))
 		{
 			// Path found
 

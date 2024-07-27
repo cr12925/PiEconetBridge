@@ -156,7 +156,7 @@ FSOP_00(FSCONFIG)
 
 	strcpy(configitem, &(parameter[1]));
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d *FSCONFIG - %s %s", "", f->net, f->stn, configitem, (operator == '+' ? "ON" : "OFF"));
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "*FSCONFIG - %s %s", configitem, (operator == '+' ? "ON" : "OFF"));
 
 	if (!strcasecmp("ACORNHOME", configitem))
 		f->server->config->fs_acorn_home = (operator == '+' ? 1 : 0);
@@ -164,12 +164,6 @@ FSOP_00(FSCONFIG)
 		f->server->config->fs_infcolon = (operator == '+' ? 1 : 0);
 	else if (!strcasecmp("MDFS", configitem))
 		f->server->config->fs_sjfunc = (operator == '+' ? 1 : 0);
-	else if (!strcasecmp("BIGCHUNKS", configitem))
-		f->server->config->fs_bigchunks = (operator == '+' ? 1 : 0);
-	/* No longer used
-	else if (!strcasecmp("BIGHANDLES", configitem))
-		f->server->config->fs_manyhandle = (operator == '+' ? 1 : 0);
-	*/
 	else if (!strcasecmp("MDFSINFO", configitem))
 		f->server->config->fs_mdfsinfo = (operator == '+' ? 1 : 0);
 	else if (!strcasecmp("ACORNDIR", configitem))

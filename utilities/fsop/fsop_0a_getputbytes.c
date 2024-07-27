@@ -108,8 +108,6 @@ FSOP(0a)
 
 	r.p.ctrl = FSOP_CTRL;
 
-	fsop_aun_send_noseq(&r, 2, f);
-
         FS_LIST_MAKENEW(struct __fs_active_load_queue,f->active->load_queue,1,alq,"FS","Create new active load queue structure for GetBytes operation");
 
         /* Populate active load queue trigger data */
@@ -129,111 +127,9 @@ FSOP(0a)
         alq->cursor = offset; /* Initialize */
         alq->valid_bytes = 0; /* Initialize */
         alq->pasteof = eofreached; /* Initialize */
-        alq->chunk_size = f->active->chunk_size; // (f->active->machinepeek & 0xFF000000) == 0x0F ? 0x1000 : FS_MAX_BULK_SIZE; /* Try that  - if a RISC PC, send bigger chunks */
-
-        /* Send OK response and wait to see what happens */
-
-
-#if 0
-	/* Old heavyweight code */
-
-	fseek(h, offset, SEEK_SET);
-	a->fhandles[handle].cursor_old = offset; // Store old cursor
-	a->fhandles[handle].cursor = offset;
-
-	// Send acknowledge
-
-	// Set the sequence number so we can trigger on it
-
-	seq = eb_get_local_seq(f->server->fs_device);
-
-	r.p.seq = seq;
-
-	r.p.ctrl = FSOP_CTRL;
+        alq->chunk_size = f->active->chunk_size;  /* Copy from login process */
 
 	fsop_aun_send_noseq(&r, 2, f);
-
-	fserroronread = 0;
-	sent = 0;
-	total_received = 0;
-
-	while (sent < bytes)
-	{
-		unsigned short readlen;
-
-		readlen = ((bytes - sent) > sizeof(readbuffer) ? sizeof(readbuffer) : (bytes - sent));
-
-		received = fread(readbuffer, 1, readlen, h);
-
-		fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Get bulk transfer: bytes required %06lX, bytes already sent %06lX, buffer size %04X, ftell() = %06lX, bytes to read %06X, bytes actually read %06X", bytes, sent, (uint16_t) sizeof(readbuffer), ftell(h), readlen, received);
-
-		if (received != readlen) // Either FEOF or error
-		{
-			if (feof(h)) eofreached = 1;
-			else
-			{
-				if (ferror(h))
-				{
-					clearerr(h);
-					#ifndef __NO_LIBEXPLAIN
-						// explain_ferror() is not threadsafe - so it requires the global fs mutex
-						fs_debug_full (0, 2, f->server, f->net, f->stn, "Short file read returned %d, expected %d but not end of file - error flagged: %s", received, readlen, explain_ferror(h));
-					#else
-						fs_debug_full (0, 2, f->server, f->net, f->stn, "Short file read returned %d, expected %d but not end of file - error flagged: %s", received, readlen, "Unknown (no libexplain)");
-					#endif
-
-				}
-				fserroronread = 1;
-			}
-		}
-
-		// Always send packets which total up to the amount of data the station requested, even if all the data is past EOF (because the station works that out from the closing packet)
-		
-		r.p.ptype = ECONET_AUN_DATA;
-		r.p.port = txport;
-		r.p.ctrl = 0x80;
-
-		if (received > 0)
-			memcpy(&(r.p.data), readbuffer, received);
-		if (received < readlen) // Pad rest of data
-			memset (&(r.p.data[received]), 0, readlen - received);
-
-		// The real FS pads a short packet to the length requested, but then sends a completion message (below) indicating how many bytes were actually valid
-
-		// Now put them on a load queue
-
-		fsop_load_enqueue(f, &(r), readlen, internal_handle, a->fhandles[handle].mode, seq, FS_ENQUEUE_GETBYTES, 0 /* delay */, handle, ctrl); 
-
-		seq = 0; // seq != 0 means start a new load queue, so always set to 0 here to add to same queue
-		sent += readlen;
-		total_received += received;
-
-	}
-
-	a->fhandles[handle].cursor += total_received; // And update the cursor
-	a->fhandles[handle].sequence = (ctrl & 0x01); // Store this ctrl byte, whether it was right or wrong
-
-	if (eofreached) a->fhandles[handle].pasteof = 1; // Since we've read the end of the file, make sure getbyte() doesn't offer more data
-
-	if (fserroronread)
-		fsop_error(f, 0xFF, "FS Error on read");
-	else
-	{
-		// Send a completion message
-
-		fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Get Completion %04lX tx bytes, cursor now %06lX", sent, a->fhandles[handle].cursor);
-
-		r.p.port = FSOP_REPLY_PORT;
-		r.p.ctrl = ctrl; // Send the ctrl byte back to the station - MDFS does this on the close packet
-		r.p.data[0] = r.p.data[1] = 0;
-		r.p.data[2] = (eofreached ? 0x80 : 0x00);
-		r.p.data[3] = (total_received & 0xff);
-		r.p.data[4] = ((total_received & 0xff00) >> 8);
-		r.p.data[5] = ((total_received & 0xff0000) >> 16);
-
-		fsop_load_enqueue(f, &(r), 6, internal_handle, a->fhandles[handle].mode, seq, FS_ENQUEUE_GETBYTES, 0, handle, ctrl);
-	}
-#endif
 
 	return;
 
