@@ -245,7 +245,7 @@ struct path_entry {
         unsigned char unixpath[1024], unixfname[ECONET_ABS_MAX_FILENAME_LENGTH+1], acornname[ECONET_ABS_MAX_FILENAME_LENGTH+1]; // unixfname / acornname were 15, but now 81 to handle max 80 character filenames
         unsigned char day, monthyear, hour, min, sec; // Modified date / time
         unsigned char c_day, c_monthyear, c_hour, c_min, c_sec;
-        void *next, *parent;
+        struct path_entry *next, *parent;
 };
 
 /* Object attributes definition */

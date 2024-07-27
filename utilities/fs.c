@@ -1681,6 +1681,15 @@ int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, ch
 			if (stat(new_p->unixpath, &statbuf) != 0) // Error
 			{
 				fs_debug (0, 2, "Unable to stat %s", new_p->unixpath);
+				if (new_p->parent)
+				{
+					new_p->parent->next = NULL;
+					*tail = new_p->parent;
+				}
+				else	
+					*head = *tail = NULL;
+
+
 				free (new_p);
 				counter++;
 				continue;
