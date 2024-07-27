@@ -11027,7 +11027,9 @@ uint8_t	eb_port_allocate(struct __eb_device *d, uint8_t req_port, port_func func
 
 		port++;
 
-		if (port == 0xFF) port = 0x01; /* Skip port 0 */
+		if (port == 0xFF || port == 0x00)
+			port = 0x01;
+
 	}
 
 	pthread_mutex_unlock(&(d->local.ports_mutex));
