@@ -31,15 +31,15 @@ FSOP(0a)
 	FS_R_DATA(0x80);
 	uint32_t		bytes, offset;
 	uint8_t			txport, offsetstatus;
-	uint8_t			handle, ctrl;
-	off_t			sent, length;
+	uint8_t			handle; //, ctrl;
+	off_t			length; // sent;
 	struct __fs_file	*internal_handle;
 	struct __fs_active	*a;
 	FILE 			*h;
-	uint8_t			eofreached, fserroronread;
-	int			received, total_received;
+	uint8_t			eofreached; //, fserroronread;
+	//int			received, total_received;
 
-	uint8_t 		readbuffer[FS_MAX_BULK_SIZE];
+	//uint8_t 		readbuffer[FS_MAX_BULK_SIZE];
 
 	uint32_t		seq;
 
@@ -48,7 +48,7 @@ FSOP(0a)
 	a = f->active;
 
 	handle = FS_DIVHANDLE(a,*(f->data+5));
-	ctrl = FSOP_CTRL;
+	//ctrl = FSOP_CTRL;
 	txport = FSOP_URD; /* Takes URD slot */
 	offsetstatus = *(f->data+6);
 	bytes = (((*(f->data+7))) + ((*(f->data+8)) << 8) + (*(f->data+9) << 16));

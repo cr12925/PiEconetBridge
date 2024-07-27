@@ -31,20 +31,20 @@ FSOP(02)
         unsigned char 		command[256];
         struct path 		p;
 
-        FILE 			*fl;
+        //FILE 			*fl;
 
         uint8_t 		data_port = *(f->data+2);
         uint8_t 		relative_to = FSOP_CWD;
 	uint8_t 		loadas = (*(f->data+1) == 0x05 ? 1 : 0);
 	uint8_t 		is_32bit = (*(f->data+1) == 0x28 ? 1 : 0);
-	uint8_t			ctrl = FSOP_CTRL;
+	//uint8_t			ctrl = FSOP_CTRL;
 
         uint16_t		result;
 	int8_t			err;
 
         struct __fs_file 	*internal_handle;
 
-        uint32_t        	sequence; // Used to track the seq number sent to the load enqueuer
+        //uint32_t        	sequence; // Used to track the seq number sent to the load enqueuer
 
 	struct __fs_active_load_queue	*alq;
 
@@ -106,7 +106,7 @@ FSOP(02)
                 return;
         }
 
-        fl = internal_handle->handle;
+        // fl = internal_handle->handle;
 
         r.p.data[2] = (p.load & 0xff);
         r.p.data[3] = (p.load & 0xff00) >> 8;
@@ -126,7 +126,7 @@ FSOP(02)
         r.p.data[15+is_32bit] = p.monthyear;
         r.p.seq = eb_get_local_seq(f->server->fs_device);
 
-        sequence = r.p.seq; // Forces enqueuer to start new queue, and sets up the ack trigger for the packet we are about to send so that when that ACK turns up, we send the first packet in the queue.
+        // sequence = r.p.seq; // Forces enqueuer to start new queue, and sets up the ack trigger for the packet we are about to send so that when that ACK turns up, we send the first packet in the queue.
 
         // Use the noseq variant so we can force the load_enqueue routine to start a new queue and trigger on the right sequence number.
 

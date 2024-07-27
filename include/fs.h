@@ -154,7 +154,7 @@ struct __fs_station {
 	struct __fs_machine_peek_reg	*peeks; // List of pending machine peeks
 	uint8_t			bulkport_use[32]; // Bitmap - Need to move this to the local device in the bridge
 	uint8_t			enabled; // Whether server enabled
-	struct load_queue	*fs_load_queue; // Per server load queue
+	//struct load_queue	*fs_load_queue; // Per server load queue - now disused
 	struct __eb_device	*fs_device; // Pointer to device housing this server in the main bridge 
 	pthread_mutex_t		fs_mutex; // Lock when this FS is working
 	pthread_mutex_t		fs_mpeek_mutex; // Lock we sit on waiting for machine peeks
@@ -431,6 +431,8 @@ struct __pq {
         struct __pq *next;
 };
 
+#if 0
+/* now disused */
 struct load_queue {
 	struct __fs_station	*server;
 	struct __fs_active	*active; /* Identify client & address */
@@ -448,6 +450,7 @@ struct load_queue {
         struct __pq 		*pq_head, *pq_tail; /* Will be disused when the load dequeuer reads on a just in time basis */
 
 };
+#endif
 
 struct __fs_active_load_queue {
         unsigned 		queue_type; // Is this FsOp_Load or GBPB? (Changes the padding and termination packet)

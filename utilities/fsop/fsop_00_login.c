@@ -486,8 +486,10 @@ FSOP_00(LOGIN)
 
 			a->chunk_size = FS_MAX_BULK_SIZE;
 
-			if (machine == 0x0F || machine == 0x07) /* RISC PC or Arch */
+			if (machine == 0x07) /* Arch */
 				a->chunk_size = 0x1000;
+			else if (machine == 0x0F) /* RISC PC */
+				a->chunk_size = 0x4000;
 
 			a->server = f->server;
 			a->root = a->current = a->lib = 0; /* Rogue so things don't get closed when they aren't open */
