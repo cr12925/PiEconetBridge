@@ -253,10 +253,11 @@ FSOP(07)
 		return;
 	}
 
-	fs_debug_full (0, 2, f->server, f->net, f->stn, "Close handle &%02X (%s)", handle, a->fhandles[handle].acornfullpath);
-
 	if (handle != 0)
+	{
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "Close handle &%02X (%s)", handle, a->fhandles[handle].acornfullpath);
 		fsop_close_handle(f, handle);
+	}
 	else // User wants to close everything
 	{
 
@@ -266,6 +267,7 @@ FSOP(07)
 		{
 			if (a->fhandles[count].handle && !(a->fhandles[count].is_dir)) // Close it only if it's open and not a directory handle
 			{
+				fs_debug_full (0, 2, f->server, f->net, f->stn, "Close handle &%02X (%s)", count, a->fhandles[count].acornfullpath);
 				fsop_close_handle(f, count);
 			}
 			count++;
