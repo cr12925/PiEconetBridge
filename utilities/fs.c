@@ -3846,7 +3846,7 @@ void fsop_bulk_dequeue (struct __fs_station *s, uint8_t net, uint8_t stn, uint32
 
 	fprintf (stderr, "\n *** Bulk dequeue looking for %d.%d:%d ***\n\n", net, stn, seq);
 
-	a = fsop_find_active(s, net, stn);
+	a = fsop_find_active(s, net == 0 ? s->net : net, stn);
 
 	if (!a) /* No user! */
 		return;
