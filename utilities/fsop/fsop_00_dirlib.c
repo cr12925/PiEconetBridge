@@ -134,7 +134,7 @@ FSOP_00(DIR)
 
 	fsop_00_dirlib_internal(f, &(f->active->current), dirname, 1);
 
-	fs_debug_full (0, 1, f->server, f->net, f->stn, "DIR %s (new handle &%02X)", dirname, f->active->current);
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "DIR %s (handle &%02X)", dirname, f->active->current);
 
 }
 
@@ -149,7 +149,7 @@ FSOP_00(LIB)
 
 	fsop_00_dirlib_internal(f, &(f->active->lib), dirname, 0);
 
-	fs_debug_full (0, 1, f->server, f->net, f->stn, "LIB %s (new handle &%02X)", dirname, f->active->lib);
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "LIB %s (handle &%02X)", dirname, f->active->lib);
 
 }
 
