@@ -3844,14 +3844,10 @@ void fsop_bulk_dequeue (struct __fs_station *s, uint8_t net, uint8_t stn, uint32
 	struct __fs_active	*a;
 	struct __fs_active_load_queue	*alq;
 
-	fprintf (stderr, "\n *** Bulk dequeue looking for %d.%d:%d ***\n\n", net, stn, seq);
-
 	a = fsop_find_active(s, net == 0 ? s->net : net, stn);
 
 	if (!a) /* No user! */
 		return;
-
-	fprintf (stderr, "\n *** Bulk dequeue looking found active user ***\n\n");
 
 	alq = a->load_queue;
 
@@ -4908,7 +4904,6 @@ void *fsop_thread(void *p)
 	
 					case ECONET_AUN_ACK:
 					{
-						fprintf (stderr, "\n *** Sending to bulk dequeue ***\n\n");
 						fsop_bulk_dequeue(s, pq->p->p.srcnet, pq->p->p.srcstn, pq->p->p.seq);
 					}
 						break;
