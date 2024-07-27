@@ -24,9 +24,9 @@ FSOP(20)
 
 	uint16_t 	len;
 
-	len = fs_copy_terminate(reply.p.data, FSOP_UINFO(FSOP_USER)->username, 10, 0x0d);
+	len = fs_copy_terminate(&(reply.p.data[2]), FSOP_UINFO(FSOP_USER)->username, 10, 0x0d);
 
-	fsop_aun_send (&reply, len, f);
+	fsop_aun_send (&reply, len+2, f);
 
 	return;
 
