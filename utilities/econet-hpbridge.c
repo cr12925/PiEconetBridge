@@ -7166,7 +7166,7 @@ static void * eb_device_despatcher (void * device)
 							// Deal with machinetype queries here
 							ack.p.aun_ttype = ECONET_AUN_IMMREP;
 							ack.p.data[0] = ack.p.data[1] = 0xee;
-							ack.p.data[2] = (EB_VERSION & 0x0f);
+							ack.p.data[2] = (EB_VERSION & 0x0f) << 4;
 							ack.p.data[3] = (EB_VERSION & 0xf0) >> 4;
 
 							eb_enqueue_output (d, &ack, 4, NULL);
@@ -7219,9 +7219,12 @@ static void * eb_device_despatcher (void * device)
 								printer = d->local.printers;
 
 								while (printer && !found)
+								{
+									//eb_debug (0, 3, "PRINTER", "Looking at printer named %s", printer->acorn_name);
 									if (!strcasecmp(printer->acorn_name, (char *) pname) || !strcasecmp("PRINT ", (char *) pname))
 										found = 1;
 									else printer = printer->next;
+								}
 
 								if (found) 
 								{
@@ -7281,9 +7284,11 @@ static void * eb_device_despatcher (void * device)
 								job = printer->printjobs;
 
 								while (!jobfound && job)
+								{
 									if (job->net == p->p->p.srcnet && job->stn == p->p->p.srcstn)
 										jobfound = found = 1;
 									else job = job->next;
+								}
 
 								if (!jobfound)
 									printer = printer->next;
@@ -7593,7 +7598,7 @@ static void * eb_device_despatcher (void * device)
 						{
 							/* Check to see if this is a handled port */
 
-							eb_debug (0, 3, "BRIDGE", "%-8s %3d.%3d Looking for handler for port &%02X", eb_type_str(d->type), d->net, d->local.stn,p->p->p.port);
+							eb_debug (0, 3, "BRIDGE", "%-8s %3d.%3d Looking for handler for port &%02X (ports list says 0x%02X)", eb_type_str(d->type), d->net, d->local.stn,p->p->p.port, (EB_PORT_ISSET(d,ports,p->p->p.port)));
 
 							if (EB_PORT_ISSET(d,ports,p->p->p.port))
 							{
@@ -7613,7 +7618,7 @@ static void * eb_device_despatcher (void * device)
 									(d->local.port_funcs[0x99])(p->p, p->length + 12, d->local.port_param[0x99]);
 								}
 							}
-							if (p->p->p.aun_ttype == ECONET_AUN_IMMREP && d->local.fs.server)
+							else if (p->p->p.aun_ttype == ECONET_AUN_IMMREP && d->local.fs.server)
 							{
 								struct __fs_machine_peek_reg *m;
 
@@ -11013,7 +11018,7 @@ uint8_t	eb_port_allocate(struct __eb_device *d, uint8_t req_port, port_func func
 			EB_PORT_SET(d,ports,port,func,param);
 			if (req_port == 0) d->local.last_port = port;
 			pthread_mutex_unlock(&(d->local.ports_mutex));
-			eb_debug (0, 2, "BRIDGE", "%-8s %3d.%3d Port &%02X allocated (%s)", eb_type_str(d->type), d->net, d->local.stn, port, (req_port == 0x00 ? "Dynamic" : "Static"));
+			eb_debug (0, 2, "BRIDGE", "%-8s %3d.%3d              Port &%02X allocated (%s)", eb_type_str(d->type), d->net, d->local.stn, port, (req_port == 0x00 ? "Dynamic" : "Static"));
 			return port;
 		}
 
@@ -11041,9 +11046,9 @@ void eb_port_deallocate(struct __eb_device *d, uint8_t port)
 {
 
 	pthread_mutex_lock(&(d->local.ports_mutex));
-	EB_PORT_CLR(d,port);
+	EB_PORT_CLR(d,ports,port);
 	pthread_mutex_unlock(&(d->local.ports_mutex));
 
-	eb_debug (0, 2, "BRIDGE", "%-8s %3d.%3d Port &%02X de-allocated", eb_type_str(d->type), d->net, d->local.stn, port);
+	eb_debug (0, 2, "BRIDGE", "%-8s %3d.%3d              Port &%02X de-allocated", eb_type_str(d->type), d->net, d->local.stn, port);
 
 }

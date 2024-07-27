@@ -34,6 +34,10 @@ RELEASE NOTES FOR V2.2
 - *FSDEFPERM has been retired in favour of *FSCONFIG DEFPERM <(D)perm>
 - *NETCONF BIGHANDLE has been retired. The FS now determines how many
   handles a user can have based on their machine type / NFS version.
+- The FS will now send larger data burst packets to Archimedes and
+  RISC PC class machines, if it discovers one at login
+- The previous, rather heavyweight, load dequeuer has been retired
+  in favour of one which simply reads the relevant file on demand.
 
 Roadmap to v2.2
 ---------------

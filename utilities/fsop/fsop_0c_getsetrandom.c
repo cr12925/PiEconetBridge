@@ -61,7 +61,7 @@ FSOP(0c)
 			r.p.data[2] = (a->fhandles[handle].cursor & 0xff);
 			r.p.data[3] = (a->fhandles[handle].cursor & 0xff00) >> 8;
 			r.p.data[4] = (a->fhandles[handle].cursor & 0xff0000) >> 16;
-			fs_debug (0, 2, "%12sfrom %3d.%3d Get random access info on handle %02X, function %02X - cursor %06lX - data returned %02X %02X %02X", "", f->net, f->stn, handle, function, a->fhandles[handle].cursor, r.p.data[2], r.p.data[3], r.p.data[4]);
+			fs_debug_full (0, 2, f->server, f->net, f->stn, "Get random access info on handle %02X, function %02X - cursor %06lX - data returned %02X %02X %02X", handle, function, a->fhandles[handle].cursor, r.p.data[2], r.p.data[3], r.p.data[4]);
 			break;
 		case 1: // Fall through extent / allocation - going to assume this is file size but might be wrong
 		case 2:
@@ -74,7 +74,7 @@ FSOP(0c)
 				return;
 			}
 
-			fs_debug (0, 2, "%12sfrom %3d.%3d Get random access info on handle %02X, function %02X - extent %06lX", "", f->net, f->stn, handle, function, s.st_size);
+			fs_debug_full (0, 2, f->server, f->net, f->stn, "Get random access info on handle %02X, function %02X - extent %06lX", handle, function, s.st_size);
 
 			r.p.data[2] = s.st_size & 0xff;
 			r.p.data[3] = (s.st_size & 0xff00) >> 8;
@@ -141,7 +141,7 @@ FSOP(0d)
 		case 0: // Set pointer
 		{
 
-			fs_debug (0, 2, "%12sfrom %3d.%3d Set file pointer on channel %02X to %06lX, current extent %06lX%s", "", f->net, f->stn, handle, value, extent, (value > extent) ? " which is beyond EOF" : "");
+			fs_debug_full (0, 2, f->server, f->net, f->stn, "Set file pointer%s on channel %02X to %06lX, current extent %06lX%s", (is_32bit ? " (32 bit)" : ""), handle, value, extent, (value > extent) ? " which is beyond EOF" : "");
 
 			if ((value > extent) && a->fhandles[handle].mode == 1) // Don't extend if read only!
 			{
@@ -172,7 +172,7 @@ FSOP(0d)
 						fsop_error(f, 0xFF, "FS Error extending file");
 						return;
 					}
-					fs_debug (0, 1, "%12sfrom %3d.%3d  - tried to write %06X bytes, actually wrote %06lX", "", f->net, f->stn, chunk, written);
+					fs_debug_full (0, 1, f->server, f->net, f->stn, "Tried to write %06X bytes, actually wrote %06lX", chunk, written);
 					to_write -= written;
 				}
 
@@ -186,7 +186,7 @@ FSOP(0d)
 		case 2:
 		case 1: // Set file extent
 		{
-			fs_debug (0, 2, "%12sfrom %3d.%3d Set file extent on channel %02X to %06lX, current extent %06lX%s", "", f->net, f->stn, handle, value, extent, (value > extent) ? " so adding bytes to end of file" : "");
+			fs_debug_full (0, 2, f->server, f->net, f->stn, "Set file extent%s on channel %02X to %06lX, current extent %06lX%s", (is_32bit ? " (32 bit)" : ""), handle, value, extent, (value > extent) ? " so adding bytes to end of file" : "");
 
 			if (a->fhandles[handle].mode == 1) // Read only - refuse!
 			{
@@ -196,7 +196,7 @@ FSOP(0d)
 
 			fflush(h);
 
-			fs_debug (0, 3, "%12sfrom%3d.%3d   - %s file accordingly", "", f->net, f->stn, ((value < extent) ? "truncating" : "extending"));
+			fs_debug_full (0, 3, f->server, f->net, f->stn, "   - %s file accordingly", (is_32bit ? " (32 bit)" : ""), ((value < extent) ? "truncating" : "extending"));
 
 			if (ftruncate(fileno(h), value)) // Error if non-zero
 			{
@@ -258,7 +258,7 @@ FSOP(29)
 				return;
 			}
 
-			fs_debug (0, 2, "%12sfrom %3d.%3d Get random access info (32 bit) on handle %02X, function %02X - cursor %08lX, size %08lX (extent is same)", "", f->net, f->stn, handle, function, a->fhandles[handle].cursor, s.st_size);
+			fs_debug_full (0, 2, f->server, f->net, f->stn, "Get random access info (32 bit) on handle %02X, function %02X - cursor %08lX, size %08lX (extent is same)", handle, function, a->fhandles[handle].cursor, s.st_size);
 
 			r.p.data[2] = (a->fhandles[handle].cursor & 0xff);
 			r.p.data[3] = (a->fhandles[handle].cursor & 0xff00) >> 8;

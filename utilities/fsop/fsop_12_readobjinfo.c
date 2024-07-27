@@ -122,11 +122,11 @@ void fsop_12_internal (struct fsop_data *f, uint8_t is_32bit)
                 reply.p.data[replylen++] = (p.load & 0xff);
                 reply.p.data[replylen++] = (p.load & 0xff00) >> 8;
                 reply.p.data[replylen++] = (p.load & 0xff0000) >> 16;
-                if (command == 8) reply.p.data[replylen++] = (p.load & 0xff000000) >> 24;
+                reply.p.data[replylen++] = (p.load & 0xff000000) >> 24;
                 reply.p.data[replylen++] = (p.exec & 0xff);
                 reply.p.data[replylen++] = (p.exec & 0xff00) >> 8;
                 reply.p.data[replylen++] = (p.exec & 0xff0000) >> 16;
-                if (command == 8) reply.p.data[replylen++] = (p.exec & 0xff000000) >> 24;
+                reply.p.data[replylen++] = (p.exec & 0xff000000) >> 24;
         }
 
         if (command == 3 || command == 5 || command == 8 || command == 96)

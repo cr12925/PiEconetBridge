@@ -43,6 +43,8 @@ FSOP(0a)
 
 	uint32_t		seq;
 
+	struct __fs_active_load_queue	*alq;
+
 	a = f->active;
 
 	handle = FS_DIVHANDLE(a,*(f->data+5));
@@ -95,6 +97,45 @@ FSOP(0a)
 		eofreached = 0;
 
 	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Get offset %06lX, file length %06lX, beyond EOF %s", offset, length, (eofreached ? "Yes" : "No"));
+
+	// Send acknowledge
+
+	// Set the sequence number so we can trigger on it
+
+	seq = eb_get_local_seq(f->server->fs_device);
+
+	r.p.seq = seq;
+
+	r.p.ctrl = FSOP_CTRL;
+
+	fsop_aun_send_noseq(&r, 2, f);
+
+        FS_LIST_MAKENEW(struct __fs_active_load_queue,f->active->load_queue,1,alq,"FS","Create new active load queue structure for GetBytes operation");
+
+        /* Populate active load queue trigger data */
+
+        alq->queue_type = FS_ENQUEUE_GETBYTES;
+        alq->internal_handle = internal_handle;
+        alq->user_handle = handle; /* There isn't one */
+        alq->mode = f->active->fhandles[handle].mode; 
+        alq->ctrl = f->ctrl; /* So that the close packet can echo it */
+        alq->client_dataport = txport;
+        alq->client_finalackport = FSOP_REPLY_PORT;
+        alq->ack_seq_trigger = r.p.seq;
+        alq->last_ack_rx = time(NULL); /* now */
+        alq->start_ptr = offset;
+        alq->send_bytes = bytes;
+        alq->sent_bytes = 0; /* Initialize */
+        alq->cursor = offset; /* Initialize */
+        alq->valid_bytes = 0; /* Initialize */
+        alq->pasteof = eofreached; /* Initialize */
+        alq->chunk_size = f->active->chunk_size; // (f->active->machinepeek & 0xFF000000) == 0x0F ? 0x1000 : FS_MAX_BULK_SIZE; /* Try that  - if a RISC PC, send bigger chunks */
+
+        /* Send OK response and wait to see what happens */
+
+
+#if 0
+	/* Old heavyweight code */
 
 	fseek(h, offset, SEEK_SET);
 	a->fhandles[handle].cursor_old = offset; // Store old cursor
@@ -161,7 +202,7 @@ FSOP(0a)
 
 		// Now put them on a load queue
 
-		fsop_load_enqueue(f, &(r), readlen, internal_handle, a->fhandles[handle].mode, seq, FS_ENQUEUE_GETBYTES, 0 /* delay */); 
+		fsop_load_enqueue(f, &(r), readlen, internal_handle, a->fhandles[handle].mode, seq, FS_ENQUEUE_GETBYTES, 0 /* delay */, handle, ctrl); 
 
 		seq = 0; // seq != 0 means start a new load queue, so always set to 0 here to add to same queue
 		sent += readlen;
@@ -190,8 +231,9 @@ FSOP(0a)
 		r.p.data[4] = ((total_received & 0xff00) >> 8);
 		r.p.data[5] = ((total_received & 0xff0000) >> 16);
 
-		fsop_load_enqueue(f, &(r), 6, internal_handle, a->fhandles[handle].mode, seq, FS_ENQUEUE_GETBYTES, 0);
+		fsop_load_enqueue(f, &(r), 6, internal_handle, a->fhandles[handle].mode, seq, FS_ENQUEUE_GETBYTES, 0, handle, ctrl);
 	}
+#endif
 
 	return;
 
@@ -256,7 +298,7 @@ FSOP(0b)
 	{
 		off_t	count;
 
-		fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Put Attempt to write at offset %06X beyond file end (length %06X) - padding with nulls", offset, length);
+		fs_debug_full (0, 3, f->server, f->net, f->stn, "OSGBPB Put Attempt to write at offset %06X beyond file end (length %06X) - padding with nulls", offset, length);
 
 		fseek(h, 0, SEEK_END);
 

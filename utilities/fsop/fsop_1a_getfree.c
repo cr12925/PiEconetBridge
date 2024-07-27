@@ -38,7 +38,7 @@ FSOP(1a)
 		{
 			struct statvfs s;
 
-			snprintf((char * ) path, 1024, "%s/%1d%s",(const char * ) f->server->directory, disc->index, (const char *) disc->name);
+			snprintf((char * ) path, 1024, "%s/%1X%s",(const char * ) f->server->directory, disc->index, (const char *) disc->name);
 
 			if (!statvfs((const char * ) path, &s))
 			{

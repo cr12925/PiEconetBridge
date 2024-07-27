@@ -691,13 +691,14 @@ int16_t fsop_get_uid(struct __fs_station *s, char *username)
 void fsop_get_username_base (struct __fs_station *s, int userid, char *username)
 {
 	memcpy (username, &(s->users[userid]), 10);
+	username[10] = '\0';
 }
 
 void fsop_get_username_lock (struct __fs_active *a, char *username)
 {
 	pthread_mutex_lock(&(a->server->fs_mutex));
 	fsop_get_username_base (a->server, a->userid, username);
-	pthread_mutex_lock(&(a->server->fs_mutex));
+	pthread_mutex_unlock(&(a->server->fs_mutex));
 	return;
 }
 
@@ -751,7 +752,7 @@ uint8_t fsop_perm_to_acorn(struct __fs_station *s, uint8_t fs_perm, uint8_t ftyp
 	if (fs_perm & FS_PERM_L)
 		r |= 0x10;
 
-	if (s->config->fs_sjfunc & FS_PERM_H) // SJ research Privacy bit
+	if (s->config->fs_sjfunc && (fs_perm & FS_PERM_H)) // SJ research Privacy bit
 		r |= ((fs_perm & (FS_PERM_H)) ? 0x40 : 0);
 
 	r |= ((fs_perm & (FS_PERM_OWN_R | FS_PERM_OWN_W)) << 2);
@@ -3505,7 +3506,7 @@ void fsop_shutdown (struct __fs_station *s)
 	struct __fs_disc 	*disc;
 	struct load_queue	*l;
 	struct __fs_bulk_port	*bulk;
-	struct __eb_packetqueue *pq;
+	//struct __eb_packetqueue *pq;
 
 	// Flag server inactive
 	
@@ -6959,7 +6960,7 @@ void fs_cat_header(int server, unsigned short reply_port, int active_id, unsigne
 #define FS_ENQUEUE_GETBYTES 2
 #endif
 
-struct load_queue * fsop_load_enqueue(struct fsop_data *f, struct __econet_packet_udp *p, uint16_t len, struct __fs_file *h, uint8_t mode, uint32_t seq, uint8_t qtype, uint16_t delay)
+struct load_queue * fsop_load_enqueue(struct fsop_data *f, struct __econet_packet_udp *p, uint16_t len, struct __fs_file *h, uint8_t mode, uint32_t seq, uint8_t qtype, uint16_t delay, uint8_t user_handle, uint8_t ctrl)
 {
 
 	struct __econet_packet_udp *u; // Packet we'll put into the queue
@@ -7252,6 +7253,134 @@ char fsop_load_dequeue(struct __fs_station *s, uint8_t net, uint8_t stn, uint32_
 	}
 
 	return 1; // Success - but still more packets to come
+}
+
+void fsop_bulk_dequeue (struct __fs_station *s, uint8_t net, uint8_t stn, uint32_t seq)
+{
+	struct __fs_active	*a;
+	struct __fs_active_load_queue	*alq;
+
+	a = fsop_find_active(s, net, stn);
+
+	if (!a) /* No user! */
+		return;
+
+	alq = a->load_queue;
+
+	while (alq)
+	{
+		if (alq->ack_seq_trigger == seq) /* Found */
+			break;
+		else	alq = alq->next;
+	}
+
+	if (!alq) /* No load queue found */
+		return;
+
+	/* Update last rx time */
+
+	alq->last_ack_rx = time(NULL); /* Now */
+
+	if (alq->sent_bytes == alq->send_bytes) /* We've sent what was asked */
+	{
+		struct __econet_packet_udp	*reply;
+
+		reply = eb_malloc(__FILE__, __LINE__, "FS", "Allocate FS bulk transfer completion packet", 18); /* 18 is max size - 12 + 6 data */
+
+		reply->p.ctrl = alq->ctrl;
+		reply->p.ptype = ECONET_AUN_DATA;
+		reply->p.port = alq->client_finalackport;
+
+		reply->p.data[0] = reply->p.data[1] = 0x00;
+
+		if (alq->queue_type == FS_ENQUEUE_LOAD)
+		{
+			//fs_debug_full (0, 2, s, a->net, a->stn, "About to send termination for load - __fs_file entry is %p, FILE * is %p", alq->internal_handle, alq->internal_handle->handle);
+			fsop_close_interlock(s, alq->internal_handle, alq->mode);
+			raw_fsop_aun_send(reply, 2, s, a->net, a->stn);
+		}
+		else
+		{
+			reply->p.data[2] = (alq->pasteof) ? 0x80 : 0x00;
+			reply->p.data[3] = (alq->valid_bytes & 0xFF);
+			reply->p.data[4] = (alq->valid_bytes & 0xFF00) >> 8;
+			reply->p.data[5] = (alq->valid_bytes & 0xFF0000) >> 16;
+
+			raw_fsop_aun_send(reply, 6, s, a->net, a->stn);
+		}
+
+		eb_free(__FILE__, __LINE__, "FS", "Deallocate bulk transfer completion packet after transmission", reply);
+
+		FS_LIST_SPLICEFREE(a->load_queue, alq, "FS", "Freeing load queue struct on data burst completion");
+	}
+	else
+	{
+		/* Must still be bytes to send */
+
+		struct __econet_packet_udp	*reply;
+
+		uint32_t	bytes_required;
+		int		bytes_read;
+
+		bytes_required = (alq->send_bytes - alq->sent_bytes);
+
+		if (bytes_required > alq->chunk_size)
+			bytes_required = alq->chunk_size; /* Clamp to maximum client can handle */
+
+		reply = eb_malloc(__FILE__, __LINE__, "FS", "Allocate FS bulk transfer data packet", 12 + bytes_required); 
+
+		reply->p.port = alq->client_dataport;
+		reply->p.seq = eb_get_local_seq(s->fs_device);
+		reply->p.ctrl = 0x80;
+		reply->p.ptype = ECONET_AUN_DATA;
+
+		alq->ack_seq_trigger = reply->p.seq;
+
+		if (alq->pasteof)
+			bytes_read = 0;
+		else
+		{
+			//fs_debug_full (0, 2, s, a->net, a->stn, "About to read data - __fs_file entry is %p, FILE * is %p", alq->internal_handle, alq->internal_handle->handle);
+			fseek(alq->internal_handle->handle, alq->cursor, SEEK_SET);
+			bytes_read = fread(&(reply->p.data), 1, bytes_required, alq->internal_handle->handle);
+
+			if (feof(alq->internal_handle->handle))
+				alq->pasteof = 1;
+
+			if (bytes_read < 0) /* Error */
+			{
+				if (alq->queue_type == FS_ENQUEUE_LOAD)
+					fsop_close_interlock(s, alq->internal_handle, alq->mode);
+
+				fs_debug_full(0, 1, a->server, a->net, a->stn, "Data burst file read failed!");
+				FS_LIST_SPLICEFREE(a->load_queue, alq, "FS", "Freeing load queue struct on data burst read failure");
+
+				return;
+			}
+		}
+
+		/* Send what we've got */
+
+		alq->sent_bytes += bytes_required;
+		alq->valid_bytes += bytes_read;
+		alq->cursor += bytes_read;
+
+		/* Update user cursor if this is getbytes */
+		 
+		if (alq->queue_type == FS_ENQUEUE_GETBYTES)
+			a->fhandles[alq->user_handle].cursor = alq->cursor;
+
+		/* the old system used to set the data area from bytes_read+1 to bytes_required to 0, but
+		 * it probably doesn't matter 
+		 */
+
+		raw_fsop_aun_send_noseq(reply, bytes_required, s, a->net, a->stn);
+
+		eb_free (__FILE__, __LINE__, "FS", "Free databurst packet after transmission", reply);
+	}
+
+	return;
+
 }
 
 #if 0
@@ -8645,6 +8774,8 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t len, void 
 		unsigned char day, monthyear;
 		time_t now;
 
+		fs_debug_full (0, 2, s, bp->active->net, bp->active->stn, "Bulk transfer in on port &%02X has completed: expected total length &%04lX, received &%04lX", bp->bulkport, bp->length, bp->received);
+
 		now = time(NULL);
 		t = *localtime(&now);
 
@@ -8728,6 +8859,8 @@ void fsop_garbage_collect(struct __fs_station *s)
 
 	struct load_queue *l; // Load queue pointer
 	struct __fs_bulk_port	*p; // Bulk port pointer
+	struct __fs_active_load_queue	*alq; // load queue in a user active struct
+	struct __fs_active	*a; // Current user traverse
 
 	p = s->bulkports;
 
@@ -8751,7 +8884,7 @@ void fsop_garbage_collect(struct __fs_station *s)
 			}
 			else
 			{
-				fs_debug (0, 2, "%12sfrom %3d.%3d Garbage collector did not close bulk port %d because it had already closed.", "", p->active->net, p->active->stn, p->bulkport);
+				fs_debug_full (0, 2, s, p->active->net, p->active->stn, "Garbage collector did not close bulk port %d because it had already closed.", p->bulkport);
 			}
 			FS_LIST_SPLICEFREE(s->bulkports, p, "FS", "Deallocate bulk port on garbage collect");
 		}
@@ -8776,6 +8909,37 @@ void fsop_garbage_collect(struct __fs_station *s)
 		l = m; // Move to next, use stored value in case we dumped the queue
 	}
 
+	a = s->actives;
+
+	while (a)
+	{
+		alq = a->load_queue;
+
+		while (alq)
+		{
+			struct __fs_active_load_queue *n;
+
+			n = alq->next;
+
+			if (alq->last_ack_rx < (time(NULL) - 10)) /* 10 second timeout */
+			{
+				if (alq->queue_type == FS_ENQUEUE_LOAD) /* Close the handle */
+				{
+					fsop_close_interlock(s, alq->internal_handle, alq->mode);
+					fs_debug_full (0, 1, s, a->net, a->stn, "Load operation failed - Client failed to acknowledge data");
+				}
+				else
+					fs_debug_full (0, 1, s, a->net, a->stn, "OSGBPB operation failed - Client failed to acknowledge data on channel &%02X", alq->user_handle);
+				
+				FS_LIST_SPLICEFREE(a->load_queue, alq, "FS", "Freeing active load queue struct on ACK timeout from client in fsop_garbage_collect()");
+				
+			}
+
+			alq = n;
+		}
+
+		a = a->next;
+	}
 }
 
 // Find any servers this station is logged into and eject them in case the station is dynamically reallocated
@@ -10965,6 +11129,7 @@ uint8_t fsop_writedisclist (struct __fs_station *s, unsigned char *addr)
 	while (d)
 	{
 		memcpy (addr+(found * 20), d->name, strlen(d->name));
+		d = d->next;
 		found++;
 	}
 
@@ -11006,7 +11171,7 @@ void fsop_setup(void)
 	FSOP_SET (0b, (FSOP_F_LOGGEDIN)); /* Put bytes */
 	FSOP_SET (0c, (FSOP_F_LOGGEDIN)); /* Get Random Access Info 24-bit */
 	FSOP_SET (0d, (FSOP_F_LOGGEDIN)); /* Set Random Access Info 24-bit */
-	FSOP_SET (0e, (FSOP_F_LOGGEDIN)); /* Read disc names */
+	FSOP_SET (0e, (FSOP_F_NONE)); /* Read disc names */
 	FSOP_SET (0f, (FSOP_F_LOGGEDIN)); /* Read logged on users */
 	FSOP_SET (10, (FSOP_F_NONE)); /* Read time */
 	FSOP_SET (11, (FSOP_F_LOGGEDIN)); /* Read EOF status */
@@ -11014,6 +11179,7 @@ void fsop_setup(void)
 	FSOP_SET (13, (FSOP_F_LOGGEDIN)); /* Set object info */
 	FSOP_SET (14, (FSOP_F_LOGGEDIN)); /* Delete object(s) */
 	FSOP_SET (15, (FSOP_F_LOGGEDIN)); /* Read user env */
+	FSOP_SET (16, (FSOP_F_LOGGEDIN)); /* Set Opt */
 	FSOP_SET (17, (FSOP_F_LOGGEDIN)); /* Bye */
 	FSOP_SET (18, (FSOP_F_LOGGEDIN)); /* Read user information */
 	FSOP_SET (19, (FSOP_F_NONE)); /* Read FS Version */
@@ -11285,7 +11451,8 @@ void *fsop_thread(void *p)
 	
 					case ECONET_AUN_ACK:
 					{
-						fsop_load_dequeue(s, pq->p->p.srcnet, pq->p->p.srcstn, pq->p->p.seq);
+						//fsop_load_dequeue(s, pq->p->p.srcnet, pq->p->p.srcstn, pq->p->p.seq);
+						fsop_bulk_dequeue(s, pq->p->p.srcnet, pq->p->p.srcstn, pq->p->p.seq);
 					}
 						break;
 	

@@ -46,9 +46,9 @@ FSOP(02)
 
         uint32_t        	sequence; // Used to track the seq number sent to the load enqueuer
 
-        fs_copy_to_cr(command, f->data+5, 256);
+	struct __fs_active_load_queue	*alq;
 
-	fprintf (stderr, "command = '%s'\n", command);
+        fs_copy_to_cr(command, f->data+5, 256);
 
         if (loadas) // End the command at first space if there is one - BBC Bs seem to send the whole command line
         {
@@ -61,7 +61,7 @@ FSOP(02)
                 }
         }
 
-        fs_debug_full (0, 1, f->server, f->net, f->stn, "%s %s", (loadas ? "RUN" : "LOAD"), command);
+        fs_debug_full (0, 1, f->server, f->net, f->stn, "%s%s %s", (loadas ? "RUN" : "LOAD"), (is_32bit ? "32" : ""), command);
 
         if (!(result = fsop_normalize_path(f, command, relative_to, &p)) && !loadas) // Try and find the file first, but don't barf here if we are trying to *RUN it.
         {
@@ -130,8 +130,35 @@ FSOP(02)
 
         // Use the noseq variant so we can force the load_enqueue routine to start a new queue and trigger on the right sequence number.
 
+	FS_LIST_MAKENEW(struct __fs_active_load_queue,f->active->load_queue,1,alq,"FS","Create new active load queue structure for load operation");
+
+	/* Populate active load queue trigger data */
+
+	alq->queue_type = FS_ENQUEUE_LOAD;
+	alq->internal_handle = internal_handle;
+	alq->user_handle = 0; /* There isn't one */
+	alq->mode = 1; /* Always just read for a *LOAD */
+	alq->ctrl = f->ctrl; /* So that the close packet can echo it */
+	alq->client_dataport = data_port;
+	alq->client_finalackport = FSOP_REPLY_PORT;
+	alq->ack_seq_trigger = r.p.seq;
+	alq->last_ack_rx = time(NULL); /* now */
+	alq->start_ptr = 0;
+	alq->send_bytes = p.length;
+	alq->sent_bytes = 0; /* Initialize */
+	alq->cursor = 0; /* Initialize */
+	alq->valid_bytes = 0; /* Initialize */
+	alq->pasteof = 0; /* Initialize */
+	alq->chunk_size = FS_MAX_BULK_SIZE; /* Try that */
+
+	/* Send OK response and wait to see what happens */
+
         if (fsop_aun_send_noseq(&r, 16+is_32bit, f))
         {
+
+
+#if 0
+		/* Old databurst heavyweight queue code */
                 // Send data burst
 
                 int collected;
@@ -147,7 +174,7 @@ FSOP(02)
                 {
                         collected = fread(&(r.p.data), 1, 1280, fl);
 
-                        if (collected > 0) enqueue_result = fsop_load_enqueue(f, &r, collected, internal_handle, 1, sequence, FS_ENQUEUE_LOAD, 0); 
+                        if (collected > 0) enqueue_result = fsop_load_enqueue(f, &r, collected, internal_handle, 1, sequence, FS_ENQUEUE_LOAD, 0, 0, 0x80); 
 
                         if (collected < 0)
                         {
@@ -174,8 +201,9 @@ FSOP(02)
                 r.p.port = FSOP_REPLY_PORT;
                 r.p.ctrl = ctrl;
 
-                fsop_load_enqueue(f, &r, 2, internal_handle, 1, sequence, FS_ENQUEUE_LOAD, 0);
+                fsop_load_enqueue(f, &r, 2, internal_handle, 1, sequence, FS_ENQUEUE_LOAD, 0, 0, 0);
 
+#endif
         }
 
 	return;

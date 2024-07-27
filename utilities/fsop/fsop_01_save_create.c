@@ -48,7 +48,7 @@ void fsop_save_internal(struct fsop_data *f, uint8_t is_32bit)
 
 	if (is_32bit) length += (*(data + 16) << 24);
 
-	fs_debug_full (0, 1, f->server, f->net, f->stn, "%s %s %08lx %08lx %06lx", (create_only ? "CREATE" : "SAVE"), filename, load, exec, length);
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "%s%s %s %08lx %08lx %06lx", (create_only ? "CREATE" : "SAVE"), (is_32bit ? "32" : ""), filename, load, exec, length);
 
 	if (create_only || (incoming_port = fsop_find_bulk_port(f->server)))
 	{
@@ -170,7 +170,7 @@ void fsop_save_internal(struct fsop_data *f, uint8_t is_32bit)
 				}
 				else
 				{
-					fs_debug (0, 2, "%12sfrom %3d.%3d %s %s ftype=%02X, parent_perm=%02X, my_perm=%02X, parent_owner=%04X, uid=%04X", "", f->net, f->stn, (create_only ? "CREATE" : "SAVE"), filename, p.ftype, p.parent_perm, p.my_perm, p.parent_owner, f->userid);
+					fs_debug_full (0, 2, f->server, f->net, f->stn, "%s%s %s ftype=%02X, parent_perm=%02X, my_perm=%02X, parent_owner=%04X, uid=%04X", (create_only ? "CREATE" : "SAVE"), (is_32bit ? "32" : ""), filename, p.ftype, p.parent_perm, p.my_perm, p.parent_owner, f->userid);
 					fsop_error(f, 0xBD, "Insufficient access");
 				}
 

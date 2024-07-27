@@ -308,7 +308,7 @@ FSOP_00(LOGIN)
 	FS_REPLY_DATA(0x80);
 
 	char username[11], username_extract[11];
-	char password[11], password_extract[11];
+	char password[20], password_extract[11];
 
 	uint16_t counter;
 	uint8_t found = 0;
@@ -366,9 +366,35 @@ FSOP_00(LOGIN)
 	}
 
 	if (num > (1 + skip_first))
-		fsop_00_oscli_extract(f->data, p, 1+skip_first, password_extract, 10, param_start);
+		fsop_00_oscli_extract(f->data, p, 1+skip_first, password_extract, 19, param_start);
 	else
 		strcpy(password_extract, "");
+
+	/* Dequote password */
+
+	if (strlen(password_extract) >= 2 && password_extract[0] == '\"' && password_extract[strlen(password_extract)-1] == '\"')
+	{
+
+		unsigned char	tmp[20];
+
+		fs_debug_full(0, 2, f->server, f->net, f->stn, "Dequoting password >>>%s<<<", password_extract);
+
+		if (strlen(password_extract) == 2) /* Just "" */
+			strcpy(password_extract, "");
+		else
+		{
+			uint8_t		l;
+
+			l = strlen(password_extract)-2;
+
+			memcpy(tmp, &(password_extract[1]), strlen(password_extract)-2);
+			tmp[l] = '\0';
+			strcpy(password_extract, tmp);
+		}
+
+		fs_debug_full(0, 2, f->server, f->net, f->stn, "Dequoted password >>>%s<<<", password_extract);
+
+	}
 
 	fs_copy_padded(username, username_extract, 10);
 	fs_copy_padded(password, password_extract, 10);
@@ -446,16 +472,22 @@ FSOP_00(LOGIN)
 			a->userid = counter;
 			a->current_disc = f->server->users[counter].home_disc; // Need to set here so that first normalize for URD works.
 			a->machinepeek = mtype;
+			a->load_queue = NULL;
 			machine = (mtype & 0xFF000000) >> 24;
 			ver = (mtype & 0xFF);
 			a->manyhandles = 0;
-			if (	(machine == 0x07) // Archimedes
+			if (	(machine == 0x07 || machine == 0x0F) // Archimedes or RISC PC
 			||	(ver >= 4 && (machine == 0x05 || machine == 0x0A || machine == 0x0C)) // M128, Master ET, Master Compact & ANFS or greater
 			)
 			{
 				a->manyhandles = 1;
 				fs_debug_full(0, 1, f->server, a->net, a->stn, "32 Handle mode enabled");
 			}
+
+			a->chunk_size = FS_MAX_BULK_SIZE;
+
+			if (machine == 0x0F || machine == 0x07) /* RISC PC or Arch */
+				a->chunk_size = 0x1000;
 
 			a->server = f->server;
 			a->root = a->current = a->lib = 0; /* Rogue so things don't get closed when they aren't open */

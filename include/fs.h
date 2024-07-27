@@ -436,15 +436,33 @@ struct load_queue {
 	struct __fs_active	*active; /* Identify client & address */
         unsigned queue_type; // For later use with getbytes() - but for now assume always a load
 	struct __fs_file	*internal_handle; // Pointer to the file we're reading
-        unsigned char mode; // Internal mode
-        uint32_t        ack_seq_trigger; // Sequence number for which we receive an ack which will trigger next transmission
-        time_t          last_ack_rx; // Last time we received an ACK from this station - used for garbage collection
+	uint8_t			user_handle; // Index to active->fhandles for this transaction - e.g. to update cursor on gbpb
+        uint8_t			mode; // Internal mode
+	uint8_t			ctrl; // Ctrl byte for close packet on GBPB calls
+        uint32_t        	ack_seq_trigger; // Sequence number for which we receive an ack which will trigger next transmission
+        time_t          	last_ack_rx; // Last time we received an ACK from this station - used for garbage collection
 	/* For future use - when implemented, we can dump the packet queue and its memory usage ...  */
-	uint32_t	start_ptr, send_len, sent_len; /* filepos to start at, length to send (in chunk_size lumps), amount sent already - to calculate next packet start pos */
-	uint16_t	chunk_size;
-        struct load_queue *next;
-        struct __pq *pq_head, *pq_tail;
+	uint32_t		start_ptr, send_len, sent_len; /* filepos to start at, length to send (in chunk_size lumps), amount sent already - to calculate next packet start pos */
+	uint16_t		chunk_size;
+        struct load_queue 	*next;
+        struct __pq 		*pq_head, *pq_tail; /* Will be disused when the load dequeuer reads on a just in time basis */
 
+};
+
+struct __fs_active_load_queue {
+        unsigned 		queue_type; // Is this FsOp_Load or GBPB? (Changes the padding and termination packet)
+        struct __fs_file        *internal_handle; // Pointer to the file we're reading
+        uint8_t                 user_handle; // Index to active->fhandles for this transaction - e.g. to update cursor on gbpb. Invalid on FsOp_Load
+        uint8_t                 mode; // Internal file opening mode - so that the close_interlock closes the right mode
+        uint8_t                 ctrl; // Ctrl byte for close packet on GBPB calls
+	uint8_t			client_dataport, client_finalackport; // Ports to send stuff to
+        uint32_t                ack_seq_trigger; // Sequence number for which we receive an ack which will trigger next transmission
+        time_t                  last_ack_rx; // Last time we received an ACK from this station - used for garbage collection
+        /* For future use - when implemented, we can dump the packet queue and its memory usage ...  */
+        uint32_t                start_ptr, send_bytes, sent_bytes, cursor, valid_bytes; /* filepos to start at, length to send (in chunk_size lumps), amount sent already - to calculate next packet start pos */
+	uint8_t			pasteof; /* Signals to the dequeuer if it is already past EOF so it doesn't bother trying to read again */
+        uint16_t                chunk_size;
+        struct __fs_active_load_queue       *next, *prev;;
 };
 
 /* Main user structs etc. */
@@ -522,12 +540,14 @@ struct __fs_active {
         uint8_t priv; // Copy of priv bits from user info
 
 	uint32_t machinepeek; /* Machinepeek result if it's happened */
+	uint32_t chunk_size; /* Max bulk transfer outbound chunk size */
 	uint8_t manyhandles; /* 1 = 32 handles, 0 = 8 */
 
         uint8_t printer; // Index into this station's printer array which shows which printer has been selected - defaults to &ff to signal 'none'.
 
 	struct __fs_user_fhandle fhandles[FS_MAX_OPEN_FILES];
-	uint32_t	handle_map; /* New structure - 1 bit per handle if handle is in use / valid. To find a free handle, XOR with &FFFFFFFF and if 0 then no free handles (for 32 bit machines), if XOR = &FFFFFF00 then no free handles for 8 bit machines. To find first new handle, just keep looking at least significant bit - if 0, then you've found a handle, otherwise shift right one bit. */
+	//uint32_t	handle_map; /* New structure - 1 bit per handle if handle is in use / valid. To find a free handle, XOR with &FFFFFFFF and if 0 then no free handles (for 32 bit machines), if XOR = &FFFFFF00 then no free handles for 8 bit machines. To find first new handle, just keep looking at least significant bit - if 0, then you've found a handle, otherwise shift right one bit. */
+	struct __fs_active_load_queue	*load_queue;
 
         uint8_t sequence; // Used to detect duplicate transmissions on putbyte - oscillates 0-1-0-1 - low bit of ctrl byte in packet. Gets re-set whenever there is an operation which is not a putbyte, so that successive putbytes get the tracker, but anything else in the way resets it
 
@@ -707,7 +727,7 @@ extern unsigned char *pathname_to_dotfile(unsigned char *, uint8_t);
 
 /* Externs for load/getbytes dequeuer system in fs.c */
 
-extern struct load_queue * fsop_load_enqueue(struct fsop_data *, struct __econet_packet_udp *, uint16_t, struct __fs_file *, uint8_t, uint32_t, uint8_t, uint16_t);
+extern struct load_queue * fsop_load_enqueue(struct fsop_data *, struct __econet_packet_udp *, uint16_t, struct __fs_file *, uint8_t, uint32_t, uint8_t, uint16_t, uint8_t, uint8_t);
 
 /* And some defines for use with fsop_load_enqueu */
 
@@ -740,6 +760,9 @@ extern void fs_copy_padded(unsigned char *, unsigned char *, uint16_t);
 /* Externs for printer stuff */
 
 int8_t fsop_get_user_printer(struct __fs_active *);
+
+/* Externs from fs.c for machine peek types */
+unsigned char * fsop_machine_type_str (uint16_t);
 
 /* Externs from fsop_00_oscli.c */
 
@@ -915,6 +938,7 @@ FSOP_EXTERN(12);
 FSOP_EXTERN(13);
 FSOP_EXTERN(14);
 FSOP_EXTERN(15);
+FSOP_EXTERN(16);
 FSOP_EXTERN(17);
 FSOP_EXTERN(18);
 FSOP_EXTERN(19);
@@ -932,6 +956,7 @@ FSOP_EXTERN(29);
 FSOP_EXTERN(2a);
 FSOP_EXTERN(2b);
 FSOP_EXTERN(2c);
+FSOP_EXTERN(2e);
 FSOP_EXTERN(40);
 FSOP_EXTERN(41);
 FSOP_EXTERN(60);

@@ -22,7 +22,7 @@
 #include <openssl/rand.h>
 
 // Server version number advertised
-#define EB_VERSION	0x21 // i.e. 2.1
+#define EB_VERSION	0x22 // i.e. 2.1
 #define EB_SERVERID	"Pi HP Bridge"
 
 #define EB_TRUNK 	0x01
@@ -430,9 +430,9 @@ struct __eb_device { // Structure holding information about a "physical" device 
 
 };
 
-#define EB_PORT_SET(device,list,port,func,param)	{ device->local.list[((port) / 8)] |= (1 << (port & 0x01f));  device->local.port_funcs[(port)]=func; device->local.port_param[(port)]=param; }
-#define EB_PORT_CLR(device,port)	device->local.ports[((port) / 8)] &= ~(1 << ((port) & 0x01f))
-#define EB_PORT_ISSET(device,list,port)	((device->local.list[(port)/8] & (1 << (port & 0x01f))) != 0)
+#define EB_PORT_SET(device,list,port,func,param)	{ device->local.list[((port) / 32)] |= (1 << (port & 0x01f));  device->local.port_funcs[(port)]=func; device->local.port_param[(port)]=param; }
+#define EB_PORT_CLR(device,list,port)	device->local.list[((port) / 32)] &= ~(1 << ((port) & 0x01f))
+#define EB_PORT_ISSET(device,list,port)	((device->local.list[(port)/32] & (1 << (port & 0x01f))) != 0)
 
 uint8_t	eb_port_allocate(struct __eb_device *, uint8_t, port_func, void*);
 void eb_port_deallocate(struct __eb_device *, uint8_t);

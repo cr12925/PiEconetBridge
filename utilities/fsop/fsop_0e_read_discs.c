@@ -30,7 +30,7 @@ FSOP(0e)
 
 	r.p.data[0] = 10;
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d Read Discs from %d (up to %d)", "", f->net, f->stn, start, number);
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "Read Discs from %d (up to %d)", start, number);
 
 	disc = f->server->discs;
 
@@ -39,7 +39,7 @@ FSOP(0e)
 	while (disc && delivered < number)
 	{
 		//fprintf(stderr, "Looking at disc at %p index %d, Visible = %d\n", disc, disc->index, FS_DISC_VIS(f->server, f->userid, disc->index));
-		if (FS_DISC_VIS(f->server, f->userid, disc->index) && (disc->index >= start))
+		if ((f->user && FS_DISC_VIS(f->server, f->userid, disc->index) && (disc->index >= start)) || (!f->user && disc->index == 0 && start == 0))
 		{
 				snprintf((char *) &(r.p.data[data_ptr]), 18, "%c%-16s", disc->index, disc->name);
 				delivered++;
