@@ -881,7 +881,7 @@ int raw_fsop_aun_send_noseq(struct __econet_packet_udp *p, int len, struct __fs_
 
         a->p.srcnet = s->net;
         a->p.srcstn = s->stn;
-        a->p.dstnet = (s->net == dstnet) ? 0 : dstnet;
+        a->p.dstnet = dstnet;
         a->p.dststn = dststn;
 
 	return raw_fs_send (s, a, len);
@@ -3844,10 +3844,14 @@ void fsop_bulk_dequeue (struct __fs_station *s, uint8_t net, uint8_t stn, uint32
 	struct __fs_active	*a;
 	struct __fs_active_load_queue	*alq;
 
+	fprintf (stderr, "\n *** Bulk dequeue looking for %d.%d:%d ***\n\n", net, stn, seq);
+
 	a = fsop_find_active(s, net, stn);
 
 	if (!a) /* No user! */
 		return;
+
+	fprintf (stderr, "\n *** Bulk dequeue looking found active user ***\n\n");
 
 	alq = a->load_queue;
 
@@ -4251,7 +4255,7 @@ void fsop_garbage_collect(struct __fs_station *s)
 				if (alq->queue_type == FS_ENQUEUE_LOAD) /* Close the handle */
 				{
 					fsop_close_interlock(s, alq->internal_handle, alq->mode);
-					fs_debug_full (0, 1, s, a->net, a->stn, "Load operation failed - Client failed to acknowledge data");
+					fs_debug_full (0, 1, s, a->net, a->stn, "Load operation failed - Client failed to acknowledge FS transmission");
 				}
 				else
 					fs_debug_full (0, 1, s, a->net, a->stn, "OSGBPB operation failed - Client failed to acknowledge data on channel &%02X", alq->user_handle);
@@ -4904,7 +4908,7 @@ void *fsop_thread(void *p)
 	
 					case ECONET_AUN_ACK:
 					{
-						//fsop_load_dequeue(s, pq->p->p.srcnet, pq->p->p.srcstn, pq->p->p.seq);
+						fprintf (stderr, "\n *** Sending to bulk dequeue ***\n\n");
 						fsop_bulk_dequeue(s, pq->p->p.srcnet, pq->p->p.srcstn, pq->p->p.seq);
 					}
 						break;
