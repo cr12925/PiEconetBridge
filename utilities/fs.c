@@ -881,9 +881,8 @@ int raw_fsop_aun_send_noseq(struct __econet_packet_udp *p, int len, struct __fs_
 
         a->p.srcnet = s->net;
         a->p.srcstn = s->stn;
-        a->p.dstnet = dstnet;
+        a->p.dstnet = (s->net == dstnet) ? 0 : dstnet;
         a->p.dststn = dststn;
-
 
 	return raw_fs_send (s, a, len);
 
