@@ -484,7 +484,7 @@ FSOP_00(LOGIN)
 				fs_debug_full(0, 1, f->server, a->net, a->stn, "32 Handle mode enabled");
 			}
 
-			a->chunk_size = FS_MAX_BULK_SIZE;
+			a->chunk_size = 0x400;
 
 			if (machine == 0x07 || machine == 0x0F) /* Arch or RISC PC */
 				a->chunk_size = 0x1000;
