@@ -1160,6 +1160,7 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 			EB_PORT_SET(existing, reserved_ports, 0x9E, NULL, NULL); /* PS ? */
 			EB_PORT_SET(existing, reserved_ports, 0x9F, NULL, NULL); /* PS Query */
 			EB_PORT_SET(existing, reserved_ports, 0xA0, NULL, NULL); /* *FAST */
+			EB_PORT_SET(existing, reserved_ports, 0xB0, NULL, NULL); /* FindServer */
 			EB_PORT_SET(existing, reserved_ports, 0xD1, NULL, NULL); /* PS Data */
 			EB_PORT_SET(existing, reserved_ports, 0xD2, NULL, NULL); /* IP/Econet */
 		}
