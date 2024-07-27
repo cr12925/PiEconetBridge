@@ -39,6 +39,14 @@ RELEASE NOTES FOR V2.2
 - The previous, rather heavyweight, load dequeuer has been retired
   in favour of one which simply reads the relevant file on demand.
 
+KNOWN ISSUES
+------------
+
+Using the "Fileserver shutdown" command, either in *FAST or through
+the Fileserver Operations interface will crash the bridge. There
+appears to be some heap corruption somewhere I have not yet 
+tracked down.
+
 Roadmap to v2.2
 ---------------
 

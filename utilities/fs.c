@@ -1044,6 +1044,8 @@ void fsop_dump_handle_list(FILE *out, struct __fs_station *s)
 				);
 		}
 
+		fprintf (out, "\n    Databurst chucnk size: &%04X", active->chunk_size);
+
 		fprintf (out, "\n\n");
 		d = active->fhandles[active->root].handle;
 		fprintf (out, "       URD: %2d %s\n", active->root, d->name);
@@ -3351,17 +3353,6 @@ void fsop_shutdown (struct __fs_station *s)
 	if (s->files) /* This should not have anything in it after everyone has been logged off! */
 		fs_debug_full (0, 1, s, 0, 0, "Server was left with one or more open files after shutdown!");
 
-	/* Unmap users and groups */
-
-	if (s->users)
-		munmap(s->users, 256 * s->total_users); 
-
-	if (s->groups)
-		munmap(s->groups, 10 * s->total_groups);
-
-	s->users = NULL;
-	s->groups = NULL;
-
 	/* Free any discs we found */
 
 	disc = s->discs;
@@ -3376,46 +3367,6 @@ void fsop_shutdown (struct __fs_station *s)
 	}
 
 	s->discs = NULL;
-
-	/* Free the config struct */
-
-	//eb_free (__FILE__, __LINE__, "FS", "Free config struct", s->config);
-	
-	munmap(s->config, 256);
-
-#if 0
-	/* Now disused */
-	/* Dump the various queues, if there's anything on them */
-
-	l = s->fs_load_queue;
-
-	while (l)
-	{
-		struct load_queue *ln;
-		struct __pq *packetq, *packetq_next;
-
-		ln = l->next;	
-
-		fs_debug_full (0, 3, s, 0, 0, "FS", "Server cleaning up load_queue at %p on shutdown", l);
-		packetq = l->pq_head;
-
-		while (packetq)
-		{
-			packetq_next = packetq->next;
-
-			fs_debug_full (0, 3, s, 0, 0, "FS", "Server freeing packetq entry at %p on load_queue at %p on shutdown", packetq, l);
-			eb_free(__FILE__, __LINE__, "FS", "Free packet queue entry on shutdown", packetq);
-
-			packetq = packetq_next;
-		}
-
-		eb_free(__FILE__, __LINE__, "FS", "Free load queue entry at %p on shutdown", l);
-
-		l = ln;
-	}
-
-	s->fs_load_queue = NULL;
-#endif
 
 	/* Next clean up the bulk ports */
 
@@ -3437,27 +3388,21 @@ void fsop_shutdown (struct __fs_station *s)
 
 	s->bulkports = NULL;
 
-	/* Next clean up the work queue */
-/*
-	pq = s->fs_workqueue;
+	/* Unmap users and groups */
 
-	while (pq)
-	{
-		struct __eb_packetqueue	*pqn;
+	if (s->users)
+		munmap(s->users, 256 * s->total_users); 
 
-		pqn = pq->n;
+	if (s->groups)
+		munmap(s->groups, 10 * s->total_groups);
 
-		fs_debug_full (0, 3, s, 0, 0, "FS", "Server freeing work queue entry at %p on shutdown", pq);
+	s->users = NULL;
+	s->groups = NULL;
 
-		eb_free(__FILE__, __LINE__, "FS", "Free packet on FS workqueue on shutdown", pq->p);
-		eb_free(__FILE__, __LINE__, "FS", "Free packet queue entry on work queue on shutdown", pq);
+	/* Free the config struct */
 
-		pq = pqn;
+	munmap(s->config, 256);
 
-	}
-
-	s->fs_workqueue = NULL;
-*/
 	fs_debug_full (0, 1, s, 0, 0, "             Server has shut down");
 
 	return;
@@ -3616,6 +3561,8 @@ void fsop_bye_internal(struct __fs_active *a, uint8_t do_reply, uint8_t reply_po
 	int count;
 	struct __fs_station *s; 
 	struct __econet_packet_udp reply;
+	struct __fs_active_load_queue *alq;
+	struct __fs_bulk_port *bp;
 
 	fs_debug_full (0, 1, a->server, a->net, a->stn, "Bye");
 
@@ -3625,6 +3572,43 @@ void fsop_bye_internal(struct __fs_active *a, uint8_t do_reply, uint8_t reply_po
 	reply.p.ctrl = 0x80;
 	reply.p.port = reply_port;
 	reply.p.data[0] = reply.p.data[1] = 0;
+
+	/* Clean up any bulk ports or load queues */
+
+	alq = a->load_queue;
+
+	while (alq)
+	{
+		struct __fs_active_load_queue *n;
+
+		n = alq->next;
+
+		FS_LIST_SPLICEFREE(a->load_queue,alq,"FS","Free load queue entry on *BYE");
+
+		alq = n;
+
+		/* Note: the clean up below will actually close the files */
+	}
+
+	/* Clean up any bulk ports which are ours */
+	
+	bp = a->server->bulkports;
+
+	while (bp)
+	{
+		struct __fs_bulk_port *n;
+
+		n = bp->next;
+
+		if (bp->active == a) // It's ours
+		{
+			eb_port_deallocate(a->server->fs_device, bp->bulkport);
+			/* Routine below will close the file */
+			FS_LIST_SPLICEFREE(a->server->bulkports,bp,"FS","Free bulk port structure on *BYE");
+		}
+
+		bp = n;
+	}
 
 	// Close active files / handles
 	
@@ -4819,11 +4803,15 @@ void *fsop_thread(void *p)
 
 		if (!s->enabled)
 		{
-			fs_debug_full (0, 1, s, 0, 0, "Shutting down on request");
+			fs_debug_full (0, 1, s, 0, 0, "             Shutting down on request");
 			
 			fsop_shutdown(s);
 
-			pthread_mutex_unlock(&(s->fs_mutex));
+			s->fs_device->local.fs.server = NULL;
+
+			fs_debug (0, 1, "             Shut down completed");
+
+			// pthread_mutex_unlock(&(s->fs_mutex));
 
 			/* Note, don't free the __fs_station - that stays around while the bridge is running. 
 			 * Otherwise we can't tell if enabled is set or not! 

@@ -4404,9 +4404,7 @@ fast_handler_reset:
 							fastprintf (d, "%c*** Alter FS parameters on %d.%d\r\n\n", 0x0C, d->net, d->local.stn);
 							fastprintf (d, " A: Acorn home dir permssions:  %s\r\n", (params & FS_CONFIG_ACORNHOME) ? "On" : "Off");
 							fastprintf (d, " S: SJ MDFS functionality:      %s\r\n", (params & FS_CONFIG_SJFUNC) ? "On" : "Off");
-							fastprintf (d, " B: GBPB Big Chunks:            %s\r\n", (params & FS_CONFIG_BIGCHUNKS) ? "On" : "Off");
 							fastprintf (d, " C: Use : for / in filesystem:  %s\r\n", (params & FS_CONFIG_INFCOLON) ? "On" : "Off");
-							fastprintf (d, " M: > 8 handles per station:    %s\r\n", (params & FS_CONFIG_MANYHANDLE) ? "On" : "Off");
 							fastprintf (d, " I: MDFS extended *INFO:        %s\r\n", (params & FS_CONFIG_MDFSINFO) ? "On" : "Off");
 							fastprintf (d, " D: Acorn Directory display (D/)%s\r\n", (params & FS_CONFIG_MASKDIRWRR) ? "On" : "Off");
 							fastprintf (d, " F: Filename length:            %d\r\n", fnlength);
@@ -4419,9 +4417,7 @@ fast_handler_reset:
 							{
 								case 'A': params ^= FS_CONFIG_ACORNHOME; break;
 								case 'S': params ^= FS_CONFIG_SJFUNC; break;
-								case 'B': params ^= FS_CONFIG_BIGCHUNKS; break;
 								case 'C': params ^= FS_CONFIG_INFCOLON; break;
-								case 'M': params ^= FS_CONFIG_MANYHANDLE; break;
 								case 'I': params ^= FS_CONFIG_MDFSINFO; break;
 								case 'D': params ^= FS_CONFIG_MASKDIRWRR; break;
 								case 'F': 
@@ -4526,7 +4522,10 @@ fast_handler_reset:
 							fastprintf (d, "\r\n\n*** ERROR: Fileserver on %d.%d already startedr\n\n", d->net, d->local.stn);
 						else
 						{
-							fsop_shutdown (d->local.fs.server);
+							pthread_mutex_lock(&(d->local.fs.server->fs_mutex));
+							d->local.fs.server->enabled = 0;
+							pthread_mutex_unlock(&(d->local.fs.server->fs_mutex));
+							pthread_cond_signal(&(d->local.fs.server->fs_condition));
 							fastprintf (d, "\r\n\n*** Fileserver on %d.%d has shut down\r\n\n", d->net, d->local.stn);
 						}
 					}	
@@ -7612,7 +7611,7 @@ static void * eb_device_despatcher (void * device)
 							{
 								/* Send ACK & NAK to fileserver, if active */
 
-								if (EB_PORT_ISSET(d,ports,0x99))
+								if (d->local.fs.server && EB_PORT_ISSET(d,ports,0x99))
 								{
 									eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
 									(d->local.port_funcs[0x99])(p->p, p->length + 12, d->local.port_param[0x99]);
