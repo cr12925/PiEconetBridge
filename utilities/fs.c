@@ -1765,6 +1765,7 @@ int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, ch
 		counter++;
 	}
 
+#if 0
 	{
 		struct path_entry *p2;
 
@@ -1776,6 +1777,7 @@ int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, ch
 			p2 = p2->next;
 		}
 	}
+#endif
 
 
 	if (results > 0) fs_free_scandir_list(&namelist, results); // This needs to check results (not 'found') because results is how many scandir returned, not all of which might be 'found' because we apply the length criteria locally.
