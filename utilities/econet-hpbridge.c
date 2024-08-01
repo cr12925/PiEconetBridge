@@ -4357,10 +4357,12 @@ fast_handler_reset:
 		fastprintf(d, "%c*** Pi Econet Bridge Console\r\n*** Station: %d.%d\r\n\n",
 				0x0C, d->net, d->local.stn);
 
-		fastprintf (d, "  A: Alter fileserver parameters\r\n");
-		fastprintf (d, "  F: Display fileserver info\r\n");
 		if (fsop_is_enabled(d->local.fs.server))
+		{
+			fastprintf (d, "  A: Alter fileserver parameters\r\n");
+			fastprintf (d, "  F: Display fileserver info\r\n");
 			fastprintf (d, "  S: Shut down file server\r\n");
+		}
 		else
 		{
 			fastprintf (d, "  B: Boot/Restart file server\r\n");
@@ -4395,9 +4397,9 @@ fast_handler_reset:
 						uint32_t	params;
 						uint8_t		fnlength;
 
-						pthread_mutex_lock(&fs_mutex);
+						pthread_mutex_lock (&(d->local.fs.server->fs_mutex));
 						fsop_get_parameters (d->local.fs.server, &params, &fnlength);
-						pthread_mutex_unlock(&fs_mutex);
+						pthread_mutex_unlock (&(d->local.fs.server->fs_mutex));
 
 						while (!finished)
 						{
@@ -4539,8 +4541,28 @@ fast_handler_reset:
 							d->local.fs.server = fsop_initialize (d, d->local.fs.rootpath);
 							if (d->local.fs.server)
 							{
-								fsop_run(d->local.fs.server);
-								fastprintf (d, "\r\n\n*** Fileserver on %d.%d booted\r\n\n", d->net, d->local.stn);
+								int r;
+								r = fsop_run(d->local.fs.server);
+
+								switch (r)
+								{
+									case 0:
+										{
+											fastprintf (d, "\r\n\n*** Fileserver on %d.%d would not start\r\n\n", d->net, d->local.stn);
+										} break;
+									case -1:
+										{
+											fastprintf (d, "\r\n\n*** Fileserver on %d.%d was already running\r\n\n", d->net, d->local.stn);
+										} break;
+									case 1:
+										{
+											fastprintf (d, "\r\n\n*** Fileserver on %d.%d booted successfully\r\n\n", d->net, d->local.stn);
+										} break;
+									default:
+										{
+											fastprintf (d, "\r\n\n*** Fileserver on %d.%d boot returned unknown result\r\n\n", d->net, d->local.stn);
+										} break;
+								}
 							}
 							else
 								fastprintf (d, "\r\n\n*** ERROR: Fileserver on %d.%d BOOT FAILED\r\n\n", d->net, d->local.stn);
@@ -6946,12 +6968,6 @@ static void * eb_device_despatcher (void * device)
 						// Invite a queue for a single station if the FS has had an ACK from it
 						// in case there's a load queue waiting.
 
-/* NOt effective
-						if (p->p->p.aun_ttype == ECONET_AUN_ACK && (d->local.fs.server) && fs_load_dequeue(d->local.fs.server, p->p->p.srcnet, p->p->p.srcstn))
-							new_output = 1;
-*/
-						
-						
 						if (p->p->p.aun_ttype == ECONET_AUN_IMM && p->p->p.port == 0x00 && p->p->p.ctrl == 0x81) // Immediate Peek to local emulator
 						{
 							struct __eb_printer *printer;
@@ -7006,10 +7022,12 @@ static void * eb_device_despatcher (void * device)
 
 								yline += (2 + (found / 10));
 
-								if (d->local.fs.server)
+								if (fsop_is_enabled(d->local.fs.server))
 								{
 									beeb_print (yline++, 0, "FS Discs:");
+									pthread_mutex_lock(&(d->local.fs.server->fs_mutex));
 									yline += 1 + fsop_writedisclist (d->local.fs.server, &(beebmem[0x7c00 + (yline * 40)]));
+									pthread_mutex_unlock(&(d->local.fs.server->fs_mutex));
 								}
 
 								if ((printer = d->local.printers)) // Is a print server
@@ -7068,12 +7086,6 @@ static void * eb_device_despatcher (void * device)
 							eb_free (__FILE__, __LINE__, "BRIDGE", "Freeing PEEK reply packet", reply);
 							
 						}
-						/* Breaks load_dequeue
-						else if ((d->local.fs.server) && (p->p->p.aun_ttype == ECONET_AUN_NAK || p->p->p.aun_ttype == ECONET_AUN_ACK)) // Don't pass these to local devices except a fileserver
-						{
-			
-						}
-						*/
 						else if (p->p->p.aun_ttype == ECONET_AUN_DATA && p->p->p.port == 0x00 && p->p->p.ctrl == 0x84 && d->local.fs.rootpath && (ECONET_DEV_STATION(d->local.fast_priv_stns, p->p->p.srcnet, p->p->p.srcstn)) && (p->p->p.data[0] == 0xff && p->p->p.data[1] == 0xff)) // USRPROC &FFFF Immediate to a local emulator - but only bother if we are an FS and would have started the *FAST handler - and ignore anything that isn't from a privileged station
 						{
 							pthread_mutex_lock (&(d->local.fast_io_mutex));
@@ -7328,7 +7340,7 @@ static void * eb_device_despatcher (void * device)
 
 									printerindex = 0xff;
 
-									if (d->local.fs.server && (a = fsop_stn_logged_in_lock(d->local.fs.server, (job->net == d->net ? 0 : job->net), job->stn))) // Is fileserver
+									if (fsop_is_enabled(d->local.fs.server) && (a = fsop_stn_logged_in_lock(d->local.fs.server, (job->net == d->net ? 0 : job->net), job->stn))) // Is fileserver
 									{
 										fsop_get_username_lock(a, job->username);
 										printerindex = fsop_get_user_printer(a);
@@ -7489,7 +7501,7 @@ static void * eb_device_despatcher (void * device)
 							eb_debug (0, 1, "FIND", "%-8s %3d.%3d FindServer request received - type '%-8s'",
 								eb_type_str(d->type), d->net, d->local.stn, findserver_type);
 
-							if (d->local.fs.server && (fsop_is_enabled(d->local.fs.server))) // Is fileserver
+							if (fsop_is_enabled(d->local.fs.server)) // Is fileserver
 							{
 								strcpy (server_type, "FILE    ");	
 								if (!strcasecmp(findserver_type, "FILE    ") || !strcasecmp(findserver_type, "        "))
@@ -7610,7 +7622,7 @@ static void * eb_device_despatcher (void * device)
 							{
 								/* Send ACK & NAK to fileserver, if active */
 
-								if (d->local.fs.server && EB_PORT_ISSET(d,ports,0x99))
+								if (fsop_is_enabled(d->local.fs.server) && EB_PORT_ISSET(d,ports,0x99))
 								{
 									eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
 									(d->local.port_funcs[0x99])(p->p, p->length + 12, d->local.port_param[0x99]);
@@ -7639,16 +7651,6 @@ static void * eb_device_despatcher (void * device)
 							else
 								eb_debug (0, 3, "BRIDGE", "%-8s %3d.%3d NO HANDLER found for port &%02X type 0x%02X", eb_type_str(d->type), d->net, d->local.stn,p->p->p.port, p->p->p.aun_ttype);
 						}
-#if 0
-						else if (d->local.fs.server) // Must be fileserver traffic - NB, this also sends ACKs & NAKs now, just in case there's a need to dequeue
-						{
-
-							eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
-							eb_handle_fs_traffic(d->local.fs.server, p->p, p->length);
-							new_output = 1; // We'll guess there was a response. No harm if not
-						}
-#endif
-						
 					} break;
 
 					case EB_DEF_PIPE:
@@ -10635,7 +10637,7 @@ static void * eb_fs_statistics (void *nothing)
 
 					if (local && local->type == EB_DEF_LOCAL)
 					{
-						if (local->local.fs.server)
+						if (fsop_is_enabled(local->local.fs.server))
 						{
 							fsop_dump_handle_list (output, local->local.fs.server);
 						}
@@ -10850,7 +10852,7 @@ static void * eb_statistics (void *nothing)
 						{
 							case EB_DEF_AUN:	stn = divert->aun->stn; if (divert->aun->port == -1) sprintf (info, "Inactive"); else sprintf(info, "%d.%d.%d.%d:%d", (divert->aun->addr & 0xff000000) >> 24, (divert->aun->addr & 0x00ff0000) >> 16, (divert->aun->addr & 0x0000ff00) >> 8, (divert->aun->addr & 0x000000ff), divert->aun->port); break;
 							case EB_DEF_LOCAL:	stn = divert->local.stn; sprintf(info, "%c%c%c", ((divert->local.printers) ? 'P' : ' '),
-								((divert->local.fs.server) ? 'F' : ' '),
+								(fsop_is_enabled(divert->local.fs.server) ? 'F' : ' '),
 								((divert->local.ip.tunif[0] != '\0') ? 'I' : ' ')); break;
 							case EB_DEF_PIPE:	stn = divert->pipe.stn; sprintf(info, "%s", divert->pipe.base); break;
 							default:		stn = 0; break;

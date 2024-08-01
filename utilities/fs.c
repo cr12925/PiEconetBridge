@@ -2922,6 +2922,9 @@ uint8_t fsop_is_enabled(struct __fs_station *s)
 {
 	uint8_t	ret;
 
+	if (!s)
+		return 0;
+
 	pthread_mutex_lock(&(s->fs_mutex));
 	ret = s->enabled;
 	pthread_mutex_unlock(&(s->fs_mutex));
@@ -4795,7 +4798,7 @@ int8_t fsop_run (struct __fs_station *s)
 
 	/* Test to see if server already enabled */
 
-	fs_debug_full (0, 1, s, 0, 0, "Attempting to enable server");
+	fs_debug_full (0, 2, s, 0, 0, "Attempting to enable server");
 
 	pthread_mutex_lock (&(s->fs_mutex));
 
@@ -4821,7 +4824,7 @@ int8_t fsop_run (struct __fs_station *s)
 
 	/* Create the thread & detach */
 
-	err = pthread_create(&(s->fs_thread), NULL, fsop_thread, (void *) s);
+	err = pthread_create(&(s->fs_device->local.fs.fs_thread), NULL, fsop_thread, (void *) s);
 
 	if (err)
 	{
@@ -4829,9 +4832,9 @@ int8_t fsop_run (struct __fs_station *s)
 		return 0;
 	}
 
-	pthread_detach(s->fs_thread);
+	pthread_detach(s->fs_device->local.fs.fs_thread);
 
-	fs_debug_full (0, 1, s, 0, 0, "Server enabled");
+	fs_debug_full (0, 2, s, 0, 0, "Server enabled");
 
 	return 1;
 }
@@ -4891,13 +4894,18 @@ void *fsop_thread(void *p)
 
 		if (!s->enabled)
 		{
+			uint8_t	net, stn;
+
+			net = s->net;
+			stn = s->stn;
+
 			fs_debug_full (0, 1, s, 0, 0, "             Shutting down on request");
 			
 			fsop_shutdown(s);
 
 			s->fs_device->local.fs.server = NULL;
 
-			fs_debug (0, 1, "             Shut down completed");
+			fs_debug (0, 1, "     %3d.%3d Shut down completed", net, stn);
 
 			// pthread_mutex_unlock(&(s->fs_mutex));
 

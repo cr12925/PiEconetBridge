@@ -140,21 +140,30 @@ FSOP(13)
 
 			case 5: // Set file date
 				{
-					// There should be, in *(data+6, 7) a two byte date.
-					// We'll implement this later
-					// No - Linux has no means of changing the creation date - we might need to look at putting this in xattrs / dotfiles!
+					fsop_set_create_time (p.unixpath, *(f->data+6), *(f->data+7), 0, 0, 0); // Sets to midnight since no time given
 				}
 				break;
 			case 0x40: // MDFS set update, create date & time
 				{
-					// TODO: Implement this.
-					// Nothing for now
-				}
+					fsop_set_create_time (p.unixpath, *(f->data+11), *(f->data+12), *(f->data+13), *(f->data+14), *(f->data+15));
 
-			// No default needed - we caught it above
+					/* 
+					 * TODO
+					 *
+					 * Find a way to write the modification time explicitly.
+					 *
+					 */
+
+
+				}
+			default:
+				{
+					fsop_error(f, 0xFF, "Bad ARG");
+					return;
+				}
 		}
 
-		fs_debug_full (0, 2, f->server, f->net, f->stn, "Set Object Info %s relative to %s, command %d, writing to path %s, owner %04X, perm %02X, load %08X, exec %08X, homeof %04X", path, relative_to == a->root ? "Root" : relative_to == a->lib ? "Library" : "Current", command, p.unixpath, attr.owner, attr.perm, attr.load, attr.exec, attr.homeof);
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "Set Object Info %s relative to %s, command %d, writing to path %s, owner %04X, perm %02X, load %08X, exec %08X, homeof %04X", path, f->active->fhandles[relative_to].acornfullpath, command, p.unixpath, attr.owner, attr.perm, attr.load, attr.exec, attr.homeof);
 
 		fsop_write_xattr(p.unixpath, attr.owner, attr.perm, attr.load, attr.exec, attr.homeof, f);
 

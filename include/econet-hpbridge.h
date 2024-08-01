@@ -140,6 +140,7 @@ struct __eb_printer { // Struct used to hold printer definitions on local emulat
 struct __eb_fileserver { // Struct used to hold data defining a locally emulated fileserver
 	char 		*rootpath; // Full pathname to directory holding password file & directories for emulated disks
 	struct __fs_station	*server; // Pointer to __fs_station struct created on initialization - NULL if not initialized
+	pthread_t	fs_thread; // FS thread - attempt to stop core dumps when thread exits
 	pthread_mutex_t	statsmutex; // Lock on the stats values - they are written to and read by different threads
 	uint64_t	b_in, b_out; // Traffic stats
 };

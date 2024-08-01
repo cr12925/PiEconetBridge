@@ -788,6 +788,9 @@ extern void fsop_write_readable_config(struct __fs_station *);
 extern void fs_store_tail_path(char *, char *);
 extern void fsop_read_xattr(unsigned char *, struct objattr *, struct fsop_data *);
 extern void fsop_write_xattr(unsigned char *, uint16_t, uint16_t, uint32_t, uint32_t, uint16_t, struct fsop_data *);
+extern void fsop_get_create_time(unsigned char *, uint8_t *, uint8_t *, uint8_t *, uint8_t *, uint8_t *);
+extern void fsop_set_create_time(unsigned char *, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
+extern void fsop_set_create_time_now(unsigned char *);
 
 /* Some date functions from fs.c */
 uint8_t fs_year_from_two_bytes(uint8_t, uint8_t);

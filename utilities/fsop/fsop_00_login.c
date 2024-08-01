@@ -111,7 +111,7 @@ uint8_t fsop_openmap_dir(struct fsop_data *f, unsigned char *input_path, struct 
 	strcpy(a->fhandles[*handle].acornfullpath, p.acornfullpath);
 	fs_store_tail_path(a->fhandles[*handle].acorntailpath, p.acornfullpath);
 
-	fs_debug_full (0, 1, f->server, f->net, f->stn, "Map dir successful - handle %02X for user %04X, full path %s, tail path %s", *handle, f->userid, a->fhandles[*handle].acornfullpath, a->fhandles[*handle].acorntailpath);
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "Map dir successful - handle %02X for user %04X, full path %s, tail path %s", *handle, f->userid, a->fhandles[*handle].acornfullpath, a->fhandles[*handle].acorntailpath);
 
 	return FSOP_MOVE_DISC_SUCCESS;
 }
@@ -297,7 +297,7 @@ uint8_t fsop_move_disc (struct fsop_data *f, uint8_t index)
 
 	a->current_disc = d->index;
 
-	fs_debug_full (0, 1, f->server, f->net, f->stn, "Select disc - Handles allocated for URD for userid %d - URD (%02X), CWD (%02X), LIB (%02X)", f->userid, a->root, a->current, a->lib);
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "Select disc - Handles allocated for URD for userid %d - URD (%02X), CWD (%02X), LIB (%02X)", f->userid, a->root, a->current, a->lib);
 
 	return FSOP_MOVE_DISC_SUCCESS;
 
@@ -352,8 +352,6 @@ FSOP_00(LOGIN)
 	pthread_mutex_unlock(&(f->server->fs_mpeek_mutex));
 
 	mtype = stnpeek->mtype; /* If we got no reply, it'll be 0x0000 */
-
-	fs_debug_full (0, 1, f->server, f->net, f->stn, "Maching type %s running %02X.%02X", fsop_machine_type_str(mtype >> 16), (mtype & 0xFF), (mtype & 0xFF00) >> 8);
 
 	FS_LIST_SPLICEFREE(f->server->peeks, stnpeek, "FS", "Freeing machinepeek probe structure");
 
@@ -481,7 +479,6 @@ FSOP_00(LOGIN)
 			)
 			{
 				a->manyhandles = 1;
-				fs_debug_full(0, 1, f->server, a->net, a->stn, "32 Handle mode enabled");
 			}
 
 			a->chunk_size = 0x400;
@@ -551,12 +548,9 @@ FSOP_00(LOGIN)
 			// Notify bridge if we have a Bridge priv user
 
 			if (a->user->priv2 & FS_PRIV2_BRIDGE) // Bridge priv user
-			{
 				eb_fast_priv_notify(a->server->fs_device, f->net, f->stn, 1);
-				fs_debug_full (0, 1, a->server, f->net, f->stn, "User %s has bridge privileges", username);
-			}
 
-			fs_debug_full (0, 1, a->server, f->net, f->stn, "Login as %s, id %04X, disc %d, URD %s, CWD %s, LIB %s, priv 0x%02x", username, a->userid, a->current_disc, a->root_dir, a->current_dir, a->lib_dir, a->user->priv);
+			fs_debug_full (0, 1, a->server, f->net, f->stn, "Login as %s, id %04X, disc %d, URD %s, CWD %s, LIB %s, priv 0x%02x%s from %s running %02X.%02X with %d handles", username, a->userid, a->current_disc, a->root_dir, a->current_dir, a->lib_dir, a->user->priv, (a->user->priv2 & FS_PRIV2_BRIDGE) ? " (with bridge privileges)" : "", fsop_machine_type_str(mtype >> 16), (mtype & 0xFF), (mtype & 0xFF00) >> 8, (a->manyhandles) ? 32 : 8);
 
 			// Tell the station
 
@@ -589,10 +583,15 @@ FSOP_00(SDISC)
 	a = f->active;
 	
 	if (num == 0) /* *SDISC without a parameter */
+	{
 		disc_no = f->server->users[f->userid].home_disc;
+		fs_debug_full (0, 1, f->server, f->net, f->stn, "SDISC");
+	}
 	else
 	{
 		fsop_00_oscli_extract(f->data, p, 0, disc, 16, param_start);
+
+		fs_debug_full (0, 1, f->server, f->net, f->stn, "SDISC %s", disc);
 	
 		disc_no = 0;
 	
@@ -633,7 +632,7 @@ FSOP_00(SDISC)
 		return;
 	}
 
-	err = fsop_move_disc (f, f->active->current_disc);
+	err = fsop_move_disc (f, disc_no);
 
 	if (err != FSOP_MOVE_DISC_SUCCESS)
 	{
@@ -666,6 +665,8 @@ FSOP_00(SDISC)
 		FS_LIST_SPLICEFREE(f->server->actives, f->active, "FS", "Freeing active struct when cannot mount disc");
 		return;
 	}
+
+	f->active->current_disc = disc_no;
 
 	if (f->server->users[f->userid].priv2 & FS_PRIV2_CHROOT) // Fudge the root directory information so that $ maps to URD
 	{
