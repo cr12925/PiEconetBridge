@@ -58,11 +58,7 @@ void	fsop_00_dirlib_internal(struct fsop_data *f, uint8_t *user_handle, unsigned
 	else
 	{
 		
-		/* Close old handle */
-
-		fs_debug_full (0, 2, f->server, f->net, f->stn, "Closing old %s handle %d", is_dir ? "CWD" : "LIB", *user_handle);
-
-		fsop_deallocate_user_dir_channel(f->active, *user_handle);
+		/* Handle close was here until 20240801 */
 
 		/* Open the new dir */
 
@@ -78,6 +74,12 @@ void	fsop_00_dirlib_internal(struct fsop_data *f, uint8_t *user_handle, unsigned
 			char		new_dir[256];
 			char		tail[ECONET_MAX_PATH_LENGTH];
 			FS_REPLY_DATA(0x80);
+
+			/* Close old handle */
+
+			fs_debug_full (0, 2, f->server, f->net, f->stn, "Closing old %s handle %d", is_dir ? "CWD" : "LIB", *user_handle);
+
+			fsop_deallocate_user_dir_channel(f->active, *user_handle);
 
 			strncpy(new_dir, (const char *) p.acornfullpath, 255);
 
@@ -102,6 +104,7 @@ void	fsop_00_dirlib_internal(struct fsop_data *f, uint8_t *user_handle, unsigned
 				strncpy((char *) f->active->current_dir, (const char *) new_dir, 255);
 				strcpy(f->active->current_dir_tail, tail);
 				f->active->current_disc = p.disc;
+				f->active->current = handle;
 				reply.p.data[0] = 0x07; /* CWD change */
 				reply.p.data[2] = FS_MULHANDLE(f->active,handle);
 			}
@@ -110,6 +113,7 @@ void	fsop_00_dirlib_internal(struct fsop_data *f, uint8_t *user_handle, unsigned
 
 				strncpy((char *) f->active->lib_dir, (const char *) new_dir, 255);
 				strcpy(f->active->lib_dir_tail, tail);
+				f->active->lib = handle;
 				reply.p.data[0] = 0x09; /* LIB change */
 				reply.p.data[2] = FS_MULHANDLE(f->active,handle);
 			}
@@ -132,9 +136,11 @@ FSOP_00(DIR)
 	else
 		FSOP_EXTRACT(f,0,dirname,255);
 
-	fsop_00_dirlib_internal(f, &(f->active->current), dirname, 1);
+	//fsop_00_dirlib_internal(f, &(f->active->current), dirname, 1);
+	fsop_00_dirlib_internal(f, &(f->cwd), dirname, 1);
 
-	fs_debug_full (0, 1, f->server, f->net, f->stn, "DIR %s (handle &%02X)", dirname, f->active->current);
+	//fs_debug_full (0, 1, f->server, f->net, f->stn, "DIR %s (handle &%02X)", dirname, f->active->current);
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "DIR %s (handle &%02X)", dirname, f->cwd);
 
 }
 
@@ -147,9 +153,11 @@ FSOP_00(LIB)
 	else
 		FSOP_EXTRACT(f,0,dirname,255);
 
-	fsop_00_dirlib_internal(f, &(f->active->lib), dirname, 0);
+	//fsop_00_dirlib_internal(f, &(f->active->lib), dirname, 0);
+	fsop_00_dirlib_internal(f, &(f->lib), dirname, 0);
 
-	fs_debug_full (0, 1, f->server, f->net, f->stn, "LIB %s (handle &%02X)", dirname, f->active->lib);
+	//fs_debug_full (0, 1, f->server, f->net, f->stn, "LIB %s (handle &%02X)", dirname, f->active->lib);
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "LIB %s (handle &%02X)", dirname, f->lib);
 
 }
 

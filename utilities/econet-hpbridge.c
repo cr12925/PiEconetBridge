@@ -1802,7 +1802,7 @@ static void * eb_bridge_update_watcher (void *device)
 				if (me->type == EB_DEF_WIRE)
 					eb_debug (0, 2, "BRIDGE", "Wire     %3d     Send bridge update #%d %s", me->net, tx_count + 1, debug_string);
 				else
-					eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Send bridge update #%d to Trunk to %s%s", me->trunk.local_port, tx_count + 1, me->trunk.hostname, debug_string);
+					eb_debug (0, 2, "BRIDGE", "Trunk    %7d Send bridge update #%d to Trunk to %s%s", me->trunk.local_port, tx_count + 1, me->trunk.hostname, debug_string);
 			}
 
 			if (tx_count < qty) sleep(1);
@@ -1864,7 +1864,7 @@ static void * eb_bridge_reset_watcher (void *device)
 		if (!sender_net) // No bridge sender net available!
 		{
 			/* Go around again */
-			eb_debug (0,2, "BRIDGE", "%-8s   %5d   Unable to find sender net. Not sending bridge reset.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.local_port);
+			eb_debug (0,2, "BRIDGE", "%-8s   %7d Unable to find sender net. Not sending bridge reset.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.local_port);
 			continue;
 		}
 
@@ -1903,7 +1903,7 @@ static void * eb_bridge_reset_watcher (void *device)
 				if (me->type == EB_DEF_WIRE)
 					eb_debug (0, 2, "BRIDGE", "Wire     %3d     Send bridge RESET #%d", me->net, tx_count + 1);
 				else
-					eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Send bridge RESET #%d to Trunk on %s", me->trunk.local_port, tx_count + 1, me->trunk.hostname);
+					eb_debug (0, 2, "BRIDGE", "Trunk    %7d Send bridge RESET #%d to Trunk on %s", me->trunk.local_port, tx_count + 1, me->trunk.hostname);
 			}
 
 			if (tx_count < qty) sleep(1);
@@ -1959,10 +1959,10 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 	
 	if (trigger && trigger->all_nets_pooled && !EB_CONFIG_POOL_RESET_FWD)
 	{
-		eb_debug (0, 2, "BRIDGE", "%-8s %-7d Bridge %s not forwarded (all nets pooled)", eb_type_str(trigger->type), (trigger->type == EB_DEF_TRUNK ? trigger->trunk.local_port : trigger->net), (ctrl == BRIDGE_RESET) ? "reset" : "update");
+		eb_debug (0, 2, "BRIDGE", "%-8s %7d Bridge %s not forwarded (all nets pooled)", eb_type_str(trigger->type), (trigger->type == EB_DEF_TRUNK ? trigger->trunk.local_port : trigger->net), (ctrl == BRIDGE_RESET) ? "reset" : "update");
 		if (ctrl == BRIDGE_RESET)
 		{
-			eb_debug (0, 2, "BRIDGE", "%-8s %-7d Triggering bridge updates", eb_type_str(trigger->type), (trigger->type == EB_DEF_TRUNK ? trigger->trunk.local_port : trigger->net));
+			eb_debug (0, 2, "BRIDGE", "%-8s %7d Triggering bridge updates", eb_type_str(trigger->type), (trigger->type == EB_DEF_TRUNK ? trigger->trunk.local_port : trigger->net));
 			pthread_cond_signal(&(trigger->bridge_update_cond));
 		}
 		return;
@@ -2599,7 +2599,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 							(netlist_changed ? "" : " (Not forwarded - net list unchanged)"));
 				else
 				{
-					eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Received bridge %s from %s:%d with %s%s%s", source->trunk.local_port, (p->p.ctrl == BRIDGE_RESET ? "reset" : "update"), source->trunk.hostname ? source->trunk.hostname : "(Not connected)", source->trunk.hostname ? source->trunk.remote_port : 0, (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string,
+					eb_debug (0, 2, "BRIDGE", "Trunk    %7d Received bridge %s from %s:%d with %s%s%s", source->trunk.local_port, (p->p.ctrl == BRIDGE_RESET ? "reset" : "update"), source->trunk.hostname ? source->trunk.hostname : "(Not connected)", source->trunk.hostname ? source->trunk.remote_port : 0, (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string,
 							(netlist_changed ? "" : " (Not forwarded - net list unchanged)"));
 				}
 			}
@@ -3923,7 +3923,7 @@ static void * eb_trunk_keepalive (void * device)
 
 	d = device;
 
-	eb_debug (0, 2, "DESPATCH", "%-8s         Thread started (tid %d) - Trunk keepalive for local port %d", eb_type_str(d->type), syscall(SYS_gettid), d->trunk.local_port);
+	eb_debug (0, 2, "DESPATCH", "%-8s %7d Trunk keepalive thread started (tid %d)", eb_type_str(d->type), d->trunk.local_port, syscall(SYS_gettid));
 
 	last_reset = 0; // To make sure we do a *first* reset...
 
@@ -3954,7 +3954,7 @@ static void * eb_trunk_keepalive (void * device)
 		pthread_cond_signal(&(d->qwake));
 
 
-		if (!EB_CONFIG_NOKEEPALIVEDEBUG) eb_debug (0, 3, "BRIDGE", "%-8s         Trunk keepalive sent on local port %d", eb_type_str(d->type), d->trunk.local_port);
+		if (!EB_CONFIG_NOKEEPALIVEDEBUG) eb_debug (0, 3, "BRIDGE", "%-8s %7d Trunk keepalive sent", eb_type_str(d->type), d->trunk.local_port);
 
 		// Check last_rx to see if dead
 
@@ -3977,7 +3977,7 @@ static void * eb_trunk_keepalive (void * device)
 			{
 				pthread_mutex_lock (&(d->qmutex_in));
 
-				if (!EB_CONFIG_NOKEEPALIVEDEBUG) eb_debug (0, 3, "DESPATCH", "%-8s         Trunk local port %d dead - clearing dynamic host data", eb_type_str(d->type), d->trunk.local_port);
+				if (!EB_CONFIG_NOKEEPALIVEDEBUG) eb_debug (0, 3, "DESPATCH", "%-8s %7d Trunk dead - clearing dynamic host data", eb_type_str(d->type), d->trunk.local_port);
 
 				if (d->trunk.remote_host && d->trunk.remote_host->ai_addr) eb_free(__FILE__, __LINE__, "TRUNK", "Freeing trunk.remote_host.ai_addr structure", d->trunk.remote_host->ai_addr);
 				if (d->trunk.remote_host) eb_free(__FILE__, __LINE__, "TRUNK", "Freeing trunk.remote_host structure", d->trunk.remote_host);
@@ -3993,7 +3993,7 @@ static void * eb_trunk_keepalive (void * device)
 
 			if (last_rx > last_reset)
 			{
-				if (!EB_CONFIG_NOKEEPALIVEDEBUG) eb_debug (0, 2, "DESPATCH", "%-8s         Trunk local port %d dead - sending bridge reset", eb_type_str(d->type), d->trunk.local_port);
+				if (!EB_CONFIG_NOKEEPALIVEDEBUG) eb_debug (0, 2, "DESPATCH", "%-8s %7d Trunk dead - sending bridge reset", eb_type_str(d->type), d->trunk.local_port);
 				eb_bridge_reset(NULL);
 				last_reset = time(NULL);
 			}
@@ -4898,21 +4898,19 @@ static void * eb_device_aun_sender (void *device)
 
 	eb_thread_ready();
 
-	/* GOT HERE */
+	sprintf (devstring, "%-8s ", eb_type_str(d->type));
+
 	if (d->type == EB_DEF_WIRE || d->type == EB_DEF_TRUNK || d->type == EB_DEF_POOL)
 	{
-		sprintf(devstring, "%-8s %3d    ", eb_type_str(d->type), d->type != EB_DEF_TRUNK ? d->net : d->trunk.local_port);
 		if (d->type == EB_DEF_TRUNK)
-			eb_debug (0, 2, "AUNSEND", "%-8s %5d   AUN Sender thread starting", eb_type_str(d->type), d->trunk.local_port);
+			sprintf (devstring, "%-8s %7d", eb_type_str(d->type), d->trunk.local_port);
 		else
-			eb_debug (0, 2, "AUNSEND", "%16s AUN Sender thread starting", devstring);
+			sprintf (devstring, "%-8s %3d    ", eb_type_str(d->type), d->net);
 	}
 	else
-	{
 		sprintf(devstring, "%-8s %3d.%3d", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE) ? d->pipe.stn : d->local.stn);
-		eb_debug (0, 2, "AUNSEND", "%16s AUN Sender thread starting", devstring);
-	}
-		
+
+	eb_debug (0, 2, "AUNSEND", "%-16s AUN Sender thread starting", devstring);
 
 	pthread_mutex_lock (&d->aun_out_mutex);
 
@@ -5187,7 +5185,7 @@ static void * eb_device_despatcher (void * device)
 	else if (d->type != EB_DEF_TRUNK)
 		eb_debug (0, 2, "DESPATCH", "%-8s %3d     Thread started (tid %d)", eb_type_str(d->type), d->net, syscall(SYS_gettid));
 	else
-		eb_debug (0, 2, "DESPATCH", "%-8s         Thread started for trunk on port %d to %s:%d (tid %d)", eb_type_str(d->type), d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Unregistered dynamic host)", d->trunk.hostname ? d->trunk.remote_port : 0, syscall(SYS_gettid));
+		eb_debug (0, 2, "DESPATCH", "%-8s %7d Thread started for trunk to %s:%d (tid %d)", eb_type_str(d->type), d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Unregistered dynamic host)", d->trunk.hostname ? d->trunk.remote_port : 0, syscall(SYS_gettid));
 
 	d->last_rx = 0; // Reset timeout
 
@@ -5260,7 +5258,7 @@ static void * eb_device_despatcher (void * device)
 
 			sprintf (hardwareclass, "%1d", (kernvers & 0xff));
 
-			eb_debug (0, 1, "DESPATCH", "%-8s %3d     Pi hardware is %s class; bridge hardware is version %d", "", d->net, hardwareclass, (kernvers & 0xff00) >> 8);
+			eb_debug (0, 1, "DESPATCH", "%-8s %3d     Pi hardware is %s class; bridge hardware is version %d", eb_type_str(d->type), d->net, hardwareclass, (kernvers & 0xff00) >> 8);
 					
 			if (pthread_create(&d->bridge_update_thread, NULL, eb_bridge_update_watcher, d))
 				eb_debug (1, 0, "DESPATCH", "%-8s %3d     Cannot start bridge updater on this device.", "Wire", d->net);
@@ -5425,7 +5423,7 @@ static void * eb_device_despatcher (void * device)
 			{
 	
 				if (!(d->trunk.hostname))
-					eb_debug (1, 0, "DESPATCH", "%-8s         Unable to open trunk listener socket for local port %d - Static remote host but no hostname defined!", "Trunk", d->trunk.local_port);
+					eb_debug (1, 0, "DESPATCH", "%-8s %7d Unable to open trunk listener socket - Static remote host but no hostname defined!", "Trunk", d->trunk.local_port);
 
 				snprintf(portname, 6, "%d", d->trunk.remote_port);
 
@@ -5439,7 +5437,7 @@ static void * eb_device_despatcher (void * device)
 				if ((s = getaddrinfo(d->trunk.hostname, portname, &hints, &(d->trunk.remote_host))) != 0)
 				{
 					// 20240607 eb_debug (1, 0, "DESPATCH", "%-8s         Unable to resolve hostname %s: %s", "", d->trunk.hostname, gai_strerror(s));
-					eb_debug (0, 1, "DESPATCH", "%-8s         Unable to resolve hostname %s: %s - leaving inactive", "", d->trunk.hostname, gai_strerror(s));
+					eb_debug (0, 1, "DESPATCH", "TRUNK    %7d Unable to resolve hostname %s: %s - leaving inactive", d->trunk.local_port, d->trunk.hostname, gai_strerror(s));
 					d->trunk.remote_host = NULL; // Flag inactive
 				}
 
@@ -5452,7 +5450,7 @@ static void * eb_device_despatcher (void * device)
 			d->trunk.socket = socket(AF_INET, SOCK_DGRAM, 0);
 
 			if (d->trunk.socket == -1)
-				eb_debug (1, 0, "DESPATCH", "%-8s         Unable to open trunk listener socket for local port %d to %s:%d", "Trunk", d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0);
+				eb_debug (1, 0, "DESPATCH", "%-8s %7d Unable to open trunk listener socket to %s:%d", "Trunk", d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0);
 
 
 			service.sin_family = AF_INET;
@@ -5460,32 +5458,32 @@ static void * eb_device_despatcher (void * device)
 			service.sin_port = htons(d->trunk.local_port);
 
 			if (bind(d->trunk.socket, (struct sockaddr *) &service, sizeof(service)) != 0)
-				eb_debug (1, 0, "DESPATCH", "%-8s         Unable to bind trunk listener socket for local port %d to %s:%d (%s)", "Trunk", d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0, strerror(errno));
+				eb_debug (1, 0, "DESPATCH", "%-8s %7d Unable to bind trunk listener socket to %s:%d (%s)", "Trunk", d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0, strerror(errno));
 
 			// Set up keepalive thread
 
 			if ((err = pthread_create(&(d->trunk.keepalive_thread), NULL, eb_trunk_keepalive, d)))
-				eb_debug (1, 0, "DESPATCH", "%-8s         Unable to create trunk keepalive thread", "Trunk");
+				eb_debug (1, 0, "DESPATCH", "%-8s %7d Unable to create trunk keepalive thread", "Trunk", d->trunk.local_port);
 			else
 			{
-				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk keepalive thread started", "Trunk");
+				eb_debug (0, 2, "DESPATCH", "%-8s %7d Trunk keepalive thread started", "Trunk", d->trunk.local_port);
 				pthread_detach (d->trunk.keepalive_thread);
 				eb_thread_started(); // Is this neeed? We aren't counting the keepalive thread...
 			}
 			
 			if (!(d->trunk.is_dynamic))
-				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk initialized (%s) between port %d and %s:%d with key %s", "Trunk", (d->trunk.remote_host ? "active" : "inactive until DNS resolves"), d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0, d->trunk.sharedkey);
+				eb_debug (0, 2, "DESPATCH", "%-8s %7d Trunk initialized (%s) to %s:%d with key %s", "Trunk", d->trunk.local_port, (d->trunk.remote_host ? "active" : "inactive until DNS resolves"), d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0, d->trunk.sharedkey);
 			else
-				eb_debug (0, 2, "DESPATCH", "%-8s         Trunk initialized between port %d and dynamic remote host with key %s", "Trunk", d->trunk.local_port, d->trunk.sharedkey);
+				eb_debug (0, 2, "DESPATCH", "%-8s %7d Trunk initialized to dynamic remote host with key %s", "Trunk", d->trunk.local_port, d->trunk.sharedkey);
 	
 			if (pthread_create(&d->bridge_update_thread, NULL, eb_bridge_update_watcher, d))
-				eb_debug (1, 0, "DESPATCH", "%-8s %5d   Cannot start bridge updater on this device.", "Trunk", d->trunk.remote_port);
+				eb_debug (1, 0, "DESPATCH", "%-8s %7d Cannot start bridge updater on this device.", "Trunk", d->trunk.local_port);
 		
 			if (pthread_create(&d->bridge_update_thread2, NULL, eb_bridge_update_watcher, d))
-				eb_debug (1, 0, "DESPATCH", "%-8s %5d   Cannot start second bridge updater on this device.", "Trunk", d->trunk.remote_port);
+				eb_debug (1, 0, "DESPATCH", "%-8s %7d Cannot start second bridge updater on this device.", "Trunk", d->trunk.local_port);
 		
 			if (pthread_create(&d->bridge_reset_thread, NULL, eb_bridge_reset_watcher, d))
-				eb_debug (1, 0, "DESPATCH", "%-8s %5d   Cannot start bridge reset thread on this device.", "Trunk", d->trunk.remote_port);
+				eb_debug (1, 0, "DESPATCH", "%-8s %5d   Cannot start bridge reset thread on this device.", "Trunk", d->trunk.local_port);
 		
 			// Added 20240607
 			
@@ -5551,7 +5549,7 @@ static void * eb_device_despatcher (void * device)
 		if (d->type == EB_DEF_WIRE || d->type == EB_DEF_POOL)
 			sprintf(devstring, "%-8s %3d   ", eb_type_str(d->type), d->net);
 		if (d->type == EB_DEF_TRUNK)
-			sprintf(devstring, "%-8s %5d", eb_type_str(d->type), d->trunk.local_port);
+			sprintf(devstring, "%-8s %7d", eb_type_str(d->type), d->trunk.local_port);
 		else
 			sprintf(devstring, "%-8s %3d.%3d", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE) ? d->pipe.stn : d->local.stn);
 
@@ -5711,16 +5709,16 @@ static void * eb_device_despatcher (void * device)
 					length = recvfrom (l_socket, &(d->trunk.cipherpacket), TRUNK_CIPHER_TOTAL, 0, (struct sockaddr *) &src_addr, &addr_len);
 
 					if (was_dead)
-						eb_debug (0, 2, "DESPATCH", "%-8s %5d   Packet received for trunk which was dead - last_rx = %d, now = %d, diff = %d (> %d)", eb_type_str(d->type), d->trunk.local_port, last_rx, now, dead_diff, EB_CONFIG_TRUNK_DEAD_INTERVAL);
+						eb_debug (0, 2, "DESPATCH", "%-8s %7d Packet received for trunk which was dead - last_rx = %d, now = %d, diff = %d (> %d)", eb_type_str(d->type), d->trunk.local_port, last_rx, now, dead_diff, EB_CONFIG_TRUNK_DEAD_INTERVAL);
 
 					if (d->trunk.sharedkey && (length < (TRUNK_CIPHER_DATA + AES_BLOCK_SIZE)) )
 						eb_debug (0, 2, "DESPATCH", "%-8s %3d     Encrypted runt packet received - discarded", eb_type_str(d->type), d->net);
 					else if (d->trunk.sharedkey) // Encrypted trunk
 					{
 						if (!(d->trunk.ctx_dec = EVP_CIPHER_CTX_new()))
-							eb_debug (1, 0, "DESPATCH", "%-8s         Unable to set up decryption control for local port %d", "Trunk", d->trunk.local_port);
+							eb_debug (1, 0, "DESPATCH", "%-8s %7d Unable to set up decryption control", "Trunk", d->trunk.local_port);
 
-						eb_debug (0, 4, "DESPATCH", "%-8s %5d   Encrypted trunk packet received - type %d, IV bytes %02x %02x %02x ...", eb_type_str(d->type), d->trunk.local_port, d->trunk.cipherpacket[TRUNK_CIPHER_ALG], d->trunk.cipherpacket[TRUNK_CIPHER_IV], d->trunk.cipherpacket[TRUNK_CIPHER_IV+1], d->trunk.cipherpacket[TRUNK_CIPHER_IV+2]);
+						eb_debug (0, 4, "DESPATCH", "%-8s %7d Encrypted trunk packet received - type %d, IV bytes %02x %02x %02x ...", eb_type_str(d->type), d->trunk.local_port, d->trunk.cipherpacket[TRUNK_CIPHER_ALG], d->trunk.cipherpacket[TRUNK_CIPHER_IV], d->trunk.cipherpacket[TRUNK_CIPHER_IV+1], d->trunk.cipherpacket[TRUNK_CIPHER_IV+2]);
 
 						switch (d->trunk.cipherpacket[TRUNK_CIPHER_ALG])
 						{
@@ -5728,7 +5726,7 @@ static void * eb_device_despatcher (void * device)
 								EVP_DecryptInit_ex(d->trunk.ctx_dec, EVP_aes_256_cbc(), NULL, d->trunk.sharedkey, &(d->trunk.cipherpacket[TRUNK_CIPHER_IV]));
 								break;
 							default:
-								eb_debug (0, 2, "DESPATCH", "%-8s %5d   Encryption type %02x in encrypted unknown - discarded", eb_type_str(d->type), d->trunk.local_port, d->trunk.cipherpacket[TRUNK_CIPHER_ALG]);
+								eb_debug (0, 2, "DESPATCH", "%-8s %7d Encryption type %02x in encrypted unknown - discarded", eb_type_str(d->type), d->trunk.local_port, d->trunk.cipherpacket[TRUNK_CIPHER_ALG]);
 								break;
 						}
 
@@ -5737,7 +5735,7 @@ static void * eb_device_despatcher (void * device)
 
 							int	tmp_len;
 
-							eb_debug (0, 4, "DESPATCH", "%-8s %5d   Encryption type in encrypted is valid - %02x; encrypted data length %04x", eb_type_str(d->type), d->trunk.local_port, d->trunk.cipherpacket[TRUNK_CIPHER_ALG], (length - TRUNK_CIPHER_DATA));
+							eb_debug (0, 4, "DESPATCH", "%-8s %7d Encryption type in encrypted is valid - %02x; encrypted data length %04x", eb_type_str(d->type), d->trunk.local_port, d->trunk.cipherpacket[TRUNK_CIPHER_ALG], (length - TRUNK_CIPHER_DATA));
 
 							if ((!EVP_DecryptUpdate(d->trunk.ctx_dec, temp_packet, &(d->trunk.encrypted_length), (unsigned char *) &(d->trunk.cipherpacket[TRUNK_CIPHER_DATA]), length - TRUNK_CIPHER_DATA)))
 								eb_debug (0, 2, "DESPATCH", "%-8s %3d     DecryptUpdate of trunk packet failed", eb_type_str(d->type), d->net);
@@ -5746,13 +5744,13 @@ static void * eb_device_despatcher (void * device)
 
 								d->trunk.encrypted_length += tmp_len;
 
-								eb_debug (0, 4, "DESPATCH", "%-8s %5d   Trunk packet length %04x", eb_type_str(d->type), d->trunk.local_port, d->trunk.encrypted_length);
+								eb_debug (0, 4, "DESPATCH", "%-8s %7d Trunk packet length %04x", eb_type_str(d->type), d->trunk.local_port, d->trunk.encrypted_length);
 
 								datalength = (temp_packet[0] * 256) + temp_packet[1];
 
 								if (datalength >= 12) // Valid packet size received
 								{
-									eb_debug (0, 4, "DESPATCH", "%-8s %5d   Encrypted trunk packet validly received - specified length %04x, decrypted length %04x, marking receipt at %d seconds", eb_type_str(d->type), d->trunk.local_port, datalength, d->trunk.encrypted_length, time(NULL));
+									eb_debug (0, 4, "DESPATCH", "%-8s %7d Encrypted trunk packet validly received - specified length %04x, decrypted length %04x, marking receipt at %d seconds", eb_type_str(d->type), d->trunk.local_port, datalength, d->trunk.encrypted_length, time(NULL));
 									memcpy(&packet, &(temp_packet[2]), datalength); // data length always ignores the ECONET part of the data
 									length = datalength;
 									packetreceived = 1;
@@ -5787,7 +5785,7 @@ static void * eb_device_despatcher (void * device)
 													if (getnameinfo((struct sockaddr *) d->trunk.remote_host->ai_addr, sizeof (struct sockaddr_in), d->trunk.hostname, HOST_NAME_MAX, NULL, 0, 0) != 0) // = is success and we'll have the hostname in d->trunk.hostname; otherwise put numeric in there
 														strncpy (d->trunk.hostname, inet_ntoa(src_addr.sin_addr), 19);
 
-													eb_debug (0, 1, "DESPATCH", "%-8s %5d   Dynamic trunk endpoint found at host %s port %d (addr_len = %d, family = %d)", eb_type_str(d->type), d->trunk.local_port, d->trunk.hostname, ntohs(src_addr.sin_port), addr_len, src_addr.sin_family);
+													eb_debug (0, 1, "DESPATCH", "%-8s %7d Dynamic trunk endpoint found at host %s port %d (addr_len = %d, family = %d)", eb_type_str(d->type), d->trunk.local_port, d->trunk.hostname, ntohs(src_addr.sin_port), addr_len, src_addr.sin_family);
 
 													// Do a bridge reset
 
@@ -5796,10 +5794,10 @@ static void * eb_device_despatcher (void * device)
 												}
 											}
 											else
-												eb_debug (1, 1, "DESPATCH", "%-8s %3d     Dynamic trunk endpoint found for local port %d at host %s port %d, but failed to allocate memory for sockaddr_in structure!", eb_type_str(d->type), d->net, d->trunk.local_port, inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port));
+												eb_debug (1, 1, "DESPATCH", "%-8s %7d Dynamic trunk endpoint found at host %s port %d, but failed to allocate memory for sockaddr_in structure!", eb_type_str(d->type), d->trunk.local_port, inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port));
 										}
 										else if (!d->trunk.remote_host)
-											eb_debug (1, 1, "DESPATCH", "%-8s %3d     Dynamic trunk endpoint found for local port %d at host %s port %d, but failed to allocate memory for addrinfo structure!", eb_type_str(d->type), d->net, d->trunk.local_port, inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port));
+											eb_debug (1, 1, "DESPATCH", "%-8s %7d Dynamic trunk endpoint found at host %s port %d, but failed to allocate memory for addrinfo structure!", eb_type_str(d->type), d->trunk.local_port, inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port));
 									}
 
 									if (was_dead && d->all_nets_pooled) // It needs some updates, just in case it has restarted and we missed its reset
@@ -5818,10 +5816,10 @@ static void * eb_device_despatcher (void * device)
 									}
 								}
 								else
-									eb_debug (0, 2, "DESPATCH", "%-8s %5d   Decrypted trunk packet too small (data length = %04x) - discarded", eb_type_str(d->type), d->trunk.local_port, datalength);
+									eb_debug (0, 2, "DESPATCH", "%-8s %7d Decrypted trunk packet too small (data length = %04x) - discarded", eb_type_str(d->type), d->trunk.local_port, datalength);
 							}
 							else
-								eb_debug (0, 2, "DESPATCH", "%-8s %5d   DecryptFinal of trunk packet failed - decrypted length before call was %04x", eb_type_str(d->type), d->trunk.local_port, d->trunk.encrypted_length);
+								eb_debug (0, 2, "DESPATCH", "%-8s %7d DecryptFinal of trunk packet failed - decrypted length before call was %04x", eb_type_str(d->type), d->trunk.local_port, d->trunk.encrypted_length);
 						}
 
 						EVP_CIPHER_CTX_free(d->trunk.ctx_dec);
@@ -5829,7 +5827,7 @@ static void * eb_device_despatcher (void * device)
 					else // Plaintext trunk
 					{
 
-						eb_debug (0, 3, "DESPATCH", "%-8s %5d   Plaintext trunk packet received - specified length %04x, marking receipt at %d seconds", eb_type_str(d->type), d->trunk.local_port, length, time(NULL));
+						eb_debug (0, 3, "DESPATCH", "%-8s %7d Plaintext trunk packet received - specified length %04x, marking receipt at %d seconds", eb_type_str(d->type), d->trunk.local_port, length, time(NULL));
 						memcpy (&packet, &d->trunk.cipherpacket, length);
 
 						if (length >= 12)
@@ -6637,7 +6635,7 @@ static void * eb_device_despatcher (void * device)
 								d->trunk.remote_host = NULL;
 							else	
 							{
-								eb_debug (0, 1, "TRUNK", "%-8s %5d   Trunk endpoint address %s resolved. Trunk now active.", "Trunk", d->trunk.local_port, d->trunk.hostname);
+								eb_debug (0, 1, "TRUNK", "%-8s %7d Trunk endpoint address %s resolved. Trunk now active.", "Trunk", d->trunk.local_port, d->trunk.hostname);
 
 								// Trigger a reset
 								//
@@ -6670,7 +6668,7 @@ static void * eb_device_despatcher (void * device)
 								memcpy (&(temp_packet[2]), ap, p->length + 12);
 
 								if (!(d->trunk.ctx_enc = EVP_CIPHER_CTX_new()))
-									eb_debug (1, 0, "DESPATCH", "%-8s         Unable to set up encryption control for local port %d", "Trunk", d->trunk.local_port);
+									eb_debug (1, 0, "DESPATCH", "%-8s %7d Unable to set up encryption control", "Trunk", d->trunk.local_port);
 
 								EVP_EncryptInit_ex(d->trunk.ctx_enc, EVP_aes_256_cbc(), NULL, d->trunk.sharedkey, d->trunk.iv);
 
@@ -6705,7 +6703,7 @@ static void * eb_device_despatcher (void * device)
 						}
 
 						if (ap && !(d->trunk.remote_host))
-							eb_debug (0, 3, "DESPATCH", "Trunk            Packet transmission on trunk port %d failed - dynamic (or unresolved static) remote endpoint not established", d->trunk.local_port); 
+							eb_debug (0, 3, "DESPATCH", "Trunk    %7d Packet transmission failed - dynamic (or unresolved static) remote endpoint not established", d->trunk.local_port); 
 
 						remove = 1;
 					} break;
@@ -7452,7 +7450,7 @@ static void * eb_device_despatcher (void * device)
 							}
 
 						}
-						else if (p->p->p.port == 0xB0 && p->p->p.ctrl == 0x80 && p->p->p.aun_ttype == ECONET_AUN_DATA) // FindServer query
+						else if (p->p->p.port == 0xB0 && p->p->p.ctrl == 0x80 && (p->p->p.aun_ttype == ECONET_AUN_DATA || p->p->p.aun_ttype == ECONET_AUN_BCAST)) // FindServer query
 						{
 
 							char	findserver_type[9], server_type[9];

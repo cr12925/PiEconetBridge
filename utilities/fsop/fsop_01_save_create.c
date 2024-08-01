@@ -86,6 +86,7 @@ void fsop_save_internal(struct fsop_data *f, uint8_t is_32bit)
 
 					// Use interlock function here
 					internal_handle = fsop_open_interlock(f, p.unixpath, 3, &err, 0);
+					fsop_set_create_time_now(p.unixpath);
 
 					if (err == -3)
 						fsop_error(f, 0xC0, "Too many open files");

@@ -755,12 +755,20 @@ uint8_t fs_year_from_two_bytes(uint8_t day, uint8_t monthyear)
 
 uint8_t fs_month_from_two_bytes(uint8_t day, uint8_t monthyear)
 {
-	return (monthyear & 0x0f);
+	uint8_t	m;
+
+	m = monthyear & 0x0f;
+
+	return (m ? m : 1);
 }
 
 uint8_t fs_day_from_two_bytes(uint8_t day, uint8_t monthyear)
 {
-	return (day & 0x1f);
+	uint8_t d;
+
+	d = day & 0x1f;
+
+	return (d ? d : 1);
 }
 
 // Used with scandir
@@ -1376,6 +1384,54 @@ void fsop_read_xattr(unsigned char *path, struct objattr *r, struct fsop_data *f
 
 }
 
+void fsop_get_create_time (unsigned char *path, uint8_t *day, uint8_t *myear, uint8_t *hour, uint8_t *min, uint8_t *sec)
+{
+	unsigned char	tmp[11];
+
+	*day = *myear = *hour = *min = *sec = 0;
+
+	if (getxattr((const char *) path, "user.econet_birth", tmp, 10) >= 0)
+	{
+		unsigned char	day_s[3], myear_s[3], hour_s[3], min_s[3], sec_s[3];
+		memcpy(day_s, tmp, 2);
+		memcpy(myear_s, &(tmp[2]), 2);
+		memcpy(hour_s, &(tmp[4]), 2);
+		memcpy(min_s, &(tmp[6]), 2);
+		memcpy(sec_s, &(tmp[8]), 2);
+		day_s[2] = myear_s[2] = hour_s[2] = min_s[2] = sec_s[2] = 0;
+		*day = strtoul(day_s, 0, 16);
+		*myear = strtoul(myear_s, 0, 16);
+		*hour = strtoul(hour_s, 0, 10);
+		*min = strtoul(min_s, 0, 10);
+		*sec = strtoul(sec_s, 0, 10);
+	}
+}
+
+void fsop_set_create_time (unsigned char *path, uint8_t day, uint8_t myear, uint8_t hour, uint8_t min, uint8_t sec)
+{
+	unsigned char	tmp[11];
+
+	snprintf(tmp, 11, "%02X%02X%02d%02d%02d", day, myear, hour, min, sec);
+
+	setxattr((const char *) path, "user.econet_birth", (const void *) tmp, 10, 0);
+
+}
+
+void fsop_set_create_time_now (unsigned char *path)
+{
+
+	struct tm t; 
+	unsigned char day, monthyear;
+	time_t now;
+
+	now = time(NULL);
+	t = *localtime(&now);
+
+	fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &monthyear, &day);
+
+	fsop_set_create_time(path, day, monthyear, t.tm_hour, t.tm_min, t.tm_sec);
+}
+
 /*
  * Set xattr on a file/dir.
  *
@@ -1750,11 +1806,14 @@ int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, ch
 			p->sec = ct.tm_sec;
 	
 			// Create time - This is bogus. ctime is not create time.
+#if 0
 			localtime_r(&(statbuf.st_ctime), &ct);
 			fs_date_to_two_bytes(ct.tm_mday, ct.tm_mon+1, ct.tm_year, &(p->c_monthyear), &(p->c_day));
 			p->c_hour = ct.tm_hour;
 			p->c_min = ct.tm_min;
 			p->c_sec = ct.tm_sec;
+#endif
+			fsop_get_create_time(p->unixpath, &(p->c_day), &(p->c_monthyear), &(p->c_hour), &(p->c_min), &(p->c_sec));
 	
 			p->internal = statbuf.st_ino;
 			strncpy(p->ownername, f->server->users[p->owner].username, 10);
@@ -1910,13 +1969,15 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 			result->hour = t.tm_hour;
 			result->min = t.tm_min;
 			result->sec = t.tm_sec;
-	
+#if 0	
 			// Create time
 			localtime_r(&(s.st_ctime), &t);
 			fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->c_monthyear), &(result->c_day));
 			result->c_hour = t.tm_hour;
 			result->c_min = t.tm_min;
 			result->c_sec = t.tm_sec;
+#endif
+			fsop_get_create_time(result->unixpath, &(result->c_day), &(result->c_monthyear), &(result->c_hour), &(result->c_min), &(result->c_sec));
 			
 			return 1;
 
@@ -2303,12 +2364,15 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 		result->min = t.tm_min;
 		result->sec = t.tm_sec;
 
+#if 0
 		// Create time
 		localtime_r(&(s.st_ctime), &t);
 		fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->c_monthyear), &(result->c_day));
 		result->c_hour = t.tm_hour;
 		result->c_min = t.tm_min;
 		result->c_sec = t.tm_sec;
+#endif
+		fsop_get_create_time(result->unixpath, &(result->c_day), &(result->c_monthyear), &(result->c_hour), &(result->c_min), &(result->c_sec));
 		
 
 	}
@@ -2724,11 +2788,15 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 				result->sec = t.tm_sec;
 
 				// Create time
+#if 0
 				localtime_r(&(s.st_ctime), &t);
+
 				fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &(result->c_day), &(result->c_monthyear));
 				result->c_hour = t.tm_hour;
 				result->c_min = t.tm_min;
 				result->c_sec = t.tm_sec;
+#endif
+				fsop_get_create_time(result->unixpath, &(result->c_day), &(result->c_monthyear), &(result->c_hour), &(result->c_min), &(result->c_sec));
 
 				if (FS_ACTIVE_SYST(a))
 					result->my_perm = 0xff;

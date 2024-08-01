@@ -39,14 +39,16 @@ FSOP_00(MKLINK)
 
 	fs_debug (0, 1, "%12sfrom %3d.%3d LINK %s %s", "", f->net, f->stn, source, destination);
 
-	if (!fsop_normalize_path(f, source, f->active->current, &p_src) || (p_src.ftype == FS_FTYPE_NOTFOUND))
+	//if (!fsop_normalize_path(f, source, f->active->current, &p_src) || (p_src.ftype == FS_FTYPE_NOTFOUND))
+	if (!fsop_normalize_path(f, source, f->cwd, &p_src) || (p_src.ftype == FS_FTYPE_NOTFOUND))
 	{
 		fsop_error(f, 0xDC, "Not found");
 		fs_free_wildcard_list(&p_src);
 		return;
 	}
 
-	if (!fsop_normalize_path(f, destination, f->active->current, &p_dst) || (p_src.ftype == FS_FTYPE_NOTFOUND))
+	//if (!fsop_normalize_path(f, destination, f->active->current, &p_dst) || (p_src.ftype == FS_FTYPE_NOTFOUND))
+	if (!fsop_normalize_path(f, destination, f->cwd, &p_dst) || (p_src.ftype == FS_FTYPE_NOTFOUND))
 	{
 		fsop_error(f, 0xDC, "Bad destination path");
 		fs_free_wildcard_list(&p_src);
@@ -81,7 +83,8 @@ FSOP_00(UNLINK)
 
 	fs_debug (0, 1, "%12sfrom %3d.%3d UNLINK %s", "", f->net, f->stn, link);
 
-	if (!fsop_normalize_path(f, link, f->active->current, &pu) || (pu.ftype == FS_FTYPE_NOTFOUND))
+	//if (!fsop_normalize_path(f, link, f->active->current, &pu) || (pu.ftype == FS_FTYPE_NOTFOUND))
+	if (!fsop_normalize_path(f, link, f->cwd, &pu) || (pu.ftype == FS_FTYPE_NOTFOUND))
 	{
 		fsop_error(f, 0xDC, "Not found");
 		return;

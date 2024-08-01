@@ -42,6 +42,8 @@ int fsop_delete_internal (struct fsop_data *f, unsigned char *path, uint8_t rela
 	struct __fs_file	*handle;
 	int8_t			err;
 
+	//fprintf (stderr, "fsop_delete_internal(%s = %s.%s,%02X)\n", path, f->active->fhandles[relative_to].acornfullpath, path, relative_to);
+
 	if (strlen(path) == 0)
 		return -1;
 
@@ -85,7 +87,7 @@ int fsop_delete_internal (struct fsop_data *f, unsigned char *path, uint8_t rela
 			return -3;
 		}
 		else if (
-				!( FS_PERM_EFFOWNER(f->active,e->owner) || ((e->parent_owner == f->userid) && (e->parent_perm & FS_PERM_OWN_W))
+				!( FS_PERM_EFFOWNER(f->active,e->owner) || (FS_PERM_EFFOWNER(f->active,e->parent_owner) && (e->parent_perm & FS_PERM_OWN_W))
 			)
 		)
 		{
@@ -124,6 +126,14 @@ void fsop_do_delete(struct fsop_data *f, unsigned char *path, uint8_t relative_t
 
 	e = fsop_delete_internal(f,path,FSOP_CWD);
 
+	/*
+	 * TODO:
+	 *
+	 * This reply may be wrong. MDFS 1.00 manual suggests
+	 * we return attributes of the file deleted, and 
+	 * wildcards are not allowed.
+	 */
+
 	if (e >= 0)
 		fsop_reply_ok(f);
 	else
@@ -154,6 +164,8 @@ FSOP(14)
 		path_start++;
 
 	fs_copy_to_cr(path, (f->data + path_start), 1023);
+
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "*DELETE %s relative to %02X (%s)", path, FSOP_CWD, f->active->fhandles[FSOP_CWD].acornfullpath);
 
 	fsop_do_delete(f, path, FSOP_CWD);
 

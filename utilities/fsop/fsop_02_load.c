@@ -69,6 +69,13 @@ FSOP(02)
                 return;
         }
 
+	/*
+	 * TODO:
+	 *
+	 * It may be we should search the lib handle provided in the packet, as opposed
+	 * to our most recently cached one.
+	 */
+
         if ((!result || (p.ftype == FS_FTYPE_NOTFOUND)) && loadas && !fsop_normalize_path(f, command, f->active->lib, &p))   // Either in current, or lib if loadas set
         {
                 fsop_error(f, 0xFE, "Bad command");

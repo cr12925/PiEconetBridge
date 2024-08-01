@@ -53,11 +53,15 @@ FSOP_00(COPY)
 	if (num == 2)
 		fsop_00_oscli_extract(f->data, p, 1, destination, 125, param_start);
 	else
-		strcpy(destination, f->active->fhandles[f->active->current].acornfullpath);
+	{
+		//strcpy(destination, f->active->fhandles[f->active->current].acornfullpath);
+		strcpy(destination, f->active->fhandles[f->cwd].acornfullpath);
+	}
 
 	fs_debug (0, 1, "%12sfrom %3d.%3d *COPY %s %s", "", f->net, f->stn, source, destination);
 
-	if (!fsop_normalize_path_wildcard(f, source, f->active->current, &p_src, 1))
+	//if (!fsop_normalize_path_wildcard(f, source, f->active->current, &p_src, 1))
+	if (!fsop_normalize_path_wildcard(f, source, f->cwd, &p_src, 1))
 	{
 		fsop_error(f, 0xDC, "Source not found");
 		fs_free_wildcard_list(&p_src);
@@ -80,7 +84,8 @@ FSOP_00(COPY)
 		return;
 	}
 
-	if (!fsop_normalize_path(f, destination, f->active->current, &p_dst))
+	//if (!fsop_normalize_path(f, destination, f->active->current, &p_dst))
+	if (!fsop_normalize_path(f, destination, f->cwd, &p_dst))
 	{
 		fsop_error(f, 0xFF, "Bad destination");
 		fs_free_wildcard_list(&p_src);

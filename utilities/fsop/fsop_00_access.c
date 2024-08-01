@@ -149,7 +149,7 @@ FSOP_00(ACCESS)
 	
 		//fprintf (stderr, "File %s, Type %02X, Effowner (file: %02X, parent %02X)\n", e->unixpath, e->ftype, FS_PERM_EFFOWNER(f->active, e->owner), FS_PERM_EFFOWNER(f->active, e->parent_owner));
 		if (
-			((dirs && e->ftype == FS_FTYPE_DIR) || (!dirs && (e->ftype == FS_FTYPE_FILE || e->ftype == FS_FTYPE_SPECIAL)))
+			((dirs && e->ftype == FS_FTYPE_DIR) || (!dirs && (e->ftype == FS_FTYPE_FILE || e->ftype == FS_FTYPE_SPECIAL)) || (e == pt.paths && e->next == NULL)) /* Last clause means 'if there's just one answer' - we don't insist on a D if the only answer is a directory */
 		&&	(FS_PERM_EFFOWNER(f->active, e->owner) || FS_PERM_EFFOWNER(f->active, e->parent_owner))
 		)
 		{

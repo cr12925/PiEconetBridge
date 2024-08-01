@@ -67,9 +67,9 @@ FSOP(13)
 	fs_copy_to_cr(path, (f->data+filenameposition), 1023);
 
 	if (command != 4)
-		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d", "", f->net, f->stn, path, relative_to == a->root ? "Root" : relative_to == a->lib ? "Library" : "Current", command);
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "Set Object Info %s relative to %s, command %d", path, relative_to == a->root ? "Root" : relative_to == a->lib ? "Library" : "Current", command);
 	else
-		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d, attribute &%02X", "", f->net, f->stn, path, relative_to == a->root ? "Root" : relative_to == a->lib ? "Library" : "Current", command, (*(f->data + 6)));
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "Set Object Info %s relative to %s, command %d, attribute &%02X", path, relative_to == a->root ? "Root" : relative_to == a->lib ? "Library" : "Current", command, (*(f->data + 6)));
 
 	if (!fsop_normalize_path(f, path, relative_to, &p) || p.ftype == FS_FTYPE_NOTFOUND)
 		fsop_error(f, 0xD6, "Not found");
@@ -154,7 +154,7 @@ FSOP(13)
 			// No default needed - we caught it above
 		}
 
-		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d, writing to path %s, owner %04X, perm %02X, load %08X, exec %08X, homeof %04X", "", f->net, f->stn, path, relative_to == a->root ? "Root" : relative_to == a->lib ? "Library" : "Current", command, p.unixpath, attr.owner, attr.perm, attr.load, attr.exec, attr.homeof);
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "Set Object Info %s relative to %s, command %d, writing to path %s, owner %04X, perm %02X, load %08X, exec %08X, homeof %04X", path, relative_to == a->root ? "Root" : relative_to == a->lib ? "Library" : "Current", command, p.unixpath, attr.owner, attr.perm, attr.load, attr.exec, attr.homeof);
 
 		fsop_write_xattr(p.unixpath, attr.owner, attr.perm, attr.load, attr.exec, attr.homeof, f);
 

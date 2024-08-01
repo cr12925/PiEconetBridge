@@ -49,10 +49,11 @@ void fsop_12_internal (struct fsop_data *f, uint8_t is_32bit)
 	if (command == 0xBC && (!strcmp(path, "") || !strcmp(path, "$$"))) /* NetFS 32 bit support probe */
 	{
 		fs_debug_full (0, 2, f->server, f->net, f->stn, "NetFS 32 bit support probe");
-		fsop_reply_ok(f);
+		//fsop_reply_ok(f);
+		fsop_error(f, 0xFF, "Not supported");
 	}
 
-        fs_debug_full (0, 2, f->server, f->net, f->stn, "Get Object Info '%s' relative to %02X, command %d", path, relative_to, command);
+        fs_debug_full (0, 2, f->server, f->net, f->stn, "Get Object Info '%s' relative to %02X (%s), command %d", path, relative_to, f->active->fhandles[relative_to].acornfullpath, command);
 
         norm_return = fsop_normalize_path_wildcard(f, path, relative_to, &p, 1);
 

@@ -29,7 +29,8 @@ FSOP(15)
 
 	a = f->active;
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d Read user environment - current user handle %d, current lib handle %d", "", f->net, f->stn, f->active->current, f->active->lib);
+	//fs_debug (0, 2, "%12sfrom %3d.%3d Read user environment - current user handle %d, current lib handle %d", "", f->net, f->stn, f->active->current, f->active->lib);
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "Read user environment - current user handle %d, current lib handle %d", f->cwd, f->lib);
 
 	// If either current or library handle is invalid, barf massively.
 

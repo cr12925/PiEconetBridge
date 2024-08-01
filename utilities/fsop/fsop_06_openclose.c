@@ -164,6 +164,9 @@ FSOP(06)
 
 			handle = fsop_open_interlock(f, p.unixpath, (readonly ? 1 : existingfile ? 2 : 3), &err, 0);
 
+			if (mode == 3)
+				fsop_set_create_time_now(p.unixpath);
+
 			fs_free_wildcard_list(&p);
 
 			if (err == -1)  // Couldn't open a file when we think we should be able to

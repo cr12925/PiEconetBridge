@@ -37,7 +37,7 @@ FSOP(03)
 
 	fs_copy_to_cr(path, (f->data + 8), 255);
 
-	fs_debug_full (0, 2, f->server, f->net, f->stn, "Examine %s relative to %d, start %d, extent %d, arg = %d", path, relative_to, start, n, arg);
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "Examine %s relative to %d (%s), start %d, extent %d, arg = %d", path, relative_to, f->active->fhandles[relative_to].acornfullpath, start, n, arg);
 
 	replylen = 2;
 
