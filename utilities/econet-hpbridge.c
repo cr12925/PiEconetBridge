@@ -8934,6 +8934,7 @@ int eb_readconfig(char *f)
 				if (!source)
 					eb_debug (1, 0, "Cannot assign pool %s to %s %s %d because it target device does not exist", poolname, dtype, (variant == TRUNK ? "on port" : "on net"), trunkportorwirenet);
 
+				memset (&nets, 0, sizeof(nets));
 				first_net = eb_parse_nets(eb_getstring(line, &matches[4]), nets);
 
 				if (!first_net)
