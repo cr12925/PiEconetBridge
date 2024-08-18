@@ -38,6 +38,21 @@ RELEASE NOTES FOR V2.2
   RISC PC class machines, if it discovers one at login
 - The previous, rather heavyweight, load dequeuer has been retired
   in favour of one which simply reads the relevant file on demand.
+- Legacy configuration form is now internally converted to JSON
+  and implemented from the JSON. The resulting JSON can be written
+  to a file using a command line switch --json-config-write
+- The bridge will look for /etc/econet-gpio/econet-hpbridge.{cfg,json}
+  and will read the most recently modified. If the JSON is more
+  recent, it will use that. Alternative config files (both
+  legacy and JSON) can be specified with -c and -j respectively.
+- Thus you can convert your legacy config to JSON using the
+  switch above, and then save it as econet-hpbridge.json and
+  unless you subsequently modify your legacy file (.cfg), the
+  bridge will use the JSON version. 
+- The JSON config is intended to facilitate web-based configuration
+  of the HPB. When that is done, it will hopefully also be
+  friendly to text-browsers such as lynx so as to provide
+  an effect text-based config tool.
 
 KNOWN ISSUES
 ------------

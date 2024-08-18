@@ -17,12 +17,47 @@
 #ifndef __ECONETBRIDGE_H__
 #define __ECONETBRIDGE_H__
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <sys/resource.h>
+#include <resolv.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/utsname.h>
+#include <unistd.h>
+#include <poll.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <errno.h>
+#include <endian.h>
+#include <regex.h>
+#include <time.h>
+#include <stdint.h>
+#include <inttypes.h>
+#include <pthread.h>
+#include <stdarg.h>
+#include <getopt.h>
+#include <linux/if.h>
+#include <linux/if_tun.h>
+#include <signal.h>
+#include <termios.h>
+
 #include <openssl/evp.h>
 #include <openssl/aes.h>
 #include <openssl/rand.h>
 
+#include "econet-gpio-consumer.h"
+
 // Server version number advertised
-#define EB_VERSION	0x22 // i.e. 2.1
+#define EB_VERSION	0x22 // i.e. 2.2
 #define EB_SERVERID	"Pi HP Bridge"
 
 #define EB_TRUNK 	0x01
@@ -31,7 +66,7 @@
 #define EB_LOCAL	0x08
 #define EB_AUN		0x10
 #define EB_NULL		0x20
-//#define EB_EXPOSURE	0x40
+#define EB_MULTITRUNK	0x40
 #define EB_POOL		0x80
 
 #define EB_ADV_SHIFT	0
@@ -46,8 +81,8 @@
 #define EB_DEF_LOCAL	((EB_LOCAL << EB_TYPE_SHIFT) | EB_ADV_NONE) // Ditto Pipe
 #define EB_DEF_AUN	((EB_AUN << EB_TYPE_SHIFT) | EB_ADV_ALL) // Ditto Pipe
 #define EB_DEF_NULL	((EB_NULL << EB_TYPE_SHIFT) | EB_ADV_ALL)
+#define EB_DEF_MULTITRUNK	((EB_MULTITRUNK << EB_TYPE_SHIFT) | EB_ADV_ALL)	
 #define EB_DEF_POOL	((EB_POOL << EB_TYPE_SHIFT) | EB_ADV_ALL)
-//#define EB_DEF_EXPOSURE	((EB_EXPOSURE << EB_TYPE_SHIFT) | EB_ADV_NONE) // Only the parent driver gets advertised
 
 #define EB_DEV_CONF_DIRECT	0x01	// Passes all traffic, unqueued, unmolested (including ACK, NAK) to the destination. Otherwise deals with ACK, NAK itself.
 #define EB_DEV_CONF_AUTOACK	0x02	// When data traffic received from this station (usually AUN) send it an ACK immediately and don't bother tracking what actually got delivered or where from
@@ -96,12 +131,23 @@ struct __eb_outq { // Definition of outbound queue from device (i.e. going from 
 
 #define EB_FW_ACCEPT 0x01
 #define EB_FW_REJECT 0x02
+#define EB_FW_CHAIN  0x04 /* Pass to another chain */
 #define EB_FW_DEFAULT EB_FW_ACCEPT
 
-struct __eb_fw { // Firewall entry
+/* Firewall entry. */
+struct __eb_fw { // Firewall entry - any value which is &FF is the wildcard
 	uint8_t srcnet, srcstn, dstnet, dststn;
+	uint8_t port;
 	uint8_t action;
 	struct __eb_fw *next;
+};
+
+/* Firewall chain names */
+
+struct __eb_fw_chain {
+	unsigned char *		fw_chain_name;
+	uint8_t			fw_default; /* One of the EB_FW_{ACCEPT,REJECT} values for the default result if nothing matches */
+	struct __eb_fw		*fw_chain_start;
 };
 
 /* Define a printjob
@@ -287,6 +333,8 @@ struct __eb_device { // Structure holding information about a "physical" device 
 	struct __eb_outq	*out; // Queue leaving this device to outside world, separate queues per destination
 	struct __eb_packetqueue	*in; // Inbound queue (all one list)
 	struct __econet_pcaket_aun	*priority; // Not implemented yet. Will have 12 bits malloc()'d at startup and contains the pattern we are looking for as a packet to prioritize to top of input queue. Will be used both for immediates and for spotting ACKs when in the proposed new 'resilience' mode
+	struct __eb_packetqueue	*device_input; // Traffic arriving from the device itself (e.g. off the wire, from a pipe)
+	pthread_mutex_t		device_input_mutex; // Locks device_input queue
 	uint8_t 		p_net, p_stn; // Priority net, stn - if an immediate arrives from outside world from this net, stn, put it on head of inbound queue
 	uint32_t		p_seq; // Priority sequence number
 	pthread_mutex_t		priority_mutex; // Locks the priority variables above, read & write
@@ -316,6 +364,10 @@ struct __eb_device { // Structure holding information about a "physical" device 
 	pthread_t		bridge_reset_thread; // Ditto for bridge resetter
 	pthread_mutex_t		bridge_reset_lock; // Ditto for bridge resetter
 	uint8_t			all_nets_pooled; // Used to work out whether not to forward resets on this device (only relevant for wire or trunk)
+
+	/* Firewall per device - available with JSON config */
+
+	struct eb_fw		*fw_in, *fw_out; /* 'in' is for traffic going TO the device (e.g. being sent to a fileserver, pipe, econet, or trunk - i.e. going away from the bridge), 'out' is stuff emanating out of the device (i.e. arriving on a pipe, from a fileserver, off an econet, arriving on a trunk) */
 
 	// Per device type information
 	union {
@@ -350,9 +402,25 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			uint8_t 	xlate_in[256], xlate_out[256]; // Network number translation. _in translates a source network when the trunk receives traffic (and translates bridge advertised network numbers); _out translates a destination network when the trunk sends traffic.  Set up when config is read.
 			uint8_t		filter_in[256], filter_out[256]; // Networks we ignore (i.e. we ditch traffic, and we ignore/don't send adverts)
 	
+			// If part of multitrunk
+
+			struct __eb_device	*multitrunk_parent;
+
 			// Keepalive thread
+			
 			pthread_t	keepalive_thread;
 		} trunk;
+
+		struct {
+
+			int		socket; // IPv4 / IPv6 TCP socket we listen on
+
+			struct pollfd	*p_reset; // List of FDs (embedded in a pollfd list) of trunk endpoints we are talking to
+			int		numfd; // Number of valid FDs in the list. (Note, we must compress the list if one goes away from the middle.)
+
+			struct __eb_device *clients; // Client trunk device list. 
+			uint8_t		numclients; // Number of valid clients (i.e. size of malloc() on clients
+		} multitrunk;
 
 		struct { // Network on a real econet wire via a bridge board
 			int		socket; // Socket for Wire device we are talking to
@@ -689,3 +757,11 @@ struct __econet_packet_ip {
 extern struct __eb_device * eb_find_station (uint8_t, struct __econet_packet_aun *);
 extern uint8_t eb_aunpacket_to_aun_queue(struct __eb_device *, struct __eb_device *, struct __econet_packet_aun *, uint16_t);
 extern uint8_t eb_enqueue_input (struct __eb_device *, struct __econet_packet_aun *, uint16_t);
+
+/* Debug externs */
+extern void eb_debug_fmt (uint8_t, uint8_t, char *, char *);
+void eb_debug (uint8_t, uint8_t, char *, char *, ...);
+
+/* JSON */
+
+uint8_t eb_readconfig_json(char *);

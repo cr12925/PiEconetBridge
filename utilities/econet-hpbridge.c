@@ -149,9 +149,11 @@ void eb_signal_handler (int sig)
 
 }
 
+#if 0
 /* Config file path */
 
 char	config_path[1024];
+#endif
 
 char * econet_strstate(int s) // Convert AUN state to string
 {
@@ -8156,7 +8158,7 @@ struct json_object *eb_json_get_divert_makenew(struct json_object *d, uint8_t st
 
 		res = json_object_new_object();
 		json_object_object_add(res, "station", json_object_new_int(stn));
-		json_object_object_add(res, "printservers", json_object_new_array());
+		json_object_object_add(res, "printers", json_object_new_array());
 		json_object_object_add(res, "ipservers", json_object_new_array());
 		json_object_array_add(d, res);
 	}
@@ -8193,19 +8195,112 @@ struct json_object *eb_json_aunnet_makenew(struct json_object *jauns, uint8_t ne
 	return cur;
 
 }
-#endif
+
+/* Parse a JSON config and create the relevant threads etc. */
+
+int eb_parse_json_config(struct json_object *jc)
+{
+
+	/* Order of play is this:
+	 *
+	 * Create firewall chains / policies (do these first so we can apply them to objects)
+	 * Create pools, but without static mappings (we leave statics until we've created the objects they might refer to!)
+	 * Create virtual networks and their 'diverted' servers (in case we've tried to create a virtual network which overlaps with an econet)
+	 * Create the legacy 'dynamic' network - which ultimately will refer to a pool in due course
+	 * Create econets and their 'diverted' servers
+	 * Create AUN hosts (these are out on their own somewhere, but we'll find out here if we're createing an AUN host which already exists as a pool, virtual or econet device)
+	 * Create Trunks (these have no networks, so won't theoretically overlap with anything, so they're safe here)
+	 * Create Multitrunks (likewise trunks - these are just single port TCP/TCP6 listeners which divert traffic to the real trunk when it arrives)
+	 * Create pool static entries (by the time we're here, everything that should exist to map a static to should exist)
+	 * Create exposures (and by here, everything should exist, save for networks we only know about on trunks / bridges, and those get disabled at startup until they are known)
+	 */
+
+
+	json_object_put(jc); /* Free the memory */
+
+	return 1;
+
+}
+
+/* Find a firewall chain called 'name' in json config 'config' */
+
+struct json_object * eb_json_fw_chain(char *name, struct json_object *config)
+{
+
+	struct json_object	*jchains, *jchain, *jchain_name;
+	uint16_t		jlength, jcount;
+
+	jcount = 0;
+
+	if (json_object_object_get_ex(config, "firewall-chains", &jchains))
+	{
+		jlength = json_object_array_length(jchains);
+
+		while (jcount < jlength)
+		{
+			jchain = json_object_array_get_idx(jchains, jcount);
+			if (!json_object_object_get_ex(jchain, "name", &jchain_name))
+				eb_debug (1, 0, "JSON", "Cannot traverse firewall chains - found one without a name!");
+			if (!strcasecmp(name, json_object_get_string(jchain_name)))
+				return jchain;
+
+			jcount++;
+		}
+
+		/* If we get here, we didn't find it */
+
+	}
+	else
+		eb_debug (1, 0, "JSON", "Cannot find firewall-chains element in main config");
+
+	return NULL; /* Not found */
+}
+
+/* Find a firewall chain called 'name' in json config 'config' using the function above, and make a new one if we can't find it
+ */
+
+struct json_object * eb_json_fw_chain_makenew(char *name, struct json_object *config)
+{
+	struct json_object	*jchain, *jchains;
+
+	jchain = eb_json_fw_chain(name, config);
+
+	if (!jchain)
+	{
+		if (json_object_object_get_ex(config, "firewall-chains", &jchains))
+		{
+			jchain = json_object_new_object();
+			json_object_object_add(jchain, "name", json_object_new_string(name));
+			json_object_object_add(jchain, "accept", json_object_new_boolean(TRUE)); /* Default - we can change it */
+			json_object_object_add(jchain, "entries", json_object_new_array());
+			json_object_array_add(jchains, jchain);
+
+			return jchain;
+		}
+		else
+			eb_debug (1, 0, "JSON", "Cannot find firewall-chains element in main config");
+	}
+
+	return jchain;
+}
+
+#endif 
 
 /* Read and execute the main bridge config
 */
 
-int eb_readconfig(char *f)
+#ifdef EB_JSONCONFIG
+int eb_readconfig(char *f, char *json, struct json_object **jcparam)
+#else
+int eb_readconfig(char *f, char *json)
+#endif
 {
 
 	FILE 	*cfg;
 
 #ifdef EB_JSONCONFIG
-	struct json_object *	jc, *jgeneral, *jbridge_fw, *jpools;
-	FILE 	*json;
+	struct json_object *	jc, *jgeneral, *jpools, *jfw_chains, *jfw_bridge, *jfw_bridge_entries;
+	FILE 	*jsonfile;
 #endif
 
 #ifdef IPV6_TRUNKS
@@ -8216,10 +8311,10 @@ int eb_readconfig(char *f)
 
 #ifdef EB_JSONCONFIG
 	jc = json_object_new_object();
+	*jcparam = jc;
 	jgeneral = json_object_new_object();
-	jbridge_fw = json_object_new_array();
 	json_object_object_add(jc, "general", jgeneral);
-	json_object_object_add(jgeneral, "fw", jbridge_fw);
+	json_object_object_add(jgeneral, "fw", json_object_new_string("BRIDGE"));
 	json_object_object_add(jc, "econets", json_object_new_array());
 	json_object_object_add(jc, "virtuals", json_object_new_array());
 	json_object_object_add(jc, "trunks", json_object_new_array());
@@ -8228,6 +8323,14 @@ int eb_readconfig(char *f)
 	json_object_object_add(jc, "pools", jpools);
 	json_object_object_add(jc, "aun", json_object_new_array());
 	json_object_object_add(jc, "exposures", json_object_new_array());
+	jfw_chains = json_object_new_array();
+	jfw_bridge = json_object_new_object(); // Bridge-wide firewall
+	json_object_object_add(jfw_bridge, "name", json_object_new_string("BRIDGE"));
+	json_object_object_add(jfw_bridge, "accept", json_object_new_boolean(TRUE));
+	jfw_bridge_entries = json_object_new_array();
+	json_object_object_add(jfw_bridge, "entries", jfw_bridge_entries);
+	json_object_object_add(jc, "firewall-chains", jfw_chains);
+	json_object_array_add(jfw_chains, jfw_bridge);
 #endif
 
 	/* Temp test hook */
@@ -8437,8 +8540,6 @@ int eb_readconfig(char *f)
 				json_object_object_add(wire, "device", json_object_new_string(device));
 				json_object_object_add(wire, "net", json_object_new_int(net));
 				json_object_object_add(wire, "diverts", json_object_new_array());
-				json_object_object_add(wire, "fw-in", json_object_new_array());
-				json_object_object_add(wire, "fw-out", json_object_new_array());
 				json_object_object_add(wire, "pool-assignment", json_object_new_array());
 				json_object_array_add(econets, wire);
 #endif
@@ -8497,8 +8598,6 @@ int eb_readconfig(char *f)
 #ifdef EB_JSONCONFIG
 				json_object_object_get_ex(jc, "trunks", &jtrunks);
 				jtrunk = json_object_new_object();
-				json_object_object_add(jtrunk, "fw-in", json_object_new_array());
-				json_object_object_add(jtrunk, "fw-out", json_object_new_array());
 				json_object_object_add(jtrunk, "nat", json_object_new_array());
 				json_object_object_add(jtrunk, "pool-assignment", json_object_new_array());
 #endif
@@ -8701,8 +8800,7 @@ int eb_readconfig(char *f)
 				if (json_object_object_get_ex(divert, "fileserver-path", &jfs))
 					eb_debug (1, 0, "JSON", "Fileserver already exists on %d.%d", net, stn);
 
-				json_object_object_add(divert, "fileerver-path", json_object_new_string(eb_getstring(line, &matches[2])));
-				json_object_object_add(divert, "fileserver-fw", json_object_new_array());
+				json_object_object_add(divert, "fileserver-path", json_object_new_string(eb_getstring(line, &matches[2])));
 #endif
 				/* Put this in all wire station[] maps */
 
@@ -8732,7 +8830,7 @@ int eb_readconfig(char *f)
 
 				json_object_object_get_ex(jnet, "diverts", &diverts);
 				divert = eb_json_get_divert_makenew(diverts, stn);
-				json_object_object_get_ex(divert, "printservers", &jps);
+				json_object_object_get_ex(divert, "printers", &jps);
 				jprinter = json_object_new_object();
 #endif
 
@@ -8756,10 +8854,8 @@ int eb_readconfig(char *f)
 #ifdef EB_JSONCONFIG
 				json_object_object_add(jprinter, "acorn-name", json_object_new_string(acorn_printer));
 				json_object_object_add(jprinter, "unix-name", json_object_new_string(unix_printer));
-				json_object_object_add(jprinter, "priority", json_object_new_int(1));
-				json_object_object_add(jprinter, "default", json_object_new_boolean(TRUE));
-				json_object_object_add(jprinter, "fw-in", json_object_new_array());
-				json_object_object_add(jprinter, "fw-out", json_object_new_array());
+				json_object_object_add(jprinter, "priority", json_object_new_int(json_object_array_length(jps) + 1));
+				json_object_object_add(jprinter, "default", json_object_new_boolean(json_object_array_length(jps) == 0 ? TRUE : FALSE));
 #endif
 				/* Put this in all wire station[] maps */
 
@@ -8842,8 +8938,8 @@ int eb_readconfig(char *f)
 				if (!divert)
 					eb_debug (1, 0, "JSON", "Attempt to set print handler for printer on unknown station %d.%d", net, stn);
 
-				if (!json_object_object_get_ex(divert, "printservers", &jps))
-					eb_debug (1, 0, "JSON", "printservers key missing from divert for %d.%d", net, stn);
+				if (!json_object_object_get_ex(divert, "printers", &jps))
+					eb_debug (1, 0, "JSON", "printers key missing from divert for %d.%d", net, stn);
 
 				jcount = 0;
 
@@ -8990,8 +9086,6 @@ int eb_readconfig(char *f)
 					eb_debug (1, 0, "JSON", "Pipe server already exists on %d.%d", net, stn);
 
 				json_object_object_add(divert, "pipe-path", json_object_new_string(eb_getstring(line, &matches[2])));
-				json_object_object_add(divert, "pipe-fw-in", json_object_new_array());
-				json_object_object_add(divert, "pipe-fw-out", json_object_new_array());
 #endif
 				if (!strcasecmp(eb_getstring(line, &matches[3]), "passthru"))
 				{
@@ -9319,8 +9413,6 @@ int eb_readconfig(char *f)
 				json_object_object_add(jexposure, "net-address", json_object_new_string(addr));
 				json_object_object_add(jexposure, "base-port", json_object_new_int(port));
 				json_object_object_add(jexposure, "fixed-port", json_object_new_boolean(fixed ? TRUE : FALSE));
-				json_object_object_add(jexposure, "fw-in", json_object_new_array());
-				json_object_object_add(jexposure, "fw-out", json_object_new_array());
 #endif
 	
 			}
@@ -9439,8 +9531,6 @@ int eb_readconfig(char *f)
 				json_object_object_add(jexposure, "station", json_object_new_int(stn));
 				json_object_object_add(jexposure, "host", json_object_new_string(addr));
 				json_object_object_add(jexposure, "port", json_object_new_int(port));
-				json_object_object_add(jexposure, "fw-in", json_object_new_array());
-				json_object_object_add(jexposure, "fw-out", json_object_new_array());
 				json_object_array_add(jexp_already, jexposure);
 
 #endif
@@ -9516,6 +9606,7 @@ int eb_readconfig(char *f)
 #ifdef EB_JSONCONFIG
 				struct json_object	*jfw_array, *jdevice, *jfw_entry;
 				uint8_t		is_trunk = 0;
+				char		fw_name[128];
 #endif
 
 				if (!strcasecmp(eb_getstring(line, &matches[1]), "DROP"))
@@ -9607,6 +9698,8 @@ int eb_readconfig(char *f)
 					json_object_object_add(jfw_entry, "accept", json_object_new_boolean(drop ? FALSE : TRUE));
 					json_object_object_add(jfw_entry, "distant-net", json_object_new_int(distant_net));
 
+					sprintf (fw_name, "%s_%d_%s", is_trunk ? "TRUNK" : "ECONET", trunk_port, inbound ? "IN" : "OUT");
+
 					if (is_trunk)
 					{
 						struct json_object	*jtrunk, *jtrunkport;
@@ -9654,10 +9747,7 @@ int eb_readconfig(char *f)
 					if (!jdevice)
 						eb_debug(1, 0, "JSON", "Attempt to set firewall on non-existent device %s %d", (is_trunk ? "Trunk port" : "Wire net"), trunk_port);
 
-					if (inbound)
-						json_object_object_get_ex(jdevice, "fw-in", &jfw_array);
-					else
-						json_object_object_get_ex(jdevice, "fw-out", &jfw_array);
+					jfw_array = eb_json_fw_chain_makenew(fw_name, jc);
 
 					json_object_array_add(jfw_array, jfw_entry);
 #endif
@@ -9672,7 +9762,7 @@ int eb_readconfig(char *f)
 			{
 				struct __eb_fw		*entry, *search;
 #ifdef EB_JSONCONFIG
-				struct json_object	*jfw_table, *jfw_entry;
+				struct json_object	*jfw_entry;
 #endif
 
 				entry = eb_malloc (__FILE__, __LINE__, "CONFIG", "Create firewall struct", sizeof(struct __eb_fw));
@@ -9691,6 +9781,8 @@ int eb_readconfig(char *f)
 
 				entry->dststn = atoi(eb_getstring(line, &matches[5]));
 				entry->dststn = (entry->dststn ? entry->dststn : 0xff);
+
+				entry->port = 0xff; // Wildcard - the standard config doesn't understand ports in FW
 
 				entry->action = (!strcasecmp(eb_getstring(line, &matches[1]), "drop")) ? EB_FW_REJECT : EB_FW_ACCEPT;
 
@@ -9724,12 +9816,11 @@ int eb_readconfig(char *f)
 				if (entry->dststn != 0xff)
 					json_object_object_add(jfw_entry, "destination-station", json_object_new_int(entry->dststn));
 
+				/* Don't bother setting destination-port because the legacy config can't set it - will always be wildcard */
+
 				json_object_object_add(jfw_entry, "accept", json_object_new_boolean((entry->action == EB_FW_ACCEPT) ? TRUE : FALSE));
 
-				if (json_object_object_get_ex(jgeneral, "fw", &jfw_table))
-					json_object_array_add(jfw_table, jfw_entry);
-				else
-					eb_debug (1, 0, "JSON", "Cannot add bridge-wide firewall entry - fw table not found!");
+				json_object_array_add(jfw_bridge_entries, jfw_entry);
 #endif
 
 			}
@@ -10216,10 +10307,13 @@ int eb_readconfig(char *f)
 	regfree (&r_pool_static_trunk);
 	
 #ifdef EB_JSONCONFIG
-	json = fopen("/tmp/hpbtmp.json", "w");
-	fprintf (json, "%s", json_object_to_json_string_ext(jc, JSON_C_TO_STRING_PRETTY));
-	fclose(json);
-	json_object_put(jc);
+	if (json[0]) /* Non-null string */
+	{
+		jsonfile = fopen(json, "w");
+		fprintf (jsonfile, "%s", json_object_to_json_string_ext(jc, JSON_C_TO_STRING_PRETTY));
+		fclose(jsonfile);
+		json_object_put(jc);
+	}
 #endif
 
 	return 1;
@@ -10243,7 +10337,12 @@ Options:\n\
 \t-h\t\tThis help text\n\
 \n\
 \t-c <path>\tUse alternative config file\n\
-\t-d <path>\tSet debug file output. Will overwrite, not append\n\
+"
+#ifdef EB_JSONCONFIG
+"\t-j <path>\tUse alternative JSON config file\n\
+"
+#endif
+"\t-d <path>\tSet debug file output. Will overwrite, not append\n\
 \t-l\t\tDon't try to open Econet devices. IP only operation\n\
 \t-n <num>\tMax data bytes in a packet dump (default 0)\n\
 \t-p [iIoO]\tPacket dump - i/I: input phase, before/after NAT; o/O: output phase, likewise\n\
@@ -10296,8 +10395,15 @@ Deep-level debugging options:\n\
 \n\
 --malloc-debug\t\tTurn on (very verbose) malloc()/free() debug when at loglevel 2 or above\n\
 \n\
-\
-", name,
+"
+#ifdef EB_JSONCONFIG
+"Configuration:\n\
+\n\
+--json-config-write <path>\tFilename to write JSON version of legacy config to\n\
+\n\
+"
+#endif
+	, name,
 	(EB_VERSION & 0xf0) >> 4,
 	(EB_VERSION & 0x0f),
 	EB_CONFIG_WIRE_RETRIES,
@@ -10337,6 +10443,13 @@ int main (int argc, char **argv)
 	struct __eb_aun_exposure *e;
 	int	optind;
 	struct rlimit	max_fds;
+	char 	config_path[256];
+#ifdef EB_JSONCONFIG
+	char	jsonconfig_path[256], jsonconfigout_path[256];
+	struct	json_object	*json_config;
+	struct 	stat		config_stat, json_stat;
+	int			config_stat_res, json_stat_res;
+#endif
 
 	/* Drop privs in case we're setuid for *FAST */
 
@@ -10413,6 +10526,11 @@ int main (int argc, char **argv)
 	EB_CONFIG_BRIDGE_LOOP_DETECT = 1; // Enable bridge loop detection & trunk/wire shutdown. (Only ignores traffic on the wire which is not destined for a local emulator on this bridge, so they can still talk to local fileservers etc.)
 
 	strcpy (config_path, "/etc/econet-gpio/econet-hpbridge.cfg");
+#ifdef EB_JSONCONFIG
+	strcpy (jsonconfig_path, "/etc/econet-gpio/econet-hpbridge.json");
+	strcpy (jsonconfigout_path, "");
+#endif
+
 	/* Clear networks[] table */
 
 	memset (&networks, 0, sizeof(networks));
@@ -10464,6 +10582,11 @@ int main (int argc, char **argv)
 		{"wire-max-not-listening", required_argument,	0, 	0},
 		{"no-bridge-announce-debug", 0,			0, 	0},
 		{"fs-stats-port", 	required_argument, 	0, 	0},
+#ifdef EB_JSONCONFIG
+		{"json-config-write", 	required_argument, 	0, 	0},
+#else
+		{"XXXX-json-config-write-disabled", 0		0,	0},
+#endif
 		{0, 			0,			0,	0 }
 	};
 
@@ -10507,12 +10630,14 @@ int main (int argc, char **argv)
 					case 27:	EB_CONFIG_WIRE_MAX_NOTLISTENING = atoi(optarg); break;
 					case 28:	EB_CONFIG_NOBRIDGEANNOUNCEDEBUG = 1; EB_CONFIG_NOKEEPALIVEDEBUG = 1; break;
 					case 29:	EB_CONFIG_FS_STATS_PORT = atoi(optarg); break;
+					case 30:	strncpy(jsonconfigout_path, optarg, 255); break;
 				}
 			} break;
-			case 'c':	strncpy(config_path, optarg, 1023); break;
+			case 'c':	strncpy(config_path, optarg, 255); break;
 			case 'd':	strncpy(debug_path, optarg, 1023); break;
 			case 'e':	EB_CONFIG_EXTRALOGS = 1; break;
 			case 'h':	eb_help(argv[0]); exit(EXIT_SUCCESS); break;
+			case 'j':	strncpy(jsonconfig_path, optarg, 255); break;
 			case 'l':	EB_CONFIG_LOCAL = 1; break;
 			case 'n':	EB_CONFIG_MAX_DUMP_BYTES = atoi(optarg); break; // Max packet dump data bytes
 			case 'p':	
@@ -10563,8 +10688,44 @@ int main (int argc, char **argv)
 
 	/* Read config */
 
-	if (!eb_readconfig(config_path))
+#ifdef EB_JSONCONFIG
+	/* Compare modified dates of json & legacy configs and pick the right one */
+	
+	config_stat_res = stat(config_path, &config_stat);
+	json_stat_res = stat(jsonconfig_path, &json_stat);
+
+	if (!config_stat_res) /* Stat succeeded */
+		if ((config_stat.st_mode & S_IFMT) != S_IFREG) 
+			eb_debug (1, 0, "CONFIG", "Configuration file is not a regular file");
+
+	if (!json_stat_res) /* Stat succeeded */
+		if ((json_stat.st_mode & S_IFMT) != S_IFREG) 
+			eb_debug (1, 0, "CONFIG", "JSON Configuration file is not a regular file");
+
+	if (json_stat_res && config_stat_res)
+		eb_debug (1, 0, "CONFIG", "Neither regular nor JSON configuration files was found");
+
+	if (json_stat_res || (json_stat.st_mtime < config_stat.st_mtime)) /* No JSON or stat failed, or legacy config modified more recently, at least in seconds, than JSON config file */
+	{
+		if (!eb_readconfig(config_path, jsonconfigout_path, &json_config))
+			exit (EXIT_FAILURE);
+	}
+	else if (!json_stat_res) /* JSON must exist and (given the if() above) must be newer */
+	{
+		json_config = json_object_from_file(jsonconfig_path);
+		if (!json_config)
+			eb_debug (1, 0, "JSON", "Cannot read %s as JSON", jsonconfig_path);
+	}
+
+	if (!eb_parse_json_config(json_config))
+	{
+		eb_debug (1, 0, "JSON", "Parsing JSON config failed");
+		exit(EXIT_FAILURE);
+	}
+#else
+	if (!eb_readconfig(config_path, jsonconfigout_path))
 		exit (EXIT_FAILURE);
+#endif
 
 	/* Now copy stations to stations_initial in each wire, and copy networks[] to networks_initial[] */
 
