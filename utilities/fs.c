@@ -65,18 +65,6 @@
 */
 #include "fs.h"
 
-/*
-// the ] as second character is a special location for that character - it loses its
-// special meaning as 'end of character class' so you can match on it.
-#define FSACORNREGEX    "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
-#define FSREGEX    "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
-#define FSDOTREGEX "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;\\.[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
-#define FS_NETCONF_REGEX_ONE "^NETCONF(IG)?\\s+([\\+\\-][A-Z]+)\\s*"
-
-#define FS_DIVHANDLE(x)	((fs_config[server].fs_manyhandle == 0) ? (  (  ((x) == 128) ? 8 : ((x) == 64) ? 7 : ((x) == 32) ? 6 : ((x) == 16) ? 5 : ((x) == 8) ? 4 : ((x) == 4) ? 3 : ((x) == 2) ? 2 : ((x) == 1) ? 1 : (x))) : (x))
-#define FS_MULHANDLE(x) ((fs_config[server].fs_manyhandle != 0) ? (x) : (1 << ((x) - 1)))
-*/
-
 uint8_t fs_set_syst_bridgepriv = 0; // If set to 1 by the HP Bridge, then on initialization, each FS will enable the bridge priv on its SYST user
 short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for extra year information
 short use_xattr=1 ; // When set use filesystem extended attributes, otherwise use a dotfile
@@ -148,7 +136,7 @@ void fsop_get_parameters (struct __fs_station *server, uint32_t *params, uint8_t
 	if (server->config->fs_sjfunc)	*params |= FS_CONFIG_SJFUNC;
 	if (server->config->fs_bigchunks)	*params |= FS_CONFIG_BIGCHUNKS;
 	if (server->config->fs_infcolon)	*params |= FS_CONFIG_INFCOLON;
-	if (server->config->fs_manyhandle)	*params |= FS_CONFIG_MANYHANDLE;
+	//if (server->config->fs_manyhandle)	*params |= FS_CONFIG_MANYHANDLE;
 	if (server->config->fs_mdfsinfo)	*params |= FS_CONFIG_MDFSINFO;
 	if (server->config->fs_pifsperms)	*params |= FS_CONFIG_PIFSPERMS;
 	if (server->config->fs_mask_dir_wrr)	*params |= FS_CONFIG_MASKDIRWRR;
@@ -190,7 +178,7 @@ void fsop_set_parameters (struct __fs_station *server, uint32_t params, uint8_t 
 	server->config->fs_sjfunc = (params & FS_CONFIG_SJFUNC) ? 1 : 0;
 	server->config->fs_bigchunks = (params & FS_CONFIG_BIGCHUNKS) ? 1 : 0;
 	server->config->fs_infcolon = (params & FS_CONFIG_INFCOLON) ? 1 : 0;
-	server->config->fs_manyhandle = (params & FS_CONFIG_MANYHANDLE) ? 1 : 0;
+	//server->config->fs_manyhandle = (params & FS_CONFIG_MANYHANDLE) ? 1 : 0;
 	server->config->fs_mdfsinfo = (params & FS_CONFIG_MDFSINFO) ? 1 : 0;
 	server->config->fs_pifsperms = (params & FS_CONFIG_PIFSPERMS) ? 1 : 0;
 	server->config->fs_mask_dir_wrr = (params & FS_CONFIG_MASKDIRWRR) ? 1 : 0;
@@ -1129,7 +1117,7 @@ uint8_t fsop_allocate_user_file_channel(struct __fs_active *a)
 	while ((a->fhandles[count].is_dir || a->fhandles[count].handle) && count < FS_MAX_OPEN_FILES)
 		count++;
 
-	if (count >= (a->server->config->fs_manyhandle ? FS_MAX_OPEN_FILES : 9)) return 0; // No handle available - if not in manyhandle mode, >= 9 is what we need because we can allocate up to and including 8
+	if (count >= (a->manyhandles ? FS_MAX_OPEN_FILES : 9)) return 0; // No handle available - if not in manyhandle mode, >= 9 is what we need because we can allocate up to and including 8
 
 	a->fhandles[count].is_dir = 0;
 
@@ -1159,7 +1147,7 @@ uint8_t fsop_allocate_user_dir_channel(struct __fs_active *a, struct __fs_file *
 	while (a->fhandles[count].handle && count < FS_MAX_OPEN_FILES)
 		count++;
 
-	if (count >= (a->server->config->fs_manyhandle ? FS_MAX_OPEN_FILES : 9)) return 0; // No handle available - see comment in the user file allocator for why this is 9
+	if (count >= (a->manyhandles ? FS_MAX_OPEN_FILES : 9)) return 0; // No handle available - see comment in the user file allocator for why this is 9
 
 	a->fhandles[count].handle = d;
 	a->fhandles[count].cursor = 0;
@@ -1657,7 +1645,7 @@ void fs_free_wildcard_list(struct path *p)
  
 #define fsop_get_wildcard_entries fs_get_wildcard_entries
 
-int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, char *needle, struct path_entry **head, struct path_entry **tail)
+int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, char *needle, struct path_entry **head, struct path_entry **tail, uint8_t *max_fname_length)
 {
 
 	unsigned short 		counter, found;
@@ -1671,6 +1659,8 @@ int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, ch
 
 	found = counter = 0;
 	*head = *tail = p = NULL;
+
+	*max_fname_length = 0;
 
 	fs_acorn_to_unix(needle, f->server->config->fs_infcolon);
 
@@ -1703,6 +1693,8 @@ int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, ch
 		   )	// Exclude the special directories in case we have COLONMAP turned on
 		{
 
+			uint8_t		fname_length;
+
 			found++;
 
 			new_p = malloc(sizeof(struct path_entry));	
@@ -1732,6 +1724,13 @@ int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, ch
 	
 			fs_unix_to_acorn(new_p->acornname);
 	
+			/* Track max filename length in this selection, goes back into the path structure from calling function
+			 * to enable padding to be tailored.
+			 */
+
+			if ((fname_length = strlen(new_p->acornname)) > *max_fname_length)
+				*max_fname_length = fname_length;
+
 			sprintf (new_p->unixpath, "%s/%s", haystack, new_p->unixfname);
 	
 			if (stat(new_p->unixpath, &statbuf) != 0) // Error
@@ -1885,6 +1884,7 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 
 	result->npath = 0;
 	result->paths = result->paths_tail = NULL;
+	result->max_fname_length = 0; // Stores maximum filename length for display purposes
 
 	result->disc = -1; // Rogue so that we can tell if there was a discspec in the path
 
@@ -2398,7 +2398,7 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 
 			num_entries = fs_get_wildcard_entries(f, a->userid, result->unixpath, // Current search dir
 					acorn_path, // Current segment in Acorn format (which the function will convert)
-					&(result->paths), &(result->paths_tail));
+					&(result->paths), &(result->paths_tail), &(result->max_fname_length));
 
 			if (normalize_debug)
 			{
@@ -2815,6 +2815,7 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 
 			result->acornname[ECONET_MAX_FILENAME_LENGTH] = '\0';
 			fs_unix_to_acorn(result->acornname);
+			result->max_fname_length = strlen(result->acornname); // Only one result, so give its length
 
 		}
 		else	return 0; // Something wrong - that should have existed
@@ -4466,7 +4467,6 @@ void fsop_port99 (struct __fs_station *s, struct __econet_packet_aun *packet, ui
         {
                 /* Modify the three handles that are in every packet - assuming the packet is long enough - if we are not in manyhandle mode */
 
-                //if (!FS_CONFIG(s,fs_manyhandle)) // NFS 3 / BBC B compatible handles
 		if (active)
                 {
 			// Don't modify for LOAD, SAVE, RUNAS, (GETBYTE, PUTBYTE - not in this loop), GETBYTES, PUTBYTES - all of which either don't have the usual three handles in the tx block or use the URD for something else

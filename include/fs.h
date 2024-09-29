@@ -290,6 +290,7 @@ struct path {
         unsigned char monthyear; // Top 4 bits years since 1981; bottom four are month (Not very y2k...)
         unsigned char hour, min, sec; // Hours mins sec of modification time
         unsigned char c_day, c_monthyear, c_hour, c_min, c_sec; // Date/time of Creation
+	uint8_t max_fname_length; // Maximum length of any filename matching this query
         struct path_entry *paths, *paths_tail; // pointers to head and tail of a linked like of path_entry structs. These are dynamically malloced by the wildcard normalize function and must be freed by the caller. If FS_FTYPE_NOTFOUND, then both will be NULL.
 };
 
@@ -773,6 +774,7 @@ extern void fsop_lsb_reply (char *, uint8_t, uint32_t);
 
 /* Externs for fileserver control from fs.c */
 
+extern uint8_t fs_get_maxdiscs();
 extern void fsop_shutdown(struct __fs_station *);
 extern int fs_normalize_path(int, int, unsigned char *, short, struct path *);
 extern int fs_normalize_path_wildcard(int, int, unsigned char *, short, struct path *, unsigned short);
@@ -1008,6 +1010,7 @@ FSOP_00_EXTERN(SETOWNER);
 FSOP_00_EXTERN(SETPASS);
 FSOP_00_EXTERN(UNLINK);
 
-/* From fs.c - master fileserver list */
+extern short fs_sevenbitbodge;
+extern short normalize_debug;
+extern uint8_t fs_set_syst_bridgepriv;
 
-extern struct __fs_station *fileservers;

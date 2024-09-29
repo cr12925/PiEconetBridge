@@ -29,6 +29,7 @@ FSOP(03)
 	int replylen, replyseglen;
 	unsigned short examined, dirsize;
 	char acornpathfromroot[1024];
+	uint8_t		pad_length = 10;
 
 	relative_to = FSOP_CWD;
 	arg = FSOP_ARG;
@@ -73,7 +74,6 @@ FSOP(03)
 		return;
 	}
 
-
 	// Wildcard code
 
 	strcpy(acornpathfromroot, path);
@@ -95,6 +95,11 @@ FSOP(03)
 			fsop_error(f, 0xD6, "Not found");
 		return;
 	}
+
+	if (pt.max_fname_length > 40)
+		pad_length = 90; // Pad to two lines, and add 10 characters to get us to the start of the load address
+	if (pt.max_fname_length > 10)
+		pad_length = 50; // Pad to one line, and add 10 characters to get us to start of load address
 
 	e = pt.paths;
 
@@ -187,9 +192,13 @@ FSOP(03)
 						((e->perm & FS_PERM_OTH_W) ? (FS_CONFIG(f->server,fs_mdfsinfo) ? (is_owner ? "w" : "W") : "W") : ""),
 						((e->perm & FS_PERM_OTH_R) ? (FS_CONFIG(f->server,fs_mdfsinfo) ? (is_owner ? "r" : "R") : "R") : "") );
 
-					sprintf(permstring_both, "%s/%s", permstring_l, permstring_r);
+					sprintf(permstring_both, "%4s/%s", permstring_l, permstring_r);
 
-					sprintf (hr_fmt_string, "%%-%ds %%08lX %%08lX   %%06lX   %%-7s     %%02d/%%02d/%%02d %%06lX", ECONET_MAX_FILENAME_LENGTH);
+#if 0
+					sprintf (hr_fmt_string, "%%-%ds %%08lX %%08lX   %%06lX   %%-7s    %%02d/%%02d/%%02d %%06lX", ECONET_MAX_FILENAME_LENGTH);
+#else
+					sprintf (hr_fmt_string, "%%-%ds %%08lX %%08lX   %%06lX   %%-7s    %%02d/%%02d/%%02d %%06lX", pad_length);
+#endif
 
 					sprintf (tmp, hr_fmt_string,
 						e->acornname,

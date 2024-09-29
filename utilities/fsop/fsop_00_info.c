@@ -69,10 +69,10 @@ FSOP_00(INFO)
                         if (FS_CONFIG(f->server,fs_mask_dir_wrr) && pt.ftype == FS_FTYPE_DIR && (pt.perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == FS_ACORN_DIR_MASK)
                                 pt.perm &= ~(FS_ACORN_DIR_MASK);
 
-                        if (pt.perm & FS_PERM_L) strcat (permstring, "L");
-			if (pt.perm & FS_PERM_EXEC) strcat (permstring, "E");
-                        if (pt.perm & FS_PERM_OWN_W) strcat (permstring, (is_owner ? "W" : mdfsinfo ? "w" : "W"));
-                        if (pt.perm & FS_PERM_OWN_R) strcat (permstring, (is_owner ? "R" : mdfsinfo ? "r" : "R"));
+                        if (pt.perm & FS_PERM_L) strcat (permstring, "L"); else strcat (permstring, " ");
+			if (pt.perm & FS_PERM_EXEC) strcat (permstring, "E"); else strcat (permstring, " ");
+                        if (pt.perm & FS_PERM_OWN_W) strcat (permstring, (is_owner ? "W" : mdfsinfo ? "w" : "W")); else strcat (permstring, " ");
+                        if (pt.perm & FS_PERM_OWN_R) strcat (permstring, (is_owner ? "R" : mdfsinfo ? "r" : "R")); else strcat (permstring, " ");
                         strcat (permstring, "/");
                         if (pt.perm & FS_PERM_OTH_W) strcat (permstring, (mdfsinfo ? (is_owner ? "w" : "W") : "W"));
                         if (pt.perm & FS_PERM_OTH_R) strcat (permstring, (mdfsinfo ? (is_owner ? "r" : "R") : "R"));
@@ -80,7 +80,7 @@ FSOP_00(INFO)
                         if (mdfsinfo)
                         {
                                 // Longer output
-                                sprintf(hr_fmt_string, "%%-%ds %%08lX %%08lX   %%06lX    %%-7s   %%02d/%%02d/%%02d %%02d/%%02d/%%02d %%02d:%%02d:%%02d %%06lX%%c%%c", ECONET_MAX_FILENAME_LENGTH);
+                                sprintf(hr_fmt_string, "%%-%ds %%08lX %%08lX   %%06lX   %%-7s    %%02d/%%02d/%%02d %%02d/%%02d/%%02d %%02d:%%02d:%%02d%%c%%c", ECONET_MAX_FILENAME_LENGTH);
                                 sprintf(reply_string, hr_fmt_string, pt.acornname, pt.load, pt.exec, pt.length, permstring,
                                                 fs_day_from_two_bytes(pt.c_day, pt.c_monthyear),
                                                 fs_month_from_two_bytes(pt.c_day, pt.c_monthyear),
@@ -89,11 +89,11 @@ FSOP_00(INFO)
                                                 fs_month_from_two_bytes(pt.day, pt.monthyear),
                                                 fs_year_from_two_bytes(pt.day, pt.monthyear),
                                                 pt.hour, pt.min, pt.sec,
-                                                pt.internal, 0x0d, 0x80);
+                                                0x0d, 0x80);
                         }
                         else
                         {
-                                sprintf(hr_fmt_string, "%%-%ds %%08lX %%08lX   %%06lX    %%-7s   %%02d/%%02d/%%02d %%06lX%%c%%c", ECONET_MAX_FILENAME_LENGTH);
+                                sprintf(hr_fmt_string, "%%-%ds %%08lX %%08lX   %%06lX   %%-7s    %%02d/%%02d/%%02d %%06lX%%c%%c", ECONET_MAX_FILENAME_LENGTH);
                                 sprintf(reply_string, hr_fmt_string, pt.acornname, pt.load, pt.exec, pt.length, permstring,
                                                 fs_day_from_two_bytes(pt.day, pt.monthyear),
                                                 fs_month_from_two_bytes(pt.day, pt.monthyear),
