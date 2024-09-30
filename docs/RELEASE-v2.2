@@ -23,7 +23,7 @@ RELEASE NOTES FOR V2.2
 - Limit on number of logged on users and open files (at system level)
   removed. (Limit on maximum number of handles for a logged in user
   remains 30.)
-- Fileserver now dynamiccally allocates memory instead of statically,
+- Fileserver now dynamically allocates memory instead of statically,
   which should save on RAM
 - *FLOG has been removed in favour of *LOGOFF
 - *PRIV will now take an expanded privilege parameter (see docs)
@@ -36,6 +36,11 @@ RELEASE NOTES FOR V2.2
   handles a user can have based on their machine type / NFS version.
 - The FS will now send larger data burst packets to Archimedes and
   RISC PC class machines, if it discovers one at login
+- Human-readable output of FS Examine now pads filenames
+  to 10, 40 or 80 characters depending on the length of the longest
+  filename in the directory in question, in order to make output tidier.
+  *INFO output modified similarly based on length of the one filename
+  being returned.
 - The previous, rather heavyweight, load dequeuer has been retired
   in favour of one which simply reads the relevant file on demand.
 - Legacy configuration form is now internally converted to JSON
