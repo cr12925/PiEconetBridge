@@ -4379,7 +4379,7 @@ void fs_pibridge (int server, uint8_t reply_port, uint16_t active_id, uint8_t ne
 }
 
 // Set boot option
-void fs_set_bootopt(int server, unsigned char reply_port, unsigned int userid, unsigned short net, unsigned short stn, unsigned char *data)
+void fs_set_bootopt(int server, unsigned char reply_port, int userid, unsigned short net, unsigned short stn, unsigned char *data)
 {
 
 	unsigned char new_bootopt;
@@ -4387,6 +4387,13 @@ void fs_set_bootopt(int server, unsigned char reply_port, unsigned int userid, u
 	int		active_id;
 
 	new_bootopt = *(data+5);
+
+	if (userid < 0)
+	{
+		fs_debug (0, 2, "%12sfrom %3d.%3d Set boot option %d - prohibited - bad user ID", "", net, stn, new_bootopt);
+		fs_error(server, reply_port, net, stn, 0xBD, "Bad user ID");
+		return;
+	}
 
 	/* 
 	 * Check if user can change boot opt
@@ -9716,7 +9723,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 {
 
 	unsigned char fsop, reply_port; 
-	unsigned int userid;
+	int userid;
 	int active_id;
 
 	// If server disabled, return without doing anything
@@ -10472,7 +10479,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					unsigned char 	params[256];
 					unsigned char 	username[11];
 					uint8_t		new_opt;
-					short		uid;
+					int		uid;
 
 					fs_copy_to_cr(params, param, 255);
 
