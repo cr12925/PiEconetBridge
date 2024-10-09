@@ -1539,7 +1539,7 @@ int fs_find_userid(int server, unsigned char net, unsigned char stn)
 
 	while (index < ECONET_MAX_FS_USERS)
 	{
-		if (active[server][index].net == net && active[server][index].stn == stn)
+		if (active[server][index].net == (net == 0 ? fs_stations[server].net : net) && active[server][index].stn == stn)
 			return active[server][index].userid;
 	
 		index++;
