@@ -762,6 +762,30 @@ extern uint8_t eb_enqueue_input (struct __eb_device *, struct __econet_packet_au
 extern void eb_debug_fmt (uint8_t, uint8_t, char *, char *);
 void eb_debug (uint8_t, uint8_t, char *, char *, ...);
 
+/* externs within econet-hpbridge.c used by ...devinit.c */
+
+extern struct __eb_device * eb_device_init (uint8_t, uint16_t, uint8_t);
+extern struct __eb_device * eb_new_local (uint8_t, uint8_t, uint16_t);
+extern void eb_set_whole_wire_net (uint8_t, struct __eb_device *);
+extern void eb_set_single_wire_host (uint8_t, uint8_t);
+extern void * eb_malloc (char *, int line, char *, char *, size_t);
+
+/* Globals in econet-hpbridge.c used by ...devinit.c */
+
+extern struct __eb_device 	* trunks;
+extern struct __eb_device	* networks[];
+extern struct __eb_aun_remote	* aun_remotes;
+
+/* externs within econet-hpbridge-devinit.c */
+
+extern uint8_t	eb_device_init_wire (uint8_t, char *);
+extern uint8_t	eb_device_init_singletrunk (char *, uint16_t, uint16_t, char *);
+extern uint8_t 	eb_device_init_dynamic (uint8_t, uint8_t);
+extern uint8_t	eb_device_init_fs (uint8_t, uint8_t, char *);
+extern uint8_t	eb_device_init_ps (uint8_t, uint8_t, char *, char *, char *);
+extern uint8_t 	eb_device_init_ps_handler (uint8_t, uint8_t, char *, char *);
+extern uint8_t	eb_device_init_ip (uint8_t, uint8_t, char *, uint32_t, uint32_t);
+
 /* JSON */
 
 uint8_t eb_readconfig_json(char *);

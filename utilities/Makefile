@@ -6,8 +6,8 @@ fsop_objects := $(patsubst %.c,%.o,$(wildcard fsop/*.c))
 
 all:	econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers econet-poke econet-isnets
 
-econet-hpbridge:	Makefile econet-hpbridge.o fsv2.o econet-hpbridge-json.o $(fsop_objects)
-	if [ -f .noexplain ]; then cc $(CFLAGS) -o econet-hpbridge econet-hpbridge.o fsv2.o econet-hpbridge-json.o $(fsop_objects) -lpthread -lssl -lcrypto -ljson-c; else cc $(CFLAGS) -o econet-hpbridge econet-hpbridge.o fsv2.o econet-hpbridge-json.o $(fsop_objects) -lpthread -lssl -lcrypto -lexplain -ljson-c; fi
+econet-hpbridge:	Makefile econet-hpbridge.o econet-hpbridge-devinit.o fsv2.o econet-hpbridge-json.o $(fsop_objects)
+	if [ -f .noexplain ]; then cc $(CFLAGS) -o econet-hpbridge econet-hpbridge.o econet-hpbridge-devinit.o fsv2.o econet-hpbridge-json.o $(fsop_objects) -lpthread -lssl -lcrypto -ljson-c; else cc $(CFLAGS) -o econet-hpbridge econet-hpbridge.o econet-hpbridge-devinit.o fsv2.o econet-hpbridge-json.o $(fsop_objects) -lpthread -lssl -lcrypto -lexplain -ljson-c; fi
 	-chgrp econet econet-hpbridge
 
 $(fsop_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
@@ -15,6 +15,9 @@ $(fsop_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consum
 
 econet-hpbridge.o:	Makefile econet-hpbridge.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-pserv.h
 	cc $(CFLAGS) -I../include -I/usr/include/json-c -DGIT_VERSION=\"$(GIT_VERSION)\" -c econet-hpbridge.c -Wall
+
+econet-hpbridge-devinit.o:	Makefile econet-hpbridge-devinit.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-pserv.h
+	cc $(CFLAGS) -I../include -I/usr/include/json-c -DGIT_VERSION=\"$(GIT_VERSION)\" -c econet-hpbridge-devinit.c -Wall
 
 econet-hpbridge-json.o:	Makefile econet-hpbridge-json.c ../include/econet-hpbridge.h
 	cc $(CFLAGS) -I../include -I/usr/include/json-c -DGIT_VERSION=\"$(GIT_VERSION)\" -c econet-hpbridge-json.c -Wall

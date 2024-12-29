@@ -17,7 +17,7 @@
 
 // #define IPV6_TRUNKS
 
-#define EB_JSONCONFIG
+//#define EB_JSONCONFIG
 #define _GNU_SOURCE
 
 #include "econet-hpbridge.h"
@@ -8525,8 +8525,13 @@ int eb_readconfig(char *f, char *json)
 			{
 				uint8_t			net;
 				char			device[128];
+#ifndef EB_JSONCONFIG
+				/* Old - moved to devinit
 				struct __eb_device	*p;
 				short			c_net, c_stn;
+				*/
+#endif
+
 #ifdef EB_JSONCONFIG
 				struct json_object	*wire, *econets;
 #endif
@@ -8542,52 +8547,18 @@ int eb_readconfig(char *f, char *json)
 				json_object_object_add(wire, "diverts", json_object_new_array());
 				json_object_object_add(wire, "pool-assignment", json_object_new_array());
 				json_object_array_add(econets, wire);
+#else
+				eb_device_init_wire (net, device);
 #endif
-						
-				p = eb_device_init (net, EB_DEF_WIRE, 0);
-
-				if ((p->wire.device = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create wire device string", strlen(device)+1)))
-					strcpy(p->wire.device, device);
-				else	eb_debug (1, 0, "CONFIG", "Cannot malloc space for device name for wire network %d", net);
-
-				gettimeofday (&(p->wire.last_tx), 0); // Reset last transmission counter
-			
-				memset (&(p->wire.divert), 0, sizeof (p->wire.divert));
-	
-				/* Initialize sequence numbers for wire machines */
-
-				for (c_net = 0; c_net < 256; c_net++)
-					for (c_stn = 0; c_stn < 256; c_stn++)
-						p->wire.seq[c_net][c_stn] = 0x4000; 
-
-				ECONET_INIT_STATIONS(p->wire.stations);
-				ECONET_SET_STATION((p->wire.stations), 255, 255); // Catch broadcasts
-
-				/* Now ensure that we put this network in all the *other* wire device stations[] lists */
-				
-				eb_set_whole_wire_net (net, p);
-
-				memset (&(p->wire.filter_in), 0, 256);
-				memset (&(p->wire.filter_out), 0, 256);
-
-				p->wire.period = p->wire.mark = 0;
-
-				p->wire.pool = NULL;
-				memset(&(p->wire.use_pool), 0, sizeof(p->wire.use_pool));
-
-				// Initialize bridge response timers
-			
-				memset (&(p->wire.last_bridge_whatnet), 0, sizeof(p->wire.last_bridge_whatnet));
-				memset (&(p->wire.last_bridge_isnet), 0, sizeof(p->wire.last_bridge_isnet));
-				
-				
 			}
 			else if (!regexec(&r_trunk, line, 4, matches, 0) ||
 				(!regexec(&r_trunk_plaintext, line, 3, matches, 0) && (is_plaintext = 1)))
 			{
-				struct __eb_device	*p;
 				char *			destination;
 				char *			colon;
+				uint16_t		local_port, remote_port;
+				// Old uint8_t			is_dynamic;
+				char *			psk;
 #ifdef EB_JSONCONFIG
 				struct json_object	*jtrunk, *jtrunks;
 #endif
@@ -8595,98 +8566,63 @@ int eb_readconfig(char *f, char *json)
 				if (!regexec(&r_trunk_plaintext, line, 3, matches, 0))
 					is_plaintext = 1; // Old non-keyed trunk - cannot do dynamic
 
+				destination = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create Trunk destination host string", strlen(eb_getstring(line, &matches[2])) + 1);
+				if (!destination)	eb_debug (1, 0, "CONFIG", "Unable to malloc() string for trunk destination %s", eb_getstring(line, &matches[2]));
+
+				strncpy (destination, eb_getstring(line, &matches[2]), strlen(eb_getstring(line, &matches[2])) + 1);
+				local_port = atoi(eb_getstring(line, &matches[1]));
+				remote_port = 0;
+
+				/* Old
+				is_dynamic = 0;
+				*/
+
+				if (!strcasecmp(destination, "dynamic") && !is_plaintext)
+				{
+					eb_free(__FILE__, __LINE__, "CONFIG", "Free unused trunk destination host string", destination);
+					destination = NULL;
+				}
+				else
+				{
+					colon = strchr(destination, ':');
+					if (!colon)	eb_debug (1, 0, "CONFIG", "Bad configuration line - no port specifier on trunk destination: %s", destination);
+					*colon = '\0';
+					colon++; // Now points to port
+					remote_port = atoi(colon);
+
+				}
+
+				if (!is_plaintext)
+				{
+					psk = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create trunk shared key string", 32);
+						
+					// Pad supplied key with zeros
+					memset (psk, 0, 32);
+	
+					if (!psk)
+						eb_debug (1, 0, "CONFIG", "Unable to malloc() string for trunk shared key - trunk port %d", local_port);
+					strncpy ((char *) psk, eb_getstring (line, &matches[3]), strlen(eb_getstring(line, &matches[3])) + 1);
+				}
+				else	psk = NULL;
+
 #ifdef EB_JSONCONFIG
 				json_object_object_get_ex(jc, "trunks", &jtrunks);
 				jtrunk = json_object_new_object();
 				json_object_object_add(jtrunk, "nat", json_object_new_array());
 				json_object_object_add(jtrunk, "pool-assignment", json_object_new_array());
-#endif
-
-				/* Make our struct */
-
-				p = eb_device_init (0, EB_DEF_TRUNK, 0);
-
-				destination = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create Trunk destination host string", strlen(eb_getstring(line, &matches[2])) + 1);
-				strncpy (destination, eb_getstring(line, &matches[2]), strlen(eb_getstring(line, &matches[2])) + 1);
-
-				if (!destination)	eb_debug (1, 0, "CONFIG", "Unable to malloc() string for trunk destination %s", eb_getstring(line, &matches[2]));
-
-				p->trunk.local_port = atoi(eb_getstring(line, &matches[1]));
-				p->trunk.head = NULL;
-				p->trunk.tail = NULL;
-				memset (&(p->trunk.xlate_in), 0, 256);
-				memset (&(p->trunk.xlate_in), 0, 256);
-				memset (&(p->trunk.filter_in), 0, 256);
-				memset (&(p->trunk.filter_out), 0, 256);
-
-#ifdef EB_JSONCONFIG
-				json_object_object_add(jtrunk, "local-port", json_object_new_int(atoi(eb_getstring(line, &matches[1]))));
-#endif
-
-				p->trunk.pool = NULL;
-				memset(&(p->trunk.use_pool), 0, sizeof(p->trunk.use_pool));
-
-				// Flag NOT part of multitrunk
-
-				p->trunk.multitrunk_parent = NULL;
-
-				// Initialize shared key to NULL so we can tell if it is unset
-				p->trunk.sharedkey = NULL;
-
-				if (!strcasecmp(destination, "dynamic") && !is_plaintext) // Insist on encrypted traffic if remote is dynamic IP
+				json_object_object_add(jtrunk, "local-port", json_object_new_int(local_port));
+				// Old if (!is_dynamic)
+				if (destination) /* Not dyunamic */
 				{
-					p->trunk.is_dynamic = 1;
-					p->trunk.remote_port = 0;
-					p->trunk.hostname = NULL;
-				}
-				else
-				{
-					// Traditional, end-identified trunk
-					p->trunk.is_dynamic = 0;
-
-					colon = strchr(destination, ':');
-
-					if (!colon)	eb_debug (1, 0, "CONFIG", "Bad configuration line - no port specifier on trunk destination: %s", destination);
-				
-					*colon = '\0';
-
-					colon++; // Now points to port
-
-					p->trunk.remote_port = atoi(colon);
-					p->trunk.hostname = destination;
-#ifdef EB_JSONCONFIG
-					json_object_object_add(jtrunk, "remote-port", json_object_new_int(atoi(colon)));
+					json_object_object_add(jtrunk, "remote-port", json_object_new_int(remote_port));
 					json_object_object_add(jtrunk, "remote-host", json_object_new_string(destination));
-#endif
 				}
-	
 				if (!is_plaintext)
-				{
-					// Get the PSK
+					json_object_object_add(jtrunk, "key", json_object_new_string(psk));
 
-					p->trunk.sharedkey = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create trunk shared key string", 32);
-						
-					// Pad supplied key with zeros
-					memset (p->trunk.sharedkey, 0, 32);
-				
-
-					if (!(p->trunk.sharedkey))
-						eb_debug (1, 0, "CONFIG", "Unable to malloc() string for trunk shared key - trunk port %d", p->trunk.local_port);
-
-					strncpy ((char *) p->trunk.sharedkey, eb_getstring (line, &matches[3]), strlen(eb_getstring(line, &matches[3])) + 1);
-#ifdef EB_JSONCONFIG
-					json_object_object_add(jtrunk, "key", json_object_new_string(eb_getstring(line, &matches[3])));
-#endif
-				}
-				else
-					p->trunk.sharedkey = NULL;  // Rogue for 'don't encrypt'.
-
-				/* Put it on our list of trunks */
-
-				p->next = trunks; // Never sits in the devices list, because it doesn't have a network number
-				trunks = p;
-#ifdef EB_JSONCONFIG
 				json_object_array_add(jtrunks, jtrunk);
+#else
+				eb_device_init_singletrunk (destination, local_port, remote_port, psk);
 #endif
 				
 			}
@@ -8695,9 +8631,7 @@ int eb_readconfig(char *f, char *json)
 				//printf ("Identified as dynamic - network %s flags %s\n", eb_getstring(line, &matches[1]), eb_getstring(line, &matches[2]));
 
 				uint8_t			net;
-				struct __eb_device	*p;
 				uint8_t			flags = 0;
-				uint8_t			stn;
 #ifdef EB_JSONCONFIG
 				struct json_object	*general;
 #endif
@@ -8710,63 +8644,16 @@ int eb_readconfig(char *f, char *json)
 #ifdef EB_JSONCONFIG
 				json_object_object_get_ex(jc, "general", &general);
 				json_object_object_add(general, "dynamic", json_object_new_int(net));
+				if (flags & EB_DEV_CONF_AUTOACK)
+					json_object_object_add(general, "dynamic-autoack", json_object_new_boolean(TRUE));
+#else
+				eb_device_init_dynamic (net, flags);
+
 #endif
 
-				if (networks[net])
-					eb_debug (1, 0, "CONFIG", "Cannot configure net %d as dynamic station network - network already exists", net);
-				
-				p = eb_device_init (net, EB_DEF_NULL, flags);
-
-				for (stn = 254; stn > 0; stn--)
-				{
-					struct __eb_device	*r;
-					struct __eb_aun_remote	*a;
-	
-					r = eb_new_local (net, stn, EB_DEF_AUN);
-
-					p->null.divert[stn] = r;
-
-					a = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create AUN Host structure (in NET)", sizeof(struct __eb_aun_remote));
-
-					if (!a) eb_debug (1, 0, "CONFIG", "Unable to malloc() for remote AUN device %d.%d", net, stn);
-					
-					r->aun = a;
-
-					r->config = flags; /* Enable autoack if requested */
-
-					/* Initialize the aun struct */
-
-					a->stn = stn;
-					a->port = -1; // Dynamic
-					//strcpy (a->host, "");
-					// r->s_addr - later
-					a->eb_device = r; // Pointer to divert device
-					a->is_dynamic = 1;
-					a->b_in = a->b_out = 0; // Traffic stats
-
-					if (pthread_mutex_init(&(a->statsmutex), NULL) == -1)
-						eb_debug (1, 0, "CONFIG", "Cannot initialize stats mutex for AUN/IP exposure at %d.%d", net, stn);
-
-					if (pthread_mutex_init(&(a->updatemutex), NULL) == -1)
-						eb_debug (1, 0, "CONFIG", "Cannot initialize update mutex for AUN/IP exposure at %d.%d", net, stn);
-
-					a->last_dynamic.tv_sec = a->last_dynamic.tv_usec = 0; // Last traffic the epoch
-					a->next = NULL;
-
-					/* Maintain our list of remote AUN hosts */
-
-					if (aun_remotes)	a->next = aun_remotes;
-					aun_remotes = a;
-
-					//fprintf (stderr, "AutoAck status for %d.%d is %s (matches[2] = %s)\n", r->net, a->stn, (r->config & EB_DEV_CONF_AUTOACK) ? "On" : "Off", eb_getstring(line, &matches[2]));
-				}
-
-				eb_set_whole_wire_net (net, NULL);
-				
 			}
 			else if (!regexec(&r_fileserver, line, 3, matches, 0))
 			{
-				struct __eb_device	*existing;
 				uint8_t			net, stn;
 #ifdef EB_JSONCONFIG
 				struct json_object	*jnet, *divert, *jfs, *diverts;
@@ -8774,24 +8661,6 @@ int eb_readconfig(char *f, char *json)
 
 				if (sscanf(eb_getstring(line, &matches[1]), "%3hhd.%3hhd", &net, &stn) != 2)
 					eb_debug (1, 0, "CONFIG", "Bad station ID for fileserver in config line %s", line);
-
-				existing = eb_new_local (net, stn, EB_DEF_LOCAL); // Barfs and quits if cannot do this.
-	
-				if (!existing)	eb_debug (1, 0, "CONFIG", "Unable to create fileserver device on %d.%d", net, stn);
-
-				if (existing->local.fs.rootpath) // Already a fileserver
-					eb_debug (1, 0, "CONFIG", "Cannot create fileserver at %s - already a fileserver", eb_getstring(line, &matches[1]));
-
-				existing->local.fs.rootpath = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create FS rootpath string", strlen(eb_getstring(line, &matches[2])) + 1);
-
-				if (!(existing->local.fs.rootpath))
-					eb_debug (1, 0, "CONFIG", "Unable to malloc() fileserver path %s\n", eb_getstring(line, &matches[2]));
-
-				existing->local.fs.b_in = existing->local.fs.b_out = 0; // Traffic stats
-
-				if (pthread_mutex_init(&(existing->statsmutex), NULL) == -1)
-					eb_debug (1, 0, "CONFIG", "Cannot initialize stats mutex for fileserver at %d.%d", net, stn);
-
 #ifdef EB_JSONCONFIG
 				jnet = eb_json_get_net_makevirtual(jc, net);
 
@@ -8801,20 +8670,17 @@ int eb_readconfig(char *f, char *json)
 					eb_debug (1, 0, "JSON", "Fileserver already exists on %d.%d", net, stn);
 
 				json_object_object_add(divert, "fileserver-path", json_object_new_string(eb_getstring(line, &matches[2])));
+#else
+				eb_device_init_fs (net, stn, eb_getstring(line, &matches[2]));
 #endif
-				/* Put this in all wire station[] maps */
-
-				eb_set_single_wire_host (net, stn);
-
-				strncpy(existing->local.fs.rootpath, eb_getstring(line, &matches[2]), strlen(eb_getstring(line, &matches[2])) + 1);
 
 			}
 			else if (!regexec(&r_printserver, line, 4, matches, 0) || !regexec(&r_printserver_user, line, 5, matches, 0))
 			{
-				struct __eb_device	*existing;
-				struct __eb_printer	*printer, *current_printers;
 				uint8_t			net, stn;
 				char			acorn_printer[7], unix_printer[128];
+				char			user[11];
+
 #ifdef EB_JSONCONFIG
 				struct json_object	*jnet, *jps, *jpusers, *diverts, *divert, *jprinter;
 #endif
@@ -8832,67 +8698,34 @@ int eb_readconfig(char *f, char *json)
 				divert = eb_json_get_divert_makenew(diverts, stn);
 				json_object_object_get_ex(divert, "printers", &jps);
 				jprinter = json_object_new_object();
-#endif
-
-				existing = eb_new_local (net, stn, EB_DEF_LOCAL);
-
-				if (!existing)	eb_debug (1, 0, "CONFIG", "Unable to create printserver device on %d.%d", net, stn);
-
-				printer = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create printer struct", sizeof(struct __eb_printer));
-
-				if (!printer)	eb_debug (1, 0, "CONFIG", "Unable to malloc() for printer on %d.%d (%s)", net, stn, acorn_printer);
-				
-				printer->priority = 1;
-				printer->isdefault = 1;
-				strcpy (printer->acorn_name, acorn_printer);
-				strcpy (printer->unix_name, unix_printer);
-				printer->status = PRN_IN_READY | PRN_OUT_READY;
-				printer->control = PRNCTRL_DEFAULT;
-				printer->printjobs = NULL;
-				strcpy (printer->handler, ""); // Null handler
-
-#ifdef EB_JSONCONFIG
 				json_object_object_add(jprinter, "acorn-name", json_object_new_string(acorn_printer));
 				json_object_object_add(jprinter, "unix-name", json_object_new_string(unix_printer));
 				json_object_object_add(jprinter, "priority", json_object_new_int(json_object_array_length(jps) + 1));
 				json_object_object_add(jprinter, "default", json_object_new_boolean(json_object_array_length(jps) == 0 ? TRUE : FALSE));
 #endif
-				/* Put this in all wire station[] maps */
+				strcpy (user, "");
 
-				eb_set_single_wire_host (net, stn);
-
-				if (!regexec(&r_printserver_user, line, 5, matches, 0))
+                                if (!regexec(&r_printserver_user, line, 5, matches, 0))
 				{
+					strcpy (user, eb_getstring(line, &matches[4]));
 #ifdef EB_JSONCONFIG
 					jpusers = json_object_new_array();
-					json_object_array_add(jpusers, json_object_new_string(eb_getstring(line, &matches[4])));
+					json_object_array_add(jpusers, json_object_new_string(user));
 					json_object_object_add(jprinter, "users", jpusers);
 #endif
-					strcpy (printer->user, eb_getstring(line, &matches[4]));
 				}
-				else	strcpy (printer->user, "");
-
-				current_printers = existing->local.printers;
-			
-				while (current_printers && current_printers->next)
-					current_printers = current_printers->next;
-				
-				printer->next = NULL;
-
-				if (current_printers)
-					current_printers->next = printer;
-				else	existing->local.printers = printer;
-
 #ifdef EB_JSONCONFIG
 				json_object_array_add(jps, jprinter);
+#else
+				eb_device_init_ps (net, stn, acorn_printer, unix_printer, user);
 #endif
 
 			}
 			else if (!regexec(&r_printhandler, line, 4, matches, 0))
 			{
 				uint8_t		net, stn;
-				struct __eb_device	*dev;
-				struct __eb_printer	*printer;
+				char		acorn_name[7], handler[128];
+
 #ifdef EB_JSONCONFIG
 				struct json_object	*jnet, *diverts, *divert, *jps, *jprinter;
 				uint8_t			jlength, jcount;
@@ -8901,28 +8734,9 @@ int eb_readconfig(char *f, char *json)
 				if (sscanf(eb_getstring(line, &matches[1]), "%3hhd.%3hhd", &net, &stn) != 2)
 					eb_debug (1, 0, "CONFIG", "Bad station ID for print handelr configuration line %s", line);
 
-				dev = networks[net];
+				strncpy (acorn_name, eb_getstring(line, &matches[2]), 6);
 
-				if (!dev)
-					eb_debug (1, 0, "CONFIG", "Cannot configure print handler on undefined station %s", eb_getstring(line, &matches[1]));
-
-				if (dev->type != EB_DEF_WIRE && dev->type != EB_DEF_NULL)
-					eb_debug (1, 0, "CONFIG", "Cannot configure print handler on station that is not a local emulator %s", eb_getstring(line, &matches[1]));
-
-				if (dev->type == EB_DEF_WIRE)
-					dev = dev->wire.divert[stn];
-				else	dev = dev->null.divert[stn];
-
-				if (dev->type != EB_DEF_LOCAL)
-					eb_debug (1, 0, "CONFIG", "Cannot configure print handler on station that is not a local emulator %s", eb_getstring(line, &matches[1]));
-
-				printer = dev->local.printers;
-
-				while (strncasecmp(printer->acorn_name, eb_getstring(line, &matches[2]), 6) && printer)
-					printer = printer->next;
-
-				if (!printer)
-					eb_debug (1, 0, "CONFIG", "Unknown printer %s on station %s - cannot set print handler", eb_getstring(line, &matches[2]), eb_getstring(line, &matches[1]));
+				strncpy (handler, eb_getstring(line, &matches[3]), 126);
 				
 #ifdef EB_JSONCONFIG
 			
@@ -8955,7 +8769,7 @@ int eb_readconfig(char *f, char *json)
 
 						if (json_object_object_get_ex(jprinter, "acorn-name", &acorn_name))
 						{
-							if (!strcasecmp(eb_getstring(line, &matches[3]), json_object_get_string(acorn_name)))
+							if (!strcasecmp(acorn_name, json_object_get_string(acorn_name)))
 							{
 								/* Found */
 
@@ -8970,16 +8784,15 @@ int eb_readconfig(char *f, char *json)
 					jcount++;
 				}
 				
+#else
+				eb_device_init_ps_handler (net, stn, acorn_name, handler);
 #endif
-				strncpy (printer->handler, eb_getstring(line, &matches[3]), 126);
 				
 			}
 			else if (!regexec(&r_ipserver, line, 4, matches, 0))
 			{
-				struct __eb_device	*existing;
 				char			addr[20], tunif[10];
 				uint8_t			net, stn;
-				struct __eip_addr	*local;
 				uint8_t			ip[4];
 				uint8_t			masklen;
 				uint32_t		ip_host, mask_host;
@@ -9004,37 +8817,6 @@ int eb_readconfig(char *f, char *json)
 				while (masklen-- > 0)
 					mask_host = (mask_host >> 1) | 0x80000000;
 				
-				existing = eb_new_local (net, stn, EB_DEF_LOCAL);
-
-				if (!existing)	eb_debug (1, 0, "CONFIG", "Unable to create IP server device on %d.%d", net, stn);
-
-				if (existing->local.ip.tunif[0] != '\0') // Already a tunnel server
-					eb_debug (1, 0, "CONFIG", "Unable to create IP gateway on %d.%d - already a gateway", net, stn);
-
-				strcpy (existing->local.ip.tunif, tunif);
-				strcpy (existing->local.ip.addr, addr);
-	
-				existing->local.ip.b_in = existing->local.ip.b_out = 0; // Traffic stats
-
-				if (pthread_mutex_init(&(existing->statsmutex), NULL) == -1)
-					eb_debug (1, 0, "CONFIG", "Cannot initialize stats mutex for IP server at %d.%d", net, stn);
-
-				/* Put this in all wire station[] maps */
-
-				eb_set_single_wire_host (net, stn);
-
-				local = eb_malloc (__FILE__, __LINE__, "IPGW", "Local IP address structure", sizeof(struct __eip_addr));
-
-				if (!local)
-					eb_debug (1, 0, "IPGW", "Unable to malloc() IP address structure");
-
-				local->next = NULL;
-				local->arp = NULL; // No ARP entries for now
-				local->ip = ip_host;
-				local->mask = mask_host;
-				local->ipq = NULL; // Queue of packets waiting for ARP replies
-
-				existing->local.ip.addresses = local;
 #ifdef EB_JSONCONFIG
 				jipaddr = json_object_new_object();
 				json_object_object_add(jipaddr, "interface", json_object_new_string(tunif));
@@ -9050,10 +8832,14 @@ int eb_readconfig(char *f, char *json)
 					eb_debug (1, 0, "JSON", "ipservers key missing from divert for %d.%d", net, stn);
 
 				json_object_array_add(ipservers, jipaddr);
-
+#else
+				eb_device_init_ip (net, stn, tunif, ip_host, mask_host);
 #endif
 
 			}
+
+// GOT HERE FOR JSON CONVERSION
+
 			else if (!regexec(&r_pipeserver, line, 5, matches, 0))
 			{
 
@@ -10444,8 +10230,8 @@ int main (int argc, char **argv)
 	int	optind;
 	struct rlimit	max_fds;
 	char 	config_path[256];
-#ifdef EB_JSONCONFIG
 	char	jsonconfig_path[256], jsonconfigout_path[256];
+#ifdef EB_JSONCONFIG
 	struct	json_object	*json_config;
 	struct 	stat		config_stat, json_stat;
 	int			config_stat_res, json_stat_res;
@@ -10529,6 +10315,9 @@ int main (int argc, char **argv)
 #ifdef EB_JSONCONFIG
 	strcpy (jsonconfig_path, "/etc/econet-gpio/econet-hpbridge.json");
 	strcpy (jsonconfigout_path, "");
+#else
+	strcpy (jsonconfig_path, "");
+	strcpy (jsonconfigout_path, "");
 #endif
 
 	/* Clear networks[] table */
@@ -10585,7 +10374,7 @@ int main (int argc, char **argv)
 #ifdef EB_JSONCONFIG
 		{"json-config-write", 	required_argument, 	0, 	0},
 #else
-		{"XXXX-json-config-write-disabled", 0		0,	0},
+		{"XXXX-json-config-write-disabled", 		0,	0},
 #endif
 		{0, 			0,			0,	0 }
 	};
