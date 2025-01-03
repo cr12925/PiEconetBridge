@@ -8619,22 +8619,17 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 	unsigned char readbuffer[FS_MAX_BULK_SIZE];
 
-	// Test
-	uint8_t		bigarray[20];
-
 	uint32_t	seq;
 
 	struct __econet_packet_udp r;
 
 	txport = *(data+2);
-	// Test
-	bigarray[10] = *(data+2);
 	offsetstatus = *(data+6);
 	bytes = (((*(data+7))) + ((*(data+8)) << 8) + (*(data+9) << 16));
 	offset = (((*(data+10))) + ((*(data+11)) << 8) + (*(data+12) << 16));
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX (%s) by user %04x on handle %02x, ctrl seq is %s (stored: %02X, received: %02X), data burst port &%02X (copy = &%02X)", "", net, stn, bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), active[server][active_id].userid, handle,
-		fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl) ? "OK" : "WRONG", active[server][active_id].fhandles[handle].sequence, ctrl, txport, bigarray[10]);
+	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX (%s) by user %04x on handle %02x, ctrl seq is %s (stored: %02X, received: %02X), data burst port &%02X", "", net, stn, bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), active[server][active_id].userid, handle,
+		fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl) ? "OK" : "WRONG", active[server][active_id].fhandles[handle].sequence, ctrl, txport);
 
 	if (active[server][active_id].fhandles[handle].handle == -1) // Invalid handle
 	{
@@ -8714,7 +8709,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 		// received = read(fileno(fs_files[server][internal_handle].handle), readbuffer, readlen);
 
-		fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() bulk transfer: bytes required %06lX, bytes already sent %06lX, buffer size %04X, ftell() = %06lX, bytes to read %06X, bytes actually read %06X - data burst port &%02X (copy = &%02X)", "", net, stn, bytes, sent, (unsigned short) sizeof(readbuffer), ftell(fs_files[server][internal_handle].handle), readlen, received, txport, bigarray[10]);
+		fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() bulk transfer: bytes required %06lX, bytes already sent %06lX, buffer size %04X, ftell() = %06lX, bytes to read %06X, bytes actually read %06X - data burst port &%02X", "", net, stn, bytes, sent, (unsigned short) sizeof(readbuffer), ftell(fs_files[server][internal_handle].handle), readlen, received, txport);
 
 		if (received != readlen) // Either FEOF or error
 		{
@@ -8754,8 +8749,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 		// Always send packets which total up to the amount of data the station requested, even if all the data is past EOF (because the station works that out from the closing packet)
 		databurst->p.ptype = ECONET_AUN_DATA;
-		//databurst->p.port = txport;
-		databurst->p.port = bigarray[10];
+		databurst->p.port = txport;
 		databurst->p.ctrl = 0x80;
 
 		if (received > 0)
