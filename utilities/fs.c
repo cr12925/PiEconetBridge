@@ -8795,6 +8795,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	
 		fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() Acknowledging %04lX tx bytes, cursor now %06lX", "", net, stn, sent, active[server][active_id].fhandles[handle].cursor);
 
+		comp.p.ptype = ECONET_AUN_DATA;
 		comp.p.port = reply_port;
 		//r.p.ctrl = 0x80;
 		comp.p.ctrl = ctrl; // Send the ctrl byte back to the station - MDFS does this on the close packet
