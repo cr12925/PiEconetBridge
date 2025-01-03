@@ -85,6 +85,11 @@ uint8_t fs_set_syst_bridgepriv = 0; // If set to 1 by the HP Bridge, then on ini
 	unsigned short fs_quiet = 0, fs_noisy = 0;
 #endif
 
+/* Malloc / free harness */
+
+extern void * eb_malloc (char *, int, char *, char *, size_t);
+extern void eb_free (char *, int, char *, char *, void *);
+
 extern uint32_t get_local_seq(unsigned char, unsigned char);
 
 // routine in econet-bridge.c to find a printer definition
@@ -1591,7 +1596,8 @@ int fs_check_dir(DIR *h, char *e,  char *r)
 unsigned char *pathname_to_dotfile(unsigned char *path, uint8_t infcolon)
 {
 	unsigned char *dotfile;
-	dotfile=malloc(strlen(path)+ECONET_ABS_MAX_FILENAME_LENGTH);
+	//dotfile=malloc(strlen(path)+ECONET_ABS_MAX_FILENAME_LENGTH);
+	dotfile = eb_malloc(__FILE__, __LINE__, "FS", "Dot file name", strlen(path)+ECONET_ABS_MAX_FILENAME_LENGTH);
 	strcpy(dotfile,path);
 	// If last character is a / then strip it off; we want the
 	// filename in the parent directory
@@ -1625,7 +1631,8 @@ void fs_read_attr_from_file(unsigned char *path, struct objattr *r, int server)
 
 	}
 
-	free(dotfile);
+	//free(dotfile);
+	eb_free(__FILE__, __LINE__, "FS", "Dot file name", dotfile);
 	return;
 }
 
@@ -1641,7 +1648,8 @@ void fs_write_attr_to_file(unsigned char *path, int owner, short perm, unsigned 
 	else
 		fs_debug (0, 1, "Could not open %s for writing: %s\n", path, strerror(errno));
 
-	free(dotfile);
+	//free(dotfile);
+	eb_free(__FILE__, __LINE__, "FS", "Dot file name", dotfile);
 	return;
 }
 
@@ -1680,7 +1688,8 @@ void fs_read_xattr(unsigned char *path, struct objattr *r, int server)
 
 	char *dotfile=pathname_to_dotfile(path, server);
 	int dotexists=access(dotfile, F_OK);
-	free(dotfile);
+	//free(dotfile);
+	eb_free(__FILE__, __LINE__, "FS", "Dot file name", dotfile);
 
 	if (!use_xattr || dotexists==0)
 	{
@@ -1741,7 +1750,8 @@ void fs_write_xattr(unsigned char *path, uint16_t owner, uint16_t perm, uint32_t
 	char *dotfile=pathname_to_dotfile(path, fs_config[server].fs_infcolon);
 	int dotexists=access(dotfile, F_OK);
 
-	free(dotfile);
+	//free(dotfile);
+	eb_free(__FILE__, __LINE__, "FS", "Dot file name", dotfile);
 
 	fs_read_xattr(path, &existing, server);
 
@@ -1935,7 +1945,8 @@ void fs_free_wildcard_list(struct path *p)
 	while (pointer != NULL)
 	{
 		pointer_next = pointer->next;
-		free (pointer);
+		//free (pointer);
+		eb_free (__FILE__, __LINE__, "FS", "Wildcard path entry", pointer);
 		pointer = pointer_next;
 	}	
 
@@ -1995,7 +2006,8 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 
 			found++;
 
-			new_p = malloc(sizeof(struct path_entry));	
+			//new_p = malloc(sizeof(struct path_entry));	
+			new_p = eb_malloc(__FILE__, __LINE__, "FS", "Wildcard path entry", sizeof(struct path_entry));	
 			new_p->next = NULL;
 			if (p == NULL)
 			{
@@ -2030,7 +2042,8 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 			if (stat(new_p->unixpath, &statbuf) != 0) // Error
 			{
 				fs_debug (0, 2, "Unable to stat %s", new_p->unixpath);
-				free (new_p);
+				//free (new_p);
+				eb_free (__FILE__, __LINE__, "FS", "Path entry structure", new_p);
 				counter++;
 				continue;
 			}
@@ -2041,7 +2054,8 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 			if (statx(0, new_p->unixpath, 0, STATX_BTIME, &statxbuf) != 0) // Error
 			{
 				fs_debug (0, 2, "Unable to statx %s", new_p->unixpath);
-				free (new_p);
+				//free (new_p);
+				eb_free (__FILE__, __LINE__, "FS", "Path entry structure", new_p);
 				counter++;
 				continue;
 			}
@@ -3366,7 +3380,8 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 	// automatically turn on "-x" mode.  This should work transparently
 	// for any filesystem that isn't currently inf'd 'cos reads will
 	// get the xattr and writes will create a new inf file
-	char *autoinf=malloc(strlen(serverparam)+15);
+	//char *autoinf=malloc(strlen(serverparam)+15);
+	char *autoinf=eb_malloc(__FILE__, __LINE__, "FS", "Autoinf file", strlen(serverparam)+15);
 	strcpy(autoinf,serverparam);
 	strcat(autoinf,"/auto_inf");
 	if (access(autoinf, F_OK) == 0)
@@ -3374,7 +3389,8 @@ int fs_initialize(struct __eb_device *device, unsigned char net, unsigned char s
 		fs_debug (0, 1, "Automatically turned on -x mode because of %s", autoinf);
 		use_xattr = 0;
 	}
-	free(autoinf);
+	//free(autoinf);
+	eb_free(__FILE__, __LINE__, "FS", "Autoinf file", autoinf);
 
 	sprintf(regex, "^(%s{1,16})", FSREGEX);
 	if (regcomp(&r_discname, regex, REG_EXTENDED) != 0)
@@ -7706,10 +7722,12 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 
 	fs_debug (0, 3, "to %3d.%3d              Enqueue packet length %04X type %d", net, stn, len, p->p.ptype);
 
-	u = malloc(len + 8);
+	//u = malloc(len + 8);
+	u = eb_malloc(__FILE__, __LINE__, "FS", "Load enqueue packet entry", len + 8);
 	memcpy(u, p, len + 8); // Copy the packet data off
 
-	q = malloc(sizeof(struct __pq)); // Make a new packet entry
+	//q = malloc(sizeof(struct __pq)); // Make a new packet entry
+	q = eb_malloc(__FILE__, __LINE__, "FS", "Load enqueue packet queue struct", sizeof(struct __pq)); // Make a new packet entry
 
 	if (!u || !q) return -1;
 
@@ -7756,7 +7774,8 @@ char fs_load_enqueue(int server, struct __econet_packet_udp *p, int len, unsigne
 
 		fs_debug (0, 4, "Making new packet queue entry for this server/net/src triple ");
 
-		n = malloc(sizeof(struct load_queue));
+		//n = malloc(sizeof(struct load_queue));
+		n = eb_malloc(__FILE__, __LINE__, "FS", "Load queue struct", sizeof(struct load_queue));
 
 		if (!n)
 		{
@@ -8600,17 +8619,22 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 	unsigned char readbuffer[FS_MAX_BULK_SIZE];
 
+	// Test
+	uint8_t		bigarray[20];
+
 	uint32_t	seq;
 
 	struct __econet_packet_udp r;
 
 	txport = *(data+2);
+	// Test
+	bigarray[10] = *(data+2);
 	offsetstatus = *(data+6);
 	bytes = (((*(data+7))) + ((*(data+8)) << 8) + (*(data+9) << 16));
 	offset = (((*(data+10))) + ((*(data+11)) << 8) + (*(data+12) << 16));
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX (%s) by user %04x on handle %02x, ctrl seq is %s (stored: %02X, received: %02X)", "", net, stn, bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), active[server][active_id].userid, handle,
-		fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl) ? "OK" : "WRONG", active[server][active_id].fhandles[handle].sequence, ctrl);
+	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX (%s) by user %04x on handle %02x, ctrl seq is %s (stored: %02X, received: %02X), data burst port &%02X (copy = &%02X)", "", net, stn, bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), active[server][active_id].userid, handle,
+		fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl) ? "OK" : "WRONG", active[server][active_id].fhandles[handle].sequence, ctrl, txport, bigarray[10]);
 
 	if (active[server][active_id].fhandles[handle].handle == -1) // Invalid handle
 	{
@@ -8671,7 +8695,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 	r.p.seq = seq;
 
-	fs_aun_send_noseq(&r, server, 2, net, stn);
+	//fs_aun_send_noseq(&r, server, 2, net, stn); // Moved to after the queue is built
 
 	fserroronread = 0;
 	sent = 0;
@@ -8680,6 +8704,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	while (sent < bytes)
 	{
 		unsigned short readlen;
+		struct __econet_packet_udp *databurst;
 
 		readlen = ((bytes - sent) > sizeof(readbuffer) ? sizeof(readbuffer) : (bytes - sent));
 
@@ -8689,7 +8714,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 		// received = read(fileno(fs_files[server][internal_handle].handle), readbuffer, readlen);
 
-		fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() bulk transfer: bytes required %06lX, bytes already sent %06lX, buffer size %04X, ftell() = %06lX, bytes to read %06X, bytes actually read %06X", "", net, stn, bytes, sent, (unsigned short) sizeof(readbuffer), ftell(fs_files[server][internal_handle].handle), readlen, received);
+		fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() bulk transfer: bytes required %06lX, bytes already sent %06lX, buffer size %04X, ftell() = %06lX, bytes to read %06X, bytes actually read %06X - data burst port &%02X (copy = &%02X)", "", net, stn, bytes, sent, (unsigned short) sizeof(readbuffer), ftell(fs_files[server][internal_handle].handle), readlen, received, txport, bigarray[10]);
 
 		if (received != readlen) // Either FEOF or error
 		{
@@ -8722,27 +8747,35 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 			}
 		}
 
+		databurst = eb_malloc(__FILE__, __LINE__, "FS", "fs_getbytes() databurst packet", 12 + readlen);
+
+		if (!databurst)
+			fs_debug (1, 0, "%12sfrom%3d.%3d Cannot malloc data burst packet length %d", "", net, stn, readlen);
+
 		// Always send packets which total up to the amount of data the station requested, even if all the data is past EOF (because the station works that out from the closing packet)
-		r.p.ptype = ECONET_AUN_DATA;
-		r.p.port = txport;
-		r.p.ctrl = 0x80;
+		databurst->p.ptype = ECONET_AUN_DATA;
+		//databurst->p.port = txport;
+		databurst->p.port = bigarray[10];
+		databurst->p.ctrl = 0x80;
 
 		if (received > 0)
-			memcpy(&(r.p.data), readbuffer, received);	
+			memcpy(&(databurst->p.data), readbuffer, received);	
 
 		if (received < readlen) // Pad rest of data
-			memset (&(r.p.data[received]), 0, readlen - received);
+			memset (&(databurst->p.data[received]), 0, readlen - received);
 
 		// The real FS pads a short packet to the length requested, but then sends a completion message (below) indicating how many bytes were actually valid
 
 		// Now put them on a load queue
 		//fs_aun_send(&r, server, readlen, net, stn);
 
-		fs_load_enqueue(server, &(r), readlen, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES, (sent == 0) ? 0 : 0/* 275 : 100 */ ); // Interpacket delay of 200ms didn't work. 300 did. Try 250.  This is purely to cope with RISC OS cocking a deaf'un on the data burst. Probably nobody noticed in the 1990s because hard discs were so slow compared to today. And it looks like we only need it on the first databurst packet.
+		fs_load_enqueue(server, databurst, readlen, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES, (sent == 0) ? 0 : 0/* 275 : 100 */ ); // Interpacket delay of 200ms didn't work. 300 did. Try 250.  This is purely to cope with RISC OS cocking a deaf'un on the data burst. Probably nobody noticed in the 1990s because hard discs were so slow compared to today. And it looks like we only need it on the first databurst packet.
 
 		seq = 0; // seq != 0 means start a new load queue, so always set to 0 here to add to same queue
 		sent += readlen;
 		total_received += received;
+
+		eb_free(__FILE__, __LINE__, "FS", "Freeing fs_getbytes() databurst packet", databurst);
 		
 	}
 
@@ -8755,22 +8788,28 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 		fs_error(server, reply_port, net, stn, 0xFF, "FS Error on read");
 	else
 	{
-		// Send a completion message
+		struct __econet_packet_udp comp;
+
+		// Send a completion message onto the queue
+		
 	
 		fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() Acknowledging %04lX tx bytes, cursor now %06lX", "", net, stn, sent, active[server][active_id].fhandles[handle].cursor);
 
-		r.p.port = reply_port;
+		comp.p.port = reply_port;
 		//r.p.ctrl = 0x80;
-		r.p.ctrl = ctrl; // Send the ctrl byte back to the station - MDFS does this on the close packet
-		r.p.data[0] = r.p.data[1] = 0;
-		r.p.data[2] = (eofreached ? 0x80 : 0x00);
-		r.p.data[3] = (total_received & 0xff);
-		r.p.data[4] = ((total_received & 0xff00) >> 8);
-		r.p.data[5] = ((total_received & 0xff0000) >> 16);
+		comp.p.ctrl = ctrl; // Send the ctrl byte back to the station - MDFS does this on the close packet
+		comp.p.data[0] = comp.p.data[1] = 0;
+		comp.p.data[2] = (eofreached ? 0x80 : 0x00);
+		comp.p.data[3] = (total_received & 0xff);
+		comp.p.data[4] = ((total_received & 0xff00) >> 8);
+		comp.p.data[5] = ((total_received & 0xff0000) >> 16);
 
 		// Now goes on a load queue
 		//fs_aun_send(&r, server, 6, net, stn);
-		fs_load_enqueue(server, &(r), 6, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES, 0);
+		fs_load_enqueue(server, &(comp), 6, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES, 300 /* 0 */); // Final close gets not listening sometimes - let's see if a delay helps. 
+
+		// Then trigger the whole thing to start
+		fs_aun_send_noseq(&r, server, 2, net, stn); 
 	}
 	
 }
