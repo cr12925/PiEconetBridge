@@ -8807,7 +8807,7 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 		// Now goes on a load queue
 		//fs_aun_send(&r, server, 6, net, stn);
-		fs_load_enqueue(server, &(comp), 6, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES, 300 /* 0 */); // Final close gets not listening sometimes - let's see if a delay helps. 
+		fs_load_enqueue(server, &(comp), 6, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES, 0); // Final close gets not listening sometimes - let's see if a delay helps. 
 
 		// Then trigger the whole thing to start
 		fs_aun_send_noseq(&r, server, 2, net, stn); 
