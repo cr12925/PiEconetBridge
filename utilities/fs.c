@@ -8198,23 +8198,25 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 
 	// Use the noseq variant so we can force the load_enqueue routine to start a new queue and trigger on the right sequence number.
 	
-	if (fs_aun_send_noseq(&r, server, 16, net, stn))
+	//if (fs_aun_send_noseq(&r, server, 16, net, stn)) // Moved below
 	{
 		// Send data burst
 
 		int collected, enqueue_result;
 
-		r.p.ctrl = 0x80;
-		r.p.port = data_port;
+		struct __econet_packet_udp db;
 
+		db.p.ptype = ECONET_AUN_DATA;
+		db.p.ctrl = 0x80;
+		db.p.port = data_port;
 
 		fseek (f, 0, SEEK_SET);
 
 		while (!feof(f))
 		{
-			collected = fread(&(r.p.data), 1, 1280, f);
+			collected = fread(&(db.p.data), 1, 1280, f);
 			
-			if (collected > 0) enqueue_result = fs_load_enqueue(server, &r, collected, net, stn, internal_handle, 1, sequence, FS_ENQUEUE_LOAD, 0); else enqueue_result = 0;
+			if (collected > 0) enqueue_result = fs_load_enqueue(server, &db, collected, net, stn, internal_handle, 1, sequence, FS_ENQUEUE_LOAD, 0); else enqueue_result = 0;
 
 			if (collected < 0 || enqueue_result < 0)
 			{
@@ -8228,14 +8230,18 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		
 		// Send the tail end packet
 	
-		r.p.data[0] = r.p.data[1] = 0x00;
-		r.p.port = reply_port;
-		r.p.ctrl = rxctrl;
+		db.p.data[0] = db.p.data[1] = 0x00;
+		db.p.port = reply_port;
+		db.p.ctrl = rxctrl;
 
-		fs_load_enqueue(server, &r, 2, net, stn, internal_handle, 1, sequence, FS_ENQUEUE_LOAD, 0);
+		fs_load_enqueue(server, &db, 2, net, stn, internal_handle, 1, sequence, FS_ENQUEUE_LOAD, 0);
 
 	}
 	
+	// And trigger the load
+	
+	fs_aun_send_noseq(&r, server, 16, net, stn);
+
 	//fs_close_interlock(server, internal_handle, 1); // Now closed by the dequeuer
 }
 
