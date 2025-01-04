@@ -4,7 +4,10 @@ CFLAGS=-g
 
 fsop_objects := $(patsubst %.c,%.o,$(wildcard fsop/*.c))
 
-all:	econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers econet-poke econet-isnets
+all:	econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers econet-poke econet-isnets unix2beeb
+
+unix2beeb:	unix2beeb.c
+	cc $(CFLAGS) -Wall -Wno-pointer-sign unix2beeb.c -o unix2beeb
 
 econet-hpbridge:	Makefile econet-hpbridge.o econet-hpbridge-devinit.o fsv2.o econet-hpbridge-json.o $(fsop_objects)
 	if [ -f .noexplain ]; then cc $(CFLAGS) -o econet-hpbridge econet-hpbridge.o econet-hpbridge-devinit.o fsv2.o econet-hpbridge-json.o $(fsop_objects) -lpthread -lssl -lcrypto -ljson-c; else cc $(CFLAGS) -o econet-hpbridge econet-hpbridge.o econet-hpbridge-devinit.o fsv2.o econet-hpbridge-json.o $(fsop_objects) -lpthread -lssl -lcrypto -lexplain -ljson-c; fi

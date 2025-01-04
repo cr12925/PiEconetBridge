@@ -31,6 +31,7 @@ install-utilities:	install-mkgroup build-utilities
 	sudo cp utilities/econet-hpbridge utilities/econet-monitor utilities/econet-test utilities/econet-clock utilities/econet-ledtest /usr/local/sbin
 	sudo cp utilities/econet-imm utilities/econet-ipgw utilities/econet-notify utilities/econet-remote utilities/econet-fslist utilities/econet-trace utilities/econet-servers utilities/econet-isnets /usr/local/bin
 	sudo cp utilities/remove_xattr utilities/xattr_to_dotfile /usr/local/bin
+	sudo cp utilities/unix2beeb /usr/local/bin
 	utilities/config-mangle config/econet-hpbridge.cfg-EconetPlusFileserver
 	utilities/config-mangle config/econet-hpbridge.cfg-EconetFSPlusAcornAUN
 	utilities/config-mangle config/econet-hpbridge.cfg-EconetPlusFileserverAndTrunk
