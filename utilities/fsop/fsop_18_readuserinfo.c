@@ -23,7 +23,7 @@ FSOP(18)
 	FS_REPLY_DATA(0x80);
 
 	unsigned char	username[11], username_padded[11];
-	uint16_t	count;
+	struct __fs_active	*a;
 
 	/* 
 	 * Extract the username the caller wants to know above
@@ -36,33 +36,27 @@ FSOP(18)
 
 	/* Look for it in the active list */
 
-        count = 0;
+	a = f->server->actives;
 
-        while (count < ECONET_MAX_FS_ACTIVE)
+        while (a)
         {
 
-                if ((f->server->actives[count].stn != 0) && (!strncasecmp((const char *) username_padded, (const char *) f->server->users[f->server->actives[count].userid].username, 10)))
+                if (!strncasecmp((const char *) username_padded, (const char *) f->server->users[a->userid].username, 10))
                 {
-
-                        unsigned short userid = f->server->actives[count].userid;
-
-                        // reply.p.data[0] = reply.p.data[1] = 0; // No longer required - macro does it above
-			
-                        if (f->server->users[userid].priv & FS_PRIV_SYSTEM)
+                        if (f->server->users[a->userid].priv & FS_PRIV_SYSTEM)
                                 reply.p.data[2] = 0x40; // This appears to be what L3 does for a privileged user
                         else    reply.p.data[2] = 0;
 
-                        reply.p.data[3] = f->server->actives[count].stn;
-                        reply.p.data[4] = f->server->actives[count].net;
+                        reply.p.data[3] = a->stn;
+                        reply.p.data[4] = a->net;
 
                         fsop_aun_send(&reply, 5, f);
 			return;
                 }
-                else count++;
+		else	a = a->next;
         }
 
-        if (count == ECONET_MAX_FS_ACTIVE)
-                fsop_error(f, 0xBC, "No such user or not logged on");
+        fsop_error(f, 0xBC, "No such user or not logged on");
 
 	return;
 
