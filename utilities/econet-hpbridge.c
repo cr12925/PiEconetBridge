@@ -6655,7 +6655,7 @@ static void * eb_device_despatcher (void * device)
 							new_output = 1;
 
 						}
-						else if (p->p->p.port == 0x9f && p->p->p.aun_ttype == ECONET_AUN_DATA) // Print server query
+						else if (p->p->p.port == 0x9f && (p->p->p.aun_ttype == ECONET_AUN_DATA || p->p->p.aun_ttype == ECONET_AUN_BCAST)) // Print server query
 						{
 							uint8_t		querytype;
 							unsigned char	pname[7];
