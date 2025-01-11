@@ -148,6 +148,7 @@ struct __eb_fw_chain {
 	unsigned char *		fw_chain_name;
 	uint8_t			fw_default; /* One of the EB_FW_{ACCEPT,REJECT} values for the default result if nothing matches */
 	struct __eb_fw		*fw_chain_start;
+	struct __eb_fw_chain	*next;
 };
 
 /* Define a printjob
@@ -769,12 +770,23 @@ extern struct __eb_device * eb_new_local (uint8_t, uint8_t, uint16_t);
 extern void eb_set_whole_wire_net (uint8_t, struct __eb_device *);
 extern void eb_set_single_wire_host (uint8_t, uint8_t);
 extern void * eb_malloc (char *, int line, char *, char *, size_t);
+extern struct __eb_device * eb_get_network(uint8_t);
+extern char * eb_type_str (uint16_t);
+extern struct __eb_aun_exposure * eb_is_exposed (uint8_t, uint8_t, uint8_t);
+extern void eb_set_network (uint8_t, struct __eb_device *);
+extern struct __eb_pool_host *eb_pool_find_addr_lock (struct __eb_pool *, uint8_t, uint8_t, struct __eb_device *);
+extern struct __eb_pool_host *eb_find_make_pool_host (struct __eb_device *, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t *);
+extern char * eb_pool_err(uint8_t);
 
 /* Globals in econet-hpbridge.c used by ...devinit.c */
 
 extern struct __eb_device 	* trunks;
 extern struct __eb_device	* networks[];
 extern struct __eb_aun_remote	* aun_remotes;
+extern struct __eb_aun_exposure	* exposures;
+extern in_addr_t		bindhost;
+extern struct __eb_pool		* pools;
+extern struct __eb_fw_chain	* fw_chains;
 
 /* externs within econet-hpbridge-devinit.c */
 
@@ -785,6 +797,18 @@ extern uint8_t	eb_device_init_fs (uint8_t, uint8_t, char *);
 extern uint8_t	eb_device_init_ps (uint8_t, uint8_t, char *, char *, char *);
 extern uint8_t 	eb_device_init_ps_handler (uint8_t, uint8_t, char *, char *);
 extern uint8_t	eb_device_init_ip (uint8_t, uint8_t, char *, uint32_t, uint32_t);
+extern uint8_t	eb_device_init_pipe (uint8_t, uint8_t, char *, uint8_t);
+extern uint8_t	eb_device_init_aun_host (uint8_t, uint8_t, in_addr_t, uint16_t, uint8_t);
+extern uint8_t	eb_device_init_aun_net (uint8_t, in_addr_t, uint8_t, uint16_t, uint8_t);
+extern uint8_t	eb_device_init_expose_host (uint8_t, uint8_t, in_addr_t, uint16_t);
+extern uint8_t	eb_device_init_trunk_nat (struct __eb_device *, uint8_t, uint8_t);
+extern uint8_t	eb_device_init_set_bridge_filter (struct __eb_device *, uint8_t, uint8_t, uint8_t);
+extern uint8_t	eb_device_init_add_fw_to_chain (struct __eb_fw **, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
+extern uint8_t	eb_device_init_set_net_clock (struct __eb_device *, double, double);
+extern uint8_t	eb_device_init_set_trunk_bind_address (struct __eb_device *, in_addr_t);
+extern uint8_t	eb_device_init_create_pool (char *, uint8_t, uint8_t *);
+extern uint8_t	eb_device_init_set_pool_static (struct __eb_pool *, struct __eb_device *, uint8_t, uint8_t, uint8_t, uint8_t);
+extern uint8_t	eb_device_init_set_pooled_nets (struct __eb_pool *, struct __eb_device *, uint8_t, uint8_t *);
 
 /* JSON */
 

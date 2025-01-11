@@ -386,3 +386,421 @@ uint8_t	eb_device_init_ip (uint8_t net, uint8_t stn, char * tunif, uint32_t ip_h
 	return 1;
 
 }
+
+/*
+ * eb_device_init_pipe
+ *
+ */
+
+uint8_t eb_device_init_pipe (uint8_t net, uint8_t stn, char *base, uint8_t flags)
+{
+	struct __eb_device	*existing;
+
+	existing = eb_new_local (net, stn, EB_DEF_PIPE);
+
+	if (!existing)
+		eb_debug (1, 0, "CONFIG", "Unable to create Pipe server device on %d.%d", net, stn);
+
+	existing->pipe.base = base;
+	existing->config = flags;
+
+	return 1;
+}
+
+/*
+ * eb_device_init_aun_net
+ *
+ */
+
+uint8_t eb_device_init_aun_host (uint8_t net, uint8_t stn, in_addr_t address, uint16_t port, uint8_t is_autoack)
+{
+	struct __eb_device	*d;
+	struct __eb_aun_remote	*e;
+
+	d = eb_new_local(net, stn, EB_DEF_AUN);
+
+	if (!d)
+		eb_debug (1, 0, "CONFIG", "Cannot create station %d.%d on AUN MAP - already exists", net, stn);
+
+	e = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create AUN remote structure", sizeof(struct __eb_aun_remote));
+
+	if (!e)
+		eb_debug (1, 0, "CONFIG", "Cannot malloc() for AUN MAPped host %d.%d", net, stn);
+
+	e->stn = stn;
+
+	e->port = port;
+
+	e->addr = address;
+
+	e->eb_device = d; // Shouldn't this be to the network structure? CHECK
+
+	e->is_dynamic = 0;
+
+	e->b_in = e->b_out = 0; // Traffic stats
+
+	if (pthread_mutex_init(&(e->statsmutex), NULL) == -1)
+		eb_debug (1, 0, "CONFIG", "Cannot initialize stats mutex for AUN/IP exposure at %d.%d", net, stn);
+
+	if (pthread_mutex_init(&(e->updatemutex), NULL) == -1)
+		eb_debug (1, 0, "CONFIG", "Cannot initialize update mutex for AUN/IP exposure at %d.%d", net, stn);
+
+	e->next = aun_remotes;
+
+	d->config |= (is_autoack ? EB_DEV_CONF_AUTOACK : 0);
+
+	d->aun = e;
+
+	aun_remotes = e;
+
+	eb_set_single_wire_host (net, stn);
+
+	return 1;
+}
+
+/*
+ * eb_device_init_aun_net
+ *
+ */
+
+uint8_t eb_device_init_aun_net (uint8_t net, in_addr_t base, uint8_t is_fixed, uint16_t port, uint8_t is_autoack)
+{
+	uint8_t		stncount;
+
+	for (stncount = 1; stncount < 255; stncount++)
+	{
+		eb_device_init_aun_host (net, stncount, base + stncount, 
+			port ?
+				(is_fixed ? port : (port + stncount -1))
+			:       (is_fixed ? 32768 : (10000 + (net * 256) + stncount)),
+			is_autoack);
+	}
+
+	return 1;
+}
+
+/*
+ * eb_device_init_expose_host
+ *
+ */
+
+uint8_t eb_device_init_expose_host (uint8_t net, uint8_t stn, in_addr_t s_addr, uint16_t port)
+{
+
+	struct __eb_device	*net_device;
+	struct __eb_aun_exposure	*dev;
+
+	if (eb_is_exposed (net, stn, 0))
+		eb_debug (1, 0, "CONFIG", "Cannot expose %d.%d - already exposed", net, stn);
+
+	net_device = eb_get_network(net);
+	dev = eb_malloc (__FILE__, __LINE__, "CONFIG", "Create AUN exposure object", sizeof(struct __eb_aun_exposure));
+
+	if (!dev)
+		eb_debug (1, 0, "CONFIG", "Unable to create new exposure device for station %d.%d", net, stn);
+
+	if (pthread_mutex_init(&(dev->exposure_mutex), NULL) == -1)
+		eb_debug (1, 0, "CONFIG", "Cannot initialize exposure control mutex for AUN/IP exposure at %d.%d", net, stn);
+
+	if (pthread_mutex_init(&(dev->statsmutex), NULL) == -1)
+		eb_debug (1, 0, "CONFIG", "Cannot initialize exposure stats mutex for AUN/IP exposure at %d.%d", net, stn);
+
+	dev->stn = stn;
+	dev->net = net;
+	dev->addr = s_addr;
+	dev->port = port;
+	dev->socket = -1; // Init
+	dev->active = (net_device ? 1 : 0);
+
+	if (dev->active)
+	{
+		dev->parent = (
+			(net_device->type == EB_DEF_WIRE && net_device->wire.divert[stn] ? net_device->wire.divert[stn] : 
+			(net_device->type == EB_DEF_NULL && net_device->null.divert[stn] ? net_device->null.divert[stn] :
+			(net_device))));
+		eb_debug (0, 4, "CONFIG", "EXPOSURE %3d.%3d Parent device is %p (%s)", net, stn, dev->parent, eb_type_str(dev->parent->type));
+
+	}
+	else
+	{
+		dev->parent = NULL;
+		eb_debug (0, 4, "CONFIG", "EXPOSURE %3d.%3d Exposed but inactive (network unknown)", net, stn);
+	}
+
+	dev->next = exposures;
+	exposures = dev;
+
+	return 1;
+
+}
+
+/*
+ * eb_device_init_trunk_nat
+ *
+ */
+
+uint8_t eb_device_init_trunk_nat (struct __eb_device	*trunk, uint8_t local_net, uint8_t distant_net)
+{
+
+	trunk->trunk.xlate_out[local_net] = distant_net;
+	trunk->trunk.xlate_in[distant_net] = local_net;
+
+	return 1;
+}
+
+/* 
+ * eb_device_init_set_bridge_filter
+ *
+ */
+
+uint8_t eb_device_init_set_bridge_filter (struct __eb_device	*d, uint8_t net, uint8_t drop, uint8_t inbound)
+{
+
+	if (d->type == EB_DEF_WIRE)
+	{
+		if (inbound)
+		{
+			if (net)
+				d->trunk.filter_in[net] = (drop ? 0xff : 0x00);
+			else
+				memset(&(d->trunk.filter_in), (drop ? 0xff : 0x00), sizeof(d->trunk.filter_in));
+		}
+		else
+		{
+			if (net)
+				d->trunk.filter_out[net] = (drop ? 0xff : 0x00);
+			else
+				memset(&(d->trunk.filter_out), (drop ? 0x0ff : 0x00), sizeof(d->trunk.filter_out));
+		}
+	}
+	else if (d->type == EB_DEF_TRUNK)
+	{
+		if (inbound)
+		{
+			if (net)
+				d->wire.filter_in[net] = (drop ? 0xff : 0x00);
+			else
+				memset(&(d->wire.filter_in), (drop ? 0xff : 0x00), sizeof(d->trunk.filter_in));
+		}
+		else
+		{
+			if (net)
+				d->wire.filter_out[net] = (drop ? 0xff : 0x00);
+			else
+				memset(&(d->wire.filter_out), (drop ? 0x0ff : 0x00), sizeof(d->trunk.filter_out));
+		}
+
+	}
+	else return 0;	
+
+	return 1;
+}
+
+/* 
+ * eb_device_init_add_fw_to_chain
+ *
+ */
+
+uint8_t eb_device_init_add_fw_to_chain (struct __eb_fw **chain, uint8_t srcnet, uint8_t srcstn, uint8_t dstnet, uint8_t dststn, uint8_t port, uint8_t action)
+{
+
+	struct __eb_fw	*entry, *search;
+
+	entry = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create firewall struct", sizeof(struct __eb_fw));
+
+	if (!entry)
+		eb_debug (1, 0, "CONFIG", "Unable to create firewall structure for filter %d.%d to %d.%d port &%02X action %s", srcnet, srcstn, dstnet, dststn, port, (action == EB_FW_ACCEPT ? "Accept" : "Reject"));
+
+	entry->srcnet = srcnet;
+	entry->srcstn = srcstn;
+	entry->dstnet = dstnet;
+	entry->dststn = dststn;
+	entry->port = port;
+	entry->action = action;
+	entry->next = NULL;
+
+	search = *chain;
+
+	while (search)
+	{
+		if (!(search->next))
+			break;
+		search = search->next;
+	}
+
+	if (!search)
+		*chain = entry;
+	else
+		search->next = entry; /* Put on tail */
+
+	return 1;
+}
+
+/* 
+ * eb_device_init_set_net_clock
+ *
+ */
+
+uint8_t eb_device_init_set_net_clock (struct __eb_device *d, double period, double mark)
+{
+	/* Note: On anything but a SPI board, this sets a global net clock because there's only one interface! */
+
+	if (period > 15.5 || period < 3)
+		eb_debug (1, 0, "CONFIG", "Bad network clock period");
+
+	if (mark > 3)
+		eb_debug (1, 0, "CONFIG", "Bad network clock mark");
+
+	if (d->type != EB_DEF_WIRE)
+		eb_debug (1, 0, "CONFIG", "Cannot set network clock - not defined as Econet");
+
+	d->wire.period = period * 4;
+	d->wire.mark = mark * 4;
+
+	return 1;
+}
+
+/*
+ * eb_device_init_set_trunk_bind_address 
+ *
+ * NB if trunk object is null, sets global bind address
+ */
+
+uint8_t eb_device_init_set_trunk_bind_address (struct __eb_device *d, in_addr_t s)
+{
+
+	if (!d)
+		bindhost = s;
+#if 0
+	else
+		d->trunk.bindhost = s;
+#endif
+		
+	return 1;
+}	
+
+/*
+ * eb_device_init_create_pool
+ * 
+ */
+
+uint8_t eb_device_init_create_pool (char *poolname, uint8_t start_net, uint8_t *nets)
+{
+	struct __eb_device	*p;
+	uint8_t			net;
+
+	p = eb_device_init(start_net, EB_DEF_POOL, 0);
+
+	if (!p)
+		eb_debug (1, 0, "CONFIG", "Unable to create pool named %s", poolname);
+
+	for (net = 1; net < 255; net++)
+		if (nets[net])
+			eb_set_network(net, p);
+
+	p->pool.data = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create pool data structure", sizeof(struct __eb_pool));
+
+	if (pthread_mutex_init(&(p->pool.data->updatemutex), NULL) == -1)
+		eb_debug (1, 0, "CONFIG", "Unable to initialize update mutex for pool %s", poolname);
+
+	strcpy ((char *) p->pool.data->name, poolname);
+
+	for (net = 0; net < 255; net++)
+		p->pool.data->hosts_net[net] = NULL;
+
+	p->pool.data->last_net = 0; // Rogue
+
+	memcpy (&(p->pool.data->networks), nets, sizeof (uint8_t) * 255);
+
+	p->pool.data->next = pools;
+	pools = p->pool.data;
+
+	return 1;
+}
+
+/*
+ * eb_device_init_set_pool_static
+ *
+ */
+
+uint8_t eb_device_init_set_pool_static (struct __eb_pool *pool,
+		struct __eb_device *source_device,
+		uint8_t pool_net,
+		uint8_t pool_stn,
+		uint8_t source_net,
+		uint8_t source_stn)
+{
+
+	struct __eb_pool_host	*h;
+	uint8_t			err;
+
+	if (!pool)
+		eb_debug (1, 0, "CONFIG", "Cannot add static pool mapping - bad pool");
+
+	if (!source_device)
+		eb_debug (1, 0, "CONFIG", "Cannot add static pool mapping - bad source device");
+
+	if (source_device->type != EB_DEF_WIRE && source_device->type != EB_DEF_TRUNK)
+		eb_debug (1, 0, "CONFIG", "Cannot add static pool mapping - source device is neither trunk nor wire");
+
+	/* Is there already an entry for this address in this pool ? */
+
+	h = eb_pool_find_addr_lock (pool, source_net, source_stn, source_device);
+
+	if (h)
+		eb_debug (1, 0, "CONFIG", "Address %d.%d already mapped on %s %d to pool address %d.%d",
+				source_net, source_stn,
+				eb_type_str(source_device->type),
+				(source_device->type == EB_DEF_TRUNK ? source_device->trunk.local_port : source_device->net),
+				pool_net, pool_stn);
+
+	/* If we get here, there was no mapping in this pool for this source,
+	 * so make one.
+	 */
+
+	h = eb_find_make_pool_host (source_device, source_net, source_stn, pool_net, pool_stn, 1 /* static */, &err);
+
+	if (!h || err) /* NU_deviceLL return on error non-zero */
+		eb_debug (1, 0, "CONFIG",
+				"Error creating static pool entry for %d.%d on %s %d mapped to pool address %d.%d (%s)",
+				source_net, source_stn,
+				eb_type_str(source_device->type),
+				(source_device->type == EB_DEF_TRUNK ? source_device->trunk.local_port : source_device->net),
+				pool_net, pool_stn,
+				eb_pool_err(err));
+
+
+	return 1;
+}
+
+/* 
+ * eb_device_init_set_pooled_nets
+ *
+ */
+
+uint8_t eb_device_init_set_pooled_nets (struct __eb_pool *pool, struct __eb_device *source, uint8_t all_pooled, uint8_t *nets)
+{
+	if (!pool)
+		eb_debug (1, 0, "CONFIG", "Bad pool device passed to eb_device_init_set_pooled_nets()");
+
+	if (!source)
+		eb_debug (1, 0, "CONFIG", "Bad source device passed to eb_device_init_set_pooled_nets()");
+
+	if (source->type != EB_DEF_TRUNK && source->type != EB_DEF_WIRE)
+		eb_debug (1, 0, "CONFIG", "Bad source device type passed to eb_device_init_set_pooled_nets()");
+
+	source->all_nets_pooled = all_pooled;
+
+	if (source->type == EB_DEF_TRUNK)
+	{
+		source->trunk.pool = pool;
+		memcpy(&(source->trunk.use_pool), nets, sizeof(uint8_t) * 255);
+	}
+	else
+	{
+		source->wire.pool = pool;
+		memcpy(&(source->trunk.use_pool), nets, sizeof(uint8_t) * 255);
+	}
+
+	return 1;
+}
