@@ -39,6 +39,8 @@ extern uint8_t fs_set_syst_bridgepriv;
 
 // Some globals
 
+uint8_t	dumpconfig = 0;
+
 in_addr_t 	bindhost = 0; // IP to bind to if specified. Only used for trunks at the moment.
 #ifdef IPV6_TRUNKS
 struct addrinfo	*trunk_bindhosts; // For when we entertain IPv6
@@ -1073,6 +1075,7 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 		n = eb_device_init (net, EB_DEF_NULL, 0);
 		eb_set_network(net, n);
 		n->net = net;
+		DEVINIT_DEBUG ("Created new virtual network %d", net);
 	}				
 	//else	n = eb_get_network(net);
 
@@ -1119,6 +1122,9 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 			EB_PORT_SET(existing, reserved_ports, 0xB0, NULL, NULL); /* FindServer */
 			EB_PORT_SET(existing, reserved_ports, 0xD1, NULL, NULL); /* PS Data */
 			EB_PORT_SET(existing, reserved_ports, 0xD2, NULL, NULL); /* IP/Econet */
+
+			DEVINIT_DEBUG("Created new local device on station %d.%d", net, stn);
+
 		}
 		else if (newtype == EB_DEF_PIPE)
 		{
@@ -8746,10 +8752,6 @@ int eb_readconfig(char *f, char *json)
 	json_object_array_add(jfw_chains, jfw_bridge);
 #endif
 
-	/* Temp test hook */
-
-	// eb_readconfig_json("/etc/econet-gpio/econet-hpbridge.json");
-
 	regex_t	r_comment,
 		r_empty,
 		r_wire,
@@ -10328,7 +10330,6 @@ int main (int argc, char **argv)
 {
 
 	int	opt;
-	uint8_t	dumpconfig = 0;
 	struct __eb_device *p;
 	struct __eb_aun_exposure *e;
 	int	optind;
@@ -10667,7 +10668,8 @@ int main (int argc, char **argv)
 			if (p)
 			{
 				fprintf (stderr, "%03d %-15s %s\n", net, eb_type_str(p->type), 
-					(p->type == EB_DEF_WIRE) ? p->wire.device : "");
+					(p->type == EB_DEF_WIRE) ? p->wire.device : 
+					(p->type == EB_DEF_POOL) ? p->pool.data->name : "");
 
 				if (p->type == EB_DEF_POOL)
 				{

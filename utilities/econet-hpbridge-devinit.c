@@ -76,6 +76,8 @@ uint8_t	eb_device_init_wire (uint8_t net, char * device)
 	memset (&(p->wire.last_bridge_whatnet), 0, sizeof(p->wire.last_bridge_whatnet));
 	memset (&(p->wire.last_bridge_isnet), 0, sizeof(p->wire.last_bridge_isnet));
 
+	DEVINIT_DEBUG("Created econet with net number %d", net);
+
 	return 1;
 }
 
@@ -135,6 +137,8 @@ uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uin
 	p->next = trunks;
 	trunks = p;
 	
+	DEVINIT_DEBUG("Created trunk on port number %d (%sdynamic)", p->trunk.local_port, p->trunk.is_dynamic ? "" : "not ");
+
 	return 1;
 
 }
@@ -201,6 +205,8 @@ eb_debug (1, 0, "CONFIG", "Cannot initialize update mutex for AUN/IP exposure at
 
 	eb_set_whole_wire_net (net, NULL);
 	
+	DEVINIT_DEBUG("Created dynamic AUN network %d", net);
+
 	return 1;
 }
 
@@ -236,6 +242,8 @@ uint8_t eb_device_init_fs (uint8_t net, uint8_t stn, char *rootpath)
 	eb_set_single_wire_host (net, stn);
 
 	strncpy(existing->local.fs.rootpath, rootpath, strlen(rootpath));
+
+	DEVINIT_DEBUG("Created fileserver on %d.%d with path %s", net, stn, rootpath);
 
 	return 1;
 }
@@ -286,6 +294,8 @@ uint8_t eb_device_init_ps (uint8_t net, uint8_t stn, char * acorn_printer, char 
 		current_printers->next = printer;
 	else    existing->local.printers = printer;
 
+	DEVINIT_DEBUG("Created print server on %d.%d with Acorn name %s, Unix printer %s", net, stn, acorn_printer, unix_printer);
+
 	return 1;
 
 }
@@ -326,6 +336,8 @@ uint8_t eb_device_init_ps_handler (uint8_t net, uint8_t stn, char * acorn_name, 
 		eb_debug (1, 0, "CONFIG", "Unknown printer %s on station %d.%d - cannot set print handler", acorn_name, net, stn);
 
 	strncpy (printer->handler, handler, 126);
+
+	DEVINIT_DEBUG("Set print handler on %d.%d for Acorn name %s to %s", net, stn, acorn_name, handler);
 
 	return 1;
 
@@ -383,6 +395,8 @@ uint8_t	eb_device_init_ip (uint8_t net, uint8_t stn, char * tunif, uint32_t ip_h
 
 	existing->local.ip.addresses = local;
 	
+	DEVINIT_DEBUG("Created IP server on %d.%d via interface %s with IP address %s", net, stn, tunif, addr);
+
 	return 1;
 
 }
@@ -403,6 +417,8 @@ uint8_t eb_device_init_pipe (uint8_t net, uint8_t stn, char *base, uint8_t flags
 
 	existing->pipe.base = base;
 	existing->config = flags;
+
+	DEVINIT_DEBUG("Created pipe interface on %d.%d with path %s", net, stn, base);
 
 	return 1;
 }
@@ -455,6 +471,8 @@ uint8_t eb_device_init_aun_host (uint8_t net, uint8_t stn, in_addr_t address, ui
 
 	eb_set_single_wire_host (net, stn);
 
+	//DEVINIT_DEBUG("Created AUN network map for network %d with base %s", net, stn, base);
+
 	return 1;
 }
 
@@ -476,6 +494,13 @@ uint8_t eb_device_init_aun_net (uint8_t net, in_addr_t base, uint8_t is_fixed, u
 			is_autoack);
 	}
 
+	DEVINIT_DEBUG("Created AUN network map for network %d with base %d.%d.%d.%d (%sfixed, %sAutoACK)", net, 
+			(base & 0xff000000) >> 24,
+			(base & 0x00ff0000) >> 16,
+			(base & 0x0000ff00) >> 8,
+			(base & 0x000000ff),	
+			port, (is_fixed ? "" : "not "), (is_autoack ? "" : "not "));
+	
 	return 1;
 }
 
@@ -530,6 +555,7 @@ uint8_t eb_device_init_expose_host (uint8_t net, uint8_t stn, in_addr_t s_addr, 
 	dev->next = exposures;
 	exposures = dev;
 
+
 	return 1;
 
 }
@@ -544,6 +570,8 @@ uint8_t eb_device_init_trunk_nat (struct __eb_device	*trunk, uint8_t local_net, 
 
 	trunk->trunk.xlate_out[local_net] = distant_net;
 	trunk->trunk.xlate_in[distant_net] = local_net;
+
+	DEVINIT_DEBUG("Created trunk NAT for distant net %d to local net %d on trunk port %d", distant_net, local_net, trunk->trunk.local_port);
 
 	return 1;
 }
@@ -592,6 +620,14 @@ uint8_t eb_device_init_set_bridge_filter (struct __eb_device	*d, uint8_t net, ui
 
 	}
 	else return 0;	
+
+	DEVINIT_DEBUG("Created bridge protocol announcement filter on %s %s %d %s net %d %s",
+			eb_type_str(d->type),
+			d->type == EB_DEF_WIRE ? "net" : "port",
+			d->type == EB_DEF_WIRE ? d->net : d->trunk.local_port,
+			inbound ? "inbound" : "outbound",
+			net,
+			drop ? "drop" : "accept");
 
 	return 1;
 }
@@ -657,6 +693,8 @@ uint8_t eb_device_init_set_net_clock (struct __eb_device *d, double period, doub
 	d->wire.period = period * 4;
 	d->wire.mark = mark * 4;
 
+	DEVINIT_DEBUG("Network clock set to %lf period / %lf mark", period, mark);
+
 	return 1;
 }
 
@@ -676,6 +714,8 @@ uint8_t eb_device_init_set_trunk_bind_address (struct __eb_device *d, in_addr_t 
 		d->trunk.bindhost = s;
 #endif
 		
+	// Need DEVINIT_DEBUG
+	
 	return 1;
 }	
 
@@ -714,6 +754,8 @@ uint8_t eb_device_init_create_pool (char *poolname, uint8_t start_net, uint8_t *
 
 	p->pool.data->next = pools;
 	pools = p->pool.data;
+
+	DEVINIT_DEBUG("Created pool %s with first net %d", poolname, start_net);
 
 	return 1;
 }
@@ -769,6 +811,11 @@ uint8_t eb_device_init_set_pool_static (struct __eb_pool *pool,
 				pool_net, pool_stn,
 				eb_pool_err(err));
 
+	DEVINIT_DEBUG("Added pool static entry in pool %s for pool host %d.%d to distant host %d.%d on %s %s %d", 
+			pool->name, pool_net, pool_stn, source_net, source_stn,
+			eb_type_str(source_device->type),
+			source_device->type == EB_DEF_WIRE ? "net" : "local port",
+			source_device->type == EB_DEF_WIRE ? source_device->net : source_device->trunk.local_port);
 
 	return 1;
 }
@@ -801,6 +848,12 @@ uint8_t eb_device_init_set_pooled_nets (struct __eb_pool *pool, struct __eb_devi
 		source->wire.pool = pool;
 		memcpy(&(source->trunk.use_pool), nets, sizeof(uint8_t) * 255);
 	}
+
+	DEVINIT_DEBUG("Applied pool %s on device %s %s %d",
+			pool->name,
+			eb_type_str(source->type),
+			source->type == EB_DEF_WIRE ? "net" : "local port",
+			source->type == EB_DEF_WIRE ? source->net : source->trunk.local_port);
 
 	return 1;
 }
