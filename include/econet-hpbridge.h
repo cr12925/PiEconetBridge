@@ -794,7 +794,7 @@ extern uint8_t	eb_device_init_wire (uint8_t, char *);
 extern uint8_t	eb_device_init_singletrunk (char *, uint16_t, uint16_t, char *);
 extern uint8_t 	eb_device_init_dynamic (uint8_t, uint8_t);
 extern uint8_t	eb_device_init_fs (uint8_t, uint8_t, char *);
-extern uint8_t	eb_device_init_ps (uint8_t, uint8_t, char *, char *, char *);
+extern uint8_t	eb_device_init_ps (uint8_t, uint8_t, char *, char *, char *, uint8_t, uint8_t);
 extern uint8_t 	eb_device_init_ps_handler (uint8_t, uint8_t, char *, char *);
 extern uint8_t	eb_device_init_ip (uint8_t, uint8_t, char *, uint32_t, uint32_t);
 extern uint8_t	eb_device_init_pipe (uint8_t, uint8_t, char *, uint8_t);

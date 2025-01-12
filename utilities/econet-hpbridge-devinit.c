@@ -246,7 +246,7 @@ uint8_t eb_device_init_fs (uint8_t net, uint8_t stn, char *rootpath)
  * Create a PS on net.stn for acorn printer 'acorn' and unix printer 'unix' and user (restriction) 'user'
  */
 
-uint8_t eb_device_init_ps (uint8_t net, uint8_t stn, char * acorn_printer, char * unix_printer, char * user)
+uint8_t eb_device_init_ps (uint8_t net, uint8_t stn, char * acorn_printer, char * unix_printer, char * user, uint8_t priority, uint8_t is_default)
 {
 
 	struct __eb_device 	* existing;
@@ -260,8 +260,8 @@ uint8_t eb_device_init_ps (uint8_t net, uint8_t stn, char * acorn_printer, char 
 
 	if (!printer)   eb_debug (1, 0, "CONFIG", "Unable to malloc() for printer on %d.%d (%s)", net, stn, acorn_printer);
 
-	printer->priority = 1;
-	printer->isdefault = 1;
+	printer->priority = priority;
+	printer->isdefault = is_default;
 	strcpy (printer->acorn_name, acorn_printer);
 	strcpy (printer->unix_name, unix_printer);
 	printer->status = PRN_IN_READY | PRN_OUT_READY;

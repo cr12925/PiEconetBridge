@@ -1596,7 +1596,7 @@ uint8_t eb_bridge_sender_net (struct __eb_device *destnet)
 
 	pthread_mutex_unlock (&networks_update);
 
-	eb_debug (0, 4, "BRIDGE", "Internal         Sender net is %d for %s device net %d", result, eb_type_str(destnet->type), destnet->net);
+	eb_debug (0, 4, "BRIDGE", "Core             Sender net is %d for %s device net %d", result, eb_type_str(destnet->type), destnet->net);
 
 	return result;
 
@@ -1692,7 +1692,7 @@ static void * eb_bridge_update_watcher (void *device)
 			update = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge packet", 12 + 255);
 	
 			if (!update)
-				eb_debug (1, 0, "BRIDGE", "Internal     Malloc() failed creating bridge packet!");
+				eb_debug (1, 0, "BRIDGE", "Core         Malloc() failed creating bridge packet!");
 	
 			/* Make our update */
 	
@@ -1832,7 +1832,7 @@ static void * eb_bridge_reset_watcher (void *device)
 			update = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge packet", 12 + 255);
 	
 			if (!update)
-				eb_debug (1, 0, "BRIDGE", "Internal     Malloc() failed creating bridge packet!");
+				eb_debug (1, 0, "BRIDGE", "Core         Malloc() failed creating bridge packet!");
 	
 	
 			/* Make our update */
@@ -2005,7 +2005,7 @@ void eb_bridge_reset (struct __eb_device *trigger)
 		strcpy (info, "internal");
 
 	if (!EB_CONFIG_NOBRIDGEANNOUNCEDEBUG)
-		eb_debug (0, 2, "BRIDGE", "%-8s         Bridge reset from %s", (trigger ? eb_type_str(trigger->type) : "Internal"), info);
+		eb_debug (0, 2, "BRIDGE", "%-8s         Bridge reset from %s", (trigger ? eb_type_str(trigger->type) : "Core"), info);
 
 	// Put our networks structure back to the start
 
@@ -2045,7 +2045,7 @@ void eb_bridge_reset (struct __eb_device *trigger)
 
 	pthread_mutex_unlock (&networks_update);
 
-	eb_debug (0, 2, "BRIDGE", "%-8s         Networks list reset", (trigger ? eb_type_str(trigger->type) : "Internal"));
+	eb_debug (0, 2, "BRIDGE", "%-8s         Networks list reset", (trigger ? eb_type_str(trigger->type) : "Core"));
 
 	// Reset station map to defaults on each wire net as well
 	// Re-uses dev
@@ -2066,7 +2066,7 @@ void eb_bridge_reset (struct __eb_device *trigger)
 				dev->wire.stations[pipe_counter] |= pipe_stations[pipe_counter];
 
 			ioctl (dev->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(dev->wire.stations));
-			eb_debug (0, 2, "BRIDGE", "%-8s         Station set reset on wire network %d", (trigger ? eb_type_str(trigger->type) : "Internal"), dev->net);
+			eb_debug (0, 2, "BRIDGE", "%-8s         Station set reset on wire network %d", (trigger ? eb_type_str(trigger->type) : "Core"), dev->net);
 
 			dev->wire.stations_update_rq = 1;
 
@@ -5285,9 +5285,9 @@ static void * eb_device_despatcher (void * device)
 			{
 				d->local.fs.server = fsop_initialize (d, d->local.fs.rootpath);
 				if (d->local.fs.server && (fsop_run(d->local.fs.server) >= 1))
-					eb_debug (0, 2, "FS", "         %3d.%3d Fileserver initialized at %s", d->net, d->local.stn, d->local.fs.rootpath);
+					eb_debug (0, 2, "BRIDGE", "FS       %3d.%3d Fileserver initialized at %s", d->net, d->local.stn, d->local.fs.rootpath);
 				else
-					eb_debug (1, 0, "FS", "         %3d.%3d Fileserver at %s FAILED to initialize", d->net, d->local.stn, d->local.fs.rootpath);
+					eb_debug (1, 0, "BRIDGE", "FS       %3d.%3d Fileserver at %s FAILED to initialize", d->net, d->local.stn, d->local.fs.rootpath);
 			}
 
 			if (d->local.ip.tunif[0] != '\0') // Active tunnel config
@@ -5307,7 +5307,7 @@ static void * eb_device_despatcher (void * device)
 				if ((err = ioctl(handle, TUNSETIFF, (void *) &mine)) == -1) // Failure
 					eb_debug (1, 0, "IPGW", "%-8s %3d.%3d Cannot select %s for IPGW", eb_type_str(d->type), d->net, d->local.stn, d->local.ip.tunif);
 
-				eb_debug (0, 2, "IPGW", "%-8s %3d.%3d Tunnel %s opened for IPGW", eb_type_str(d->type), d->net, d->local.stn, d->local.ip.tunif);
+				eb_debug (0, 2, "IPGW", "%-8s %3d.%3d Tunnel interface %s opened", eb_type_str(d->type), d->net, d->local.stn, d->local.ip.tunif);
 
 				d->local.ip.socket = handle;
 				
@@ -5530,9 +5530,9 @@ static void * eb_device_despatcher (void * device)
 			sprintf(devstring, "%-8s %3d.%3d", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE) ? d->pipe.stn : d->local.stn);
 
 		if ((err = pthread_create (&(d->aun_out_thread), NULL, eb_device_aun_sender, d)))
-			eb_debug (1, 0, "DESPATCH", "%-16s Cannot start AUN sender: %s", devstring, strerror(err));
+			eb_debug (1, 0, "DESPATCH", "%-16s Cannot create AUN sender: %s", devstring, strerror(err));
 		else
-			eb_debug (0, 2, "DESPATCH", "%-16s Started AUN sender thread", devstring);
+			eb_debug (0, 2, "DESPATCH", "%-16s Created AUN sender thread", devstring);
 		
 		pthread_detach(d->aun_out_thread);
 		eb_thread_started();
@@ -7142,7 +7142,7 @@ static void * eb_device_despatcher (void * device)
 							new_output = 1;
 
 						}
-						else if (p->p->p.port == 0x9f && p->p->p.aun_ttype == ECONET_AUN_DATA) // Print server query
+						else if (p->p->p.port == 0x9f && (p->p->p.aun_ttype == ECONET_AUN_DATA || p->p->p.aun_ttype == ECONET_AUN_BCAST)) // Print server query
 						{
 							uint8_t		querytype;
 							unsigned char	pname[7];
@@ -7592,7 +7592,7 @@ static void * eb_device_despatcher (void * device)
 								struct __fs_machine_peek_reg *m;
 
 								eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
-								m = eb_malloc(__FILE__, __LINE__, "Internal", "New machine peek registration struct", sizeof (struct __fs_machine_peek_reg));
+								m = eb_malloc(__FILE__, __LINE__, "Core", "New machine peek registration struct", sizeof (struct __fs_machine_peek_reg));
 
 								m->s = d->local.fs.server;
 								m->net = p->p->p.srcnet;
@@ -8197,6 +8197,200 @@ struct json_object *eb_json_aunnet_makenew(struct json_object *jauns, uint8_t ne
 
 }
 
+/* Parse virtuals or econets object - they're similarly formatted */
+
+void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
+{
+	/* otype == 1 means virtuals; 2 means econets */
+
+	uint8_t		net, stn;
+	uint16_t	jcount, jlength;
+	struct json_object	*jdiverts, *jstation, *jstation_number, *jprinters, *jfs, *jips, *jpipepath, *jpool, *jpoolnets, *jnetclock;
+
+	if (json_object_object_get_ex(o, "net", &jdiverts)) /* Temp use of jdiverts */
+		net = json_object_get_int(jdiverts);
+	else	eb_debug (1, 0, "JSON", "Econet or virtual device in %s JSON config without a network numbers", (otype == 2) ? "Econet" : "Virtual");
+
+	if (otype == 2)
+	{
+		if (json_object_object_get_ex(o, "device", &jdiverts)) /* Temp use of jdiverts */
+			eb_device_init_wire (net, (char *) json_object_get_string(jdiverts));
+		else
+			eb_debug (1, 0, "JSON", "Econet device in JSON config without a device name");
+
+		if (json_object_object_get_ex(o, "net-clock", &jnetclock))
+		{
+			double	period, mark;
+
+			if (sscanf(json_object_get_string(jnetclock), "%lf/%lf", &period, &mark) != 2)
+				eb_debug (1, 0, "JSON", "Invalid clock specifier for econet device %s", json_object_get_string(jdiverts));
+
+			eb_device_init_set_net_clock(networks[net], period, mark);
+
+		}
+	}
+
+	/* Now create virtual servers */
+
+	if (json_object_object_get_ex(o, "diverts", &jdiverts))
+	{
+		jcount = 0;
+
+		jlength = json_object_array_length(jdiverts);
+
+		while (jcount < jlength)
+		{
+			jstation = json_object_array_get_idx(jdiverts, jcount);	
+
+			if (json_object_object_get_ex(jstation, "station", &jstation_number))
+				stn = json_object_get_int(jstation_number);
+			else
+				eb_debug (1, 0, "JSON", "No station number in divert number %d in %s net %d", jcount, (otype == 1) ? "virtual" : "econet", net);
+
+			json_object_object_get_ex(jstation, "printers", &jprinters);
+			json_object_object_get_ex(jstation, "ipservers", &jips);
+
+			/* Printers */
+
+			if (jprinters)
+			{
+				uint16_t	pcount, plength;
+
+				pcount = 0;
+
+				plength = json_object_array_length(jprinters);
+
+				while (pcount < plength)
+				{
+					struct json_object	*jprinter, *jacorn, *junix, *jpriority, *jdefault, *jhandler, *jusers, *juser;
+					uint8_t		priority = 1, pdefault = 1;
+
+
+					jprinter = json_object_array_get_idx(jprinters, pcount);
+
+					if (!json_object_object_get_ex(jprinter, "acorn-name", &jacorn))
+						eb_debug (1, 0, "JSON", "Malformed printer definition on station %d.%d, index %d, has no Acorn name", net, stn, pcount);
+
+					if (!json_object_object_get_ex(jprinter, "unix-name", &junix))
+						eb_debug (1, 0, "JSON", "Malformed printer definition on station %d.%d, index %d, has no Unix printer name", net, stn, pcount);
+
+					if (json_object_object_get_ex(jprinter, "priority", &jpriority))
+						priority = json_object_get_int(jpriority);
+
+					if (json_object_object_get_ex(jprinter, "default", &jdefault) && !json_object_get_boolean(jdefault))
+						pdefault = 0;
+
+					/* This handles only the first user for now - but the users list is an array so in the future
+					 * we can support more than one user.
+					 */
+
+					juser = NULL;
+
+					if (json_object_object_get_ex(jprinter, "users", &jusers))
+					{
+						if (json_object_array_length(jusers) >= 1)
+							juser = json_object_array_get_idx(jusers, 0);
+					}
+
+					eb_device_init_ps (net, stn, (char *) json_object_get_string(jacorn),
+							(char *) json_object_get_string(junix),
+							juser ? (char *) json_object_get_string(juser) : "",
+							priority, pdefault);
+						
+					if (json_object_object_get_ex(jprinter, "handler", &jhandler))
+						eb_device_init_ps_handler (net, stn, (char *) json_object_get_string(jacorn), (char *) json_object_get_string(jhandler));	
+
+					pcount++;
+				}
+			}
+
+			/* IP gateways */
+
+			if (jips)
+			{
+				struct json_object	*jip;
+				uint16_t		icount, ilength;
+
+				icount = 0;
+
+				ilength = json_object_array_length (jips);
+
+				while (icount < ilength)
+				{
+					struct json_object	*jipinterface, *jipaddress;
+					uint8_t			ip[4], masklen;
+					uint32_t		ip_host, mask_host;
+					char			address[30];
+
+					jip = json_object_array_get_idx (jips, icount);
+
+					if (!json_object_object_get_ex(jip, "interface", &jipinterface))
+						eb_debug (1, 0, "JSON", "Malformed IP interface configuration on %d.%d index %d - no tunnel interface specified", net, stn, icount);
+
+					if (!json_object_object_get_ex(jip, "ip", &jipaddress))
+						eb_debug (1, 0, "JSON", "Malformed IP interface configuration on %d.%d index %d - no ip address specified", net, stn, icount);
+
+					strncpy (address, json_object_get_string(jipaddress), 29);
+
+					/* Parse the address / mask */
+
+					if (sscanf(address, "%hhd.%hhd.%hhd.%hhd/%hhd",
+						&(ip[3]), &(ip[2]), &(ip[1]), &(ip[0]), &masklen) != 5)
+						eb_debug(1, 0, "JSON", "Bad network and/or mask for IP gateway on %d.%d index %d", net, stn, icount);
+					
+					ip_host = (ip[3] << 24) | (ip[2] << 16) | (ip[1] << 8) | ip[0];
+
+					mask_host = 0;
+	
+					while (masklen-- > 0)
+						mask_host = (mask_host >> 1) | 0x80000000;
+
+					eb_device_init_ip (net, stn, (char *) json_object_get_string(jipinterface), ip_host, mask_host);
+
+					icount++;	
+				}
+			}
+
+			if (json_object_object_get_ex(jstation, "fileserver-path", &jfs))
+				eb_device_init_fs(net, stn, (char *) json_object_get_string(jfs));
+
+			if (json_object_object_get_ex(jstation, "pipe-path", &jpipepath))
+			{
+				uint8_t	flags = 0;
+				struct json_object	*jpipedirect;
+				char 			*pipebase;
+
+				if (json_object_object_get_ex(jstation, "pipe-direct", &jpipedirect) && (json_object_get_boolean(jpipedirect)))
+					flags |= EB_DEV_CONF_DIRECT;
+
+				pipebase = eb_malloc (__FILE__, __LINE__, "JSON", "Create pipe base path string", json_object_get_string_len(jpipepath) + 1);
+				strcpy (pipebase, json_object_get_string(jpipepath));
+				eb_device_init_pipe(net, stn, pipebase, flags);
+			}
+
+			jcount++;
+		}
+	}
+}
+
+/* Parse through a list of Econets / Virtuals and feed them to the individual creator function above */
+
+void eb_create_json_virtuals_econets_loop(struct json_object *o, uint8_t otype)
+{
+
+	uint16_t	count, length;
+
+	count = 0;
+
+	length = json_object_array_length(o);
+
+	while (count < length)
+	{
+		eb_create_json_virtuals_econets(json_object_array_get_idx(o, count), otype);
+		count++;
+	}
+}
+
 /* Parse a JSON config and create the relevant threads etc. */
 
 int eb_parse_json_config(struct json_object *jc)
@@ -8216,6 +8410,8 @@ int eb_parse_json_config(struct json_object *jc)
 	 * Create exposures (and by here, everything should exist, save for networks we only know about on trunks / bridges, and those get disabled at startup until they are known)
 	 * Set general parameters - if they haven't been changed on the command line
 	 */
+
+	//fprintf (stderr, "***\n\nJSON:\n\n%s\n\n***\n\n", json_object_to_json_string_ext (jc, JSON_C_TO_STRING_PRETTY));
 
 	{
 		struct json_object	*jchains, *jchain, *jchain_name, *jchain_entries, *jchain_default;
@@ -8312,6 +8508,7 @@ int eb_parse_json_config(struct json_object *jc)
 				jcount++;
 			}
 		}	
+		
 	}
 
 	/* Now create pools, but not static mappings - which are done when the other devices have been created */
@@ -8367,16 +8564,25 @@ int eb_parse_json_config(struct json_object *jc)
 	/* Now create virtual networks & their diverted servers */
 
 	{
+		struct json_object	*jvirtuals;
 
-	}
-
-	/* Now set up the legacy 'dynamic' network */
-
-	{
-
+		if (json_object_object_get_ex(jc, "virtuals", &jvirtuals))
+			eb_create_json_virtuals_econets_loop(jvirtuals, 1);
 	}
 
 	/* Now create econet(s) */
+
+	{
+
+		struct json_object	*jeconets;
+
+		if (json_object_object_get_ex(jc, "econets", &jeconets))
+			eb_create_json_virtuals_econets_loop(jeconets, 2);
+	}
+
+	/* GOT HERE */
+
+	/* Now set up the legacy 'dynamic' network */
 
 	{
 
@@ -8416,11 +8622,14 @@ int eb_parse_json_config(struct json_object *jc)
 
 	{
 
+		/* TO DO - if there's a bridge-wide chain in here, we need to assign it to the bridge firewall pointer */
 	}
 
 	/* Free up the pointers */
 
 	json_object_put(jc); /* Free the memory */
+
+	eb_debug (0, 2, "CONFIG", "%16s JSON configuration read successfully", "");
 
 	return 1;
 
@@ -8921,7 +9130,7 @@ int eb_readconfig(char *f, char *json)
 #ifdef EB_JSONCONFIG
 				json_object_array_add(jps, jprinter);
 #else
-				eb_device_init_ps (net, stn, acorn_printer, unix_printer, user);
+				eb_device_init_ps (net, stn, acorn_printer, unix_printer, user, 1, 1);
 #endif
 
 			}
@@ -9821,8 +10030,6 @@ int eb_readconfig(char *f, char *json)
 
 			}
 
-// GOT HERE FOR JSON CONVERSION
-
 			else if (!regexec(&r_pool_net_wire, line, 5, matches, 0) || !regexec(&r_pool_net_trunk, line, 5, matches, 0))
 			{
 
@@ -9991,10 +10198,11 @@ int eb_readconfig(char *f, char *json)
 #ifdef EB_JSONCONFIG
 	if (json[0]) /* Non-null string */
 	{
+		eb_debug (0, 2, "JSON", "%16s Writing JSON config to %s", "", json);
 		jsonfile = fopen(json, "w");
 		fprintf (jsonfile, "%s", json_object_to_json_string_ext(jc, JSON_C_TO_STRING_PRETTY));
 		fclose(jsonfile);
-		json_object_put(jc);
+		//json_object_put(jc);
 	}
 #endif
 
@@ -10278,6 +10486,13 @@ int main (int argc, char **argv)
 
 	/* Parse command line */
 
+	/* TODO - we need to parse only some options here, namely the ones which
+	 * don't override the config file. Then repeat the getopt after we have
+	 * read the config, and implement those which *do* override the config.
+	 * Otherwise the config will always win over the command line, which is
+	 * wrong.
+	 */
+
 	while ((opt = getopt_long(argc, argv, "hc:d:eln:p:sz", long_options, &optind)) != -1)	
 	{
 		switch (opt)
@@ -10393,11 +10608,13 @@ int main (int argc, char **argv)
 
 	if (json_stat_res || (json_stat.st_mtime < config_stat.st_mtime)) /* No JSON or stat failed, or legacy config modified more recently, at least in seconds, than JSON config file */
 	{
+		eb_debug (0, 2, "CONFIG", "%16s Reading legacy config %s and converting to JSON internally", "", config_path);
 		if (!eb_readconfig(config_path, jsonconfigout_path, &json_config))
 			exit (EXIT_FAILURE);
 	}
 	else if (!json_stat_res) /* JSON must exist and (given the if() above) must be newer */
 	{
+		eb_debug (0, 2, "CONFIG", "%16s Reading JSON config %s", "", jsonconfig_path);
 		json_config = json_object_from_file(jsonconfig_path);
 		if (!json_config)
 			eb_debug (1, 0, "JSON", "Cannot read %s as JSON", jsonconfig_path);
@@ -10408,6 +10625,8 @@ int main (int argc, char **argv)
 		eb_debug (1, 0, "JSON", "Parsing JSON config failed");
 		exit(EXIT_FAILURE);
 	}
+
+	json_object_put(json_config); /* Free up the memory */
 #else
 	if (!eb_readconfig(config_path, jsonconfigout_path))
 		exit (EXIT_FAILURE);
@@ -10733,7 +10952,7 @@ int main (int argc, char **argv)
 
 	/* Start the engines, captain! */
 
-	eb_debug (0, 1, "MAIN", "Internal         Bridge to engine room: Start main engines...");
+	eb_debug (0, 1, "MAIN", "Core             Bridge to engine room: Start main engines...");
 
 	p = devices;
 
@@ -10860,7 +11079,7 @@ int main (int argc, char **argv)
 
 	pthread_mutex_unlock (&threadcount_mutex);
 
-	eb_debug (0, 1, "MAIN", "%-8s         Engine room to bridge: %d engines at full chat. Wait for traffic.", "Internal", threads_ready);
+	eb_debug (0, 1, "MAIN", "%-8s         Engine room to bridge: %d engines at full chat. Wait for traffic.", "Core", threads_ready);
 
 	{
 		cpu_set_t	*cpus;
@@ -10897,7 +11116,7 @@ int main (int argc, char **argv)
 
 	/* Now doze off */
 
-	eb_debug (0, 2, "MAIN", "%-8s         Main loop going to sleep.", "");
+	eb_debug (0, 2, "MAIN", "Core             Main loop going to sleep.", "");
 
 	while (1)
 		sleep (600); // ZZzzzzz....
