@@ -8235,6 +8235,8 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 		}
 	}
+	else
+		eb_device_init_virtual(net);
 
 	/* Now create virtual servers */
 
@@ -8417,7 +8419,12 @@ int eb_parse_json_config(struct json_object *jc)
 	 * Set general parameters - if they haven't been changed on the command line
 	 */
 
-	//fprintf (stderr, "***\n\nJSON:\n\n%s\n\n***\n\n", json_object_to_json_string_ext (jc, JSON_C_TO_STRING_PRETTY));
+	struct json_object	*jgeneral;
+
+	json_object_object_get_ex(jc, "general", &jgeneral);
+
+	if (!jgeneral)
+		eb_debug (1, 0, "JSON", "No generals entry in JSON config - cannot parse.");
 
 	{
 		struct json_object	*jchains, *jchain, *jchain_name, *jchain_entries, *jchain_default;
@@ -8586,30 +8593,276 @@ int eb_parse_json_config(struct json_object *jc)
 			eb_create_json_virtuals_econets_loop(jeconets, 2);
 	}
 
-	/* GOT HERE */
-
 	/* Now set up the legacy 'dynamic' network */
 
 	{
+		struct json_object	*jdynamic, *jdynamic_autoack;
 
+		if (json_object_object_get_ex(jgeneral, "dynamic", &jdynamic))
+		{
+			uint8_t	flags = 0, net;
+
+			if (json_object_object_get_ex(jdynamic, "dynamic-autoack", &jdynamic_autoack) && json_object_get_boolean(jdynamic_autoack))
+				flags |= EB_DEV_CONF_AUTOACK;
+
+			net = json_object_get_int(jdynamic);
+
+			eb_device_init_dynamic (net, flags);
+		}
 	}
 
 	/* AUN Hosts */
 
 	{
+		struct json_object	*jaun, *jaun_entry, *jaun_net, *jstations, *jstation, *jstation_stn, *jstation_host, *jstation_port, *jstation_autoack, *jnet_baseport, *jnet_fixedport;;
 
+		if (json_object_object_get_ex(jc, "aun", &jaun))
+		{
+			uint16_t	alength, acount = 0;
+
+			alength = json_object_array_length (jaun);
+
+			while (acount < alength)
+			{
+
+				jaun_entry = json_object_array_get_idx (jaun, acount);
+
+				if (jaun_entry)
+				{
+					if (json_object_object_get_ex(jaun_entry, "net", &jaun_net))
+					{
+						uint8_t		net;
+
+						net = json_object_get_int(jaun_net);
+
+						eb_device_init (net, EB_DEF_NULL, 0);
+
+						if (json_object_object_get_ex(jaun_entry, "net-address", &jstations)) // This is an AUN MAP for a network
+						{
+							uint16_t	port = 32768;
+							uint8_t		flags = 0, is_fixed = 1, is_autoack = 0;
+							char		*net_address;
+							uint8_t		base_parts[4];
+							uint32_t	base;
+
+							json_object_object_get_ex(jaun_entry, "fixed-port", &jnet_fixedport);
+							json_object_object_get_ex(jaun_entry, "base-port", &jnet_baseport);
+							json_object_object_get_ex(jaun_entry, "autoack", &jstation_autoack);
+							json_object_object_get_ex(jaun_entry, "net-address", &jstation_host);
+
+							if (jstation_autoack && json_object_get_boolean(jstation_autoack))
+								is_autoack = 1;
+
+							if (jnet_baseport)
+								port = json_object_get_int(jnet_baseport);
+
+							if (jnet_fixedport && !json_object_get_boolean(jnet_fixedport))
+								is_fixed = 0;
+
+							if (jstation_autoack && json_object_get_boolean(jstation_autoack))
+								flags |= EB_DEV_CONF_AUTOACK;
+
+							net_address = eb_malloc (__FILE__, __LINE__, "JSON", "New AUN Net address string", json_object_get_string_len(jstations)+1);
+							strcpy (net_address, json_object_get_string(jstations));
+
+							if (sscanf(net_address, "%hhd.%hhd.%hhd.%hhd", &base_parts[0], 
+										&base_parts[1], 
+										&base_parts[2],
+										&base_parts[3]) != 4)
+								eb_debug (1, 0, "JSON", "AUN MAP for net %d has a net-address string (%s) which is unparseable", net, net_address);
+
+							base = 0;
+
+							for (uint8_t count = 0; count < 4; count++)
+								base = (base << 8) | base_parts[count];
+
+							if ((base & 0xff) != 0)
+								eb_debug (1, 0, "JSON", "AUN MAP for net %d has a net-address string whose LSB is non-zero (%s)", net, net_address);
+
+							eb_free (__FILE__, __LINE__, "JSON", "AUN Net address string", net_address);
+
+							eb_device_init_aun_net (net, base, is_fixed, port, is_autoack);
+
+						}
+						else
+						{
+							uint8_t		slength, scount = 0;
+
+							json_object_object_get_ex(jaun_entry, "stations", &jstations);
+
+							if (!jstations)
+								eb_debug (1, 0, "JSON", "AUN Network %d is not a whole network map but has no stations key", net);
+
+							slength = json_object_array_length (jstations);
+
+							while (scount < slength)
+							{
+
+								uint8_t		stn, flags = 0;
+								uint16_t	port = 32768;
+								char 		* host;
+								in_addr_t	address;
+								struct hostent	*h;
+
+								jstation = json_object_array_get_idx(jstations, scount);
+
+								json_object_object_get_ex(jstation, "station", &jstation_stn);
+								json_object_object_get_ex(jstation, "host", &jstation_host);
+								json_object_object_get_ex(jstation, "port", &jstation_port);
+								json_object_object_get_ex(jstation, "autoack", &jstation_autoack);
+
+								if (json_object_get_boolean(jstation_autoack))
+									flags |= EB_DEV_CONF_AUTOACK;
+
+								if (jstation_port)
+									port = json_object_get_int(jstation_port);
+
+								if (!jstation_stn)
+									eb_debug (1, 0, "JSON", "AUN host defined in net %d without a station number", net);
+
+								stn = json_object_get_int(jstation_stn);
+
+								if (!jstation_host)
+									eb_debug (1, 0, "JSON", "AUN Host defined at %d.%d without a hostname", net, stn);
+
+								host = eb_malloc (__FILE__, __LINE__, "JSON", "New AUN single host string", json_object_get_string_len(jstation_host) + 1);
+								strcpy (host, json_object_get_string(jstation_host));
+
+								h = gethostbyname2(host, AF_INET); // IPv4 only for AUN
+
+								if (!h)
+									eb_debug (1, 0, "JSON", "AUN Host defined at %d.%d with an unknown hostname (%s)", net, stn, host);
+								address = ntohl(*((in_addr_t *)h->h_addr));
+
+								eb_device_init_aun_host (net, stn, address, port, flags);
+
+								eb_free (__FILE__, __LINE__, "JSON", "AUN single host string", host);
+
+								scount++;
+							}
+					
+						}
+
+					}
+				}
+
+				acount++;
+
+			}
+		}
 	}
 
 	/* Trunks */
 
 	{
+		uint16_t	tcount = 0, tlength;
+		json_object	*jtrunks, *jtrunk, *jnats, *jnat, *jpools, *jpool, *jlocalport, *jremoteport, *jremotehost, *jkey;
+
+		json_object_object_get_ex(jc, "trunks", &jtrunks);
+
+		if (jtrunks)
+		{
+			tlength = json_object_array_length(jtrunks);
+
+			while (tcount < tlength)
+			{
+				uint16_t	local_port, remote_port = 0;
+				char		* remote_host, *key;
+				uint8_t		nat_local, nat_distant, found = 0;
+				uint16_t	nlength, ncount = 0;
+				struct __eb_device	*trunk;
+				struct json_object	*jnat_local, *jnat_remote;
+
+				jtrunk = json_object_array_get_idx(jtrunks, tcount);
+
+				json_object_object_get_ex(jtrunk, "nat", &jnats);
+				json_object_object_get_ex(jtrunk, "pool-assignment", &jpools);
+				json_object_object_get_ex(jtrunk, "local-port", &jlocalport);
+				json_object_object_get_ex(jtrunk, "remote-port", &jremoteport);
+				json_object_object_get_ex(jtrunk, "remote-host", &jremotehost);
+				json_object_object_get_ex(jtrunk, "key", &jkey);
+
+				if (!jkey && (!jremotehost || !jremoteport)) 
+				{
+					/* No key, and no remote host data. If no remote host data, there
+					 * has to be a key because the trunk is dynamic.
+					 */
+
+					eb_debug(1, 0, "JSON", "UDP trunk index %d has neither key nor remote host or remote port. Either specify a key (for a dynamic trunk) or host name and port (for an unencrypted static trunk)", tcount);
+				}
+
+				if (!jlocalport)
+					eb_debug (1, 0, "JSON", "UDP trunk index %d has no local port specified. Cannot establish trunk without a local port.", tcount);
+
+				local_port = json_object_get_int(jlocalport);
+
+				if ((jremotehost && !jremoteport) || (jremoteport && !jremotehost))
+					eb_debug (1, 0, "JSON", "UDP trunk index %d specifies only one of remote-port and remote-host: either specify both (for a static trunk) or neither (with a key - for a dynamic trunk)", tcount);
+
+				if (jremoteport)
+					remote_port = json_object_get_int(jremoteport);
+
+				if (jremotehost)
+				{
+					remote_host = eb_malloc (__FILE__, __LINE__, "JSON", "New Trunk remote endpoint host string", json_object_get_string_len(jremotehost) + 1);
+					strcpy (remote_host, json_object_get_string(jremotehost));
+				}
+
+				key = NULL; /* Dynamic trunk */
+
+				if (jkey)
+				{
+					key = eb_malloc (__FILE__, __LINE__, "JSON", "New trunk key", json_object_get_string_len(jkey) + 1);
+					strcpy (key, json_object_get_string(jkey));
+				}
+
+				eb_device_init_singletrunk (remote_host, local_port, remote_port, key);
+
+				nlength = json_object_array_length(jnats);
+
+				while (ncount < nlength)
+				{
+					jnat = json_object_array_get_idx (jnats, ncount);
+
+					json_object_object_get_ex(jnat, "distant-net", &jnat_remote);
+					json_object_object_get_ex(jnat, "local-net", &jnat_local);
+
+					if (!jnat_remote || !jnat_local)
+						eb_debug (1, 0, "JSON", "UDP Trunk definition %d has a nat entry (no. %d) which is missing either distant or local network number", tcount, ncount);
+
+					nat_local = json_object_get_int(jnat_local);
+					nat_distant = json_object_get_int(jnat_remote);
+
+					trunk = trunks;
+
+					while (!found && trunk)
+					{
+						if (trunk->trunk.local_port == local_port)
+						{
+							found = 1;
+							eb_device_init_trunk_nat (trunk, nat_local, nat_distant);
+						}
+
+						trunk = trunk->next;
+					}
+
+					ncount++;
+				}
+
+				/* Now add pool assignment */
+
+				/* GOT HERE  & Note to self - is dynamic creating the necessary AUN endpoints or do they appear magically once the network is created? See port 6809 output, which doesn't include them. */
+
+				tcount++;
+			}
+		}
 
 	}
 
 	/* Multitrunks */
 
 	{
-
+		/* TO DO - Implement later when we've written the driver */
 	}
 
 	/* Pool statics */
@@ -10669,7 +10922,7 @@ int main (int argc, char **argv)
 			{
 				fprintf (stderr, "%03d %-15s %s\n", net, eb_type_str(p->type), 
 					(p->type == EB_DEF_WIRE) ? p->wire.device : 
-					(p->type == EB_DEF_POOL) ? p->pool.data->name : "");
+					((p->type == EB_DEF_POOL) ? (char *) p->pool.data->name : ""));
 
 				if (p->type == EB_DEF_POOL)
 				{

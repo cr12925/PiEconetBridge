@@ -56,6 +56,8 @@
 
 #include "econet-gpio-consumer.h"
 
+#define DEVINIT_DEBUG(_fmt, ...) if (dumpconfig) eb_debug (0, 0, "CONFIG", "%-16s " _fmt, "Core", __VA_ARGS__)
+
 // Server version number advertised
 #define EB_VERSION	0x22 // i.e. 2.2
 #define EB_SERVERID	"Pi HP Bridge"
@@ -788,9 +790,12 @@ extern in_addr_t		bindhost;
 extern struct __eb_pool		* pools;
 extern struct __eb_fw_chain	* fw_chains;
 
+extern uint8_t	dumpconfig;
+
 /* externs within econet-hpbridge-devinit.c */
 
 extern uint8_t	eb_device_init_wire (uint8_t, char *);
+extern uint8_t	eb_device_init_virtual (uint8_t);
 extern uint8_t	eb_device_init_singletrunk (char *, uint16_t, uint16_t, char *);
 extern uint8_t 	eb_device_init_dynamic (uint8_t, uint8_t);
 extern uint8_t	eb_device_init_fs (uint8_t, uint8_t, char *);

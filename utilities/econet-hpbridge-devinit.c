@@ -210,6 +210,25 @@ eb_debug (1, 0, "CONFIG", "Cannot initialize update mutex for AUN/IP exposure at
 	return 1;
 }
 
+/* 
+ * eb_device_init_virtual
+ *
+ */
+
+uint8_t eb_device_init_virtual (uint8_t net)
+{
+
+	if (networks[net])
+		eb_debug (1, 0, "CONFIG", "Cannot configure net %d as new virtual network - network already exists", net);
+
+	networks[net] = eb_device_init (net, EB_DEF_NULL, 0);
+
+	DEVINIT_DEBUG("Created virtual network %d", net);
+
+	return 1;
+
+}
+
 /*
  * eb_device_init_fs
  *
@@ -471,7 +490,11 @@ uint8_t eb_device_init_aun_host (uint8_t net, uint8_t stn, in_addr_t address, ui
 
 	eb_set_single_wire_host (net, stn);
 
-	//DEVINIT_DEBUG("Created AUN network map for network %d with base %s", net, stn, base);
+	DEVINIT_DEBUG("Created AUN network map for network %d with base %d.%d.%d.%d", net, stn,
+			(address & 0xff000000) >> 24,
+			(address & 0x00ff0000) >> 16,
+			(address & 0x0000ff00) >> 8,
+			(address & 0x000000ff));
 
 	return 1;
 }
