@@ -11299,7 +11299,6 @@ int main (int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	json_object_put(json_config); /* Free up the memory */
 #else
 	if (!eb_readconfig(config_path, jsonconfigout_path))
 		exit (EXIT_FAILURE);
