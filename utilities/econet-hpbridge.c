@@ -9350,7 +9350,7 @@ struct json_object * eb_json_fw_chain_makenew(char *name, struct json_object *co
 		{
 			jchain = json_object_new_object();
 			json_object_object_add(jchain, "name", json_object_new_string(name));
-			json_object_object_add(jchain, "accept", json_object_new_boolean(TRUE)); /* Default - we can change it */
+			json_object_object_add(jchain, "accept", json_object_new_boolean((json_bool)1)); /* Default - we can change it */
 			json_object_object_add(jchain, "entries", json_object_new_array());
 			json_object_array_add(jchains, jchain);
 
@@ -9405,7 +9405,7 @@ int eb_readconfig(char *f, char *json)
 	jfw_chains = json_object_new_array();
 	jfw_bridge = json_object_new_object(); // Bridge-wide firewall
 	json_object_object_add(jfw_bridge, "name", json_object_new_string("BRIDGE"));
-	json_object_object_add(jfw_bridge, "accept", json_object_new_boolean(TRUE));
+	json_object_object_add(jfw_bridge, "accept", json_object_new_boolean((json_bool)1));
 	jfw_bridge_entries = json_object_new_array();
 	json_object_object_add(jfw_bridge, "entries", jfw_bridge_entries);
 	json_object_object_add(jc, "firewall-chains", jfw_chains);
@@ -9720,7 +9720,7 @@ int eb_readconfig(char *f, char *json)
 				json_object_object_get_ex(jc, "general", &general);
 				json_object_object_add(general, "dynamic", json_object_new_int(net));
 				if (flags & EB_DEV_CONF_AUTOACK)
-					json_object_object_add(general, "dynamic-autoack", json_object_new_boolean(TRUE));
+					json_object_object_add(general, "dynamic-autoack", json_object_new_boolean((json_bool)1));
 #else
 				eb_device_init_dynamic (net, flags);
 
@@ -9776,7 +9776,7 @@ int eb_readconfig(char *f, char *json)
 				json_object_object_add(jprinter, "acorn-name", json_object_new_string(acorn_printer));
 				json_object_object_add(jprinter, "unix-name", json_object_new_string(unix_printer));
 				json_object_object_add(jprinter, "priority", json_object_new_int(json_object_array_length(jps) + 1));
-				json_object_object_add(jprinter, "default", json_object_new_boolean(json_object_array_length(jps) == 0 ? TRUE : FALSE));
+				json_object_object_add(jprinter, "default", json_object_new_boolean((json_bool) json_object_array_length(jps) == 0 ? 1 : 0));
 #endif
 				strcpy (user, "");
 
@@ -9949,7 +9949,7 @@ int eb_readconfig(char *f, char *json)
 				json_object_object_add(divert, "pipe-path", json_object_new_string(pipepath));
 				eb_free(__FILE__, __LINE__, "CONFIG", "Free pipe base string", pipepath);
 				if (flags & EB_DEV_CONF_DIRECT)
-					json_object_object_add(divert, "pipe-direct", json_object_new_boolean(TRUE));
+					json_object_object_add(divert, "pipe-direct", json_object_new_boolean((json_bool) 1));
 #else
 				eb_device_init_pipe (net, stn, pipepath, flags);
 #endif
@@ -10011,8 +10011,8 @@ int eb_readconfig(char *f, char *json)
 					eb_debug (1, 0, "JSON", "Cannot AUN map net %d twice", net);
 				json_object_object_add(jaun, "net-address", json_object_new_string(base_string));
 				json_object_object_add(jaun, "base-port", json_object_new_int(port ? port : (is_fixed ? 32768 : 10000)));
-				json_object_object_add(jaun, "fixed-port", json_object_new_boolean(is_fixed ? TRUE : FALSE));
-				json_object_object_add(jaun, "autoack", json_object_new_boolean(is_autoack ? TRUE : FALSE));
+				json_object_object_add(jaun, "fixed-port", json_object_new_boolean((json_bool) is_fixed ? 1 : 0));
+				json_object_object_add(jaun, "autoack", json_object_new_boolean((json_bool) is_autoack ? 1 : 0));
 
 #endif
 			}
@@ -10068,7 +10068,7 @@ int eb_readconfig(char *f, char *json)
 					json_object_object_add(jaun_station, "host", json_object_new_string(eb_getstring(line, &matches[2])));
 					json_object_object_add(jaun_station, "port", json_object_new_int(port));
 					if (flags & EB_DEV_CONF_AUTOACK)
-						json_object_object_add(jaun_station, "autoack", json_object_new_boolean(TRUE));
+						json_object_object_add(jaun_station, "autoack", json_object_new_boolean((json_bool) 1));
 					json_object_array_add(jaun_already, jaun_station);
 #endif
 				}
@@ -10130,7 +10130,7 @@ int eb_readconfig(char *f, char *json)
 					eb_debug (1, 0, "JSON", "Cannot expose net %d twice", net);
 				json_object_object_add(jexposure, "net-address", json_object_new_string(addr));
 				json_object_object_add(jexposure, "base-port", json_object_new_int(port));
-				json_object_object_add(jexposure, "fixed-port", json_object_new_boolean(fixed ? TRUE : FALSE));
+				json_object_object_add(jexposure, "fixed-port", json_object_new_boolean((json_bool) fixed ? 1 : 0));
 #else
 				for (stn = 254; stn > 0; stn--)	
 				{
@@ -10356,7 +10356,7 @@ int eb_readconfig(char *f, char *json)
 
 #ifdef EB_JSONCONFIG
 					jfw_entry = json_object_new_object();
-					json_object_object_add(jfw_entry, "accept", json_object_new_boolean(drop ? FALSE : TRUE));
+					json_object_object_add(jfw_entry, "accept", json_object_new_boolean((json_bool) drop ? 0 : 1));
 					json_object_object_add(jfw_entry, "distant-net", json_object_new_int(distant_net));
 
 					sprintf (fw_name, "%s_%d_%s", is_trunk ? "TRUNK" : "ECONET", trunk_port, inbound ? "IN" : "OUT");
@@ -10450,7 +10450,7 @@ int eb_readconfig(char *f, char *json)
 
 				/* Don't bother setting destination-port because the legacy config can't set it - will always be wildcard */
 
-				json_object_object_add(jfw_entry, "accept", json_object_new_boolean((action == EB_FW_ACCEPT) ? TRUE : FALSE));
+				json_object_object_add(jfw_entry, "accept", json_object_new_boolean((json_bool) (action == EB_FW_ACCEPT) ? 1 : 0));
 
 				json_object_array_add(jfw_bridge_entries, jfw_entry);
 #else
@@ -10812,7 +10812,7 @@ int eb_readconfig(char *f, char *json)
 							json_object_object_add (jdevice_assignment, "pool-name", json_object_new_string(poolname));
 
 							if (all_pooled)
-								json_object_object_add(jdevice_object, "pool-all", json_object_new_boolean(TRUE));
+								json_object_object_add(jdevice_object, "pool-all", json_object_new_boolean((json_bool) 1));
 							else
 							{
 								for (uint8_t net = 1; net < 255; net++)
