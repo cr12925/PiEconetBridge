@@ -10293,7 +10293,7 @@ int eb_readconfig(char *f, char *json)
 				char		device[128];
 				regex_t		r_wort;
 #ifdef EB_JSONCONFIG
-				struct json_object	*jfw_array, *jdevice, *jfw_entry;
+				struct json_object	*jfw_array, *jdevice, *jfw_entry, *jfw_entries;
 				uint8_t		is_trunk = 0;
 				char		fw_name[128];
 #endif
@@ -10406,11 +10406,14 @@ int eb_readconfig(char *f, char *json)
 					}
 
 					if (!jdevice)
-						eb_debug(1, 0, "JSON", "Attempt to set firewall on non-existent device %s %d", (is_trunk ? "Trunk port" : "Wire net"), trunk_port);
+						eb_debug(1, 0, "JSON", "Attempt to set firewall on non-existent %s %d", (is_trunk ? "Trunk port" : "Wire net"), trunk_port);
 
 					jfw_array = eb_json_fw_chain_makenew(fw_name, jc);
+					json_object_object_get_ex(jfw_array, "entries", &jfw_entries);
+					if (!jfw_entries)
+						eb_debug(1, 0, "JSON", "Attempt to set firewall on %s %d, but the firewall chain does not have an 'entries' array", (is_trunk ? "Trunk port" : "Wire net"), trunk_port);
 
-					json_object_array_add(jfw_array, jfw_entry);
+					json_object_array_add(jfw_entries, jfw_entry);
 #endif
 	
 				}
