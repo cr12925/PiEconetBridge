@@ -8927,6 +8927,8 @@ int eb_parse_json_config(struct json_object *jc)
 				struct __eb_device	*trunk;
 				struct json_object	*jnat_local, *jnat_remote;
 
+				remote_host = NULL; // Assume dynamic unless we have a host
+
 				jtrunk = json_object_array_get_idx(jtrunks, tcount);
 
 				json_object_object_get_ex(jtrunk, "nat", &jnats);
