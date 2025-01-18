@@ -1,5 +1,5 @@
-#GIT_VERSION := "$(shell git branch) $(shell git rev-parse --short HEAD)"
-GIT_VERSION := "CR Build tree"
+GIT_VERSION := "$(shell git branch) $(shell git rev-parse --short HEAD)"
+#GIT_VERSION := "CR Build tree"
 CFLAGS=-g
 
 fsop_objects := $(patsubst %.c,%.o,$(wildcard fsop/*.c))
