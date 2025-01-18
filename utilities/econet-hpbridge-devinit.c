@@ -99,8 +99,8 @@ uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uin
 	p = eb_device_init (0, EB_DEF_TRUNK, 0);
 
 	p->trunk.local_port = local_port;
-	p->trunk.head = NULL;
-	p->trunk.tail = NULL;
+	//p->trunk.head = NULL;
+	//p->trunk.tail = NULL;
 	memset (&(p->trunk.xlate_in), 0, 256);
 	memset (&(p->trunk.xlate_in), 0, 256);
 	memset (&(p->trunk.filter_in), 0, 256);
@@ -447,7 +447,7 @@ uint8_t eb_device_init_pipe (uint8_t net, uint8_t stn, char *base, uint8_t flags
  *
  */
 
-uint8_t eb_device_init_aun_host (uint8_t net, uint8_t stn, in_addr_t address, uint16_t port, uint8_t is_autoack)
+uint8_t eb_device_init_aun_host (uint8_t net, uint8_t stn, in_addr_t address, uint16_t port, uint8_t is_autoack, uint8_t printdebug)
 {
 	struct __eb_device	*d;
 	struct __eb_aun_remote	*e;
@@ -490,7 +490,8 @@ uint8_t eb_device_init_aun_host (uint8_t net, uint8_t stn, in_addr_t address, ui
 
 	eb_set_single_wire_host (net, stn);
 
-	DEVINIT_DEBUG("Created AUN network map for network %d with base %d.%d.%d.%d", net, stn,
+	if (printdebug)
+		DEVINIT_DEBUG("Created AUN map for %d.%d with base %d.%d.%d.%d", net, stn,
 			(address & 0xff000000) >> 24,
 			(address & 0x00ff0000) >> 16,
 			(address & 0x0000ff00) >> 8,
@@ -514,10 +515,10 @@ uint8_t eb_device_init_aun_net (uint8_t net, in_addr_t base, uint8_t is_fixed, u
 			port ?
 				(is_fixed ? port : (port + stncount -1))
 			:       (is_fixed ? 32768 : (10000 + (net * 256) + stncount)),
-			is_autoack);
+			is_autoack, 0); /* Trailing 0 tells this function not to print debug - otherwise we get 254 debug lines ! */
 	}
 
-	DEVINIT_DEBUG("Created AUN network map for network %d with base %d.%d.%d.%d (%sfixed, %sAutoACK)", net, 
+	DEVINIT_DEBUG("Created AUN network map for network %d with base %d.%d.%d.%d base port %d (%sfixed, %sAutoACK)", net, 
 			(base & 0xff000000) >> 24,
 			(base & 0x00ff0000) >> 16,
 			(base & 0x0000ff00) >> 8,
@@ -532,7 +533,7 @@ uint8_t eb_device_init_aun_net (uint8_t net, in_addr_t base, uint8_t is_fixed, u
  *
  */
 
-uint8_t eb_device_init_expose_host (uint8_t net, uint8_t stn, in_addr_t s_addr, uint16_t port)
+uint8_t eb_device_init_expose_host (uint8_t net, uint8_t stn, in_addr_t s_addr, uint16_t port, uint8_t printdebug)
 {
 
 	struct __eb_device	*net_device;
@@ -578,6 +579,13 @@ uint8_t eb_device_init_expose_host (uint8_t net, uint8_t stn, in_addr_t s_addr, 
 	dev->next = exposures;
 	exposures = dev;
 
+	if (printdebug)
+		DEVINIT_DEBUG("Created exposure for host %d.%d on %d.%d.%d.%d port %d", net, stn,
+				(s_addr & 0xff000000) >> 24,
+				(s_addr & 0x00ff0000) >> 16,
+				(s_addr & 0x0000ff00) >> 8,
+				(s_addr & 0x000000ff),
+				port);
 
 	return 1;
 
@@ -825,7 +833,7 @@ uint8_t eb_device_init_set_pool_static (struct __eb_pool *pool,
 
 	h = eb_find_make_pool_host (source_device, source_net, source_stn, pool_net, pool_stn, 1 /* static */, &err);
 
-	if (!h || err) /* NU_deviceLL return on error non-zero */
+	if (!h || err) /* NULL return on error non-zero */
 		eb_debug (1, 0, "CONFIG",
 				"Error creating static pool entry for %d.%d on %s %d mapped to pool address %d.%d (%s)",
 				source_net, source_stn,

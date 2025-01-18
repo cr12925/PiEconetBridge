@@ -401,7 +401,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			struct __eb_pool	*pool;
 
 			// Links
-			struct __eb_fw *head, *tail;
+			//struct __eb_fw *head, *tail;
 			uint8_t 	xlate_in[256], xlate_out[256]; // Network number translation. _in translates a source network when the trunk receives traffic (and translates bridge advertised network numbers); _out translates a destination network when the trunk sends traffic.  Set up when config is read.
 			uint8_t		filter_in[256], filter_out[256]; // Networks we ignore (i.e. we ditch traffic, and we ignore/don't send adverts)
 	
@@ -803,9 +803,9 @@ extern uint8_t	eb_device_init_ps (uint8_t, uint8_t, char *, char *, char *, uint
 extern uint8_t 	eb_device_init_ps_handler (uint8_t, uint8_t, char *, char *);
 extern uint8_t	eb_device_init_ip (uint8_t, uint8_t, char *, uint32_t, uint32_t);
 extern uint8_t	eb_device_init_pipe (uint8_t, uint8_t, char *, uint8_t);
-extern uint8_t	eb_device_init_aun_host (uint8_t, uint8_t, in_addr_t, uint16_t, uint8_t);
+extern uint8_t	eb_device_init_aun_host (uint8_t, uint8_t, in_addr_t, uint16_t, uint8_t, uint8_t);
 extern uint8_t	eb_device_init_aun_net (uint8_t, in_addr_t, uint8_t, uint16_t, uint8_t);
-extern uint8_t	eb_device_init_expose_host (uint8_t, uint8_t, in_addr_t, uint16_t);
+extern uint8_t	eb_device_init_expose_host (uint8_t, uint8_t, in_addr_t, uint16_t, uint8_t);
 extern uint8_t	eb_device_init_trunk_nat (struct __eb_device *, uint8_t, uint8_t);
 extern uint8_t	eb_device_init_set_bridge_filter (struct __eb_device *, uint8_t, uint8_t, uint8_t);
 extern uint8_t	eb_device_init_add_fw_to_chain (struct __eb_fw **, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);

@@ -1042,6 +1042,8 @@ struct __eb_device * eb_device_init (uint8_t net, uint16_t type, uint8_t config)
 		p->all_nets_pooled = 0; // Starting point
 
 		p->self = p;
+
+		p->fw_in = p->fw_out = NULL;
 	
 		p->next = NULL;
 
@@ -8211,7 +8213,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 	uint8_t		net, stn;
 	uint16_t	jcount, jlength;
-	struct json_object	*jdiverts, *jstation, *jstation_number, *jprinters, *jfs, *jips, *jpipepath, *jpool, *jpoolnets, *jnetclock;
+	struct json_object	*jdiverts, *jstation, *jstation_number, *jprinters, *jfs, *jips, *jpipepath, *jnetclock;
 
 	if (json_object_object_get_ex(o, "net", &jdiverts)) /* Temp use of jdiverts */
 		net = json_object_get_int(jdiverts);
@@ -8396,6 +8398,149 @@ void eb_create_json_virtuals_econets_loop(struct json_object *o, uint8_t otype)
 	{
 		eb_create_json_virtuals_econets(json_object_array_get_idx(o, count), otype);
 		count++;
+	}
+}
+
+/* 
+ * Find pool object by name
+ */
+
+struct __eb_pool *eb_find_pool_by_name (char *poolname)
+{
+	struct __eb_pool *p;
+
+	p = pools;
+
+	while (p)
+	{
+		if (!strcmp((char *)p->name, poolname))
+			return p;
+
+		p = p->next;
+	}
+
+	return NULL;
+}
+
+/* Parse through a list of Econet JSON objects (0) or Trunk JSON objects (1)
+ * and apply the pool assignments. At the moment, we only implement the
+ * first one in the array. This will be expanded to more than one in the
+ * future.
+ */
+
+void eb_json_pool_assignment (struct json_object *j, uint8_t objtype)
+{
+
+	struct json_object	*jdevice, *jpools, *jpool, *jnets, *jnet, *jpoolname, *jallpool;
+
+	uint8_t			all_pooled = 0;
+	char 			*poolname;
+	uint16_t		dcount = 0, dlength;
+
+	dlength = json_object_array_length(j);
+
+	while (dcount < dlength)
+	{
+		jdevice = json_object_array_get_idx (j, dcount);
+
+		json_object_object_get_ex (jdevice, "pool-assignment", &jpools);
+		json_object_object_get_ex (jdevice, "pool-all", &jallpool);
+		if (jallpool) all_pooled = json_object_get_boolean(jallpool);
+	
+		if (jpools)
+		{
+			uint16_t	pcount = 0, plength;
+			struct json_object	*jnetlocalport;
+	
+			if (objtype) /* Trunk */
+				json_object_object_get_ex (jdevice, "local-port", &jnetlocalport);
+			else
+				json_object_object_get_ex (jdevice, "net", &jnetlocalport);
+
+			if (!jnetlocalport)
+				eb_debug (1, 0, "JSON", "%s cannot find %s key whilst trying to do pool assignments", objtype ? "Trunk" : "Econet", objtype ? "local-port" : "net");
+
+			plength = json_object_array_length (jpools);
+	
+			while (pcount < plength && pcount < 1) /* Second clause limits us to the first one */
+			{
+				uint8_t		ncount = 0, nlength;
+				uint16_t	netlocalport;
+				struct __eb_pool	*pool;
+				uint8_t		nets[255];
+
+				netlocalport = json_object_get_int(jnetlocalport);
+
+				jpool = json_object_array_get_idx(jpools, pcount);
+	
+				json_object_object_get_ex (jpool, "pool-name", &jpoolname);
+	
+				if (!jpoolname)
+					eb_debug (1, 0, "JSON", "Cannot implement pool assignment for %s %d - no pool name in pool assignment array index %d", objtype ? "Trunk" : "Econet", netlocalport, pcount);
+
+				poolname = eb_malloc (__FILE__, __LINE__, "JSON", "Pool name string", json_object_get_string_len(jpoolname) + 1);
+
+				strcpy (poolname, json_object_get_string(jpoolname));
+
+				pool = eb_find_pool_by_name(poolname);
+
+				if (!pool)
+					eb_debug (1, 0, "JSON", "Cannot implement pool assignment for %s %d - pool name %s does not exist for array index %d", objtype ? "Trunk" : "Econet", netlocalport, poolname, pcount);
+
+				json_object_object_get_ex (jpool, "nets", &jnets);
+
+				if (!jnets)
+					eb_debug (1, 0, "JSON", "Cannot implement pool assignment for %s %d - no pool 'nets' key for pool assignment array index %d", objtype ? "Trunk" : "Econet", netlocalport, pcount);
+
+				memset(nets, 0, 255);
+							
+				nlength = json_object_array_length (jnets);
+
+				while (ncount < nlength)
+				{
+					jnet = json_object_array_get_idx(jnets, ncount);
+
+					nets[json_object_get_int(jnet)] = 0xff;
+
+					ncount++;
+				}
+				
+				/* Find the relevant wire or trunk device, and the named pool, and call eb_device_init_set_pooled_nets (pool, dev, all_pooled, nets) */
+
+				if (!objtype) /* Econet */
+				{
+					if (networks[netlocalport] && networks[netlocalport]->net == netlocalport)
+						eb_device_init_set_pooled_nets (pool, networks[netlocalport], all_pooled, nets);
+				}
+				else
+				{
+					struct __eb_device	*trunk;
+					uint8_t			found = 0;
+
+					/* Find relevant trunk */
+
+					trunk = trunks;
+
+					while (trunk && !found)
+					{
+						if (trunk->trunk.local_port == netlocalport)
+						{
+							eb_device_init_set_pooled_nets (pool, trunk, all_pooled, nets);
+							found = 1;
+						}
+
+						trunk = trunk->next;
+					}
+
+					if (!found)
+						eb_debug (1, 0, "JSON", "Cannot implement pool assignment for %s %d - cannot find trunk local port %d array index %d", objtype ? "Trunk" : "Econet", netlocalport, pcount);
+				}
+
+				pcount++;
+			}
+		}
+
+		dcount++;
 	}
 }
 
@@ -8734,7 +8879,7 @@ int eb_parse_json_config(struct json_object *jc)
 									eb_debug (1, 0, "JSON", "AUN Host defined at %d.%d with an unknown hostname (%s)", net, stn, host);
 								address = ntohl(*((in_addr_t *)h->h_addr));
 
-								eb_device_init_aun_host (net, stn, address, port, flags);
+								eb_device_init_aun_host (net, stn, address, port, flags, 1);
 
 								eb_free (__FILE__, __LINE__, "JSON", "AUN single host string", host);
 
@@ -8756,7 +8901,7 @@ int eb_parse_json_config(struct json_object *jc)
 
 	{
 		uint16_t	tcount = 0, tlength;
-		json_object	*jtrunks, *jtrunk, *jnats, *jnat, *jpools, *jpool, *jlocalport, *jremoteport, *jremotehost, *jkey;
+		json_object	*jtrunks, *jtrunk, *jnats, *jnat, *jlocalport, *jremoteport, *jremotehost, *jkey;
 
 		json_object_object_get_ex(jc, "trunks", &jtrunks);
 
@@ -8776,7 +8921,6 @@ int eb_parse_json_config(struct json_object *jc)
 				jtrunk = json_object_array_get_idx(jtrunks, tcount);
 
 				json_object_object_get_ex(jtrunk, "nat", &jnats);
-				json_object_object_get_ex(jtrunk, "pool-assignment", &jpools);
 				json_object_object_get_ex(jtrunk, "local-port", &jlocalport);
 				json_object_object_get_ex(jtrunk, "remote-port", &jremoteport);
 				json_object_object_get_ex(jtrunk, "remote-host", &jremotehost);
@@ -8849,11 +8993,8 @@ int eb_parse_json_config(struct json_object *jc)
 					ncount++;
 				}
 
-				/* Now add pool assignment */
-
-				/* GOT HERE  & Note to self - is dynamic creating the necessary AUN endpoints or do they appear magically once the network is created? See port 6809 output, which doesn't include them. */
-
 				tcount++;
+
 			}
 		}
 
@@ -8862,20 +9003,277 @@ int eb_parse_json_config(struct json_object *jc)
 	/* Multitrunks */
 
 	{
-		/* TO DO - Implement later when we've written the driver */
+		/* TO DO - Implement later when I've written the driver */
+	}
+
+	/* Now implement pools on wire devices and trunks, one by one */
+
+	{
+
+		struct json_object	*jdevs;
+
+		/* First Econets */
+
+		json_object_object_get_ex (jc, "econets", &jdevs);
+
+		eb_json_pool_assignment (jdevs, 0); /* 0 = Econets */
+
+		json_object_object_get_ex (jc, "trunks", &jdevs);
+
+		eb_json_pool_assignment (jdevs, 1); /* 1 = Trunks */
+
 	}
 
 	/* Pool statics */
 
 	{
+		struct json_object	*jpools, *jpool, *jstatics, *jstatic, *jintftype, *jintfref, *jpoolnet, *jpoolstn, *jsrcnet, *jsrcstn;
+		uint16_t	pcount = 0, plength;
 
+		json_object_object_get_ex (jc, "pools", &jpools);
+
+		if (jpools)
+		{
+			plength = json_object_array_length(jpools);
+
+			while (pcount < plength)
+			{
+				uint16_t	scount = 0, slength, netlocalport;
+				char		*poolname;
+				struct json_object	* jpoolname;
+				struct __eb_pool	*pool;
+
+				jpool = json_object_array_get_idx (jpools, pcount);
+
+				json_object_object_get_ex (jpool, "name", &jpoolname);
+
+				if (!jpoolname)
+					eb_debug (1, 0, "JSON", "Cannot assign static pool address in pool index %d - no name key", pcount);
+
+				poolname = eb_malloc (__FILE__, __LINE__, "JSON", "Pool name string", json_object_get_string_len(jpoolname)+1);
+				strcpy ((char *)poolname, json_object_get_string(jpoolname));
+
+				pool = eb_find_pool_by_name (poolname);
+
+				json_object_object_get_ex (jpool, "statics", &jstatics);
+
+				if (jstatics)
+				{
+					slength = json_object_array_length(jstatics);
+
+					while (scount < slength)
+					{
+						jstatic = json_object_array_get_idx (jstatics, scount);
+	
+						json_object_object_get_ex (jstatic, "interface-type", &jintftype);
+						json_object_object_get_ex (jstatic, "interface-ref", &jintfref);
+						json_object_object_get_ex (jstatic, "static-net", &jpoolnet);
+						json_object_object_get_ex (jstatic, "static-stn", &jpoolstn);
+						json_object_object_get_ex (jstatic, "source-net", &jsrcnet);
+						json_object_object_get_ex (jstatic, "source-stn", &jsrcstn);
+	
+						if (!jintftype)
+							eb_debug (1, 0, "JSON", "Cannot assign static pool address in pool %s index %d - no interface-type key", poolname, pcount);
+						if (!jintfref)
+							eb_debug (1, 0, "JSON", "Cannot assign static pool address in pool %s index %d - no interface-ref key", poolname, pcount);
+						netlocalport = json_object_get_int(jintfref);
+	
+						if (!jpoolnet)
+							eb_debug (1, 0, "JSON", "Cannot assign static pool address in pool %s index %d - no static-net key", poolname, pcount);
+	
+						if (!jpoolstn)
+							eb_debug (1, 0, "JSON", "Cannot assign static pool address in pool %s index %d - no static-stn key", poolname, pcount);
+	
+						if (!jsrcnet)
+							eb_debug (1, 0, "JSON", "Cannot assign static pool address in pool %s index %d - no source-net key", poolname, pcount);
+	
+						if (!jsrcstn)
+							eb_debug (1, 0, "JSON", "Cannot assign static pool address in pool %s index %d - no source-stn key", poolname, pcount);
+	
+						if (!strcmp("econet", json_object_get_string(jintftype)))
+						{
+							if (networks[netlocalport] && networks[netlocalport]->type == EB_DEF_WIRE && networks[netlocalport]->net == netlocalport)
+								eb_device_init_set_pool_static (pool, networks[netlocalport],
+										json_object_get_int(jpoolnet),
+										json_object_get_int(jpoolstn),
+										json_object_get_int(jsrcnet),
+										json_object_get_int(jsrcstn));
+						}
+						else if (!strcmp("trunk", json_object_get_string(jintftype)))
+						{
+							struct __eb_device 	*trunk;
+							uint8_t			found = 0;
+	
+							trunk = trunks;
+	
+							while (trunk && !found)
+							{
+								if (trunk->trunk.local_port == netlocalport)
+									found = 1;
+								else
+									trunk = trunk->next;
+							}
+	
+							if (!found)
+								eb_debug (1, 0, "JSON", "Cannot assign static pool address in pool %s index %d - trunk port %d doesn't exist", poolname, pcount, netlocalport);
+	
+							eb_device_init_set_pool_static (pool, trunk,
+										json_object_get_int(jpoolnet),
+										json_object_get_int(jpoolstn),
+										json_object_get_int(jsrcnet),
+										json_object_get_int(jsrcstn));
+						}
+
+						if (!netlocalport)
+							eb_debug (1, 0, "JSON", "Cannot assign static pool address in pool %s index %d - invalid interface type %s", poolname, pcount, json_object_get_string(jintftype));
+	
+						scount++;
+					}
+				}
+
+				eb_free (__FILE__, __LINE__, "JSON", "Pool name string", poolname);
+
+				pcount++;
+			}
+		}
 	}
 
 	/* Exposures */
 
 	{
+		struct json_object	*jexposures, *jexposure, *jnet, *jipaddr, *jport, *jfixed, *jstns, *jstn, *jfwin, *jfwout;
+		uint16_t		ecount = 0, elength;
 
+		json_object_object_get_ex (jc, "exposures", &jexposures);
+
+		if (jexposures)
+		{
+			elength = json_object_array_length (jexposures);
+
+			while (ecount < elength)
+			{
+				jexposure = json_object_array_get_idx (jexposures, ecount);
+
+				if (jexposure)
+				{
+					uint8_t		net;
+
+					json_object_object_get_ex (jexposure, "net", &jnet);
+					json_object_object_get_ex (jexposure, "net-address", &jipaddr);
+					json_object_object_get_ex (jexposure, "base-port", &jport);
+					json_object_object_get_ex (jexposure, "fixed-port", &jfixed);
+					json_object_object_get_ex (jexposure, "fw-in", &jfwin);
+					json_object_object_get_ex (jexposure, "fw-out", &jfwout);
+					json_object_object_get_ex (jexposure, "stations", &jstns);
+
+					if (!jnet)
+						eb_debug (1, 0, "JSON", "Cannot create exposure index %d - no net key", ecount);
+
+					net = json_object_get_int (jnet);
+
+					if (!jstns) /* Expose whole net */
+					{
+						uint8_t		stn, is_fixed;
+						uint8_t		addr_parts[4];
+						uint16_t	port;
+						in_addr_t	addr;
+						char		* s_addr;
+
+						if (!jipaddr)
+							eb_debug (1, 0, "JSON", "Cannot create exposure for net %d index %d - no net-address key", net, ecount);
+						if (jfixed)
+							is_fixed = json_object_get_int (jfixed);
+
+						s_addr = eb_malloc (__FILE__, __LINE__, "JSON", "Expose net address", json_object_get_string_len(jipaddr)+1);
+						strcpy ((char *) s_addr, json_object_get_string(jipaddr));
+						if ((sscanf (s_addr, "%hhd.%hhd.%hhd.%hhd", &addr_parts[0], &addr_parts[1], &addr_parts[2], &addr_parts[3])) != 4)
+							eb_debug (1, 0, "JSON", "Cannot create exposure for net %d index %d - bad ip address %s", net, ecount, s_addr);
+						addr =	(addr_parts[0] << 24) |
+							(addr_parts[1] << 16) |
+							(addr_parts[2] << 8) |
+							(addr_parts[3]);
+
+						is_fixed = json_object_get_boolean(jfixed);
+
+						if (jport)
+							port = json_object_get_int(jport);
+						else
+							port = is_fixed ? 10000 + (256 * net) : 32768;
+
+						for (stn = 1; stn < 255; stn++)
+							eb_device_init_expose_host (net, stn, (addr & 0xff) == 0 ? (addr | stn) : addr, 
+									port + (is_fixed ? 0 : stn),
+									0);
+
+						DEVINIT_DEBUG ("Exposed net %d at address %s base-port %d (%sfixed)", net, s_addr, port, is_fixed ? "" : "not ");
+
+						eb_free (__FILE__, __LINE__, "JSON", "Expose net address", s_addr);
+
+					}
+					else /* Expose single hosts */
+					{
+						uint16_t	scount = 0, slength;
+
+						slength = json_object_array_length (jstns);
+
+						while (scount < slength)
+						{
+							struct json_object 	*jhost, *jport, *jstation, *jfwin, *jfwout;
+							uint8_t			stn;
+							uint16_t		port;
+							uint8_t			addr_parts[4];
+							in_addr_t		addr;
+							char			*s_addr;
+
+							jstn = json_object_array_get_idx (jstns, scount);
+
+							json_object_object_get_ex (jstn, "host", &jhost);
+							json_object_object_get_ex (jstn, "port", &jport);
+							json_object_object_get_ex (jstn, "station", &jstation);
+							json_object_object_get_ex (jstn, "fw-in", &jfwin);
+							json_object_object_get_ex (jstn, "fw-out", &jfwout);
+
+							if (!jhost)
+								eb_debug (1, 0, "JSON", "Cannot create exposure for station index %d in net %d - no host key", scount, net);
+							s_addr = eb_malloc (__FILE__, __LINE__, "JSON", "Expose host address string", json_object_get_string_len(jhost) + 1);
+							strcpy ((char *) s_addr, json_object_get_string(jhost));
+
+							if ((sscanf(s_addr, "%hhd.%hhd.%hhd.%hhd", &addr_parts[0], &addr_parts[1], &addr_parts[2], &addr_parts[3])) != 4)
+								eb_debug (1, 0, "JSON", "Cannot create exposure for station index %d in net %d - bad host IP address %s", scount, net, s_addr);
+							eb_free (__FILE__, __LINE__, "JSON", "Expose host address string", s_addr);
+
+							addr = (addr_parts[0] << 24) | (addr_parts[1] << 16) | (addr_parts[2] << 8) | addr_parts[3];
+
+							if (!jport)
+								eb_debug (1, 0, "JSON", "Cannot create exposure for station index %d in net %d - no port key", scount, net);
+
+							port = json_object_get_int (jport);
+
+							if (!jstation)
+								eb_debug (1, 0, "JSON", "Cannot create exposure for station index %d in net %d - no station key", scount, net);
+							stn = json_object_get_int (jstation);
+
+							eb_device_init_expose_host (net, stn, addr, port, 1);
+
+							scount++;
+						}
+					}
+
+				}
+
+				ecount++;
+			}
+		}
 	}
+
+	/* Now go through each device - econet, trunk, exposure, pipe, local emulator - and find any firewall chain that's been applied,
+	 * and set them in the relevant devices.
+	 *
+	 * Actually, we should just do this in the device creation - we construct the firewall chains first off, so they'll all exist.
+	 * Just need to set fw-in / fw-out
+	 *
+	 * And we need to implement that in the actual bridge, too...
+	 */
 
 	/* Generals */
 
@@ -8888,7 +9286,7 @@ int eb_parse_json_config(struct json_object *jc)
 
 	json_object_put(jc); /* Free the memory */
 
-	eb_debug (0, 2, "CONFIG", "%16s JSON configuration read successfully", "");
+	eb_debug (0, 2, "CONFIG", "%-16s JSON configuration read successfully", "Core");
 
 	return 1;
 
@@ -9640,7 +10038,7 @@ int eb_readconfig(char *f, char *json)
 #ifndef EB_JSONCONFIG
 					address = ntohl(*((in_addr_t *)h->h_addr));
 
-					eb_device_init_aun_host (net, stn, address, port, flags);
+					eb_device_init_aun_host (net, stn, address, port, flags, 1);
 #else
 					json_object_object_get_ex(jc, "aun", &jauns);
 					jaun = eb_json_aunnet_makenew(jauns, net);
@@ -9729,9 +10127,18 @@ int eb_readconfig(char *f, char *json)
 				{
 					if (fixed) s_addr = (s_addr & ~0xff) | stn;
 
-					eb_device_init_expose_host (net, stn, s_addr, port + (fixed ? 0 : stn));
+					eb_device_init_expose_host (net, stn, s_addr, port + (fixed ? 0 : stn), 0);
 
 				}
+
+				DEVINIT_DEBUG ("Created exposure for net %d with base address %d.%d.%d.%d with base-port %d (%sfixed)",
+					net,
+					(s_addr & 0xff000000) >> 24,
+					(s_addr & 0x00ff0000) >> 16,
+					(s_addr & 0x0000ff00) >> 8,
+					(s_addr & 0x000000ff),
+					port,
+					fixed ? "" : "not ");	
 #endif
 	
 			}
@@ -9804,7 +10211,7 @@ int eb_readconfig(char *f, char *json)
 				json_object_object_add(jexposure, "port", json_object_new_int(port));
 				json_object_array_add(jexp_already, jexposure);
 #else
-				eb_device_init_expose_host (net, stn, s_addr, port);
+				eb_device_init_expose_host (net, stn, s_addr, port, 1);
 #endif
 
 			}
