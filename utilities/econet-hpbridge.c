@@ -8973,6 +8973,9 @@ int eb_parse_json_config(struct json_object *jc)
 
 				eb_device_init_singletrunk (remote_host, local_port, remote_port, key);
 
+				if (key)
+					eb_free (__FILE__, __LINE__, "JSON", "New trunk key", key); /* Free - the devinit routine copies it to a new malloced area */
+
 				nlength = json_object_array_length(jnats);
 
 				while (ncount < nlength)

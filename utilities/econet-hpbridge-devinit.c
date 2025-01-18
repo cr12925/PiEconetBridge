@@ -131,7 +131,11 @@ uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uin
 	}
 
 	if (sharedkey) /* i.e. is a keyed trunk */
-		p->trunk.sharedkey = (unsigned char *) sharedkey;
+	{
+		p->trunk.sharedkey = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create trunk key string", 32);
+		memset (p->trunk.sharedkey, 0, 32); /* Pad */
+		strncpy ((char *) p->trunk.sharedkey, sharedkey, strlen(sharedkey) > 31 ? 31 : strlen(sharedkey));
+	}
 	else    p->trunk.sharedkey = NULL;
 
 	p->next = trunks;
@@ -157,7 +161,7 @@ uint8_t eb_device_init_dynamic (uint8_t net, uint8_t flags)
 	if (networks[net])
 		eb_debug (1, 0, "CONFIG", "Cannot configure net %d as dynamic station network - network already exists", net);
 
-	p = eb_device_init (net, EB_DEF_NULL, flags);
+	p = eb_device_init (net, EB_DEF_NULL, 0);
 
 	for (stn = 254; stn > 0; stn--)
 	{
@@ -180,8 +184,6 @@ uint8_t eb_device_init_dynamic (uint8_t net, uint8_t flags)
 
 		a->stn = stn;
 		a->port = -1; // Dynamic
-		//strcpy (a->host, "");
-		// r->s_addr - later
 		a->eb_device = r; // Pointer to divert device
 		a->is_dynamic = 1;
 		a->b_in = a->b_out = 0; // Traffic stats
@@ -200,12 +202,11 @@ eb_debug (1, 0, "CONFIG", "Cannot initialize update mutex for AUN/IP exposure at
 		if (aun_remotes)	a->next = aun_remotes;
 		aun_remotes = a;
 
-		//fprintf (stderr, "AutoAck status for %d.%d is %s (matches[2] = %s)\n", r->net, a->stn, (r->config & EB_DEV_CONF_AUTOACK) ? "On" : "Off", eb_getstring(line, &matches[2]));
 	}
 
 	eb_set_whole_wire_net (net, NULL);
 	
-	DEVINIT_DEBUG("Created dynamic AUN network %d", net);
+	DEVINIT_DEBUG("Created dynamic AUN network %d (with%s Auto Ack)", net, (flags & EB_DEV_CONF_AUTOACK) ? "" : "OUT" );
 
 	return 1;
 }
@@ -481,6 +482,8 @@ uint8_t eb_device_init_aun_host (uint8_t net, uint8_t stn, in_addr_t address, ui
 		eb_debug (1, 0, "CONFIG", "Cannot initialize update mutex for AUN/IP exposure at %d.%d", net, stn);
 
 	e->next = aun_remotes;
+
+	d->config = 0;
 
 	d->config |= (is_autoack ? EB_DEV_CONF_AUTOACK : 0);
 
