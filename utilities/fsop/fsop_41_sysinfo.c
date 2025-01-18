@@ -191,13 +191,21 @@ FSOP(41)
 				if (get_printer_info(f->server->net, f->server->stn,
 					count, pname, banner, &control, &status, &account))
 				{
-					numret++;
+
 					snprintf(&(reply.p.data[reply_length]), 7, "%-6.6s", pname);
 					reply_length += 6;
-					//reply.p.data[reply_length] = 0; // This appears to be an error
 					if ((control & 0x01) == 0) reply.p.data[reply_length] = 0; // Off - the enable bit
 					else reply.p.data[reply_length] = 1;
 					reply_length++;
+				}
+				else
+				{
+					snprintf(&(reply.p.data[reply_length]), 7, "%6s", "");
+					reply_length += 6;
+					reply.p.data[reply_length] = 0; /* off - i.e. non-existent */
+					reply_length++;
+				}
+					numret++;
 					reply.p.data[reply_length++] = 0; // Not default
 					reply.p.data[reply_length++] = (control & 0x02) >> 1; // Anonymous use
 					reply.p.data[reply_length++] = (control & 0x04) >> 2; // Account required;
@@ -207,18 +215,9 @@ FSOP(41)
 					reply.p.data[reply_length++] = 0; // 2nd auto number
 					reply.p.data[reply_length++] = 0; // reserved
 					reply.p.data[reply_length++] = 0; // reserved
-
-				}
-
 			}
 
 			reply.p.data[2] = numret;
-
-			if (numret == 0)
-			{
-				reply_length--; // Don't send the count. See if that sorts it out?
-			}
-
 
 		} break;
 		default:
