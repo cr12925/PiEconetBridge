@@ -4473,8 +4473,15 @@ void fsop_port99 (struct __fs_station *s, struct __econet_packet_aun *packet, ui
                         if (	!(fsop == 1 || fsop == 2 || (fsop == 5) || (fsop >=10 && fsop <= 11)) ) 
 				if (datalen >= 3) *(f->data+2) = FS_DIVHANDLE(active,*(f->data+2)); 
 
-                        if (datalen >= 4) *(f->data+3) = FS_DIVHANDLE(active,*(f->data+3));
-                        if (datalen >= 5) *(f->data+4) = FS_DIVHANDLE(active,*(f->data+4));
+                        if (datalen >= 4) {
+				*(f->data+3) = FS_DIVHANDLE(active,*(f->data+3));
+				active->current = *(f->data+3); // Update so clients can open separate dirs and use them as CWD
+			}
+
+                        if (datalen >= 5) {
+				*(f->data+4) = FS_DIVHANDLE(active,*(f->data+4));
+				active->lib = *(f->data+4); // Update lib so client can open separate lib dirs and use them as LIB (e.g. as FindLib does)
+			}
                 }
 
         }
