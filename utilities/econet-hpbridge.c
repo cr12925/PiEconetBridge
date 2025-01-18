@@ -104,6 +104,7 @@ uint32_t eb_get_local_seq (struct __eb_device *);
 static void * eb_statistics (void *);
 static void * eb_fs_statistics (void *);
 extern void fs_dump_handle_list (FILE *, int);
+struct __eb_fw_chain * eb_get_fw_chain_byname (char *);
 
 unsigned char beebmem[65536];
 
@@ -8553,6 +8554,7 @@ void eb_json_pool_assignment (struct json_object *j, uint8_t objtype)
 	}
 }
 
+
 /* Parse a JSON config and create the relevant threads etc. */
 
 int eb_parse_json_config(struct json_object *jc)
@@ -9292,8 +9294,113 @@ int eb_parse_json_config(struct json_object *jc)
 	/* Generals */
 
 	{
+		struct json_object	*j, *jgen;
 
-		/* TO DO - if there's a bridge-wide chain in here, we need to assign it to the bridge firewall pointer */
+		json_object_object_get_ex(jc, "general", &jgen);
+		if (!jgen)
+			eb_debug (1, 0, "JSON", "Unable to find general key in JSON config!");
+
+		/* Bridge-wide firewall */
+		json_object_object_get_ex(jgen, "fw", &j);
+
+		if (j)
+		{
+			char	*fwchain;
+
+			fwchain = eb_malloc (__FILE__, __LINE__, "JSON", "Bridge-wide firewall chain name string", json_object_get_string_len(j)+1);
+			strcpy (fwchain, json_object_get_string(j));
+
+			bridge_fw = (eb_get_fw_chain_byname(fwchain))->fw_chain_start; /* This particular fw list is just the rules; the rest are __eb_fw_chain structs */
+			eb_free (__FILE__, __LINE__, "JSON", "Bridge-wide firewall chain name string", fwchain);
+		}
+
+#define EB_JSON_TUNABLE_INT(x,y)	json_object_object_get_ex(jgen, x, &j); \
+				if (j) \
+				{\
+					uint32_t	i;\
+					i = json_object_get_int(j); \
+					y = i; \
+				}
+
+#define EB_JSON_TUNABLE_BOOL(x,y)	json_object_object_get_ex(jgen, x, &j); \
+				if (j) \
+				{\
+					uint32_t	i;\
+					i = json_object_get_boolean(j);\
+					y = !!i;\
+				}
+
+		EB_JSON_TUNABLE_BOOL("disable-econet", EB_CONFIG_LOCAL);
+		EB_JSON_TUNABLE_INT("debug-level", EB_DEBUG_LEVEL);
+		EB_JSON_TUNABLE_INT("packet-dump-bytes", EB_CONFIG_MAX_DUMP_BYTES);
+		EB_JSON_TUNABLE_BOOL("kernel-extralogs", EB_CONFIG_EXTRALOGS);
+		EB_JSON_TUNABLE_INT("fs-stats-port", EB_CONFIG_FS_STATS_PORT);
+		EB_JSON_TUNABLE_BOOL("no-bridge-announce-debug", EB_CONFIG_NOBRIDGEANNOUNCEDEBUG);
+		EB_JSON_TUNABLE_BOOL("no-keepalive-debug", EB_CONFIG_NOKEEPALIVEDEBUG);
+		EB_JSON_TUNABLE_INT("wire-max-not-listening", EB_CONFIG_WIRE_MAX_NOTLISTENING);
+		EB_JSON_TUNABLE_INT("trunk-keepalive-interval", EB_CONFIG_TRUNK_KEEPALIVE_INTERVAL);
+		EB_JSON_TUNABLE_INT("trunk-dead-interval", EB_CONFIG_TRUNK_DEAD_INTERVAL);
+		EB_JSON_TUNABLE_INT("pool-dead-interval", EB_CONFIG_POOL_DEAD_INTERVAL);
+		EB_JSON_TUNABLE_BOOL("leds-off", EB_CONFIG_LEDS_OFF);
+		EB_JSON_TUNABLE_BOOL("leds-off", EB_CONFIG_BLINK_ON); /* Yes, we need to set both */
+		EB_JSON_TUNABLE_BOOL("led-blink-on", EB_CONFIG_BLINK_ON);
+		EB_JSON_TUNABLE_INT("wire-max-tx", EB_CONFIG_WIRE_RETRIES);
+		EB_JSON_TUNABLE_INT("aun-max-tx", EB_CONFIG_AUN_RETRIES);
+		EB_JSON_TUNABLE_INT("wire-interval", EB_CONFIG_WIRE_RETX);
+		EB_JSON_TUNABLE_INT("aun-interval", EB_CONFIG_AUN_RETX);
+		EB_JSON_TUNABLE_INT("wire-imm-wait", EB_CONFIG_WIRE_IMM_WAIT);
+		EB_JSON_TUNABLE_INT("aun-nak-tolerance", EB_CONFIG_AUN_NAKTOLERANCE);
+		EB_JSON_TUNABLE_INT("immediate-timeout", EB_CONFIG_WIRE_IMM_WAIT);
+		EB_JSON_TUNABLE_INT("flashtime", EB_CONFIG_FLASHTIME);
+		EB_JSON_TUNABLE_BOOL("enable-syst-fast", fs_set_syst_bridgepriv);
+		EB_JSON_TUNABLE_INT("wire-reset-qty", EB_CONFIG_WIRE_RESET_QTY);
+		EB_JSON_TUNABLE_INT("wire-update-qty", EB_CONFIG_WIRE_UPDATE_QTY);
+		EB_JSON_TUNABLE_INT("trunk-reset-qty", EB_CONFIG_TRUNK_RESET_QTY);
+		EB_JSON_TUNABLE_INT("trunk-update-qty", EB_CONFIG_TRUNK_UPDATE_QTY);
+		EB_JSON_TUNABLE_INT("bridge-query-interval", EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL);
+		EB_JSON_TUNABLE_BOOL("bridge-loop-detect", EB_CONFIG_BRIDGE_LOOP_DETECT);
+		EB_JSON_TUNABLE_BOOL("pool-reset", EB_CONFIG_POOL_RESET_FWD);
+		EB_JSON_TUNABLE_INT("stats-port", EB_CONFIG_STATS_PORT);
+		EB_JSON_TUNABLE_INT("fs-stats-port", EB_CONFIG_FS_STATS_PORT);
+		EB_JSON_TUNABLE_BOOL("malloc-debug", EB_DEBUG_MALLOC);
+		EB_JSON_TUNABLE_BOOL("normalize-debug", normalize_debug);
+
+		/* This one's a negative bool */
+
+		json_object_object_get_ex(jgen, "disable-7bitbodge", &j); 
+
+		if (j) 
+		{
+			uint32_t	i;
+			i = json_object_get_boolean(j); 
+			fs_sevenbitbodge = !i; 
+		}
+
+		json_object_object_get_ex(jgen, "max-sockets", &j);
+
+		if (j)
+		{
+			struct rlimit	max_fds;
+
+			max_fds.rlim_cur = max_fds.rlim_max = json_object_get_int(j);
+
+			setrlimit (RLIMIT_NOFILE, &max_fds);
+		}
+
+		json_object_object_get_ex(jgen, "packet-dump", &j);
+
+		if (j)
+		{
+			char 	*opt;
+
+			opt = eb_malloc(__FILE__, __LINE__, "JSON", "Packet dump option string", json_object_get_string_len(j)+1);
+			strcpy(opt, json_object_get_string(j));
+                        if (strchr(opt, 'i'))        EB_CONFIG_PKT_DUMP_OPTS |= EB_PKT_DUMP_PRE_I;
+                        if (strchr(opt, 'I'))        EB_CONFIG_PKT_DUMP_OPTS |= EB_PKT_DUMP_POST_I;
+                        if (strchr(opt, 'o'))        EB_CONFIG_PKT_DUMP_OPTS |= EB_PKT_DUMP_PRE_O;
+                        if (strchr(opt, 'O'))        EB_CONFIG_PKT_DUMP_OPTS |= EB_PKT_DUMP_POST_O;
+		}
+ 
 	}
 
 	/* Free up the pointers */
@@ -9366,6 +9473,29 @@ struct json_object * eb_json_fw_chain_makenew(char *name, struct json_object *co
 	}
 
 	return jchain;
+}
+
+/*
+ * Find a firewall chain by name in the main
+ * bridge config, and return its chain struct
+ */
+
+struct __eb_fw_chain * eb_get_fw_chain_byname (char * name)
+{
+
+	struct __eb_fw_chain 	*chain;
+
+	chain = fw_chains;
+
+	while (chain)
+	{
+		if (!strcasecmp(name, (char *) chain->fw_chain_name))
+			return chain;
+
+		chain = chain->next;
+	}
+
+	return NULL;
 }
 
 #endif 
@@ -11179,6 +11309,7 @@ int main (int argc, char **argv)
 			{
 				switch (optind)
 				{
+					/* Commented - these are implemented after reading the config file 
 					case 0: 	EB_CONFIG_WIRE_RETRIES = atoi(optarg); break;
 					case 1:		EB_CONFIG_AUN_RETRIES = atoi(optarg); break;
 					case 2:		EB_CONFIG_WIRE_RETX = atoi(optarg); break;
@@ -11188,7 +11319,9 @@ int main (int argc, char **argv)
 					case 6:		fs_sevenbitbodge = 0; break;
 					case 7:		EB_CONFIG_DYNAMIC_EXPIRY = atoi(optarg); break;
 					case 8:		EB_CONFIG_STATS_PORT = atoi(optarg); break;
+					*/
 					case 9:		max_fds.rlim_cur = max_fds.rlim_max = atoi(optarg); break;
+							/* Commented - same reason as above
 					case 10:	EB_CONFIG_FLASHTIME = atoi(optarg); break;
 					case 11:	EB_CONFIG_BLINK_ON = 1; break;
 					case 12:	EB_CONFIG_LEDS_OFF = 1; EB_CONFIG_BLINK_ON = 1; break;
@@ -11209,14 +11342,18 @@ int main (int argc, char **argv)
 					case 27:	EB_CONFIG_WIRE_MAX_NOTLISTENING = atoi(optarg); break;
 					case 28:	EB_CONFIG_NOBRIDGEANNOUNCEDEBUG = 1; EB_CONFIG_NOKEEPALIVEDEBUG = 1; break;
 					case 29:	EB_CONFIG_FS_STATS_PORT = atoi(optarg); break;
+					*/
 					case 30:	strncpy(jsonconfigout_path, optarg, 255); break;
 				}
 			} break;
 			case 'c':	strncpy(config_path, optarg, 255); break;
 			case 'd':	strncpy(debug_path, optarg, 1023); break;
+					/* Commented same reason as above
 			case 'e':	EB_CONFIG_EXTRALOGS = 1; break;
+			*/
 			case 'h':	eb_help(argv[0]); exit(EXIT_SUCCESS); break;
 			case 'j':	strncpy(jsonconfig_path, optarg, 255); break;
+					/* Commented same reason as above
 			case 'l':	EB_CONFIG_LOCAL = 1; break;
 			case 'n':	EB_CONFIG_MAX_DUMP_BYTES = atoi(optarg); break; // Max packet dump data bytes
 			case 'p':	
@@ -11227,6 +11364,7 @@ int main (int argc, char **argv)
 				if (strchr(optarg, 'O'))	EB_CONFIG_PKT_DUMP_OPTS |= EB_PKT_DUMP_POST_O;
 			}; break;
 			case 's':	dumpconfig++; break;	
+			*/
 			case 'z':	EB_DEBUG_LEVEL++; break;
 		}
 	}
@@ -11308,6 +11446,70 @@ int main (int argc, char **argv)
 	if (!eb_readconfig(config_path, jsonconfigout_path))
 		exit (EXIT_FAILURE);
 #endif
+
+	/* Second parse of command line options so that we override the config file where necessary */
+
+	optind = 1; /* Reset option processing */
+
+	while ((opt = getopt_long(argc, argv, "hc:d:eln:p:sz", long_options, &optind)) != -1)	
+	{
+		switch (opt)
+		{
+			case 0: // Long option
+			{
+				switch (optind)
+				{
+					case 0: 	EB_CONFIG_WIRE_RETRIES = atoi(optarg); break;
+					case 1:		EB_CONFIG_AUN_RETRIES = atoi(optarg); break;
+					case 2:		EB_CONFIG_WIRE_RETX = atoi(optarg); break;
+					case 3:		EB_CONFIG_AUN_RETX = atoi(optarg); break;
+					case 4:		EB_DEBUG_MALLOC = 1; break;
+					case 5:		EB_CONFIG_AUN_NAKTOLERANCE = atoi(optarg); break;
+					case 6:		fs_sevenbitbodge = 0; break;
+					case 7:		EB_CONFIG_DYNAMIC_EXPIRY = atoi(optarg); break;
+					case 8:		EB_CONFIG_STATS_PORT = atoi(optarg); break;
+					/* case 9:		max_fds.rlim_cur = max_fds.rlim_max = atoi(optarg); break; */
+					case 10:	EB_CONFIG_FLASHTIME = atoi(optarg); break;
+					case 11:	EB_CONFIG_BLINK_ON = 1; break;
+					case 12:	EB_CONFIG_LEDS_OFF = 1; EB_CONFIG_BLINK_ON = 1; break;
+					case 13:	normalize_debug = 1; break;
+					case 14:	EB_CONFIG_TRUNK_KEEPALIVE_INTERVAL = atoi(optarg); break;
+					case 15:	EB_CONFIG_TRUNK_DEAD_INTERVAL = atoi(optarg); break;
+					case 16:	EB_CONFIG_POOL_DEAD_INTERVAL = atoi(optarg); break;
+					case 17:	fs_set_syst_bridgepriv = 1; break;
+					case 18:	EB_CONFIG_WIRE_RESET_QTY = atoi(optarg); break;
+					case 19:	EB_CONFIG_WIRE_UPDATE_QTY = atoi(optarg); break;
+					case 20:	EB_CONFIG_TRUNK_RESET_QTY = atoi(optarg); break;
+					case 21:	EB_CONFIG_TRUNK_UPDATE_QTY = atoi(optarg); break;
+					case 22:	EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL = atoi(optarg); break;
+					case 23: 	EB_CONFIG_NOKEEPALIVEDEBUG = 1; break;
+					case 24:	EB_CONFIG_WIRE_IMM_WAIT = atoi(optarg); break;
+					case 25:	EB_CONFIG_BRIDGE_LOOP_DETECT = (atoi(optarg) ? 1 : 0); break;
+					case 26:	EB_CONFIG_POOL_RESET_FWD = (atoi(optarg) ? 1 : 0); break;
+					case 27:	EB_CONFIG_WIRE_MAX_NOTLISTENING = atoi(optarg); break;
+					case 28:	EB_CONFIG_NOBRIDGEANNOUNCEDEBUG = 1; EB_CONFIG_NOKEEPALIVEDEBUG = 1; break;
+					case 29:	EB_CONFIG_FS_STATS_PORT = atoi(optarg); break;
+					//case 30:	strncpy(jsonconfigout_path, optarg, 255); break;
+				}
+			} break;
+			//case 'c':	strncpy(config_path, optarg, 255); break;
+			//case 'd':	strncpy(debug_path, optarg, 1023); break;
+			case 'e':	EB_CONFIG_EXTRALOGS = 1; break;
+			//case 'h':	eb_help(argv[0]); exit(EXIT_SUCCESS); break;
+			//case 'j':	strncpy(jsonconfig_path, optarg, 255); break;
+			case 'l':	EB_CONFIG_LOCAL = 1; break;
+			case 'n':	EB_CONFIG_MAX_DUMP_BYTES = atoi(optarg); break; // Max packet dump data bytes
+			case 'p':	
+			{
+				if (strchr(optarg, 'i'))	EB_CONFIG_PKT_DUMP_OPTS |= EB_PKT_DUMP_PRE_I;
+				if (strchr(optarg, 'I'))	EB_CONFIG_PKT_DUMP_OPTS |= EB_PKT_DUMP_POST_I;
+				if (strchr(optarg, 'o'))	EB_CONFIG_PKT_DUMP_OPTS |= EB_PKT_DUMP_PRE_O;
+				if (strchr(optarg, 'O'))	EB_CONFIG_PKT_DUMP_OPTS |= EB_PKT_DUMP_POST_O;
+			}; break;
+			case 's':	dumpconfig++; break;	
+			case 'z':	EB_DEBUG_LEVEL++; break;
+		}
+	}
 
 	/* Now copy stations to stations_initial in each wire, and copy networks[] to networks_initial[] */
 
