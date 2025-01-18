@@ -3748,15 +3748,24 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 
 					enqueue_result = 0;
 
+					/* AUN AUTOACK BUG HERE ?  LOOKS LIKE THE FS IS SO QUICK IT IS GETTING ITS REPLY OUT AFTER THIS
+					 * ENQUEUE BEFORE WE GET CHANCE TO DO THE sendto() BELOW!
+					 * THIS CONFUSES BEEBEM
+					 * Even if we move the eb_enqueue_input down to below the sento() for the ACK or NAK,
+					 * sometimes the ACK for a packet STILL goes out after the FS's reply... And that seems to be
+					 * what upsets BeebEm.
+					 */
+
 					if (home_device) enqueue_result = eb_enqueue_input (home_device, input_packet, length - 8); // Only give data length here
 
 					if (!enqueue_result)
 						ack.p.aun_ttype = ECONET_AUN_NAK; // NAK if we couldn't enqueue the packet
 
 					/* AUN PROCESS */
-					eb_debug (0, 4, "AUN", "                source_device = %p, type %s, AUN Auto Ack is %s", source_device, eb_type_str(source_device->type), (source_device->config & EB_DEV_CONF_AUTOACK) ? "On" : "Off");
+					eb_debug (0, 4, "AUN", "                 source_device = %p, type %s, AUN Auto Ack is %s", source_device, eb_type_str(source_device->type), (source_device->config & EB_DEV_CONF_AUTOACK) ? "On" : "Off");
 					if ((!enqueue_result) || (incoming.p.aun_ttype == ECONET_AUN_DATA && (source_device->config & EB_DEV_CONF_AUTOACK))) // NAK if we didn't manage to enqueue; ACK if other end if AUTO ACK
 						sendto (e->socket, &(ack.p.aun_ttype), 8, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
+
 				}
 				else	// MAY AS WELL SEND A NAK (even if not auto ack because the other end will never hear of this packet!)
 				{
@@ -8747,7 +8756,7 @@ int eb_parse_json_config(struct json_object *jc)
 		{
 			uint8_t	flags = 0, net;
 
-			if (json_object_object_get_ex(jdynamic, "dynamic-autoack", &jdynamic_autoack) && json_object_get_boolean(jdynamic_autoack))
+			if (json_object_object_get_ex(jgeneral, "dynamic-autoack", &jdynamic_autoack) && json_object_get_boolean(jdynamic_autoack))
 				flags |= EB_DEV_CONF_AUTOACK;
 
 			net = json_object_get_int(jdynamic);
