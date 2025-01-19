@@ -3613,7 +3613,9 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 				incoming.p.ctrl |= 0x80;
 
 				if ((fw_result = eb_firewall(source_device->fw_in, &incoming)) == EB_FW_REJECT)
+				{
 					eb_dump_packet (e->parent, EB_PKT_DUMP_DUMPED, &incoming, length - 8); // (Drop the header length)
+				}
 				else
 				{
 					eb_dump_packet (e->parent, EB_PKT_DUMP_POST_I, &incoming, length - 8); // (Drop the header length)
@@ -5018,7 +5020,14 @@ static void * eb_device_aun_sender (void *device)
 
 				if (!exp || (p->tx++ == EB_CONFIG_AUN_RETRIES)) /* Too many attempts - splice */
 				{
-					eb_dump_packet (d, EB_PKT_DUMP_DUMPED, p->p, p->length);
+					/* Don't print the packet dump if the destination device is AUN & has autoack, because something else will already have done it */
+					if (
+						(
+						 !((o->destdevice->config & EB_DEV_CONF_AUTOACK) && (p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK))
+						) 
+					&& 	(p->p->p.aun_ttype != ECONET_AUN_INK)
+					) 
+						eb_dump_packet (d, EB_PKT_DUMP_DUMPED, p->p, p->length);
 
 					if (d->type == EB_DEF_PIPE || d->type == EB_DEF_LOCAL)
 						eb_debug (0, 4, "AUNSEND", "%-8s %3d.%3d Freeing packet data at %p in packetqueue %p on outq %p (TX attempts exceeded or not exposed)", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE ? d->pipe.stn : d->local.stn), p->p, p, o);
