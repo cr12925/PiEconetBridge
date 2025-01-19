@@ -844,7 +844,7 @@ void eb_dump_packet (struct __eb_device *source, char dir, struct __econet_packe
 
 	char 		dumpstring[8192];
 
-	if (!(EB_CONFIG_PKT_DUMP_OPTS & dir))
+	if (!(EB_CONFIG_PKT_DUMP_OPTS & dir) && !(EB_CONFIG_PKT_DUMP_OPTS != 0 && dir == EB_PKT_DUMP_DUMPED))
 		return;
 
 	if (EB_CONFIG_NOKEEPALIVEDEBUG && p->p.port == 0x9C && p->p.ctrl == 0xD0) // Trunk keepalive - exit if filtered
@@ -3612,7 +3612,9 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 				incoming.p.srcstn = source_device->aun->stn;
 				incoming.p.ctrl |= 0x80;
 
-				if ((fw_result = eb_firewall(source_device->fw_in, &incoming)) == EB_FW_ACCEPT)
+				if ((fw_result = eb_firewall(source_device->fw_in, &incoming)) == EB_FW_REJECT)
+					eb_dump_packet (e->parent, EB_PKT_DUMP_DUMPED, &incoming, length - 8); // (Drop the header length)
+				else
 				{
 					eb_dump_packet (e->parent, EB_PKT_DUMP_POST_I, &incoming, length - 8); // (Drop the header length)
 	
@@ -3736,8 +3738,6 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 					}
 
 				}
-				else /* Firewall reject */
-					eb_dump_packet (e->parent, EB_PKT_DUMP_DUMPED, &incoming, length - 8); // (Drop the header length)
 	
 				if (fw_result == EB_FW_ACCEPT)
 				{
@@ -8358,6 +8358,23 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 				eb_device_init_pipe(net, stn, pipebase, flags);
 			}
 
+			{
+				struct __eb_device 	*s, *dvt;
+				struct json_object	*jfw;
+
+				s = networks[net];
+				if (s->type == EB_DEF_WIRE)
+					dvt = s->wire.divert[stn];
+				else
+					dvt = s->null.divert[stn];
+
+				if (json_object_object_get_ex(jstation, "fw-in", &jfw))
+					dvt->fw_in = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
+	
+				if (json_object_object_get_ex(jstation, "fw-out", &jfw))
+					dvt->fw_out = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
+			}
+
 			jcount++;
 		}
 	}
@@ -11599,8 +11616,16 @@ int main (int argc, char **argv)
 							struct __eb_device	*d;
 							char			info[512], tmp[128];
 							uint8_t			prev_info = 0;
+							char			fw_in[128], fw_out[128];
 
-							d = p->type == EB_DEF_WIRE ? p->wire.divert[count] : p->null.divert[count];
+							d = (p->type == EB_DEF_WIRE) ? p->wire.divert[count] : p->null.divert[count];
+
+							strcpy(fw_in, "I/B FW: None");
+							strcpy(fw_out, "O/B FW: None");
+							if (d && d->fw_in)
+								snprintf(fw_in, 126, "I/B FW: %s", d->fw_in->fw_chain_name);
+							if (d && d->fw_out)
+								snprintf(fw_out, 126, "O/B FW: %s", d->fw_out->fw_chain_name);
 							
 							strcpy (info, "");
 
@@ -11694,10 +11719,10 @@ int main (int argc, char **argv)
 										(d->aun->addr & 0xff),
 										d->aun->port);
 
-								fprintf(stderr, "    %03d %-11s %s\n",
+								fprintf(stderr, "    %03d %-11s %s, %s, %s\n",
 									count,
 									eb_type_str(d->type),
-									info
+									info, fw_in, fw_out
 								);
 							}
 							else if (p->type == EB_DEF_WIRE && dumpconfig > 3) // Dump every station in the device if it's wire (if it's null, it will only ever have diverts - which we deal with above)
