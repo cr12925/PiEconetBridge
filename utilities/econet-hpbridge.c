@@ -3243,18 +3243,13 @@ uint8_t eb_firewall (struct __eb_fw_chain *chain, struct __econet_packet_aun *p)
 
 	while (f)
 	{
-		// Note - the bridge firewall entries are bidirectional!
+		// Note - the bridge firewall entries are bidirectional! - NOT ANY MORE!
 
 		if (	(	(f->srcstn == 0x00 || f->srcstn == p->p.srcstn)
 			&&	(f->srcnet == 0x00 || f->srcnet == p->p.srcnet)
 			&&	(f->dststn == 0x00 || f->dststn == p->p.dststn)
 			&&	(f->dstnet == 0x00 || f->dstnet == p->p.dstnet)
-			)
-		||
-			(	(f->srcstn == 0x00 || f->srcstn == p->p.dststn)
-			&&	(f->srcnet == 0x00 || f->srcnet == p->p.dstnet)
-			&&	(f->dststn == 0x00 || f->dststn == p->p.srcstn)
-			&&	(f->dstnet == 0x00 || f->dstnet == p->p.srcnet)
+			&&	(f->port   == 0x00 || f->port   == p->p.port || (f->port == 0xFF && p->p.port == 0)) /* if you configure port 0xff in the FW entry, it will match port 0 in the packet */
 			)
 		)
 		{
@@ -11832,10 +11827,10 @@ int main (int argc, char **argv)
 	
 				while (f)
 				{
-					fprintf (stderr, "  %7d %-6s %3d.%-3d <--> %3d.%-3d\n", counter++,
+					fprintf (stderr, "  %7d %-6s %3d.%-3d <--> %3d.%-3d port &%02X\n", counter++,
 							(f->action == EB_FW_ACCEPT) ? "Accept" : "Drop",
 							f->srcnet, f->srcstn,
-							f->dstnet, f->dststn
+							f->dstnet, f->dststn, f->port
 						);
 	
 					f = f->next;
