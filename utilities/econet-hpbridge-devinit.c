@@ -35,7 +35,7 @@
  * Initialize a wire network device
  */
 
-uint8_t	eb_device_init_wire (uint8_t net, char * device)
+uint8_t	eb_device_init_wire (uint8_t net, char * device, struct __eb_fw_chain *fw_in, struct __eb_fw_chain *fw_out)
 {
 	struct __eb_device      *p;
 	short                   c_net, c_stn;
@@ -45,6 +45,9 @@ uint8_t	eb_device_init_wire (uint8_t net, char * device)
 	if ((p->wire.device = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create wire device string", strlen(device)+1)))
 		strcpy(p->wire.device, device);
 	else    eb_debug (1, 0, "CONFIG", "Cannot malloc space for device name for wire network %d", net);
+
+	p->fw_in = fw_in;
+	p->fw_out = fw_out;
 
 	gettimeofday (&(p->wire.last_tx), 0); // Reset last transmission counter
 
@@ -89,7 +92,7 @@ uint8_t	eb_device_init_wire (uint8_t net, char * device)
  *
  */
 
-uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uint16_t remote_port, char * sharedkey)
+uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uint16_t remote_port, char * sharedkey, struct __eb_fw_chain *fw_in, struct __eb_fw_chain *fw_out)
 {
 
 	struct __eb_device	* p;
@@ -99,8 +102,8 @@ uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uin
 	p = eb_device_init (0, EB_DEF_TRUNK, 0);
 
 	p->trunk.local_port = local_port;
-	//p->trunk.head = NULL;
-	//p->trunk.tail = NULL;
+	p->fw_in = fw_in;
+	p->fw_out = fw_out;
 	memset (&(p->trunk.xlate_in), 0, 256);
 	memset (&(p->trunk.xlate_in), 0, 256);
 	memset (&(p->trunk.filter_in), 0, 256);
@@ -153,7 +156,7 @@ uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uin
  * Set up the (soon to be legacy) 'dynamic' AUN network
  */
 
-uint8_t eb_device_init_dynamic (uint8_t net, uint8_t flags)
+uint8_t eb_device_init_dynamic (uint8_t net, uint8_t flags, struct __eb_fw_chain *fw_in, struct __eb_fw_chain *fw_out)
 {
 	struct __eb_device	*p;
 	uint8_t			stn;
@@ -171,6 +174,8 @@ uint8_t eb_device_init_dynamic (uint8_t net, uint8_t flags)
 		r = eb_new_local (net, stn, EB_DEF_AUN);
 
 		p->null.divert[stn] = r;
+		r->fw_in = fw_in;
+		r->fw_out = fw_out;
 
 		a = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create AUN Host structure (in NET)", sizeof(struct __eb_aun_remote));
 
@@ -448,7 +453,7 @@ uint8_t eb_device_init_pipe (uint8_t net, uint8_t stn, char *base, uint8_t flags
  *
  */
 
-uint8_t eb_device_init_aun_host (uint8_t net, uint8_t stn, in_addr_t address, uint16_t port, uint8_t is_autoack, uint8_t printdebug)
+uint8_t eb_device_init_aun_host (uint8_t net, uint8_t stn, in_addr_t address, uint16_t port, uint8_t is_autoack, uint8_t printdebug, struct __eb_fw_chain *fw_in, struct __eb_fw_chain *fw_out)
 {
 	struct __eb_device	*d;
 	struct __eb_aun_remote	*e;
@@ -489,6 +494,9 @@ uint8_t eb_device_init_aun_host (uint8_t net, uint8_t stn, in_addr_t address, ui
 
 	d->aun = e;
 
+	d->fw_in = fw_in;
+	d->fw_out = fw_out;
+
 	aun_remotes = e;
 
 	eb_set_single_wire_host (net, stn);
@@ -508,7 +516,7 @@ uint8_t eb_device_init_aun_host (uint8_t net, uint8_t stn, in_addr_t address, ui
  *
  */
 
-uint8_t eb_device_init_aun_net (uint8_t net, in_addr_t base, uint8_t is_fixed, uint16_t port, uint8_t is_autoack)
+uint8_t eb_device_init_aun_net (uint8_t net, in_addr_t base, uint8_t is_fixed, uint16_t port, uint8_t is_autoack, struct __eb_fw_chain *fw_in, struct __eb_fw_chain *fw_out)
 {
 	uint8_t		stncount;
 
@@ -518,7 +526,7 @@ uint8_t eb_device_init_aun_net (uint8_t net, in_addr_t base, uint8_t is_fixed, u
 			port ?
 				(is_fixed ? port : (port + stncount -1))
 			:       (is_fixed ? 32768 : (10000 + (net * 256) + stncount)),
-			is_autoack, 0); /* Trailing 0 tells this function not to print debug - otherwise we get 254 debug lines ! */
+			is_autoack, 0, fw_in, fw_out); /* Trailing 0 tells this function not to print debug - otherwise we get 254 debug lines ! */
 	}
 
 	DEVINIT_DEBUG("Created AUN network map for network %d with base %d.%d.%d.%d base port %d (%sfixed, %sAutoACK)", net, 
@@ -671,7 +679,7 @@ uint8_t eb_device_init_set_bridge_filter (struct __eb_device	*d, uint8_t net, ui
  *
  */
 
-uint8_t eb_device_init_add_fw_to_chain (struct __eb_fw **chain, uint8_t srcnet, uint8_t srcstn, uint8_t dstnet, uint8_t dststn, uint8_t port, uint8_t action)
+uint8_t eb_device_init_add_fw_to_chain (struct __eb_fw_chain **chain, uint8_t srcnet, uint8_t srcstn, uint8_t dstnet, uint8_t dststn, uint8_t port, uint8_t action)
 {
 
 	struct __eb_fw	*entry, *search;
@@ -689,7 +697,7 @@ uint8_t eb_device_init_add_fw_to_chain (struct __eb_fw **chain, uint8_t srcnet, 
 	entry->action = action;
 	entry->next = NULL;
 
-	search = *chain;
+	search = (*chain)->fw_chain_start;
 
 	while (search)
 	{
@@ -699,7 +707,7 @@ uint8_t eb_device_init_add_fw_to_chain (struct __eb_fw **chain, uint8_t srcnet, 
 	}
 
 	if (!search)
-		*chain = entry;
+		(*chain)->fw_chain_start = entry;
 	else
 		search->next = entry; /* Put on tail */
 

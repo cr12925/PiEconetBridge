@@ -46,7 +46,8 @@ in_addr_t 	bindhost = 0; // IP to bind to if specified. Only used for trunks at 
 struct addrinfo	*trunk_bindhosts; // For when we entertain IPv6
 #endif
 
-struct __eb_fw *bridge_fw; // Bridge-wide firewall policy
+//struct __eb_fw *bridge_fw; // Bridge-wide firewall policy
+struct __eb_fw_chain	*bridge_fw; // Bridge-wide firewall policy
 
 struct __eb_fs_list { // List of known fileservers, to whom we spoof a *BYE when a dynamic station logs in
         uint8_t net, stn;
@@ -97,7 +98,7 @@ void eb_set_single_wire_host (uint8_t, uint8_t);
 void eb_clr_single_wire_host (uint8_t, uint8_t);
 void eb_setclr_single_wire_host (uint8_t, uint8_t, uint8_t);
 void eb_clear_zero_hosts (struct __eb_device *);
-uint8_t eb_firewall (struct __econet_packet_aun *);
+uint8_t eb_firewall (struct __eb_fw_chain *, struct __econet_packet_aun *);
 void eb_reset_tables(void);
 // void eb_debug (uint8_t, uint8_t, char *, char *, ...);
 uint32_t eb_get_local_seq (struct __eb_device *);
@@ -2939,8 +2940,10 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 		return 0;
 	}
 
-	if (eb_firewall(packet) != EB_FW_ACCEPT)
+	if (eb_firewall(bridge_fw, packet) != EB_FW_ACCEPT)
 	{
+		eb_dump_packet (dest, EB_PKT_DUMP_DUMPED, packet, length);
+		/*
 		eb_debug (0, 1, "BRIDGE", "%-8s %3d.%3d from %3d.%3d PACKET FIREWALLED port &%02X ctrl &%02X length &%04X seq 0x%08lX",
 			eb_type_str(dest->type),
 			packet->p.dstnet,
@@ -2952,6 +2955,7 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 			length,
 			packet->p.seq
 		);
+		*/
 
 		eb_free (__FILE__, __LINE__, "Q-IN", "Freeing inbound packet after packet firewalled", packet);
 
@@ -3219,35 +3223,38 @@ uint8_t eb_ipgw_transmit (struct __eb_device *d, uint32_t addr)
 	return result;
 }
 
-/* Implement the bridge firewall on a packet traversing the bridge. 
+/* Implement a firewall chain on a packet traversing the bridge. 
    Used by the bridge transfer routines immediately prior to eb_enqueue_input()
    Returns EB_FW_ACCEPT or EB_FW_REJECT. Defaults to the defined default.
 */
 
-uint8_t eb_firewall (struct __econet_packet_aun *p)
+uint8_t eb_firewall (struct __eb_fw_chain *chain, struct __econet_packet_aun *p)
 {
 
 	uint8_t		result;
 	struct __eb_fw	*f;
 
-	result = EB_FW_DEFAULT;
+	if (!chain)
+		return EB_FW_ACCEPT;
 
-	f = bridge_fw;
+	result = chain->fw_default;
+
+	f = chain->fw_chain_start;
 
 	while (f)
 	{
 		// Note - the bridge firewall entries are bidirectional!
 
-		if (	(	(f->srcstn == 0xff || f->srcstn == p->p.srcstn)
-			&&	(f->srcnet == 0xff || f->srcnet == p->p.srcnet)
-			&&	(f->dststn == 0xff || f->dststn == p->p.dststn)
-			&&	(f->dstnet == 0xff || f->dstnet == p->p.dstnet)
+		if (	(	(f->srcstn == 0x00 || f->srcstn == p->p.srcstn)
+			&&	(f->srcnet == 0x00 || f->srcnet == p->p.srcnet)
+			&&	(f->dststn == 0x00 || f->dststn == p->p.dststn)
+			&&	(f->dstnet == 0x00 || f->dstnet == p->p.dstnet)
 			)
 		||
-			(	(f->srcstn == 0xff || f->srcstn == p->p.dststn)
-			&&	(f->srcnet == 0xff || f->srcnet == p->p.dstnet)
-			&&	(f->dststn == 0xff || f->dststn == p->p.srcstn)
-			&&	(f->dstnet == 0xff || f->dstnet == p->p.srcnet)
+			(	(f->srcstn == 0x00 || f->srcstn == p->p.dststn)
+			&&	(f->srcnet == 0x00 || f->srcnet == p->p.dstnet)
+			&&	(f->dststn == 0x00 || f->dststn == p->p.srcstn)
+			&&	(f->dstnet == 0x00 || f->dstnet == p->p.srcnet)
 			)
 		)
 		{
@@ -3529,8 +3536,6 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 					pthread_mutex_unlock (&(station->updatemutex));
 
 					if (!found)	station = n;
-
-					
 				}
 
 				if (found)
@@ -3597,6 +3602,8 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 			if (source_device) // Known traffic
 			{
 
+				uint8_t fw_result;
+
 				eb_add_stats(&(source_device->statsmutex), &(source_device->b_out), length-12); // Traffic stats - this is the remote device generating output
 
 				incoming.p.dstnet = e->net;
@@ -3605,177 +3612,176 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 				incoming.p.srcstn = source_device->aun->stn;
 				incoming.p.ctrl |= 0x80;
 
-				eb_dump_packet (e->parent, EB_PKT_DUMP_POST_I, &incoming, length - 8); // (Drop the header length)
-
-				// Update the last transaction time - we do this whether dynamic or not, because it doesn't matter
-
-				gettimeofday(&(source_device->aun->last_dynamic), 0);
-
-				// If this is an ACK or NAK, scan the outq of the destination device and see if we need to remove a DATA packet. NB, if it's NAK and there's only been one transmission attempt, don't dump it because it might be from a RiscOS machine that has the bug where it isn't listening early enough. Then wake the despatcher up so it tries to transmit the next packet in its queue
-
-				if (incoming.p.aun_ttype == ECONET_AUN_ACK || incoming.p.aun_ttype == ECONET_AUN_NAK)
+				if ((fw_result = eb_firewall(source_device->fw_in, &incoming)) == EB_FW_ACCEPT)
 				{
-					struct __eb_device 	*my_parent;
-					struct __eb_outq	*outq, *outq_parent;
-					uint16_t		combo;
-
-					my_parent = e->parent;
-
-					combo = (incoming.p.srcnet << 8) | incoming.p.srcstn; // Source here, because we're doing this from the incoming packet
-
-					eb_debug (0, 4, "QUEUE", "%-8s %3d.%3d Acquiring lock for incoming search of outq for packet to %3d.%3d P:&%02X C: &%02X Length 0x%04X, combo = 0x%04X, e->parent = %p", eb_type_str(my_parent->type), incoming.p.dstnet, incoming.p.dststn, incoming.p.srcnet, incoming.p.srcstn, incoming.p.port, incoming.p.ctrl, length, combo, my_parent);
-
-					//pthread_mutex_lock (&(my_parent->qmutex_out));
-					pthread_mutex_lock (&(my_parent->aun_out_mutex));
-
-					eb_debug (0, 4, "QUEUE", "%-8s %3d.%3d Locks acquired for incoming search of outq for packet to %3d.%3d P:&%02X C: &%02X Seq: 0x%08X Length 0x%04X, combo = 0x%04X", eb_type_str(my_parent->type), incoming.p.dstnet, incoming.p.dststn, incoming.p.srcnet, incoming.p.srcstn, incoming.p.port, incoming.p.ctrl, incoming.p.seq, length, combo);
-
-					outq_parent = NULL;
-					//outq = my_parent->out;
-					outq = my_parent->aun_out_head;
-
-					while (outq && outq->destcombo != combo)
+					eb_dump_packet (e->parent, EB_PKT_DUMP_POST_I, &incoming, length - 8); // (Drop the header length)
+	
+					// Update the last transaction time - we do this whether dynamic or not, because it doesn't matter
+	
+					gettimeofday(&(source_device->aun->last_dynamic), 0);
+	
+					// If this is an ACK or NAK, scan the outq of the destination device and see if we need to remove a DATA packet. NB, if it's NAK and there's only been one transmission attempt, don't dump it because it might be from a RiscOS machine that has the bug where it isn't listening early enough. Then wake the despatcher up so it tries to transmit the next packet in its queue
+	
+					if (incoming.p.aun_ttype == ECONET_AUN_ACK || incoming.p.aun_ttype == ECONET_AUN_NAK)
 					{
-						outq_parent = outq;
-						outq = outq->next;
-					}
-
-					if (outq) // Found correct outq
-					{
-
-						struct __eb_packetqueue		*parent, *packetq;
-						parent = NULL;
-						packetq = outq->p;
-
-						while (packetq && (packetq->p->p.aun_ttype != ECONET_AUN_DATA || packetq->p->p.seq != incoming.p.seq))
+						struct __eb_device 	*my_parent;
+						struct __eb_outq	*outq, *outq_parent;
+						uint16_t		combo;
+	
+						my_parent = e->parent;
+	
+						combo = (incoming.p.srcnet << 8) | incoming.p.srcstn; // Source here, because we're doing this from the incoming packet
+	
+						eb_debug (0, 4, "QUEUE", "%-8s %3d.%3d Acquiring lock for incoming search of outq for packet to %3d.%3d P:&%02X C: &%02X Length 0x%04X, combo = 0x%04X, e->parent = %p", eb_type_str(my_parent->type), incoming.p.dstnet, incoming.p.dststn, incoming.p.srcnet, incoming.p.srcstn, incoming.p.port, incoming.p.ctrl, length, combo, my_parent);
+	
+						//pthread_mutex_lock (&(my_parent->qmutex_out));
+						pthread_mutex_lock (&(my_parent->aun_out_mutex));
+	
+						eb_debug (0, 4, "QUEUE", "%-8s %3d.%3d Locks acquired for incoming search of outq for packet to %3d.%3d P:&%02X C: &%02X Seq: 0x%08X Length 0x%04X, combo = 0x%04X", eb_type_str(my_parent->type), incoming.p.dstnet, incoming.p.dststn, incoming.p.srcnet, incoming.p.srcstn, incoming.p.port, incoming.p.ctrl, incoming.p.seq, length, combo);
+	
+						outq_parent = NULL;
+						//outq = my_parent->out;
+						outq = my_parent->aun_out_head;
+	
+						while (outq && outq->destcombo != combo)
 						{
-							parent = packetq;
-							packetq = packetq->n;
+							outq_parent = outq;
+							outq = outq->next;
 						}
-
-						// If within NAK tolerance, set the last tx time to nil so we get an immediate retransmission
-						if (packetq && (incoming.p.aun_ttype == ECONET_AUN_NAK && packetq->tx <= EB_CONFIG_AUN_NAKTOLERANCE))
-							packetq->last_tx.tv_sec = 0;
-
-						if (packetq && (incoming.p.aun_ttype == ECONET_AUN_ACK || (incoming.p.aun_ttype == ECONET_AUN_NAK && packetq->tx > EB_CONFIG_AUN_NAKTOLERANCE))) // Found a match - splice out
+	
+						if (outq) // Found correct outq
 						{
-
-							// uint8_t		port, srcstn, srcnet;
-							struct __eb_packetqueue	*this, *this_parent;
-
-							//port = incoming.p.port;
-							//srcstn = incoming.p.dststn;
-							//srcnet = incoming.p.dstnet;
-							this = packetq;
-							this_parent = parent;
-
-/* The idea of this was to dump remaining packets from a particular source to this AUN destination if we got too many NAKs so that there wasn't a queue of traffic which was likely to be
- * NAK'd. Unfortunately, BeebEm (which is the primary thing I was testing with) doesn't seem to NAK. So if you interrupt a bulk transfer by pressing BREAK in BeebEm, the remaining 
- * bulk transfer packets on the outq just re-transmit one by one and it takes ages before the BeebEm machine can start communicating again...
-
-							while (this)
+	
+							struct __eb_packetqueue		*parent, *packetq;
+							parent = NULL;
+							packetq = outq->p;
+	
+							while (packetq && (packetq->p->p.aun_ttype != ECONET_AUN_DATA || packetq->p->p.seq != incoming.p.seq))
 							{
-								if (port == this->p->p.port && srcstn == this->p->p.srcstn && srcnet == this->p->p.srcnet && ((this == packetq && this->p->p.seq == incoming.p.seq) || (this != packetq && incoming.p.aun_ttype == ECONET_AUN_NAK))) // Ditch it. This will always be so on the first loop. Only ditch if first in queue, or if not first in queue if it was a NAK - because we'll be over the NAK tolerance by the time we get here.
-								{
-*/
-									if (this_parent)
-										this_parent->n = this->n;
-									else
-										outq->p = this->n;
-
-									eb_debug (0, 4, "QUEUE", "%-8s %3d.%3d Packet spliced from outq to %3d.%3d P:&%02X C: &%02X Seq: 0x%08X Length 0x%04X, combo = 0x%04X", eb_type_str(my_parent->type), this->p->p.dstnet, this->p->p.dststn, this->p->p.srcnet, this->p->p.srcstn, this->p->p.port, this->p->p.ctrl, this->p->p.seq, this->length, combo);
-
-									eb_free (__FILE__, __LINE__, "AUN-EXP", "Free packet after locating packet to splice out because of ACK/NAK", this->p);
-									eb_free (__FILE__, __LINE__, "AUN-EXP", "Free packetq after locating packet to splice out because of ACK/NAK", this);
-
-/*
-									if (this_parent)
-										this = this_parent->n;
-									else	this = outq->p;
-
-								}
-								else // not removed - move one down the line
-								{
-									this_parent = this;
-									this = this->n;
-								}
-
-								if (incoming.p.aun_ttype == ECONET_AUN_ACK) break; // Only do one loop if it's an ACK - we don't want to ditch everything if it was ACK not NAK!
-							}
-*/
-						}
-
-						if (!outq->p) // outq emptied - free it and de-splice
-						{
-							if (outq_parent) // This wasn't the first in the queue
-								outq_parent->next = outq->next;
-							else // Was the first in the queue
-							{
-								//my_parent->out = outq->next;
-								my_parent->aun_out_head = outq->next;
+								parent = packetq;
+								packetq = packetq->n;
 							}
 	
-							eb_free (__FILE__, __LINE__, "AUN-EXP", "Free outq after locating packet to splice out because of ACK/NAK", outq);
-						}
-					}
+							// If within NAK tolerance, set the last tx time to nil so we get an immediate retransmission
+							if (packetq && (incoming.p.aun_ttype == ECONET_AUN_NAK && packetq->tx <= EB_CONFIG_AUN_NAKTOLERANCE))
+								packetq->last_tx.tv_sec = 0;
+	
+							if (packetq && (incoming.p.aun_ttype == ECONET_AUN_ACK || (incoming.p.aun_ttype == ECONET_AUN_NAK && packetq->tx > EB_CONFIG_AUN_NAKTOLERANCE))) // Found a match - splice out
+							{
+	
+								// uint8_t		port, srcstn, srcnet;
+								struct __eb_packetqueue	*this, *this_parent;
+	
+								//port = incoming.p.port;
+								//srcstn = incoming.p.dststn;
+								//srcnet = incoming.p.dstnet;
+								this = packetq;
+								this_parent = parent;
+	
+	/* The idea of this was to dump remaining packets from a particular source to this AUN destination if we got too many NAKs so that there wasn't a queue of traffic which was likely to be
+ 	* NAK'd. Unfortunately, BeebEm (which is the primary thing I was testing with) doesn't seem to NAK. So if you interrupt a bulk transfer by pressing BREAK in BeebEm, the remaining 
+ 	* bulk transfer packets on the outq just re-transmit one by one and it takes ages before the BeebEm machine can start communicating again...
+	
+								while (this)
+								{
+									if (port == this->p->p.port && srcstn == this->p->p.srcstn && srcnet == this->p->p.srcnet && ((this == packetq && this->p->p.seq == incoming.p.seq) || (this != packetq && incoming.p.aun_ttype == ECONET_AUN_NAK))) // Ditch it. This will always be so on the first loop. Only ditch if first in queue, or if not first in queue if it was a NAK - because we'll be over the NAK tolerance by the time we get here.
+									{
+	*/
+										if (this_parent)
+											this_parent->n = this->n;
+										else
+											outq->p = this->n;
+	
+										eb_debug (0, 4, "QUEUE", "%-8s %3d.%3d Packet spliced from outq to %3d.%3d P:&%02X C: &%02X Seq: 0x%08X Length 0x%04X, combo = 0x%04X", eb_type_str(my_parent->type), this->p->p.dstnet, this->p->p.dststn, this->p->p.srcnet, this->p->p.srcstn, this->p->p.port, this->p->p.ctrl, this->p->p.seq, this->length, combo);
+	
+										eb_free (__FILE__, __LINE__, "AUN-EXP", "Free packet after locating packet to splice out because of ACK/NAK", this->p);
+										eb_free (__FILE__, __LINE__, "AUN-EXP", "Free packetq after locating packet to splice out because of ACK/NAK", this);
+	
+	/*
+										if (this_parent)
+											this = this_parent->n;
+										else	this = outq->p;
+	
+									}
+									else // not removed - move one down the line
+									{
+										this_parent = this;
+										this = this->n;
+									}
+	
 
-					//pthread_mutex_unlock (&(my_parent->qmutex_out));
-					pthread_mutex_unlock (&(my_parent->aun_out_mutex));
+									if (incoming.p.aun_ttype == ECONET_AUN_ACK) break; // Only do one loop if it's an ACK - we don't want to ditch everything if it was ACK not NAK!
+								}
+	*/
+							}
+	
+							if (!outq->p) // outq emptied - free it and de-splice
+							{
+								if (outq_parent) // This wasn't the first in the queue
+									outq_parent->next = outq->next;
+								else // Was the first in the queue
+								{
+									//my_parent->out = outq->next;
+									my_parent->aun_out_head = outq->next;
+								}
 		
-					pthread_cond_signal (&(my_parent->qwake));
+								eb_free (__FILE__, __LINE__, "AUN-EXP", "Free outq after locating packet to splice out because of ACK/NAK", outq);
+							}
+						}
 
-
-				}
+						pthread_mutex_unlock (&(my_parent->aun_out_mutex));
 	
-				// Prospectively build an ACK - Don't need addressing because this is going out over AUN
+						pthread_cond_signal (&(my_parent->qwake));
 
-				ack.p.seq	= incoming.p.seq;
-				ack.p.aun_ttype	= ECONET_AUN_ACK;
-				ack.p.port	= incoming.p.port;
-				ack.p.ctrl	= incoming.p.ctrl;
-
-				// Because this is going on an input queue, we need to malloc it
-
-				input_packet = eb_malloc(__FILE__, __LINE__, "AUN", "Create incoming packet structure", length + 4); // Extra four bytes
-
-				if (input_packet) // Only do this if the malloc succeeded
-				{
-					uint8_t		enqueue_result;
-					struct __eb_device	*home_device; // The thing this is an exposure for
-
-					memcpy (input_packet, &incoming, length + 4);
-
-					home_device = eb_find_station (2, &incoming);
-
-					enqueue_result = 0;
-
-					/* AUN AUTOACK BUG HERE ?  LOOKS LIKE THE FS IS SO QUICK IT IS GETTING ITS REPLY OUT AFTER THIS
-					 * ENQUEUE BEFORE WE GET CHANCE TO DO THE sendto() BELOW!
-					 * THIS CONFUSES BEEBEM
-					 * Even if we move the eb_enqueue_input down to below the sento() for the ACK or NAK,
-					 * sometimes the ACK for a packet STILL goes out after the FS's reply... And that seems to be
-					 * what upsets BeebEm.
-					 */
-
-					if (home_device) enqueue_result = eb_enqueue_input (home_device, input_packet, length - 8); // Only give data length here
-
-					if (!enqueue_result)
-						ack.p.aun_ttype = ECONET_AUN_NAK; // NAK if we couldn't enqueue the packet
-
-					/* AUN PROCESS */
-					eb_debug (0, 4, "AUN", "                 source_device = %p, type %s, AUN Auto Ack is %s", source_device, eb_type_str(source_device->type), (source_device->config & EB_DEV_CONF_AUTOACK) ? "On" : "Off");
-					if ((!enqueue_result) || (incoming.p.aun_ttype == ECONET_AUN_DATA && (source_device->config & EB_DEV_CONF_AUTOACK))) // NAK if we didn't manage to enqueue; ACK if other end if AUTO ACK
-						sendto (e->socket, &(ack.p.aun_ttype), 8, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
+					}
 
 				}
-				else	// MAY AS WELL SEND A NAK (even if not auto ack because the other end will never hear of this packet!)
+				else /* Firewall reject */
+					eb_dump_packet (e->parent, EB_PKT_DUMP_DUMPED, &incoming, length - 8); // (Drop the header length)
+	
+				if (fw_result == EB_FW_ACCEPT)
 				{
-					ack.p.aun_ttype = ECONET_AUN_NAK;
-
-					sendto (e->socket, &(ack.p.aun_ttype), 8, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
+					// Prospectively build an ACK - Don't need addressing because this is going out over AUN
+	
+					ack.p.seq	= incoming.p.seq;
+					ack.p.aun_ttype	= ECONET_AUN_ACK;
+					ack.p.port	= incoming.p.port;
+					ack.p.ctrl	= incoming.p.ctrl;
+	
+					// Because this is going on an input queue, we need to malloc it
+	
+					input_packet = eb_malloc(__FILE__, __LINE__, "AUN", "Create incoming packet structure", length + 4); // Extra four bytes
+	
+					if (input_packet) // Only do this if the malloc succeeded
+					{
+						uint8_t		enqueue_result;
+						struct __eb_device	*home_device; // The thing this is an exposure for
+	
+						memcpy (input_packet, &incoming, length + 4);
+	
+						home_device = eb_find_station (2, &incoming);
+	
+						enqueue_result = 0;
+	
+						if (home_device) enqueue_result = eb_enqueue_input (home_device, input_packet, length - 8); // Only give data length here
+	
+						if (!enqueue_result)
+							ack.p.aun_ttype = ECONET_AUN_NAK; // NAK if we couldn't enqueue the packet
+	
+					/* AUN PROCESS */
+						eb_debug (0, 4, "AUN", "                 source_device = %p, type %s, AUN Auto Ack is %s", source_device, eb_type_str(source_device->type), (source_device->config & EB_DEV_CONF_AUTOACK) ? "On" : "Off");
+						if ((!enqueue_result) || (incoming.p.aun_ttype == ECONET_AUN_DATA && (source_device->config & EB_DEV_CONF_AUTOACK))) // NAK if we didn't manage to enqueue; ACK if other end if AUTO ACK
+							sendto (e->socket, &(ack.p.aun_ttype), 8, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
+	
+					}
+					else	// MAY AS WELL SEND A NAK (even if not auto ack because the other end will never hear of this packet!)
+					{
+						ack.p.aun_ttype = ECONET_AUN_NAK;
+	
+						sendto (e->socket, &(ack.p.aun_ttype), 8, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
+					}
 				}
 			}
-
 		}
 		else // Packet dumped because exposure inactive
 		{
@@ -4948,7 +4954,7 @@ static void * eb_device_aun_sender (void *device)
 					else
 						eb_debug (0, 4, "AUNSEND", "%-8s %3d     Thread freeing packet data at %p in packetqueue %p", eb_type_str(d->type), d->net, p->p, p); 
 
-					eb_free (__FILE__, __LINE__, "AUNSEND", "Freeing packet w ithin packet queue - Destination device unknown", p->p);
+					eb_free (__FILE__, __LINE__, "AUNSEND", "Freeing packet within packet queue - Destination device unknown", p->p);
 
 					if (d->type == EB_DEF_PIPE || d->type == EB_DEF_LOCAL)
 						eb_debug (0, 4, "AUNSEND", "%-8s %3d.%3d Thread freeing packetqueue %p", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE ? d->pipe.stn : d->local.stn), p);
@@ -5058,16 +5064,21 @@ static void * eb_device_aun_sender (void *device)
 
 						eb_debug (0, 4, "AUNSEND", "%16s Looking at outq %p, packet %p - Sending (time diff = %d)", devstring, o, p, timediff);
 
-						eb_dump_packet (o->destdevice, EB_PKT_DUMP_POST_O, p->p, p->length);
 
 						eb_add_stats(&(o->destdevice->statsmutex), &(o->destdevice->b_in), p->length);
+						if (eb_firewall(o->destdevice->fw_out, p->p) == EB_FW_REJECT)
+							eb_dump_packet (o->destdevice, EB_PKT_DUMP_DUMPED, p->p, p->length);
+						else
+						{
+							eb_dump_packet (o->destdevice, EB_PKT_DUMP_POST_O, p->p, p->length);
 
-						if ((r = sendto (exp->socket, &(p->p->p.aun_ttype), p->length + 8, MSG_DONTWAIT, (struct sockaddr *) &dest, sizeof(dest))) < 0)
-							eb_debug (0, 1, "AUNSEND", "%16s Packet at %p AUN transmission failed: %s", devstring, p->p, strerror(errno));
+							if ((r = sendto (exp->socket, &(p->p->p.aun_ttype), p->length + 8, MSG_DONTWAIT, (struct sockaddr *) &dest, sizeof(dest))) < 0)
+								eb_debug (0, 1, "AUNSEND", "%16s Packet at %p AUN transmission failed: %s", devstring, p->p, strerror(errno));
 
 
-						if (p->p->p.aun_ttype != ECONET_AUN_DATA) // && p->p->p.aun_ttype != ECONET_AUN_IMM) // Everything else only gets a single shot tx
-							p->tx = EB_CONFIG_AUN_RETRIES; /* Cheat by flagging max retries */
+						}
+							if (p->p->p.aun_ttype != ECONET_AUN_DATA) // && p->p->p.aun_ttype != ECONET_AUN_IMM) // Everything else only gets a single shot tx
+								p->tx = EB_CONFIG_AUN_RETRIES; /* Cheat by flagging max retries */
 					}
 					else
 						eb_debug (0, 4, "AUNSEND", "%16s Looking at outq %p, packet %p - NOT Sending ACK/NAK/INK", devstring, o, p);
@@ -6061,9 +6072,19 @@ static void * eb_device_despatcher (void * device)
 
 				eb_add_stats(&(d->statsmutex), &(d->b_out), length); // Traffic stats - local pipe producing traffic outbound to the bridge
 				
-				eb_dump_packet (d, EB_PKT_DUMP_PRE_I, &packet, length - 12);
+				/* Apply inbound firewall. Note that eb_firewall() returns an EB_FW_ACCEPT if the chain
+				 * it is given is NULL
+				 */
 
-				if (d->type != EB_DEF_TRUNK) // Fill in network numbers if need be
+				if (eb_firewall (d->fw_in, &packet) == EB_FW_REJECT)
+				{
+					eb_dump_packet (d, EB_PKT_DUMP_DUMPED, &packet, length);
+					dump_traffic = 1;
+				}
+
+				if (!dump_traffic) eb_dump_packet (d, EB_PKT_DUMP_PRE_I, &packet, length - 12);
+
+				if (!dump_traffic && d->type != EB_DEF_TRUNK) // Fill in network numbers if need be
 				{
 					if (packet.p.srcnet == 0)	packet.p.srcnet = d->net;
 					if (packet.p.dstnet == 0)	packet.p.dstnet = d->net;
@@ -6071,7 +6092,7 @@ static void * eb_device_despatcher (void * device)
 
 				// Apply pool nat to wire & trunk devices
 
-				if (packet.p.srcstn != 0 && // Don't translate bridge updates from bridges, which come from .0
+				if (!dump_traffic && packet.p.srcstn != 0 && // Don't translate bridge updates from bridges, which come from .0
 					(
 					(d->type == EB_DEF_TRUNK && d->trunk.use_pool[packet.p.srcnet])
 				||	(d->type == EB_DEF_WIRE && d->wire.use_pool[packet.p.srcnet])
@@ -6307,74 +6328,6 @@ static void * eb_device_despatcher (void * device)
 
 								remove = 1; /* Either way we want it off our queue */
 							}
-#if 0
-							/* Old code */
-							{
-								struct __eb_aun_exposure	*exp;
-								struct __eb_outq	*aun_out;
-								struct __eb_packetqueue	*pq;
-
-								/* Put it on our AUN queue and wake the AUN sender */
-
-								exp = eb_is_exposed(p->p->p.srcnet, p->p->p.srcstn, 1); /* 1 = must be active */
-
-								if (exp) /* Exposed. If not, packet gets dumped anyway */
-								{
-									pthread_mutex_lock(&(d->aun_out_mutex));
-	
-									aun_out = d->aun_out_head;
-	
-									/* Find queue for this device */
-	
-									while (aun_out)
-									{
-										if (aun_out->destdevice == o->destdevice)	 /* Found it */
-											break;
-										else
-											aun_out = aun_out->next;
-									}
-
-									if (!aun_out) /* No outq for this device, make one */
-									{
-										aun_out = eb_malloc (__FILE__, __LINE__, "DESPATCH", "Create new AUN outq entry", sizeof(struct __eb_outq));
-
-										/* eb_malloc() does a zero-out */
-
-										aun_out->next = d->aun_out_head;
-										d->aun_out_head = aun_out;
-										aun_out->destdevice = o->destdevice;
-										aun_out->p = NULL;
-										
-										/* Destcombo and is_aun_output not used - this is an AUN queue, we just do it by device */
-									}
-
-									pq = eb_malloc (__FILE__, __LINE__, "DESPATCH", "Create new AUN packetqueue entry", sizeof(struct __eb_packetqueue));
-
-									pq->p = p->p;
-									pq->last_tx.tv_sec = 0;
-									pq->tx = 0;
-									pq->errors = 0;
-									pq->length = p->length;
-									pq->n = aun_out->p; /* Join on head of queue */
-									aun_out->p = pq;
-
-									/* Unlock */
-
-									pthread_mutex_unlock(&(d->aun_out_mutex));
-
-									/* Wake up the AUN thread */
-
-									pthread_cond_signal(&(d->aun_out_cond)); 
-
-									/* Job done */
-
-								}
-								else	packetfree = 1; /* Get rid of the packet data as well */
-
-								remove = 1; /* Take it off our output queue, but if packetfree not set then that's been sent elsewhere - i.e. onto the AUN queue */
-
-							}
-#endif
 							else
 							{
 								// Move it and wake the in queue
@@ -6594,6 +6547,14 @@ static void * eb_device_despatcher (void * device)
 			{
 				remove = 0;
 	
+				/* Apply outbound firewall */
+
+				if ((eb_firewall(d->fw_out, p->p) == EB_FW_REJECT))
+				{
+					eb_dump_packet (d, EB_PKT_DUMP_DUMPED, p->p, p->length);
+					remove = 1;
+				}
+
 				ack.p.aun_ttype = ECONET_AUN_ACK; // Default; update later if not
 				ack.p.dstnet = p->p->p.srcnet;
 				ack.p.dststn = p->p->p.srcstn;
@@ -6603,10 +6564,10 @@ static void * eb_device_despatcher (void * device)
 				ack.p.port = p->p->p.port;
 				ack.p.ctrl = p->p->p.ctrl;
 
-				if (p->p->p.port == 0x99 && p->p->p.aun_ttype == ECONET_AUN_DATA) // Track fileservers
+				if (!remove && p->p->p.port == 0x99 && p->p->p.aun_ttype == ECONET_AUN_DATA) // Track fileservers
 					eb_mark_fileserver(p->p->p.dstnet, p->p->p.dststn);
 
-				switch (d->type)
+				if (!remove) switch (d->type)
 				{
 					case EB_DEF_TRUNK:
 					{
@@ -7722,7 +7683,7 @@ static void * eb_device_despatcher (void * device)
 						remove = 1;
 					} break;
 				}	
-	
+
 				// Splice out if necessary and find the next 'p'
 
 				//eb_debug (0, 4, "DESPATCH", "%-8s %3d     Despatcher considering removing packet %p from input queue", eb_type_str(d->type), d->net, p);
@@ -8231,8 +8192,17 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 	if (otype == 2)
 	{
+		struct json_object	*jfw;
+		struct __eb_fw_chain	*fw_in = NULL, *fw_out = NULL;
+
+		if (json_object_object_get_ex(o, "fw-in", &jfw))
+			fw_in = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
+
+		if (json_object_object_get_ex(o, "fw-out", &jfw))
+			fw_out = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
+
 		if (json_object_object_get_ex(o, "device", &jdiverts)) /* Temp use of jdiverts */
-			eb_device_init_wire (net, (char *) json_object_get_string(jdiverts));
+			eb_device_init_wire (net, (char *) json_object_get_string(jdiverts), fw_in, fw_out);
 		else
 			eb_debug (1, 0, "JSON", "Econet device in JSON config without a device name");
 
@@ -8620,7 +8590,7 @@ int eb_parse_json_config(struct json_object *jc)
 
 				/* Now look for the entries */
 				
-				if (json_object_object_get_ex(jc, "entries", &jchain_entries))
+				if (json_object_object_get_ex(jchain, "entries", &jchain_entries))
 				{
 					struct json_object	*jentry;
 
@@ -8636,7 +8606,7 @@ int eb_parse_json_config(struct json_object *jc)
 						jentry = json_object_array_get_idx(jchain_entries, ecount);
 
 						fw_entry = eb_malloc (__FILE__, __LINE__, "JSON", "New firewall chain entry", sizeof(struct __eb_fw));
-						memset (fw_entry, 0xff, sizeof(struct __eb_fw)); // 0xff is the wildcard value, but we need to set next to NULL
+						memset (fw_entry, 0x00, sizeof(struct __eb_fw)); // 0x00 is the wildcard value, but we need to set next to NULL
 						fw_entry->action = EB_FW_ACCEPT;
 						fw_entry->next = NULL;
 
@@ -8661,6 +8631,8 @@ int eb_parse_json_config(struct json_object *jc)
 								fw_entry->action = EB_FW_ACCEPT;
 							else	fw_entry->action = EB_FW_REJECT;
 						}
+
+						//fprintf (stderr, "Adding firewall entry to chain %s: %d.%d -> %d.%d port %d %s\n", fw_chain->fw_chain_name, fw_entry->srcnet, fw_entry->srcstn, fw_entry->dstnet, fw_entry->dststn, fw_entry->port, fw_entry->action == EB_FW_ACCEPT ? "Accept" : "Reject");
 
 						if (fw_entry_last)
 							fw_entry_last->next = fw_entry;
@@ -8757,13 +8729,21 @@ int eb_parse_json_config(struct json_object *jc)
 		if (json_object_object_get_ex(jgeneral, "dynamic", &jdynamic))
 		{
 			uint8_t	flags = 0, net;
+			struct json_object	*jfw;
+			struct __eb_fw_chain *fw_in = NULL, *fw_out = NULL;
+
+			if (json_object_object_get_ex(jgeneral, "dynamic-fw-in", &jfw))
+				fw_in = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
+
+			if (json_object_object_get_ex(jgeneral, "dynamic-fw-out", &jfw))
+				fw_out = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
 
 			if (json_object_object_get_ex(jgeneral, "dynamic-autoack", &jdynamic_autoack) && json_object_get_boolean(jdynamic_autoack))
 				flags |= EB_DEV_CONF_AUTOACK;
 
 			net = json_object_get_int(jdynamic);
 
-			eb_device_init_dynamic (net, flags);
+			eb_device_init_dynamic (net, flags, fw_in, fw_out);
 		}
 	}
 
@@ -8788,10 +8768,18 @@ int eb_parse_json_config(struct json_object *jc)
 					if (json_object_object_get_ex(jaun_entry, "net", &jaun_net))
 					{
 						uint8_t		net;
+						struct json_object	*jfw;
+						struct __eb_fw_chain	*fw_in = NULL, *fw_out = NULL;
 
 						net = json_object_get_int(jaun_net);
 
 						eb_device_init (net, EB_DEF_NULL, 0);
+
+						if (json_object_object_get_ex(jaun_entry, "fw-in", &jfw))
+							fw_in = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
+
+						if (json_object_object_get_ex(jaun_entry, "fw-out", &jfw))
+							fw_out = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
 
 						if (json_object_object_get_ex(jaun_entry, "net-address", &jstations)) // This is an AUN MAP for a network
 						{
@@ -8837,7 +8825,7 @@ int eb_parse_json_config(struct json_object *jc)
 
 							eb_free (__FILE__, __LINE__, "JSON", "AUN Net address string", net_address);
 
-							eb_device_init_aun_net (net, base, is_fixed, port, is_autoack);
+							eb_device_init_aun_net (net, base, is_fixed, port, is_autoack, fw_in, fw_out);
 
 						}
 						else
@@ -8890,7 +8878,7 @@ int eb_parse_json_config(struct json_object *jc)
 									eb_debug (1, 0, "JSON", "AUN Host defined at %d.%d with an unknown hostname (%s)", net, stn, host);
 								address = ntohl(*((in_addr_t *)h->h_addr));
 
-								eb_device_init_aun_host (net, stn, address, port, flags, 1);
+								eb_device_init_aun_host (net, stn, address, port, flags, 1, fw_in, fw_out);
 
 								eb_free (__FILE__, __LINE__, "JSON", "AUN single host string", host);
 
@@ -8927,7 +8915,8 @@ int eb_parse_json_config(struct json_object *jc)
 				uint8_t		nat_local, nat_distant, found = 0;
 				uint16_t	nlength, ncount = 0;
 				struct __eb_device	*trunk;
-				struct json_object	*jnat_local, *jnat_remote;
+				struct json_object	*jnat_local, *jnat_remote, *jfw;
+				struct __eb_fw_chain	*fw_in = NULL, *fw_out = NULL;
 
 				remote_host = NULL; // Assume dynamic unless we have a host
 
@@ -8938,7 +8927,7 @@ int eb_parse_json_config(struct json_object *jc)
 				json_object_object_get_ex(jtrunk, "remote-port", &jremoteport);
 				json_object_object_get_ex(jtrunk, "remote-host", &jremotehost);
 				json_object_object_get_ex(jtrunk, "key", &jkey);
-
+	
 				if (!jkey && (!jremotehost || !jremoteport)) 
 				{
 					/* No key, and no remote host data. If no remote host data, there
@@ -8973,7 +8962,13 @@ int eb_parse_json_config(struct json_object *jc)
 					strcpy (key, json_object_get_string(jkey));
 				}
 
-				eb_device_init_singletrunk (remote_host, local_port, remote_port, key);
+				if (json_object_object_get_ex(jtrunk, "fw-in", &jfw))
+					fw_in = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
+
+				if (json_object_object_get_ex(jtrunk, "fw-out", &jfw))
+					fw_out = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
+
+				eb_device_init_singletrunk (remote_host, local_port, remote_port, key, fw_in, fw_out);
 
 				if (key)
 					eb_free (__FILE__, __LINE__, "JSON", "New trunk key", key); /* Free - the devinit routine copies it to a new malloced area */
@@ -9157,7 +9152,7 @@ int eb_parse_json_config(struct json_object *jc)
 	/* Exposures */
 
 	{
-		struct json_object	*jexposures, *jexposure, *jnet, *jipaddr, *jport, *jfixed, *jstns, *jstn, *jfwin, *jfwout;
+		struct json_object	*jexposures, *jexposure, *jnet, *jipaddr, *jport, *jfixed, *jstns, *jstn;
 		uint16_t		ecount = 0, elength;
 
 		json_object_object_get_ex (jc, "exposures", &jexposures);
@@ -9178,8 +9173,6 @@ int eb_parse_json_config(struct json_object *jc)
 					json_object_object_get_ex (jexposure, "net-address", &jipaddr);
 					json_object_object_get_ex (jexposure, "base-port", &jport);
 					json_object_object_get_ex (jexposure, "fixed-port", &jfixed);
-					json_object_object_get_ex (jexposure, "fw-in", &jfwin);
-					json_object_object_get_ex (jexposure, "fw-out", &jfwout);
 					json_object_object_get_ex (jexposure, "stations", &jstns);
 
 					if (!jnet)
@@ -9310,9 +9303,11 @@ int eb_parse_json_config(struct json_object *jc)
 			fwchain = eb_malloc (__FILE__, __LINE__, "JSON", "Bridge-wide firewall chain name string", json_object_get_string_len(j)+1);
 			strcpy (fwchain, json_object_get_string(j));
 
-			bridge_fw = (eb_get_fw_chain_byname(fwchain))->fw_chain_start; /* This particular fw list is just the rules; the rest are __eb_fw_chain structs */
+			bridge_fw = eb_get_fw_chain_byname(fwchain);
+
 			eb_free (__FILE__, __LINE__, "JSON", "Bridge-wide firewall chain name string", fwchain);
 		}
+		else	bridge_fw = NULL;
 
 #define EB_JSON_TUNABLE_INT(x,y)	json_object_object_get_ex(jgen, x, &j); \
 				if (j) \
@@ -9758,7 +9753,7 @@ int eb_readconfig(char *f, char *json)
 				json_object_object_add(wire, "pool-assignment", json_object_new_array());
 				json_object_array_add(econets, wire);
 #else
-				eb_device_init_wire (net, device);
+				eb_device_init_wire (net, device, NULL, NULL);
 #endif
 			}
 			else if (!regexec(&r_trunk, line, 4, matches, 0) ||
@@ -9832,7 +9827,7 @@ int eb_readconfig(char *f, char *json)
 
 				json_object_array_add(jtrunks, jtrunk);
 #else
-				eb_device_init_singletrunk (destination, local_port, remote_port, psk);
+				eb_device_init_singletrunk (destination, local_port, remote_port, psk, NULL, NULL);
 #endif
 				
 			}
@@ -9857,7 +9852,7 @@ int eb_readconfig(char *f, char *json)
 				if (flags & EB_DEV_CONF_AUTOACK)
 					json_object_object_add(general, "dynamic-autoack", json_object_new_boolean((json_bool)1));
 #else
-				eb_device_init_dynamic (net, flags);
+				eb_device_init_dynamic (net, flags, NULL, NULL);
 
 #endif
 
@@ -10138,7 +10133,7 @@ int eb_readconfig(char *f, char *json)
 				if (!strcasecmp("AUTOACK", eb_getstring(line, &matches[5])))
 					is_autoack = 1;
 #ifndef EB_JSONCONFIG	
-				eb_device_init_aun_net (net, base, is_fixed, port, is_autoack);
+				eb_device_init_aun_net (net, base, is_fixed, port, is_autoack, NULL, NULL);
 #else
 				json_object_object_get_ex(jc, "aun", &jauns);
 				jaun = eb_json_aunnet_makenew(jauns, net); 
@@ -10182,7 +10177,7 @@ int eb_readconfig(char *f, char *json)
 #ifndef EB_JSONCONFIG
 					address = ntohl(*((in_addr_t *)h->h_addr));
 
-					eb_device_init_aun_host (net, stn, address, port, flags, 1);
+					eb_device_init_aun_host (net, stn, address, port, flags, 1, NULL, NULL);
 #else
 					json_object_object_get_ex(jc, "aun", &jauns);
 					jaun = eb_json_aunnet_makenew(jauns, net);
@@ -10271,7 +10266,7 @@ int eb_readconfig(char *f, char *json)
 				{
 					if (fixed) s_addr = (s_addr & ~0xff) | stn;
 
-					eb_device_init_expose_host (net, stn, s_addr, port + (fixed ? 0 : stn), 0);
+					eb_device_init_expose_host (net, stn, s_addr, port + (fixed ? 0 : stn), 0, NULL, NULL);
 
 				}
 
@@ -10355,7 +10350,7 @@ int eb_readconfig(char *f, char *json)
 				json_object_object_add(jexposure, "port", json_object_new_int(port));
 				json_object_array_add(jexp_already, jexposure);
 #else
-				eb_device_init_expose_host (net, stn, s_addr, port, 1);
+				eb_device_init_expose_host (net, stn, s_addr, port, 1, NULL, NULL);
 #endif
 
 			}
@@ -11363,8 +11358,8 @@ int main (int argc, char **argv)
 				if (strchr(optarg, 'o'))	EB_CONFIG_PKT_DUMP_OPTS |= EB_PKT_DUMP_PRE_O;
 				if (strchr(optarg, 'O'))	EB_CONFIG_PKT_DUMP_OPTS |= EB_PKT_DUMP_POST_O;
 			}; break;
-			case 's':	dumpconfig++; break;	
 			*/
+			case 's':	dumpconfig++; break;	
 			case 'z':	EB_DEBUG_LEVEL++; break;
 		}
 	}
@@ -11784,52 +11779,42 @@ int main (int argc, char **argv)
 			fprintf (stderr, "\n");
 		}
 		
-		if (bridge_fw) // Dump firewall rules
+		if (fw_chains) // Dump firewall rules
 		{
 			struct __eb_fw	*f;
+			struct __eb_fw_chain *chain;
 			int		counter;
 
-			f = bridge_fw;
+			chain = fw_chains;
 
-			fprintf (stderr, "\nBridge firewall rules\n\n");
+			fprintf (stderr, "\nFirewall chains\n\n");
 
-			counter = 1;
-
-			while (f)
+			while (chain)
 			{
-				fprintf (stderr, "%7d %-6s %3d.%-3d <--> %3d.%-3d\n", counter++,
-						(f->action == EB_FW_ACCEPT) ? "Accept" : "Drop",
-						f->srcnet, f->srcstn,
-						f->dstnet, f->dststn
-					);
+				fprintf (stderr, "Chain name: %s (default: %s)\n", chain->fw_chain_name, chain->fw_default == EB_FW_ACCEPT ? "Accept" : "Reject");
+				f = chain->fw_chain_start;
 
-				f = f->next;
+				counter = 1;
+	
+				while (f)
+				{
+					fprintf (stderr, "  %7d %-6s %3d.%-3d <--> %3d.%-3d\n", counter++,
+							(f->action == EB_FW_ACCEPT) ? "Accept" : "Drop",
+							f->srcnet, f->srcstn,
+							f->dstnet, f->dststn
+						);
+	
+					f = f->next;
+				}
+	
+				fprintf (stderr, "\n");
+				chain = chain->next;
 			}
-
-			fprintf (stderr, "Default %-6s\n\n", (EB_FW_DEFAULT == EB_FW_ACCEPT) ? "Accept" : "Drop");
 
 		}
 
 	}
 	
-	// Map check on sample config
-	if (0) {
-		struct __eb_device *p;
-
-		p = devices;
-
-		while (p)
-		{
-			if (p->type == EB_DEF_WIRE)
-				if (ECONET_DEV_STATION((p->wire.stations),0,251))
-				{
-					eb_debug (0, 1, "DEBUG", "Found station 0.251 in the station map at thread %p", p);
-				}
-
-			p = p->next;
-		}
-	}
-
 	/* Start the engines, captain! */
 
 	eb_debug (0, 1, "MAIN", "Core             Bridge to engine room: Start main engines...");

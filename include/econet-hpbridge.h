@@ -134,7 +134,7 @@ struct __eb_outq { // Definition of outbound queue from device (i.e. going from 
 #define EB_FW_ACCEPT 0x01
 #define EB_FW_REJECT 0x02
 #define EB_FW_CHAIN  0x04 /* Pass to another chain */
-#define EB_FW_DEFAULT EB_FW_ACCEPT
+//#define EB_FW_DEFAULT EB_FW_ACCEPT
 
 /* Firewall entry. */
 struct __eb_fw { // Firewall entry - any value which is &FF is the wildcard
@@ -370,7 +370,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 
 	/* Firewall per device - available with JSON config */
 
-	struct eb_fw		*fw_in, *fw_out; /* 'in' is for traffic going TO the device (e.g. being sent to a fileserver, pipe, econet, or trunk - i.e. going away from the bridge), 'out' is stuff emanating out of the device (i.e. arriving on a pipe, from a fileserver, off an econet, arriving on a trunk) */
+	struct __eb_fw_chain		*fw_in, *fw_out; /* 'in' is for traffic going TO the device (e.g. being sent to a fileserver, pipe, econet, or trunk - i.e. going away from the bridge), 'out' is stuff emanating out of the device (i.e. arriving on a pipe, from a fileserver, off an econet, arriving on a trunk) */
 
 	// Per device type information
 	union {
@@ -400,8 +400,6 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			uint8_t			use_pool[255];
 			struct __eb_pool	*pool;
 
-			// Links
-			//struct __eb_fw *head, *tail;
 			uint8_t 	xlate_in[256], xlate_out[256]; // Network number translation. _in translates a source network when the trunk receives traffic (and translates bridge advertised network numbers); _out translates a destination network when the trunk sends traffic.  Set up when config is read.
 			uint8_t		filter_in[256], filter_out[256]; // Networks we ignore (i.e. we ditch traffic, and we ignore/don't send adverts)
 	
@@ -794,21 +792,21 @@ extern uint8_t	dumpconfig;
 
 /* externs within econet-hpbridge-devinit.c */
 
-extern uint8_t	eb_device_init_wire (uint8_t, char *);
+extern uint8_t	eb_device_init_wire (uint8_t, char *, struct __eb_fw_chain *, struct __eb_fw_chain *);
 extern uint8_t	eb_device_init_virtual (uint8_t);
-extern uint8_t	eb_device_init_singletrunk (char *, uint16_t, uint16_t, char *);
-extern uint8_t 	eb_device_init_dynamic (uint8_t, uint8_t);
+extern uint8_t	eb_device_init_singletrunk (char *, uint16_t, uint16_t, char *, struct __eb_fw_chain *, struct __eb_fw_chain *);
+extern uint8_t 	eb_device_init_dynamic (uint8_t, uint8_t, struct __eb_fw_chain *, struct __eb_fw_chain *);
 extern uint8_t	eb_device_init_fs (uint8_t, uint8_t, char *);
 extern uint8_t	eb_device_init_ps (uint8_t, uint8_t, char *, char *, char *, uint8_t, uint8_t);
 extern uint8_t 	eb_device_init_ps_handler (uint8_t, uint8_t, char *, char *);
 extern uint8_t	eb_device_init_ip (uint8_t, uint8_t, char *, uint32_t, uint32_t);
 extern uint8_t	eb_device_init_pipe (uint8_t, uint8_t, char *, uint8_t);
-extern uint8_t	eb_device_init_aun_host (uint8_t, uint8_t, in_addr_t, uint16_t, uint8_t, uint8_t);
-extern uint8_t	eb_device_init_aun_net (uint8_t, in_addr_t, uint8_t, uint16_t, uint8_t);
+extern uint8_t	eb_device_init_aun_host (uint8_t, uint8_t, in_addr_t, uint16_t, uint8_t, uint8_t, struct __eb_fw_chain *, struct __eb_fw_chain *);
+extern uint8_t	eb_device_init_aun_net (uint8_t, in_addr_t, uint8_t, uint16_t, uint8_t, struct __eb_fw_chain *, struct __eb_fw_chain *);
 extern uint8_t	eb_device_init_expose_host (uint8_t, uint8_t, in_addr_t, uint16_t, uint8_t);
 extern uint8_t	eb_device_init_trunk_nat (struct __eb_device *, uint8_t, uint8_t);
 extern uint8_t	eb_device_init_set_bridge_filter (struct __eb_device *, uint8_t, uint8_t, uint8_t);
-extern uint8_t	eb_device_init_add_fw_to_chain (struct __eb_fw **, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
+extern uint8_t	eb_device_init_add_fw_to_chain (struct __eb_fw_chain **, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
 extern uint8_t	eb_device_init_set_net_clock (struct __eb_device *, double, double);
 extern uint8_t	eb_device_init_set_trunk_bind_address (struct __eb_device *, in_addr_t);
 extern uint8_t	eb_device_init_create_pool (char *, uint8_t, uint8_t *);

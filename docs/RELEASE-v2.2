@@ -58,6 +58,17 @@ RELEASE NOTES FOR V2.2
   of the HPB. When that is done, it will hopefully also be
   friendly to text-browsers such as lynx so as to provide
   an effect text-based config tool.
+- The JSON config "general" key can have within it keys which
+  reflect the long command line parameters so that those settings
+  can be made semi-permanent without having to have them on the
+  command line. 
+- Each interface and device can have an inbound and outbound firewall
+  chain associated with it to provide granular filtering. Inbound
+  means from the device - e.g. received on a trunk or from a pipe. 
+  Outbound is the converse. Inbound filters must be configured
+  to filter traffic with network / station numbers as received, i.e.
+  before any NAT or pooling. Outbound filters are the reverse - the
+  matching is done prior to the undoing of any NAT etc.
 
 KNOWN ISSUES
 ------------
