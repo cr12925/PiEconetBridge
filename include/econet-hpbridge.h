@@ -77,6 +77,14 @@
 #define EB_ADV_ALL	((EB_TRUNK | EB_WIRE | EB_PIPE | EB_LOCAL | EB_POOL) << EB_ADV_SHIFT) // We never do bridging with AUN stations. They should know where things are.
 #define EB_ADV_NONE	0x00
 
+/* The lower bits of these definitions are actually not used. They were planned
+ * to help the bridge protocol (trunks, wires) decide what to advertise, but
+ * in the end we just do it from the networks table
+ *
+ * But I've maintained the definitions as they originally were because they're
+ * used for comparison purposes and it means I don't need to check if 
+ * something will break!
+ */
 #define EB_DEF_TRUNK	((EB_TRUNK << EB_TYPE_SHIFT) | EB_ADV_ALL)
 #define EB_DEF_WIRE	((EB_WIRE << EB_TYPE_SHIFT) | EB_ADV_ALL)
 #define EB_DEF_PIPE	((EB_PIPE << EB_TYPE_SHIFT) | EB_ADV_NONE) // Only the Null driver gets advertised, not the host
@@ -379,9 +387,14 @@ struct __eb_device { // Structure holding information about a "physical" device 
 
 			// General parameters
 			int 		socket;
+			pthread_mutex_t	mt_mutex; // Locks mt_client - which is NULL if we are an inactive multitrunk client. And that structure also containts our pipe2() pair.
+			pthread_cond_t	mt_cond;
+			uint8_t		mt_addr_flags; // Can be used to set IPV6_ONLY
+			// Probably need a struct mt_client *mt_client; here so that we know where our sockets & things are in multitrunk world
+
 			char 		*hostname;
-			struct addrinfo	*remote_host;
-			int 		local_port, remote_port;
+			struct addrinfo	*remote_host; // updated by mt_client / mt_server when we're a multitrunk
+			int 		local_port, remote_port; // For UDP trunks only
 			int		is_dynamic; // 0 = fixed other end; 1 = dynamic other end
 
 			// Encryption parameters
@@ -403,24 +416,25 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			uint8_t 	xlate_in[256], xlate_out[256]; // Network number translation. _in translates a source network when the trunk receives traffic (and translates bridge advertised network numbers); _out translates a destination network when the trunk sends traffic.  Set up when config is read.
 			uint8_t		filter_in[256], filter_out[256]; // Networks we ignore (i.e. we ditch traffic, and we ignore/don't send adverts)
 	
-			// If part of multitrunk
+			// If part of multitrunk // If NULL then not part of multi-trunk
 
-			struct __eb_device	*multitrunk_parent;
+			struct __eb_device	*mt_parent;
 
+			
 			// Keepalive thread
 			
 			pthread_t	keepalive_thread;
+
 		} trunk;
 
 		struct {
+			char		*mt_name;
+			uint16_t	port; // Port number
+			char 		* host; // NULL if all interfaces
+			int		ai_family; // AF_INET, AF_INET6, AF_UNSPEC
+			uint16_t	listenqueue; // listen queue length
+			enum		{ MT_CLIENT = 1, MT_SERVER = 2} mt_type;
 
-			int		socket; // IPv4 / IPv6 TCP socket we listen on
-
-			struct pollfd	*p_reset; // List of FDs (embedded in a pollfd list) of trunk endpoints we are talking to
-			int		numfd; // Number of valid FDs in the list. (Note, we must compress the list if one goes away from the middle.)
-
-			struct __eb_device *clients; // Client trunk device list. 
-			uint8_t		numclients; // Number of valid clients (i.e. size of malloc() on clients
 		} multitrunk;
 
 		struct { // Network on a real econet wire via a bridge board
@@ -781,6 +795,7 @@ extern char * eb_pool_err(uint8_t);
 /* Globals in econet-hpbridge.c used by ...devinit.c */
 
 extern struct __eb_device 	* trunks;
+extern struct __eb_device	* multitrunks;
 extern struct __eb_device	* networks[];
 extern struct __eb_aun_remote	* aun_remotes;
 extern struct __eb_aun_exposure	* exposures;
@@ -795,6 +810,7 @@ extern uint8_t	dumpconfig;
 extern uint8_t	eb_device_init_wire (uint8_t, char *, struct __eb_fw_chain *, struct __eb_fw_chain *);
 extern uint8_t	eb_device_init_virtual (uint8_t);
 extern uint8_t	eb_device_init_singletrunk (char *, uint16_t, uint16_t, char *, struct __eb_fw_chain *, struct __eb_fw_chain *);
+extern uint8_t	eb_device_init_multitrunk (char *, char *, uint16_t, int, uint8_t);
 extern uint8_t 	eb_device_init_dynamic (uint8_t, uint8_t, struct __eb_fw_chain *, struct __eb_fw_chain *);
 extern uint8_t	eb_device_init_fs (uint8_t, uint8_t, char *);
 extern uint8_t	eb_device_init_ps (uint8_t, uint8_t, char *, char *, char *, uint8_t, uint8_t);
@@ -813,6 +829,20 @@ extern uint8_t	eb_device_init_create_pool (char *, uint8_t, uint8_t *);
 extern uint8_t	eb_device_init_set_pool_static (struct __eb_pool *, struct __eb_device *, uint8_t, uint8_t, uint8_t, uint8_t);
 extern uint8_t	eb_device_init_set_pooled_nets (struct __eb_pool *, struct __eb_device *, uint8_t, uint8_t *);
 
+/* Multitrunk */
+
+extern void * eb_multitrunk_server_device (void *);
+extern void * eb_multitrunk_client_device (void *);
+
 /* JSON */
 
 uint8_t eb_readconfig_json(char *);
+
+/* Thread management */
+
+extern uint16_t		threads_started, threads_ready;
+
+extern pthread_mutex_t		threadcount_mutex; // Locks the thread counter
+
+#define eb_thread_started() { pthread_mutex_lock(&threadcount_mutex); threads_started++; pthread_mutex_unlock(&threadcount_mutex); }
+#define eb_thread_ready() { pthread_mutex_lock(&threadcount_mutex); threads_ready++; pthread_mutex_unlock(&threadcount_mutex); }

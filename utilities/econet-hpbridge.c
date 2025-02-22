@@ -64,6 +64,7 @@ struct __eb_device      *networks[255]; // One entry per network, contains point
 struct __eb_device      *networks_initial[255]; // Used to rebuild networks[] on a bridge reset
 struct __eb_device      *devices; // All devices. Used to rebuild networks[] on a bridge re-set
 struct __eb_device      *trunks; // List of trunks.
+struct __eb_device	*multitrunks; // List of multitrunks.
 struct __eb_pool	*pools; // List of pool definitions
 struct __eb_fw_chain	*fw_chains; // List of firewall chains
 
@@ -71,8 +72,10 @@ uint16_t		threads_started, threads_ready;
 
 pthread_mutex_t		threadcount_mutex; // Locks the thread counter
 
+/* Moved to header 
 #define eb_thread_started() { pthread_mutex_lock(&threadcount_mutex); threads_started++; pthread_mutex_unlock(&threadcount_mutex); }
 #define eb_thread_ready() { pthread_mutex_lock(&threadcount_mutex); threads_ready++; pthread_mutex_unlock(&threadcount_mutex); }
+*/
 	
 #define eb_update_lastrx(d) { pthread_mutex_lock(&(d->statsmutex)); d->last_rx = time(NULL); pthread_mutex_unlock(&(d->statsmutex)); }
 
@@ -248,6 +251,7 @@ char * eb_type_str (uint16_t type)
 	{
 		case EB_WIRE: return (char *)"Wire"; break;
 		case EB_TRUNK: return (char *)"Trunk"; break;
+		case EB_MULTITRUNK: return (char *)"M-Trunk"; break;
 		case EB_PIPE: return (char *)"Pipe"; break;
 		case EB_LOCAL: return (char *)"Local"; break;
 		case EB_AUN: return (char *)"AUN"; break;
@@ -710,7 +714,7 @@ static void *eb_pool_garbage_collector(void *ignored)
 	while (1)
 	{
 
-		eb_debug (0, 4, "POOL", "Pool garbage collector running");
+		eb_debug (0, 4, "POOL", "%16sPool garbage collector running", "");
 
 		p = pools;
 
@@ -1050,7 +1054,7 @@ struct __eb_device * eb_device_init (uint8_t net, uint16_t type, uint8_t config)
 		p->next = NULL;
 
 	}
-	else	eb_debug (1, 0, "CONFIG", "Unable to malloc() device struct for network %d", net);
+	else	eb_debug (1, 0, "CONFIG", "Unable to malloc() device struct for network %d type %02x", net, type);
 
 	if (net) // We don't do this unless we're creating a new network
 	{
@@ -8917,6 +8921,72 @@ int eb_parse_json_config(struct json_object *jc)
 		}
 	}
 
+	/* Multitrunks */
+
+	{
+		uint16_t	tcount = 0, tlength;
+		json_object	*jtrunks, *jtrunk;
+
+		json_object_object_get_ex(jc, "multitrunks", &jtrunks);
+
+		if (jtrunks)
+		{
+			tlength = json_object_array_length(jtrunks);
+
+			while (tcount < tlength)
+			{
+				uint16_t	port;
+				int		ai_family = AF_UNSPEC;
+				uint8_t		server = 1;
+				json_object	*jport, *jserver, *jtrunkname, *jhost, *jfamily;
+
+				jtrunk = json_object_array_get_idx(jtrunks, tcount);
+
+				json_object_object_get_ex(jtrunk, "port", &jport);
+				json_object_object_get_ex(jtrunk, "host", &jhost);
+				json_object_object_get_ex(jtrunk, "type", &jserver);
+				json_object_object_get_ex(jtrunk, "family", &jfamily);
+				json_object_object_get_ex(jtrunk, "name", &jtrunkname);
+
+				if (!jtrunkname)
+					eb_debug(1, 0, "JSON", "Multi-Trunk index %d does not have a trunk name", tcount);
+
+				if (!jport)
+					eb_debug (1, 0, "JSON", "Multi-Trunk index %d does not have a port number", tcount);
+				else
+					port = json_object_get_int(jport);
+
+				if (jfamily)
+				{
+					if (strchr(json_object_get_string(jfamily), '4'))
+						ai_family = AF_INET;
+					else if (strchr(json_object_get_string(jfamily), '6'))
+						ai_family = AF_INET6;
+					else
+						eb_debug (1, 0, "JSON", "Multi-Trunk index %d has unknown family parameter '%s'", json_object_get_string(jfamily));
+				}
+
+				if (jserver && !strncmp("client", json_object_get_string(jserver), 6))
+				{
+					if (!jhost) /* Must have a host for a client */
+						eb_debug (1, 0, "JSON", "Multi-Trunk index %d is a client but has no host parameter", tcount);
+
+					server = 0;
+				}
+					
+				eb_device_init_multitrunk(
+						jhost ? (char *) json_object_get_string(jhost) : (char *) NULL,
+						(char *) json_object_get_string(jtrunkname),
+						port,
+						ai_family,
+						server);
+
+				tcount++;
+			}
+
+		}
+	}
+
 	/* Trunks */
 
 	{
@@ -9030,12 +9100,6 @@ int eb_parse_json_config(struct json_object *jc)
 			}
 		}
 
-	}
-
-	/* Multitrunks */
-
-	{
-		/* TO DO - Implement later when I've written the driver */
 	}
 
 	/* Now implement pools on wire devices and trunks, one by one */
@@ -11864,6 +11928,30 @@ int main (int argc, char **argv)
 		eb_thread_started();
 
 		p = p->next;
+	}
+
+	/* Start up the multitrunk devices */
+
+	p = multitrunks;
+
+	while (p)
+	{
+		int e;
+
+		eb_debug (0, 2, "MAIN", "%-8s %7d Starting multitrunk handler thread for %s", eb_type_str(p->type), p->multitrunk.port, p->multitrunk.mt_name);
+
+		if (p->multitrunk.mt_type == MT_SERVER)
+			e = pthread_create(&(p->me), NULL, eb_multitrunk_server_device, p);
+		else
+			e = pthread_create(&(p->me), NULL, eb_multitrunk_client_device, p);
+
+		if (e)
+			eb_debug (1, 0, "MAIN", "Thread creation for multitrunk handler for %s failed", eb_type_str(p->type), p->multitrunk.port, p->multitrunk.mt_name);
+
+		eb_thread_started();
+
+		p = p->next;
+
 	}
 
 	/* Start the trunk devices */

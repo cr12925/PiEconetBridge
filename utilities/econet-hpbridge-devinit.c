@@ -114,7 +114,13 @@ uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uin
 
 	// Flag NOT part of multitrunk
 
-	p->trunk.multitrunk_parent = NULL;
+	p->trunk.mt_parent = NULL;
+
+	if (pthread_cond_init(&(p->trunk.mt_cond), NULL) == -1)
+		eb_debug (1, 0, "DEVINIT", "%-8s %5d   Cannot initialize multitrunk condition this device.", "Trunk", p->trunk.local_port);
+
+	if (pthread_mutex_init(&(p->trunk.mt_mutex), NULL) == -1)
+		eb_debug (1, 0, "DEVINIT", "%-8s %5d   Cannot initialize multitrunk mutex this device.", "Trunk", p->trunk.local_port);
 
 	// Initialize shared key to NULL so we can tell if it is unset
 	
@@ -148,6 +154,37 @@ uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uin
 
 	return 1;
 
+}
+
+/*
+ * eb_device_init_multitrunk
+ *
+ * Set up a multi trunk to listen on (NULL, hostname) port X, IPV4/6/both
+ */
+
+uint8_t eb_device_init_multitrunk (char *host, char *trunkname, uint16_t port, int family, uint8_t server)
+{
+	struct __eb_device	*p;
+
+	p = eb_device_init(0, EB_DEF_MULTITRUNK, 0);
+
+	p->multitrunk.mt_name = strdup(trunkname);
+	p->multitrunk.port = port;
+	p->multitrunk.ai_family = family;
+	p->multitrunk.mt_type = (server == 1) ? MT_SERVER : MT_CLIENT;
+	if (host)
+		p->multitrunk.host = strdup(host);
+	else	p->multitrunk.host = NULL;
+
+	if (multitrunks)
+		p->next = multitrunks;
+
+	multitrunks = p;
+
+	DEVINIT_DEBUG("Created Multi-Trunk with name %s, host %s, port %d, family %d, server %d", 
+			host, trunkname, port, family, server);
+
+	return 1;
 }
 
 /*
