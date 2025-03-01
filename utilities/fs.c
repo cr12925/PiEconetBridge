@@ -3031,8 +3031,12 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
 		if (!cfgfile) // Config file not present
 		{
+			uint8_t		blank[256];
+
+			memset (&blank, 0, 256);
+
 			if ((cfgfile = fopen(passwordfile, "w+")))
-				fwrite(server->config, 256, 1, cfgfile);
+				fwrite(&blank, 256, 1, cfgfile);
 			else fs_debug_full (0, 1, server, 0, 0, "Unable to write configuration file at %s - not initializing", passwordfile);
 
 			setconfigdefaults = 1;
@@ -3138,9 +3142,12 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 				if ((length / 256) != ECONET_MAX_FS_USERS) // Old pw file that hasn't been padded
 				{
 					struct __fs_user u;
+					uint16_t	count = 0;
+
 					fseek(passwd, 0, SEEK_END);
 					memset(&u, 0, sizeof(u));
-					fwrite(&u, 256, ECONET_MAX_FS_USERS - (length / 256), passwd);
+					for (; count < (ECONET_MAX_FS_USERS - (length / 256)); count++)
+						fwrite(&u, 256, 1, passwd);
 				}
 
 				fseek(passwd, 0, SEEK_END);
