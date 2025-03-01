@@ -34,6 +34,7 @@
 #include <unistd.h>
 #include <poll.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <errno.h>
@@ -434,6 +435,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			int		ai_family; // AF_INET, AF_INET6, AF_UNSPEC
 			uint16_t	listenqueue; // listen queue length
 			enum		{ MT_CLIENT = 1, MT_SERVER = 2} mt_type;
+			unsigned int	timeout; // Timeout in MS to give to TCP to shut a connection if data goes unacked this long. Provides for fast closure on failed trunks
 
 		} multitrunk;
 
@@ -810,7 +812,7 @@ extern uint8_t	dumpconfig;
 extern uint8_t	eb_device_init_wire (uint8_t, char *, struct __eb_fw_chain *, struct __eb_fw_chain *);
 extern uint8_t	eb_device_init_virtual (uint8_t);
 extern uint8_t	eb_device_init_singletrunk (char *, uint16_t, uint16_t, char *, struct __eb_fw_chain *, struct __eb_fw_chain *);
-extern uint8_t	eb_device_init_multitrunk (char *, char *, uint16_t, int, uint8_t);
+extern uint8_t	eb_device_init_multitrunk (char *, char *, uint16_t, int, uint8_t, uint16_t);
 extern uint8_t 	eb_device_init_dynamic (uint8_t, uint8_t, struct __eb_fw_chain *, struct __eb_fw_chain *);
 extern uint8_t	eb_device_init_fs (uint8_t, uint8_t, char *);
 extern uint8_t	eb_device_init_ps (uint8_t, uint8_t, char *, char *, char *, uint8_t, uint8_t);
