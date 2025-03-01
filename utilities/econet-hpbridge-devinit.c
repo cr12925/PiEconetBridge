@@ -162,7 +162,7 @@ uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uin
  * Set up a multi trunk to listen on (NULL, hostname) port X, IPV4/6/both
  */
 
-uint8_t eb_device_init_multitrunk (char *host, char *trunkname, uint16_t port, int family, uint8_t server)
+uint8_t eb_device_init_multitrunk (char *host, char *trunkname, uint16_t port, int family, uint8_t server, uint16_t timeout)
 {
 	struct __eb_device	*p;
 
@@ -172,6 +172,7 @@ uint8_t eb_device_init_multitrunk (char *host, char *trunkname, uint16_t port, i
 	p->multitrunk.port = port;
 	p->multitrunk.ai_family = family;
 	p->multitrunk.mt_type = (server == 1) ? MT_SERVER : MT_CLIENT;
+	p->multitrunk.timeout = timeout;
 	if (host)
 		p->multitrunk.host = strdup(host);
 	else	p->multitrunk.host = NULL;
