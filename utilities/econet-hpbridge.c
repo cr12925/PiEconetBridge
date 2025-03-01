@@ -8938,7 +8938,7 @@ int eb_parse_json_config(struct json_object *jc)
 				uint16_t	port;
 				int		ai_family = AF_UNSPEC;
 				uint8_t		server = 1;
-				json_object	*jport, *jserver, *jtrunkname, *jhost, *jfamily;
+				json_object	*jport, *jserver, *jtrunkname, *jhost, *jfamily, *jtimeout;
 
 				jtrunk = json_object_array_get_idx(jtrunks, tcount);
 
@@ -8947,6 +8947,7 @@ int eb_parse_json_config(struct json_object *jc)
 				json_object_object_get_ex(jtrunk, "type", &jserver);
 				json_object_object_get_ex(jtrunk, "family", &jfamily);
 				json_object_object_get_ex(jtrunk, "name", &jtrunkname);
+				json_object_object_get_ex(jtrunk, "timeout", &jtimeout); // ms of unacked data before TCP shuts connection
 
 				if (!jtrunkname)
 					eb_debug(1, 0, "JSON", "Multi-Trunk index %d does not have a trunk name", tcount);
@@ -8979,7 +8980,8 @@ int eb_parse_json_config(struct json_object *jc)
 						(char *) json_object_get_string(jtrunkname),
 						port,
 						ai_family,
-						server);
+						server,
+						jtimeout ? json_object_get_int(jtimeout) : 0);
 
 				tcount++;
 			}
@@ -11947,6 +11949,8 @@ int main (int argc, char **argv)
 
 		if (e)
 			eb_debug (1, 0, "MAIN", "Thread creation for multitrunk handler for %s failed", eb_type_str(p->type), p->multitrunk.port, p->multitrunk.mt_name);
+
+		pthread_detach(p->me);
 
 		eb_thread_started();
 
