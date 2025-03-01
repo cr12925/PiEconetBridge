@@ -3041,7 +3041,6 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
 			setconfigdefaults = 1;
 
-			fsop_write_readable_config(server);
 		}
 
 		fseek(cfgfile, 0, SEEK_END);
