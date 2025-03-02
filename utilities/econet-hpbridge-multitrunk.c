@@ -53,7 +53,7 @@
  * traffic then the key is copied into local storage and used
  * thereafter. The socket is added to the list of sockets the
  * multitrunk object listens on, together with the appropriate
- * member of the pipe2() pair, in order to receive traffic
+ * member of the socketpair() pair, in order to receive traffic
  * for outbound transmission.
  *
  * If no such trunk is found, the connection is simply closed.
@@ -66,21 +66,6 @@
 #define _GNU_SOURCE
 
 #include "econet-hpbridge.h"
-
-struct mt_client {
-	struct __eb_device	*trunk, *multitrunk_parent; 
-	int			mt_pipe[2];
-	int			socket; // Socket to distant end 
-	unsigned char *		key; // Will also be NULL until we've found the relevant trunk client
-	uint8_t 		* recv_buffer; // malloced when data turns up after a '*'. The trailing '*' is never put in this buffer. This buffer is decoded from Base64
-	uint16_t		recv_length; // Current malloc'd length of recv_buffer
-	uint8_t			* packet; // Buffer for transfer to trunk pipe - this will be encrypted on transmission to the trunk client (distant end) if this is a TCP trunk, or a UDP encrypted trunk
-	uint16_t		packet_length;
-	uint8_t			* decrypted_buffer; // Only used when we are trying to work out which endpoint has connected to us
-	enum			{ MT_IDLE = 1, MT_START = 2, MT_DATA = 3 } mt_state; // IDLE = waiting for beginning '*', START means '*' received but no data, DATA means receiving data (and waiting for trailing '*')
-	enum			{ MT_TYPE_UDP = 1, MT_TYPE_TCP = 2 } mt_type; // Not used at present - TCP trunks only for now. This is for later when we might consolidate UDP and TCP listening into the same infrastructure
-	struct mt_client 	* next;
-};
 
 /* 
  * Multitrunk transceiver thread
@@ -101,18 +86,572 @@ struct mt_client {
  * get it to start trying to connect unconnected multitrunks again.
  */
 
+/* eb_trunk_decrypt
+ *
+ * Uses the SSL library to decrypt an encrypted packet, and leaves it in
+ * newly malloc()ed dec_data (length dec_datalen), which must be 
+ * free()d by the caller at some stage.
+ *
+ * returns length of decrypted data at dec_data if successful (bytes)
+ * or -1 for failure
+ */
+
+int32_t	eb_trunk_decrypt(uint16_t port, uint8_t *cipherpacket, uint32_t length, unsigned char *sharedkey, uint8_t *dec_data)
+{
+
+	EVP_CIPHER_CTX  *ctx_dec; // Encryption control
+	int		encrypted_length;
+	uint8_t		temp_packet[ECONET_MAX_PACKET_SIZE+6];
+	uint16_t	datalength;
+	int32_t		dec_datalen = 0;
+
+	if (!(ctx_dec = EVP_CIPHER_CTX_new()))
+		eb_debug (1, 0, "(M)TRUNK", "(M)Trunk %7d Failed to establish decrypt cipher control!", port);
+
+	 eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encrypted trunk packet received - type %d, IV bytes %02x %02x %02x ...", port, cipherpacket[TRUNK_CIPHER_ALG], cipherpacket[TRUNK_CIPHER_IV], cipherpacket[TRUNK_CIPHER_IV+1], cipherpacket[TRUNK_CIPHER_IV+2]);
+
+	switch (cipherpacket[TRUNK_CIPHER_ALG])
+	{
+		case 1:
+			EVP_DecryptInit_ex(ctx_dec, EVP_aes_256_cbc(), NULL, sharedkey, &(cipherpacket[TRUNK_CIPHER_IV]));
+			break;
+		default:
+			eb_debug (0, 2, "(M)TRUNK", "(M)Trunk %7d Encryption type %02x in encrypted unknown - discarded", port, cipherpacket[TRUNK_CIPHER_ALG]);
+			break;
+	}
+
+	if (cipherpacket[TRUNK_CIPHER_ALG] && (cipherpacket[TRUNK_CIPHER_ALG] <= 1))
+	{
+
+		int     tmp_len;
+
+		eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encryption type in encrypted is valid - %02x; encrypted data length %04x", port, cipherpacket[TRUNK_CIPHER_ALG], (length - TRUNK_CIPHER_DATA));
+
+		if ((!EVP_DecryptUpdate(ctx_dec, temp_packet, &(encrypted_length), (unsigned char *) &(cipherpacket[TRUNK_CIPHER_DATA]), length - TRUNK_CIPHER_DATA)))
+			eb_debug (0, 2, "(M)TRUNK", "(M)Trunk %7d DecryptUpdate of trunk packet failed", port);
+		else if (EVP_DecryptFinal_ex(ctx_dec, (unsigned char *) &(temp_packet[encrypted_length]), &tmp_len))
+		{
+			encrypted_length += tmp_len;
+
+			eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Trunk packet length %04x", port, encrypted_length);
+
+			datalength = (temp_packet[0] * 256) + temp_packet[1];
+
+			if (datalength >= 12) // Valid packet size received
+			{
+				eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encrypted trunk packet validly received - specified length %04x, decrypted length %04x, marking receipt at %d seconds", port, datalength, encrypted_length, time(NULL));
+
+				dec_data = eb_malloc(__FILE__, __LINE__, "(M)TRUNK", "Allocate memory for decrypted packet received on trunk", datalength);
+
+				memcpy(dec_data, &(temp_packet[2]), datalength); // data length always ignores the ECONET part of the data
+				dec_datalen = datalength;
+			}
+			else
+				eb_debug (0, 2, "(M)TRUNK", "(M)Trunk %7d Decrypted trunk packet too small (data length = %04x) - discarded", port, datalength);
+		}
+		else
+			eb_debug (0, 2, "(M)TRUNK", "(M)Trunk %7d DecryptFinal of trunk packet failed - decrypted length before call was %04x", port, encrypted_length);
+	}
+
+	EVP_CIPHER_CTX_free(ctx_dec);
+	
+	if (dec_datalen == 0)
+		return -1;
+	else	return datalength;
+}
+
+/*
+ * eb_trunk_encrypt
+ *
+ * Takes a raw packet at *packet, length
+ * and encrypts using the data using the key etc within device 'd'.
+ * Puts the encrypted data at *encrypted (which is malloc()ed here and must be free()d by the caller).
+ * Returns length of encrypted data
+ *
+ * We can safely rely on knowing what 'd' is by this stage, because multitrunks don't transmit
+ * anything except a welcome message until they've received some encrypted data and 
+ * figured out which trunk client is talking to them.
+ *
+ * NB length parameter INCLUDES the 12 byte bridge trunk header length.
+ *
+ */
+
+int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struct __eb_device *d, uint8_t *encrypted)
+{
+
+	EVP_CIPHER_CTX	*ctx_enc;
+	unsigned char	iv[EVP_MAX_IV_LENGTH];
+	uint8_t		cipherpacket[TRUNK_CIPHER_TOTAL];
+	uint8_t		temp_packet[ECONET_MAX_PACKET_SIZE + 12 + 2];
+	int		encrypted_length, tmp_len;
+	
+	RAND_bytes(iv, AES_BLOCK_SIZE);
+
+	cipherpacket[TRUNK_CIPHER_ALG] = 1;
+
+	memcpy(&(cipherpacket[TRUNK_CIPHER_IV]), &iv, EVP_MAX_IV_LENGTH);
+
+	temp_packet[0] = (length & 0xff00) >> 8;
+	temp_packet[1] = (length & 0x00ff);
+
+	memcpy (&(temp_packet[2]), packet, length);
+
+	if (!(ctx_enc = EVP_CIPHER_CTX_new()))
+		eb_debug (1, 0, "(M)TRUNK", "(M)Trunk %7d Unable to set up encryption control", port);
+
+	EVP_EncryptInit_ex(ctx_enc, EVP_aes_256_cbc(), NULL, d->trunk.sharedkey, iv);
+
+	if ((!EVP_EncryptUpdate(ctx_enc, (unsigned char *) &(cipherpacket[TRUNK_CIPHER_DATA]), &encrypted_length, temp_packet, length + 2))) // +2 for the length bytes inserted above
+	{
+		eb_debug (0, 2, "(M)TRUNK", "(M)Trunk %7d EncryptUpdate of (m)trunk packet failed", port);
+		encrypted_length = 0;
+	}
+	else if ((!EVP_EncryptFinal(ctx_enc, (unsigned char *) &(cipherpacket[TRUNK_CIPHER_DATA + encrypted_length]), &tmp_len)))
+	{
+		eb_debug (0, 2, "(M)TRUNK", "(M)Trunk %7d EncryptFinal of (m)trunk packet failed", port);
+		encrypted_length = 0;
+	}
+	else
+	{
+		encrypted_length += tmp_len;
+		eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encryption succeeded: cleartext length %04X, encrypted length %04X", length + 2, encrypted_length);
+	}
+
+	EVP_CIPHER_CTX_free(ctx_enc);
+
+	if (encrypted_length > 0)
+	{
+		encrypted = eb_malloc(__FILE__, __LINE__, "(M)TRUNK", "New encrypted packet", encrypted_length);
+		memcpy (encrypted, &cipherpacket, encrypted_length);
+		return encrypted_length;
+	}
+
+	return -1; // Failure
+
+}
+
+/* eb_multitrunk_find_marker
+ *
+ * Find * or & in stream starting at start, up to maximum of length
+ */
+
+int16_t eb_multitrunk_find_marker (uint8_t *data, uint16_t start, uint16_t length)
+{
+	uint16_t count = 0;
+
+	while ((start + count) < length)
+	{
+		if (*(data + start + count) == '*' || *(data + start + count) == '&')
+			return (start + count);
+		count++;
+	}
+
+	return -1;
+}
+
+/* eb_mt_copy_to_cipherpacket
+ *
+ * Copies new inbound data to the end of a cipherpacket structure and
+ * updates the pointers
+ */
+
+uint8_t eb_mt_copy_to_cipherpacket (uint8_t *cipherpacket, uint32_t *cipherpacket_ptr, uint32_t *cipherpacket_size, uint8_t *buffer, uint16_t start, uint16_t length)
+{
+	uint32_t	realloc_size = *cipherpacket_size + length;
+	uint32_t	copylength = length;
+	uint32_t	copystart = start;
+	uint8_t		ret = 1; /* Success */
+
+	if ((*cipherpacket_ptr + length) > EB_MT_TCP_MAXSIZE)
+	{
+		/* Too big. Wrap around */
+
+		*cipherpacket_ptr = 0;
+		realloc_size = (*cipherpacket_ptr + length) % EB_MT_TCP_MAXSIZE;
+		copylength = realloc_size;
+		copystart = length - realloc_size;
+
+		ret = 0; /* Overran */
+	}
+	
+	cipherpacket = realloc(cipherpacket, realloc_size);
+
+	memcpy ((cipherpacket + *cipherpacket_ptr), (buffer + copystart), copylength);
+
+	*cipherpacket_ptr += copylength;
+	*cipherpacket_size = realloc_size;
+
+	return ret;
+}
+
+/* eb_mt_process_admin_packet
+ *
+ * Handles processing of administrative packets received on multitrunks
+ */
+
+void eb_mt_process_admin_packet (struct mt_client *me, uint8_t *cipherpacket, char *remotehost, uint16_t remoteport)
+{
+	switch (*cipherpacket)
+	{
+		case EB_MT_CMD_VERS:
+			me->mt_remote_version = *(cipherpacket + 2);
+			eb_debug (0, 1, "MTRUNK", "M-Trunk %7d Multitrunk protocol version %02d from %s:%d", me->multitrunk_parent->multitrunk.port, me->mt_remote_version, remotehost, remoteport);
+			break;
+		default:
+			eb_debug (0, 1, "MTRUNK", "M-Trunk %7d Unknown multitrunk admin command %02X from %s:%d", me->multitrunk_parent->multitrunk.port, *(cipherpacket), remotehost, remoteport);
+			break;
+	}
+}
+
+/* 
+ * eb_mt_debase64_decrypt_process
+ *
+ * Undo base64 encoding in place using glib-2.0 (and barf if fails)
+ * Then decrypt - finding trunk if we don't know which one it is
+ * Then process - admin or other packet
+ *
+ * returns 1 for success, 0 for failure
+ */
+
+uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpacket, uint16_t length, char *remotehost, uint16_t remoteport)
+{
+
+	int32_t		decrypted_length;
+
+	struct __eb_device	*search_trunk;
+
+	/* Undo Base64 in place */
+
+	g_base64_decode_inplace (cipherpacket, length);
+
+	/* Now decrypt */
+
+	search_trunk = trunks;
+
+	if (me->trunk)
+		search_trunk = me->trunk; // If we alread know which one, the while loop will find it immediately
+
+	/* Look for a trunk with matching data - needs to be attached to our multitrunk, and if it's connected and mt_cilent is set and isn't me then dump the older connection */
+
+	while (search_trunk)
+	{
+		if (search_trunk->trunk.mt_parent && search_trunk->trunk.mt_parent->multitrunk.mt_type == MT_SERVER) /* I.e. the parent is a server, so we can accept connections */
+		{
+			uint8_t	buffer[ECONET_MAX_PACKET_SIZE+12];
+
+
+			/* Attempt a decrypt with its key */
+
+			if ((decrypted_length = eb_trunk_decrypt(me->multitrunk_parent->multitrunk.port, cipherpacket, length, search_trunk->trunk.sharedkey, buffer)) >= 0)
+			{
+				pthread_mutex_lock(&(search_trunk->trunk.mt_mutex));
+
+				/* If trunk already connected to another handler, set its death flag */
+				
+				if ((search_trunk->trunk.mt_data) && (search_trunk->trunk.mt_data != me))
+				{
+					search_trunk->trunk.mt_data->death = 1; /* Kill it */
+					search_trunk->trunk.mt_data = me;
+				}
+
+				me->trunk = search_trunk;
+
+				/* If marker = &, call eb_mt_process_admin_packet, or otherwise write to the trunk child */
+
+				if (me->marker == '&')
+					eb_mt_process_admin_packet(me, buffer, remotehost, remoteport);
+				else /* Write to underlying trunk */
+					write (me->mt_pipe[1], buffer, decrypted_length);
+
+				eb_free (__FILE__, __LINE__, "MTRUNK", "Freeing used cipherpacket data area", cipherpacket);
+
+				me->marker = 0;
+
+				pthread_mutex_unlock(&(search_trunk->trunk.mt_mutex));
+
+				return 1;
+			}
+			else /* Move to next trunk */
+				search_trunk = search_trunk->next;
+
+		}
+		else
+			search_trunk = search_trunk->next;
+	}
+
+	/* If we get here, we couldn't decrypt - fail */
+
+	eb_debug (0, 2, "MTRUNK", "M-Trunk %7s Undecryptable packet received from %s:%d length %d", remotehost, remoteport, length);
+	eb_free (__FILE__, __LINE__, "MTRUNK", "Freeing used cipherpacket data area", cipherpacket);
+	me->marker = 0;
+	return 0;
+
+}
+
+/* Bidirectional traffic from an underlying trunk device to the multitrunk socket (whether acccept()ed inbound, or connect()ed outbound */
+
 void * eb_multitrunk_handler_thread (void * input)
 {
 	struct mt_client	* me;
+	struct pollfd		p[2];
+	uint8_t			*cipherpacket = NULL;
+	uint32_t		cipherpacket_ptr = 0, cipherpacket_size = 0; // _ptr is pointer into cipherpacket, _size is current allocated size of cipherpacket, which will grow in EB_MT_TCP_CHUNKSIZE chunks up to EB_MT_TCPMAXSIZE
+	union	{
+			struct sockaddr_in	mt_sockaddr_in;
+			struct sockaddr_in6	mt_sockaddr_in6;
+	} mt_sa;
+	socklen_t		mt_sa_len = sizeof(mt_sa);
+	char 			remoteip[32];
+	uint16_t		remoteport;
+	char			remotehost[HOST_NAME_MAX];
 
-	me = (struct mt_client *) input;
+	me = (struct mt_client *) input; // Once we've found the underlying trunk, we copy this pointer into its mt_client struct in the device so that it can be found by later connections
+
+	/* When called, the trunk which might be being connected to is unknown.
+	 * What we have to do is receive some traffic, deBase64 it, and
+	 * then attempt to decrypt by reference to all the keys we have for
+	 * distant systems which support TCP. If we don't find one, we'll close
+	 * the connection and die.
+	 *
+	 * If we do, we'll populate me->trunk and that tells us where to find the
+	 * key subsequently. We also update the pipe pair
+	 * multitrunk master field in the underlying trunk so that it knows
+	 * it is operational.
+	 *
+	 * For now, we'll set up the state machine.
+	 */
+
+	/* No need to lock until the mt_client struct is populated into an underlying trunk because nothing else can find it until then. */
+
+	me->mt_state = MT_IDLE;
+	me->mt_local_version = 0; // Means not yet announced to other end
+	me->mt_remote_version = 1; // Unknown yet, assume 1 unless we hear otherwise.
+
+	eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d New thread spawned for connection", me->multitrunk_parent->multitrunk.port);
+
+	if (getpeername(me->socket, (struct sockaddr *)&mt_sa, &mt_sa_len) == -1) 
+	{
+		eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Unable to look up peer name for connection", me->multitrunk_parent->multitrunk.port);
+		close(me->socket);
+		return NULL;
+	}
+
+	switch (mt_sa.mt_sockaddr_in.sin_family)
+	{
+		case AF_INET:
+			inet_ntop(AF_INET, &(((struct sockaddr_in *) &(mt_sa.mt_sockaddr_in))->sin_addr),
+					remoteip,
+					127);
+			remoteport = ntohs(mt_sa.mt_sockaddr_in.sin_port);
+			break;
+		case AF_INET6:
+			inet_ntop(AF_INET6, &(((struct sockaddr_in6 *) &(mt_sa.mt_sockaddr_in6))->sin6_addr),
+					remoteip,
+					127);
+			remoteport = ntohs(mt_sa.mt_sockaddr_in6.sin6_port);
+			break;
+		default:
+			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Wrong socket type for connection", me->multitrunk_parent->multitrunk.port);
+			close(me->socket);
+			return NULL;
+			break;
+	}
+
+	if (getnameinfo((struct sockaddr *) &(mt_sa), mt_sa_len, remotehost, HOST_NAME_MAX-1, NULL, 0, NI_NAMEREQD))
+	{
+		eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Unable to resolve hostname for %s:%d", me->multitrunk_parent->multitrunk.port, remoteip, remoteport);
+		strcpy(remotehost, remoteip);
+	}
+
+	eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d New connection with remote at %s(%s):%d", me->multitrunk_parent->multitrunk.port, remotehost, remoteip, remoteport);
+
+	if (socketpair(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK, 0, me->mt_pipe) == -1)
+		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to create socketpair() to underlying trunk", me->multitrunk_parent->multitrunk.port);
+
+	/* 
+	 * Protocol v1:
+	 * Administrative packets are '&' (base64(encrypted)) '&' 
+	 * Data packets are '*' (base64(encrypted)) '*'
+	 */
+
+	/* Administrative packets have the following format:
+	 * byte 0	Command
+	 * 		1 - Announce protocol version (EB_MT_CMD_VERS)
+	 * byte 1	Sub-command
+	 * 		(Nothing at present)
+	 * bytes 2+	Data
+	 * 		For version, this is a 1 byte value
+	 */
+
+	/* The server can't transmit until it's received something from the client, but the client can because it knows the shared key */
+
+	/* Except a welcome message which does nothing */
+
+	write (me->socket, "$$$" EB_MT_WELCOME_MSG "$$$\r\n", strlen(EB_MT_WELCOME_MSG) + 8);
+
+	/* Wait for data */
+
+	p[0].fd = me->socket;
+	p[0].events = POLLIN;
+
+	p[1].fd = me->mt_pipe[0]; // Read side from underlying trunk
+	p[1].events = POLLIN;
+
+	while (poll(p, 1, 1000)) /* We break if we want to die */
+	{
+
+		if (p[0].revents & POLLHUP)
+			break; // Graceful death
+			
+		pthread_mutex_lock(&(me->mt_lock));
+
+		if (me->death) // Graceful death
+		{
+			pthread_mutex_unlock(&(me->mt_lock));
+			break;
+		}
+
+		if (p[0].revents & POLLIN)
+		{
+			/* Data on our TCP socket */
+			uint8_t		buffer[EB_MT_TCP_CHUNKSIZE];
+			int16_t		ptr = 0, my_ptr = 0;
+			int		len;
+			int16_t		realdata_start = -1, realdata_len = 0;
+
+
+			len = read (me->socket, buffer, len);
+
+			if (len == -1) // Error - quit
+			{
+				pthread_mutex_unlock(&(me->mt_lock));
+				break;
+			}
+
+			if ((cipherpacket_size - cipherpacket_ptr) < len)
+			{
+				/* Expand buffer, up to maximum */
+
+				cipherpacket_size = (cipherpacket_size + len) < EB_MT_TCP_MAXSIZE ? (cipherpacket_size + len) : EB_MT_TCP_MAXSIZE;
+				cipherpacket = realloc(cipherpacket, cipherpacket_size);
+			}
+
+			/* What state are we in? */
+
+			my_ptr = 0; // Look through the received data & process
+
+			while (my_ptr < len)
+			{
+				
+				switch (me->mt_state)
+				{
+					case MT_IDLE: /* Waiting for start character, so look for it */
+					{
+						if (cipherpacket) /* Free memory if currently in use */
+							eb_free(__FILE__, __LINE__, "MTRUNK", "Free current inbound packet memory ready for new reception", cipherpacket);
+
+						if ((ptr = eb_multitrunk_find_marker(buffer, my_ptr, len)) >= 0) /* Marker found */ 
+						{ 
+							me->mt_state = MT_START; // move state
+							me->marker = buffer[ptr]; // Copy start marker
+	
+							if ((ptr+2) < len) /* +2 because if e.g. len = 7, and data[6] '*' then there's no real data here - we're just at start of data packet  */
+							{
+								realdata_start = ++ptr;
+	
+								if ((ptr = eb_multitrunk_find_marker(buffer, ptr, len)) >= 0) /* Close marker found */
+								{
+									realdata_len = ptr - realdata_start;								 
+	
+									eb_mt_copy_to_cipherpacket (cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, realdata_start, realdata_len);
+
+									eb_mt_debase64_decrypt_process(me, cipherpacket, cipherpacket_ptr, remotehost, remoteport);
+
+									/* Update my_ptr for while loop */
+	
+									my_ptr = ptr;
+
+									me->mt_state = MT_IDLE; // Look for another start
+	
+								}
+								else /* Start found, but not end marker */
+								{
+									int16_t		copylen;
+	
+									my_ptr = len; /* Causes exit from while() loop */
+
+									/* Copy balance of packet from and including realdata_start into ciphertext */
+	
+									copylen = len - realdata_start; 
+
+									eb_mt_copy_to_cipherpacket (cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, realdata_start, copylen);
+								}
+							}
+						}
+						else	my_ptr = len; /* Quite the while loop and do nothing */
+					} break;
+
+					case MT_START: /* Received start character, cipherpacket & cipherpacket_ptr will point to next empty slot in cipherpacket. We are now looking for data and a terminator */
+					{
+						/* We've had a start marker, there may or may not be data in cipherpacket, so look for end marker */
+	
+						if ((ptr = eb_multitrunk_find_marker(buffer, my_ptr, len)) >= 0) /* Marker found */
+						{
+							if (ptr > 0) /* Only copy if need be */
+								eb_mt_copy_to_cipherpacket (cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, 0, ptr); // ptr is pointer to the marker, so data ends at ptr-1, so ptr is equivalent to length
+	
+							eb_mt_debase64_decrypt_process(me, cipherpacket, cipherpacket_ptr, remotehost, remoteport);
+
+							my_ptr = ptr+1; /* Loop round */
+	
+							me->mt_state = MT_IDLE; /* Back to idle for next Econet chunk */
+						}
+						else
+						{
+							eb_mt_copy_to_cipherpacket (cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, 0, len); // Copy into cipherpacket
+							my_ptr = len; /* Quit loop */
+						}
+					} break;
+				}
+			}
+		}
+
+		if (p[1].revents & POLLIN)
+		{
+			/* Data from the underlying trunk */
+
+			/* Crypt it up, Base64 it, and spit it out on the socket, and if that fails, do a graceful exit */
+		}
+
+		pthread_mutex_unlock(&(me->mt_lock));
+
+	}
+
+	eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Disconnect or read error from %s(%s):%d", me->multitrunk_parent->multitrunk.port, remotehost, remoteip, remoteport);
+
+	/* Graceful close down and unpick links in/to underlying trunk */
+
+	if (me->trunk)
+	{
+		pthread_mutex_lock(&(me->trunk->trunk.mt_mutex));
+		me->trunk->trunk.mt_data = NULL; // Disconnect us
+		// Do we need to clear ->hostname, ->remote_host as well? Probably for dynamic trunks.
+		pthread_mutex_unlock(&(me->trunk->trunk.mt_mutex));
+	}
+	close(me->mt_pipe[0]);
+	close(me->mt_pipe[1]);
+	close(me->socket);
+
+	eb_free (__FILE__, __LINE__, "M-TRUNK", "Free multitrunk handler struct mt_client", me);
+
+	return NULL;
 }
 
 /* 
  * multitrunk client device.
  *
  * Attempts to connect (and, when disconnected, reconnect) trunks which have
- * a defined remote endpoint.
+ * a defined remote endpoint and which are clients rather than servers.
  *
  * Uses locking within the (ordinary) trunk device to update all the 
  * relevant fields so that the multitrunk server doesn't accept a 
@@ -184,6 +723,7 @@ void * eb_multitrunk_server_device (void * device)
 	{
 		int mt_socket;
 		int on = 1;
+		unsigned int timeout = me->multitrunk.timeout;
 
 		mt_socket = socket (mt_iterate->ai_family,
 					mt_iterate->ai_socktype,
@@ -194,6 +734,9 @@ void * eb_multitrunk_server_device (void * device)
 
 		if (setsockopt(mt_socket, SOL_SOCKET, SO_REUSEADDR, (char *) &on, sizeof(on)) < 0)
 			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to set SO_REUSEADDR", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port);
+
+		if (timeout > 0 && (setsockopt(mt_socket, SOL_SOCKET, TCP_USER_TIMEOUT, (char *) &(timeout), sizeof(timeout)) < 0))
+			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to set TCP_USER_TIMEOUT to %d", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port, me->multitrunk.timeout);
 
 		if (bind(mt_socket, mt_iterate->ai_addr, mt_iterate->ai_addrlen) != 0)
 			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to bind to %s (addr family %d)", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port, mt_iterate->ai_canonname, mt_iterate->ai_protocol);
@@ -222,14 +765,15 @@ void * eb_multitrunk_server_device (void * device)
 
 	memcpy (fds, fds_initial, sizeof(struct pollfd) * numfds);
 
-	while ((poll_return = poll(fds, numfds, 10000))) // 10s timeout
+	while (1) 
 	{
+
+		poll_return = poll(fds, numfds, 10000); // 10s per loop
 
 		if (poll_return > 0)
 		{
 			uint16_t	count;
 			int		newconn;
-			char		*text = "Test message";
 
 			/* Loop through the fds struct, accept what needs accepting, and spin off some server threads */
 
@@ -241,13 +785,30 @@ void * eb_multitrunk_server_device (void * device)
 
 					if (newconn >= 0)	
 					{
+						struct mt_client	*mtc_new;
+						pthread_t		mtc_thread;
+						int			mtc_err;
+
 						/* Spawn a thread */
+	
+						mtc_new = eb_malloc(__FILE__, __LINE__, "M-TRUNK", "Allocate new client structure", sizeof(struct mt_client));
 
-						/* For now... */
+						memset(mtc_new, 0, sizeof(struct mt_client));
 
-						send(newconn, text, strlen(text), 0);	
+						mtc_new->socket = newconn;
+						mtc_new->multitrunk_parent = me;
+						mtc_new->mt_type = MT_TYPE_TCP; /* They're all TCP for now. There may be a time when
+			     							   we adapt this to cope with UDP too. */
 
-						close(newconn);
+						/* Initialize lock on the data */
+
+						if (pthread_mutex_init(&(mtc_new->mt_lock), NULL) == -1)
+							eb_debug(1, 0, "M-TRUNK", "M-Trunk  %7d Unable to initialize MT lock for new connection", me->multitrunk.port);
+
+						if ((mtc_err = pthread_create(&mtc_thread, NULL, eb_multitrunk_handler_thread, mtc_new)))
+							eb_debug(1, 0, "M-TRUNK", "M-Trunk  %7d Unable to spawn new thread for inbound multitrunk connection", me->multitrunk.port);
+
+						pthread_detach(mtc_thread);
 					}
 				}
 			}

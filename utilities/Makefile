@@ -1,6 +1,6 @@
-GIT_VERSION := "$(shell git branch) $(shell git rev-parse --short HEAD)"
-#GIT_VERSION := "CR Build tree"
-CFLAGS=-g
+#GIT_VERSION := "$(shell git branch) $(shell git rev-parse --short HEAD)"
+GIT_VERSION := "CR Build tree"
+CFLAGS=-g -I/usr/include/glib-2.0 -I/usr/lib/arm-linux-gnueabihf/glib-2.0/include
 
 fsop_objects := $(patsubst %.c,%.o,$(wildcard fsop/*.c))
 
@@ -10,7 +10,7 @@ unix2beeb:	unix2beeb.c
 	cc $(CFLAGS) -Wall -Wno-pointer-sign unix2beeb.c -o unix2beeb
 
 econet-hpbridge:	Makefile econet-hpbridge.o econet-hpbridge-devinit.o econet-hpbridge-multitrunk.o fsv2.o $(fsop_objects)
-	if [ -f .noexplain ]; then cc $(CFLAGS) -o econet-hpbridge econet-hpbridge.o econet-hpbridge-devinit.o econet-hpbridge-multitrunk.o fsv2.o $(fsop_objects) -lpthread -lssl -lcrypto -ljson-c; else cc $(CFLAGS) -o econet-hpbridge econet-hpbridge.o econet-hpbridge-devinit.o econet-hpbridge-multitrunk.o fsv2.o $(fsop_objects) -lpthread -lssl -lcrypto -lexplain -ljson-c; fi
+	if [ -f .noexplain ]; then cc $(CFLAGS) -o econet-hpbridge econet-hpbridge.o econet-hpbridge-devinit.o econet-hpbridge-multitrunk.o fsv2.o $(fsop_objects) -lpthread -lssl -lcrypto -ljson-c -lglib-2.0; else cc $(CFLAGS) -o econet-hpbridge econet-hpbridge.o econet-hpbridge-devinit.o econet-hpbridge-multitrunk.o fsv2.o $(fsop_objects) -lpthread -lssl -lcrypto -lexplain -ljson-c -lglib-2.0; fi
 	-chgrp econet econet-hpbridge
 
 $(fsop_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h

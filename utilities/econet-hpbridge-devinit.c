@@ -115,9 +115,7 @@ uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uin
 	// Flag NOT part of multitrunk
 
 	p->trunk.mt_parent = NULL;
-
-	if (pthread_cond_init(&(p->trunk.mt_cond), NULL) == -1)
-		eb_debug (1, 0, "DEVINIT", "%-8s %5d   Cannot initialize multitrunk condition this device.", "Trunk", p->trunk.local_port);
+	p->trunk.mt_data = NULL;
 
 	if (pthread_mutex_init(&(p->trunk.mt_mutex), NULL) == -1)
 		eb_debug (1, 0, "DEVINIT", "%-8s %5d   Cannot initialize multitrunk mutex this device.", "Trunk", p->trunk.local_port);
