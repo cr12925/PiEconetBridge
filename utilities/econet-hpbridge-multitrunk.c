@@ -255,12 +255,15 @@ int16_t eb_multitrunk_find_marker (uint8_t *data, uint16_t start, uint16_t lengt
  * updates the pointers
  */
 
-uint8_t eb_mt_copy_to_cipherpacket (uint8_t *cipherpacket, uint32_t *cipherpacket_ptr, uint32_t *cipherpacket_size, uint8_t *buffer, uint16_t start, uint16_t length)
+uint8_t eb_mt_copy_to_cipherpacket (uint8_t **cipherpacket, uint32_t *cipherpacket_ptr, uint32_t *cipherpacket_size, uint8_t *buffer, uint16_t start, uint16_t length)
 {
 	uint32_t	realloc_size = *cipherpacket_size + length;
 	uint32_t	copylength = length;
 	uint32_t	copystart = start;
 	uint8_t		ret = 1; /* Success */
+
+	if (!*cipherpacket) /* Need space */
+		*cipherpacket_ptr = 0;
 
 	if ((*cipherpacket_ptr + length) > EB_MT_TCP_MAXSIZE)
 	{
@@ -274,9 +277,20 @@ uint8_t eb_mt_copy_to_cipherpacket (uint8_t *cipherpacket, uint32_t *cipherpacke
 		ret = 0; /* Overran */
 	}
 	
-	cipherpacket = realloc(cipherpacket, realloc_size);
+	if (!*cipherpacket)
+	{
+		*cipherpacket_ptr = 0;
+		realloc_size = length > EB_MT_TCP_MAXSIZE ? EB_MT_TCP_MAXSIZE : length;
+		//fprintf (stderr, "\n\n*** Cipherpacket null - allocating %d bytes***\n\n", realloc_size);
+		*cipherpacket = eb_malloc(__FILE__, __LINE__, "MTRUNK", "New cipherpacket", realloc_size);
+	}
+	else
+	{
+		//fprintf (stderr, "\n\n*** Cipherpacket not null - re-allocating to %d***\n\n", realloc_size);
+		*cipherpacket = realloc(cipherpacket, realloc_size);
+	}
 
-	memcpy ((cipherpacket + *cipherpacket_ptr), (buffer + copystart), copylength);
+	memcpy ((*cipherpacket + *cipherpacket_ptr), (buffer + copystart), copylength);
 
 	*cipherpacket_ptr += copylength;
 	*cipherpacket_size = realloc_size;
@@ -304,7 +318,7 @@ void eb_mt_process_admin_packet (struct mt_client *me, uint8_t *cipherpacket, ch
 }
 
 /* 
- * eb_mt_debase64_decrypt_process
+ * b_mt_debase64_decrypt_process
  *
  * Undo base64 encoding in place using glib-2.0 (and barf if fails)
  * Then decrypt - finding trunk if we don't know which one it is
@@ -317,12 +331,15 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 {
 
 	int32_t		decrypted_length;
+	uint32_t	size = length;
 
 	struct __eb_device	*search_trunk;
 
+	eb_debug (0, 3, "MTRUNK", "M-Trunk  %7d Processing incoming base64 data of length %d from %s:%d %c %c %c %c", me->multitrunk_parent->multitrunk.port, length, remotehost, remoteport, *(cipherpacket), *(cipherpacket+1), *(cipherpacket+2), *(cipherpacket+3));
+
 	/* Undo Base64 in place */
 
-	g_base64_decode_inplace (cipherpacket, length);
+	g_base64_decode_inplace ((gchar *) cipherpacket, (gsize *) &size);
 
 	/* Now decrypt */
 
@@ -339,10 +356,11 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 		{
 			uint8_t	buffer[ECONET_MAX_PACKET_SIZE+12];
 
-
 			/* Attempt a decrypt with its key */
 
-			if ((decrypted_length = eb_trunk_decrypt(me->multitrunk_parent->multitrunk.port, cipherpacket, length, search_trunk->trunk.sharedkey, buffer)) >= 0)
+			/* Probably want to curtail encrypted data which is too long... TODO! */
+
+			if ((decrypted_length = eb_trunk_decrypt(me->multitrunk_parent->multitrunk.port, cipherpacket, size, search_trunk->trunk.sharedkey, buffer)) >= 0)
 			{
 				pthread_mutex_lock(&(search_trunk->trunk.mt_mutex));
 
@@ -363,8 +381,6 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 				else /* Write to underlying trunk */
 					write (me->mt_pipe[1], buffer, decrypted_length);
 
-				eb_free (__FILE__, __LINE__, "MTRUNK", "Freeing used cipherpacket data area", cipherpacket);
-
 				me->marker = 0;
 
 				pthread_mutex_unlock(&(search_trunk->trunk.mt_mutex));
@@ -381,8 +397,7 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 
 	/* If we get here, we couldn't decrypt - fail */
 
-	eb_debug (0, 2, "MTRUNK", "M-Trunk %7s Undecryptable packet received from %s:%d length %d", remotehost, remoteport, length);
-	eb_free (__FILE__, __LINE__, "MTRUNK", "Freeing used cipherpacket data area", cipherpacket);
+	eb_debug (0, 2, "MTRUNK", "M-Trunk  %7d Undecryptable packet received from %s:%d length %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteport, length);
 	me->marker = 0;
 	return 0;
 
@@ -427,7 +442,7 @@ void * eb_multitrunk_handler_thread (void * input)
 	me->mt_local_version = 0; // Means not yet announced to other end
 	me->mt_remote_version = 1; // Unknown yet, assume 1 unless we hear otherwise.
 
-	eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d New thread spawned for connection", me->multitrunk_parent->multitrunk.port);
+	eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d New thread spawned for connection", me->multitrunk_parent->multitrunk.port);
 
 	if (getpeername(me->socket, (struct sockaddr *)&mt_sa, &mt_sa_len) == -1) 
 	{
@@ -493,14 +508,19 @@ void * eb_multitrunk_handler_thread (void * input)
 
 	p[0].fd = me->socket;
 	p[0].events = POLLIN;
+	p[0].revents = 0;
 
 	p[1].fd = me->mt_pipe[0]; // Read side from underlying trunk
 	p[1].events = POLLIN;
+	p[1].revents = 0;
 
-	while (poll(p, 1, 1000)) /* We break if we want to die */
+	while (1) /* We break if we want to die */
 	{
 
-		if (p[0].revents & POLLHUP)
+		while ((poll(p, 1, 1000) == 0) && me->death == 0)
+		{ }
+
+		if (p[0].revents & POLLHUP) /* This may not be working... */
 			break; // Graceful death
 			
 		pthread_mutex_lock(&(me->mt_lock));
@@ -519,8 +539,15 @@ void * eb_multitrunk_handler_thread (void * input)
 			int		len;
 			int16_t		realdata_start = -1, realdata_len = 0;
 
+			len = read (me->socket, buffer, EB_MT_TCP_CHUNKSIZE);
 
-			len = read (me->socket, buffer, len);
+			if (len == 0) /* Socket closure? */
+			{
+				pthread_mutex_unlock(&(me->mt_lock));
+				break;
+			}
+
+			eb_debug (0, 3, "MTRUNK", "M-Trunk  %7d Data received from %s:%d length %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteport, len);
 
 			if (len == -1) // Error - quit
 			{
@@ -548,7 +575,11 @@ void * eb_multitrunk_handler_thread (void * input)
 					case MT_IDLE: /* Waiting for start character, so look for it */
 					{
 						if (cipherpacket) /* Free memory if currently in use */
+						{
 							eb_free(__FILE__, __LINE__, "MTRUNK", "Free current inbound packet memory ready for new reception", cipherpacket);
+							cipherpacket = NULL;
+							cipherpacket_size = cipherpacket_ptr = 0;
+						}
 
 						if ((ptr = eb_multitrunk_find_marker(buffer, my_ptr, len)) >= 0) /* Marker found */ 
 						{ 
@@ -563,13 +594,19 @@ void * eb_multitrunk_handler_thread (void * input)
 								{
 									realdata_len = ptr - realdata_start;								 
 	
-									eb_mt_copy_to_cipherpacket (cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, realdata_start, realdata_len);
+									//fprintf (stderr, "\n\n*** Found end marker - realdata_len = %d, cipherpacket = %p ***\n\n", realdata_len, cipherpacket);
+
+									eb_mt_copy_to_cipherpacket (&cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, realdata_start, realdata_len);
+
+									//fprintf (stderr, "\n\n*** Cipherpacket = %p ***\n\n", cipherpacket);
 
 									eb_mt_debase64_decrypt_process(me, cipherpacket, cipherpacket_ptr, remotehost, remoteport);
 
+									cipherpacket = NULL;
+
 									/* Update my_ptr for while loop */
 	
-									my_ptr = ptr;
+									my_ptr = ptr+1;
 
 									me->mt_state = MT_IDLE; // Look for another start
 	
@@ -584,7 +621,7 @@ void * eb_multitrunk_handler_thread (void * input)
 	
 									copylen = len - realdata_start; 
 
-									eb_mt_copy_to_cipherpacket (cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, realdata_start, copylen);
+									eb_mt_copy_to_cipherpacket (&cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, realdata_start, copylen);
 								}
 							}
 						}
@@ -598,9 +635,10 @@ void * eb_multitrunk_handler_thread (void * input)
 						if ((ptr = eb_multitrunk_find_marker(buffer, my_ptr, len)) >= 0) /* Marker found */
 						{
 							if (ptr > 0) /* Only copy if need be */
-								eb_mt_copy_to_cipherpacket (cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, 0, ptr); // ptr is pointer to the marker, so data ends at ptr-1, so ptr is equivalent to length
+								eb_mt_copy_to_cipherpacket (&cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, 0, ptr); // ptr is pointer to the marker, so data ends at ptr-1, so ptr is equivalent to length
 	
 							eb_mt_debase64_decrypt_process(me, cipherpacket, cipherpacket_ptr, remotehost, remoteport);
+							cipherpacket = NULL;
 
 							my_ptr = ptr+1; /* Loop round */
 	
@@ -608,7 +646,7 @@ void * eb_multitrunk_handler_thread (void * input)
 						}
 						else
 						{
-							eb_mt_copy_to_cipherpacket (cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, 0, len); // Copy into cipherpacket
+							eb_mt_copy_to_cipherpacket (&cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, 0, len); // Copy into cipherpacket
 							my_ptr = len; /* Quit loop */
 						}
 					} break;
@@ -624,6 +662,15 @@ void * eb_multitrunk_handler_thread (void * input)
 		}
 
 		pthread_mutex_unlock(&(me->mt_lock));
+
+		
+		p[0].fd = me->socket;
+		p[0].events = POLLIN;
+		p[0].revents = 0;
+	
+		p[1].fd = me->mt_pipe[0]; // Read side from underlying trunk
+		p[1].events = POLLIN;
+		p[1].revents = 0;
 
 	}
 
@@ -726,7 +773,7 @@ void * eb_multitrunk_server_device (void * device)
 		unsigned int timeout = me->multitrunk.timeout;
 
 		mt_socket = socket (mt_iterate->ai_family,
-					mt_iterate->ai_socktype,
+					mt_iterate->ai_socktype | SOCK_NONBLOCK,
 					mt_iterate->ai_protocol);
 
 		if (mt_socket == -1)
@@ -743,6 +790,8 @@ void * eb_multitrunk_server_device (void * device)
 
 		if (listen(mt_socket, me->multitrunk.listenqueue ? me->multitrunk.listenqueue : 10) < 0)
 			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to set listen queue length", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port);
+
+		/* Set non-blocking - inherited by children we think */
 
 		if (numfds == 0) // fds_initial won't point to anything yet
 			fds_initial = eb_malloc(__FILE__, __LINE__, "M-TRUNK", "Allocate first pollfd structure for fs_initial", sizeof(struct pollfd));
