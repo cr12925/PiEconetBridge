@@ -185,8 +185,6 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 	uint8_t		temp_packet[ECONET_MAX_PACKET_SIZE + 12 + 2];
 	int		encrypted_length, tmp_len;
 	
-	fprintf (stderr, "\n\n*** Starting eb_trunk_encrypt(%p, %d, %d, %p, %p)\n", packet, length, port, d, encrypted);
-
 	RAND_bytes(iv, AES_BLOCK_SIZE);
 
 	cipherpacket[TRUNK_CIPHER_ALG] = 1;
@@ -196,20 +194,14 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 	temp_packet[0] = (length & 0xff00) >> 8;
 	temp_packet[1] = (length & 0x00ff);
 
-	fprintf (stderr, "\n\n*** Copying packet to temp_packet[2]\n");
-
 	memcpy (&(temp_packet[2]), packet, length);
-
-	fprintf (stderr, "\n\n*** Calling EVP_CIPHER_CTX_new()\n");
 
 	if (!(ctx_enc = EVP_CIPHER_CTX_new()))
 		eb_debug (1, 0, "(M)TRUNK", "(M)Trunk %7d Unable to set up encryption control", port);
 
-	fprintf (stderr, "\n\n*** Calling EVP_EncryptInit_ex()\n");
-
 	EVP_EncryptInit_ex(ctx_enc, EVP_aes_256_cbc(), NULL, d->trunk.sharedkey, iv);
 
-	fprintf (stderr, "\n\n*** Calling EVP_EncryptUpdate()\n");
+	fprintf (stderr, "\n\n*** Calling EVP_EncryptUpdate() - shared key %s\n", d->trunk.sharedkey);
 
 	if ((!EVP_EncryptUpdate(ctx_enc, (unsigned char *) &(cipherpacket[TRUNK_CIPHER_DATA]), &encrypted_length, temp_packet, length + 2))) // +2 for the length bytes inserted above
 	{
@@ -396,6 +388,18 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 				me->marker = 0;
 
 				pthread_mutex_unlock(&(search_trunk->trunk.mt_mutex));
+
+				if (me->mt_local_version == 0)
+				{ 
+					/* Send version */
+
+					uint8_t		data[3] = { EB_MT_CMD_VERS, 0, EB_MT_PROTOCOL_VERSION };
+
+					eb_mt_base64_encrypt_tx (data, 3, me->trunk);
+
+					me->mt_local_version = EB_MT_PROTOCOL_VERSION;
+
+				}
 
 				return 1;
 			}
@@ -642,15 +646,6 @@ void * eb_multitrunk_handler_thread (void * input)
 	p[1].events = POLLIN;
 	p[1].revents = 0;
 	*/
-
-	{ 
-		/* Send version */
-
-		uint8_t		data[3] = { EB_MT_CMD_VERS, 0, 1 };
-
-		eb_mt_base64_encrypt_tx (data, 3, me->trunk);
-
-	}
 
 
 	while (1) /* We break if we want to die */

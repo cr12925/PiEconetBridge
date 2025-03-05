@@ -344,6 +344,7 @@ struct mt_client {
 };
 
 #define EB_MT_WELCOME_MSG "Private System"
+#define EB_MT_PROTOCOL_VERSION	0x01
 #define EB_MT_TCP_CHUNKSIZE	4096 // Max number of bytes to allocate each time we need to expand our receive buffer because we've not had a packet termination (we might expand by less if we only read less)
 #define EB_MT_TCP_MAXSIZE	65536 // Maximum size of buffer before we give up and start again, so that people can't just send us rubbish and use all our RAM
 
@@ -854,7 +855,7 @@ extern uint8_t	dumpconfig;
 
 extern uint8_t	eb_device_init_wire (uint8_t, char *, struct __eb_fw_chain *, struct __eb_fw_chain *);
 extern uint8_t	eb_device_init_virtual (uint8_t);
-extern uint8_t	eb_device_init_singletrunk (char *, uint16_t, uint16_t, char *, struct __eb_fw_chain *, struct __eb_fw_chain *, char *, struct __eb_device *mt_parent);
+extern uint8_t	eb_device_init_singletrunk (char *, uint16_t, uint16_t, char *, struct __eb_fw_chain *, struct __eb_fw_chain *, char *, struct __eb_device *mt_parent, int);
 extern uint8_t	eb_device_init_multitrunk (char *, char *, uint16_t, int, uint16_t);
 extern uint8_t 	eb_device_init_dynamic (uint8_t, uint8_t, struct __eb_fw_chain *, struct __eb_fw_chain *);
 extern uint8_t	eb_device_init_fs (uint8_t, uint8_t, char *);
