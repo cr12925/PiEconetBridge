@@ -5488,6 +5488,28 @@ static void * eb_device_despatcher (void * device)
 				if (bind(d->trunk.socket, (struct sockaddr *) &service, sizeof(service)) != 0)
 					eb_debug (1, 0, "DESPATCH", "%-8s %7d Unable to bind trunk listener socket to %s:%d (%s)", "Trunk", d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0, strerror(errno));
 			}
+			else /* Multitrunk child */
+			{
+				int e;
+
+				if (d->trunk.mt_type == MT_CLIENT) /* Multitrunk child and it's a client */
+				{
+					eb_debug (0, 1, "DESPATCH", "M-Trunk  %7d Starting multitrunk client handler to %s:%d", d->trunk.mt_parent->multitrunk.port, d->trunk.hostname, d->trunk.remote_port);
+
+					d->trunk.is_dynamic = 0; // All MT Clients have known remote endpoints
+
+					/* Start a client device */
+			
+					e = pthread_create(&(d->mt_client_thread), NULL, eb_multitrunk_client_device, d);
+			
+					if (e)
+						eb_debug (1, 0, "DESPATCH", "M-Trunk  %7d Thread creation for multitrunk client handler for %s:%d failed", d->trunk.mt_parent->multitrunk.port, d->trunk.hostname, d->trunk.remote_port);
+
+					pthread_detach(d->mt_client_thread);
+
+					eb_thread_started();
+				}
+			}
 
 			// Set up keepalive thread
 
@@ -9055,13 +9077,14 @@ int eb_parse_json_config(struct json_object *jc)
 			while (tcount < tlength)
 			{
 				uint16_t	local_port, remote_port = 0;
-				char		* remote_host, *key, *name, *mt_parent;
+				char		* remote_host, *key, *name;
 				uint8_t		nat_local, nat_distant, found = 0;
 				uint16_t	nlength, ncount = 0;
 				struct __eb_device	*trunk;
-				struct json_object	*jnat_local, *jnat_remote, *jfw, *jname, *jmt_parent;
+				struct json_object	*jnat_local, *jnat_remote, *jfw, *jname, *jmt_parent, *jmt_type;
 				struct __eb_fw_chain	*fw_in = NULL, *fw_out = NULL;
 				struct __eb_device 	*mtp_device;
+				int		mt_type = 2; /* Server by default */
 
 				remote_host = NULL; // Assume dynamic unless we have a host
 
@@ -9074,6 +9097,7 @@ int eb_parse_json_config(struct json_object *jc)
 				json_object_object_get_ex(jtrunk, "key", &jkey);
 				json_object_object_get_ex(jtrunk, "name", &jname);
 				json_object_object_get_ex(jtrunk, "multitrunk-parent", &jmt_parent);
+				json_object_object_get_ex(jtrunk, "multitrunk-client", &jmt_type); // Boolean - true = client
 	
 				if (!jkey && (!jremotehost || !jremoteport)) 
 				{
@@ -9117,12 +9141,12 @@ int eb_parse_json_config(struct json_object *jc)
 
 				if (jmt_parent)
 				{
-
-					mt_parent = eb_malloc (__FILE__, __LINE__, "JSON", "New trunk name", json_object_get_string_len(jmt_parent) + 1);
-					strcpy (mt_parent, json_object_get_string(jmt_parent));
-					mtp_device = eb_mt_find(mt_parent);
+					mtp_device = eb_mt_find((char *) json_object_get_string(jmt_parent));
 					if (!mtp_device)
-						eb_debug (1, 0, "JSON", "Multitrunk parent name %s unknown while creating trunk index %d", mt_parent, tcount);
+						eb_debug (1, 0, "JSON", "Multitrunk parent name %s unknown while creating trunk index %d", json_object_get_string(jmt_parent), tcount);
+
+					if (json_object_get_boolean(jmt_type)) /* Is client */
+						mt_type = 1;
 				}
 				else	mtp_device = NULL;
 
@@ -9132,7 +9156,7 @@ int eb_parse_json_config(struct json_object *jc)
 				if (json_object_object_get_ex(jtrunk, "fw-out", &jfw))
 					fw_out = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
 
-				eb_device_init_singletrunk (remote_host, local_port, remote_port, key, fw_in, fw_out, name, mtp_device);
+				eb_device_init_singletrunk (remote_host, local_port, remote_port, key, fw_in, fw_out, name, mtp_device, mt_type);
 
 				if (key)
 					eb_free (__FILE__, __LINE__, "JSON", "New trunk key", key); /* Free - the devinit routine copies it to a new malloced area */
@@ -12056,19 +12080,6 @@ int main (int argc, char **argv)
 		pthread_detach(p->me);
 
 		eb_thread_started();
-
-		if (p->trunk.mt_parent && p->trunk.mt_type == MT_CLIENT) /* Multitrunk child and it's a client */
-		{
-			/* Start a client device */
-	
-			e = pthread_create(&(p->mt_client_thread), NULL, eb_multitrunk_client_device, p);
-	
-			if (e)
-				eb_debug (1, 0, "MAIN", "Thread creation for multitrunk client handler for %s failed", eb_type_str(p->type), p->multitrunk.port, p->multitrunk.mt_name);
-			pthread_detach(p->mt_client_thread);
-
-			eb_thread_started();
-		}
 
 		p = p->next;
 	}
