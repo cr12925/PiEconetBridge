@@ -176,7 +176,7 @@ int32_t	eb_trunk_decrypt(uint16_t port, uint8_t *cipherpacket, uint32_t length, 
  *
  */
 
-int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struct __eb_device *d, uint8_t *encrypted)
+int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struct __eb_device *d, uint8_t **encrypted)
 {
 
 	EVP_CIPHER_CTX	*ctx_enc;
@@ -221,8 +221,8 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 
 	if (encrypted_length > 0)
 	{
-		encrypted = eb_malloc(__FILE__, __LINE__, "(M)TRUNK", "New encrypted packet", encrypted_length);
-		memcpy (encrypted, &cipherpacket, encrypted_length);
+		*encrypted = eb_malloc(__FILE__, __LINE__, "(M)TRUNK", "New encrypted packet", encrypted_length);
+		memcpy (*encrypted, &cipherpacket, encrypted_length);
 		return encrypted_length;
 	}
 
@@ -352,7 +352,7 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 
 	while (search_trunk)
 	{
-		if (search_trunk->trunk.mt_parent && search_trunk->trunk.mt_parent->multitrunk.mt_type == MT_SERVER) /* I.e. the parent is a server, so we can accept connections */
+		if (search_trunk->trunk.mt_parent && search_trunk->trunk.mt_type == MT_SERVER) /* I.e. the trunk is a multitrunk child and is a server instance, so we can accept connections and this might therefore be one whose key we can check decryption on */
 		{
 			uint8_t	buffer[ECONET_MAX_PACKET_SIZE+12];
 
@@ -379,7 +379,7 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 				if (me->marker == '&')
 					eb_mt_process_admin_packet(me, buffer, remotehost, remoteport);
 				else /* Write to underlying trunk */
-					write (me->mt_pipe[1], buffer, decrypted_length);
+					write (me->trunk_socket, buffer, decrypted_length);
 
 				me->marker = 0;
 
@@ -403,12 +403,114 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 
 }
 
+/*
+ * eb_mt_base64_encrypt_tx
+ *
+ * Take cleartext packet data, encrypt it, base64 it, and
+ * transmit it with multitrunk delimeters on the socket associated
+ * with the multitrunk of which it's a child.
+ *
+ */
+
+int eb_mt_base64_encrypt_tx(uint8_t *data, uint16_t datalength, struct __eb_device *mt)
+{
+
+	gchar 		* base64;
+	uint8_t		* base64_terminated;
+	uint8_t		* encrypted;
+	uint16_t	encrypted_length;
+
+	if ((encrypted_length = eb_trunk_encrypt(data, datalength, mt->trunk.local_port, mt, &encrypted)) >= 0)
+	{
+		base64 = g_base64_encode((const guchar *) encrypted, encrypted_length);
+
+		if (base64)
+		{
+			int send_result;
+			uint16_t	terminated_length;
+
+			terminated_length = strlen(base64)+3;
+
+			base64_terminated = eb_malloc(__FILE__, __LINE__, "M-Trunk", "New base64 terminated packet", terminated_length);
+			*base64_terminated = '*';
+			memcpy ((base64_terminated+1), base64, strlen(base64));
+			*(base64_terminated + terminated_length - 1) = '*';
+			*(base64_terminated + terminated_length) = '\0';
+		
+			g_free(base64); // No need for this any more	
+
+			/* The mt_mutex is already locked before this function gets called, and we 
+			 * have already checked mt_data is valid
+			 */
+
+			send_result = send(mt->trunk.mt_data->socket, base64_terminated, terminated_length, MSG_DONTWAIT);
+			if (send_result != terminated_length)
+			{
+				if (send_result == -1) /* Error */
+					eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Unable to transmit multitrunk data - %s", mt->trunk.local_port, strerror(errno));
+				else
+					eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Unable to transmit multitrunk data - tx was %d bytes not %d", mt->trunk.local_port, send_result, terminated_length);
+			}
+			return send_result;
+
+		}
+		else /* Failure? */
+		{
+			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Unable to transmit multitrunk data - Base64 encode failed", mt->trunk.local_port);
+			return -1;
+		}
+
+		eb_free(__FILE__, __LINE__, "M-Trunk", "Free cipher data on MT transmission", encrypted);
+
+	}
+	else /* Encryption failure */
+	{
+		eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Unable to transmit multitrunk data - Encryption failed", mt->trunk.local_port);
+		return -1;
+	}
+
+	/* Should never get here */
+
+	return -1;
+}
+
+/* 
+ * eb_mt_set_endpoint_name
+ *
+ * Set the endpoint name and port on a multitrunk child trunk device.
+ *
+ */
+
+void eb_mt_set_endpoint (struct __eb_device *mtc, char *remotehost, uint16_t remoteport)
+{
+
+	mtc->trunk.hostname = eb_malloc(__FILE__, __LINE__, "M-TRUNK", "Allocate new remote hostname string", strlen(remotehost)+1);
+	strcpy(mtc->trunk.hostname, remotehost);
+	mtc->trunk.remote_port = remoteport;
+}
+
+/*
+ * eb_mt_unset_endpoint_name
+ *
+ * Unset the endpoint name and port on a multitrunk child trunk device. Really only for server type devices where
+ * we may not have a connection to the other end we can initiate.
+ */
+
+void eb_mt_unset_endpoint (struct __eb_device *mtc)
+{
+	if (mtc->trunk.hostname)
+		eb_free(__FILE__, __LINE__, "M-TRUNK", "Free trunk hostname string", mtc->trunk.hostname);
+	mtc->trunk.hostname = NULL;
+	mtc->trunk.remote_port = 0;
+}
+
 /* Bidirectional traffic from an underlying trunk device to the multitrunk socket (whether acccept()ed inbound, or connect()ed outbound */
 
 void * eb_multitrunk_handler_thread (void * input)
 {
 	struct mt_client	* me;
-	struct pollfd		p[2];
+	//struct pollfd		p[2];
+	struct pollfd		p;
 	uint8_t			*cipherpacket = NULL;
 	uint32_t		cipherpacket_ptr = 0, cipherpacket_size = 0; // _ptr is pointer into cipherpacket, _size is current allocated size of cipherpacket, which will grow in EB_MT_TCP_CHUNKSIZE chunks up to EB_MT_TCPMAXSIZE
 	union	{
@@ -480,8 +582,11 @@ void * eb_multitrunk_handler_thread (void * input)
 
 	eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d New connection with remote at %s(%s):%d", me->multitrunk_parent->multitrunk.port, remotehost, remoteip, remoteport);
 
-	if (socketpair(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK, 0, me->mt_pipe) == -1)
-		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to create socketpair() to underlying trunk", me->multitrunk_parent->multitrunk.port);
+	if (me->trunk->trunk.mt_type == MT_SERVER) /* Update endpoint address in trunk */
+		eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
+
+	if ((me->trunk_socket = socket(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK, 0)) == -1)
+		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to create socket to underlying trunk", me->multitrunk_parent->multitrunk.port);
 
 	/* 
 	 * Protocol v1:
@@ -504,8 +609,19 @@ void * eb_multitrunk_handler_thread (void * input)
 
 	write (me->socket, "$$$" EB_MT_WELCOME_MSG "$$$\r\n", strlen(EB_MT_WELCOME_MSG) + 8);
 
+	/* Wake up the device listener */
+
+	pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
+
 	/* Wait for data */
 
+	/* Change to comms arrangements - we only listen on our TCP socket; underlying trunk writes directly out */
+
+	p.fd = me->socket;
+	p.events = POLLIN;
+	p.revents = 0;
+
+	/*
 	p[0].fd = me->socket;
 	p[0].events = POLLIN;
 	p[0].revents = 0;
@@ -513,14 +629,15 @@ void * eb_multitrunk_handler_thread (void * input)
 	p[1].fd = me->mt_pipe[0]; // Read side from underlying trunk
 	p[1].events = POLLIN;
 	p[1].revents = 0;
+	*/
 
 	while (1) /* We break if we want to die */
 	{
 
-		while ((poll(p, 1, 1000) == 0) && me->death == 0)
+		while ((poll(&p, 1, 1000) == 0) && me->death == 0)
 		{ }
 
-		if (p[0].revents & POLLHUP) /* This may not be working... */
+		if (p.revents & POLLHUP) /* This may not be working... */
 			break; // Graceful death
 			
 		pthread_mutex_lock(&(me->mt_lock));
@@ -531,7 +648,9 @@ void * eb_multitrunk_handler_thread (void * input)
 			break;
 		}
 
-		if (p[0].revents & POLLIN)
+		pthread_mutex_unlock(&(me->mt_lock));
+
+		if (p.revents & POLLIN)
 		{
 			/* Data on our TCP socket */
 			uint8_t		buffer[EB_MT_TCP_CHUNKSIZE];
@@ -543,7 +662,8 @@ void * eb_multitrunk_handler_thread (void * input)
 
 			if (len == 0) /* Socket closure? */
 			{
-				pthread_mutex_unlock(&(me->mt_lock));
+				// Not clear why we needed to be locked at this stage
+				// pthread_mutex_unlock(&(me->mt_lock));
 				break;
 			}
 
@@ -551,7 +671,8 @@ void * eb_multitrunk_handler_thread (void * input)
 
 			if (len == -1) // Error - quit
 			{
-				pthread_mutex_unlock(&(me->mt_lock));
+				// Not clear why we needed to be locked at this stage
+				// pthread_mutex_unlock(&(me->mt_lock));
 				break;
 			}
 
@@ -654,16 +775,21 @@ void * eb_multitrunk_handler_thread (void * input)
 			}
 		}
 
+		/* Trunk will write directly to our socket  
 		if (p[1].revents & POLLIN)
 		{
-			/* Data from the underlying trunk */
-
-			/* Crypt it up, Base64 it, and spit it out on the socket, and if that fails, do a graceful exit */
 		}
+		*/
 
-		pthread_mutex_unlock(&(me->mt_lock));
+		// Not clear why we needed this lock
+		// pthread_mutex_unlock(&(me->mt_lock));
 
 		
+		p.fd = me->socket;
+		p.events = POLLIN;
+		p.revents = 0;
+
+		/*
 		p[0].fd = me->socket;
 		p[0].events = POLLIN;
 		p[0].revents = 0;
@@ -671,6 +797,7 @@ void * eb_multitrunk_handler_thread (void * input)
 		p[1].fd = me->mt_pipe[0]; // Read side from underlying trunk
 		p[1].events = POLLIN;
 		p[1].revents = 0;
+		*/
 
 	}
 
@@ -682,11 +809,14 @@ void * eb_multitrunk_handler_thread (void * input)
 	{
 		pthread_mutex_lock(&(me->trunk->trunk.mt_mutex));
 		me->trunk->trunk.mt_data = NULL; // Disconnect us
+
+		if (me->trunk->trunk.mt_type == MT_SERVER)
+			eb_mt_unset_endpoint(me->trunk);
+
 		// Do we need to clear ->hostname, ->remote_host as well? Probably for dynamic trunks.
 		pthread_mutex_unlock(&(me->trunk->trunk.mt_mutex));
 	}
-	close(me->mt_pipe[0]);
-	close(me->mt_pipe[1]);
+	close(me->trunk_socket);
 	close(me->socket);
 
 	eb_free (__FILE__, __LINE__, "M-TRUNK", "Free multitrunk handler struct mt_client", me);
@@ -696,6 +826,9 @@ void * eb_multitrunk_handler_thread (void * input)
 
 /* 
  * multitrunk client device.
+ *
+ * One thread of this type is started for each trunk which is
+ * both a multitrunk child AND which is a client-type device
  *
  * Attempts to connect (and, when disconnected, reconnect) trunks which have
  * a defined remote endpoint and which are clients rather than servers.
@@ -707,7 +840,134 @@ void * eb_multitrunk_handler_thread (void * input)
 
 void * eb_multitrunk_client_device (void * device)
 {
-	struct __eb_device	*me; /* A multi-trunk device */
+	struct __eb_device	*me; /* A trunk device */
+	struct addrinfo		hints;
+	struct addrinfo		*mt_addresses, *mt_iterate;
+	char			portstring[10];
+	int			ga_return;
+
+	/* So a multitrunk child client device will have 
+	 * hostname & remoteport set which defines where to
+	 * connect. So lets resolve that and try connecting.
+	 */
+
+	me = (struct __eb_device *) device;
+
+	if (!me->trunk.hostname)
+		eb_debug (1, 0, "M-TRUNK", "Attempt to start a multitrunk client with no hostname defined!");
+
+	if (!me->trunk.remote_port)
+		eb_debug (1, 0, "M-TRUNK", "Attempt to start a multitrunk client with no remote port defined!");
+
+	sprintf (portstring, "%5d", me->multitrunk.port);
+
+	memset (&hints, 0, sizeof(hints));
+	hints.ai_family = me->multitrunk.ai_family;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = 0;
+	hints.ai_protocol = 6;
+	hints.ai_canonname = NULL;
+	hints.ai_addr = NULL;
+	hints.ai_next = NULL;
+
+	eb_thread_ready();
+
+	ga_return = EAI_AGAIN;
+
+	while (ga_return == EAI_AGAIN)
+	{
+		ga_return = getaddrinfo(me->trunk.hostname, portstring, &hints, &mt_addresses);
+		if (ga_return == EAI_AGAIN)
+		{
+			eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Server on %s:%d Temporary failure in name resolution, trying again in 10s", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+			sleep(10);
+		}
+	}
+
+	if (ga_return != 0)
+		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to resolve listen address: %s", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port, gai_strerror(ga_return));
+
+	if (mt_addresses)
+		eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Server on %s:%d successfully resolved hostname", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+	else
+	{
+		eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Server on %s:%d getaddrinfo() returned no addresses - giving up", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+		return NULL;
+	}
+
+	while (1) /* Connect and keep trying */
+	{
+		int mt_socket;
+		unsigned int timeout = me->trunk.mt_parent->multitrunk.timeout;
+		uint8_t connected;
+
+		mt_socket = -1;
+		connected = 0;
+
+		for (mt_iterate = mt_addresses; mt_iterate != NULL; mt_iterate = mt_iterate->ai_next)
+		{
+
+			mt_socket = socket (mt_iterate->ai_family,
+						mt_iterate->ai_socktype | SOCK_NONBLOCK,
+						mt_iterate->ai_protocol);
+	
+			if (mt_socket == -1)
+				eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Client unable to create a required socket for connection to %s:%d", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+	
+			/* - Not needed on clients?
+			if (setsockopt(mt_socket, SOL_SOCKET, SO_REUSEADDR, (char *) &on, sizeof(on)) < 0)
+				eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d unable to set SO_REUSEADDR", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+				*/
+	
+			if (timeout > 0 && (setsockopt(mt_socket, SOL_SOCKET, TCP_USER_TIMEOUT, (char *) &(timeout), sizeof(timeout)) < 0))
+				eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d unable to set TCP_USER_TIMEOUT to %d", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port, me->trunk.mt_parent->multitrunk.timeout);
+
+			if (connect(mt_socket, mt_iterate->ai_addr, mt_iterate->ai_addrlen) != -1)
+			{
+				connected = 1;
+				break; /* Connected. If not, try the next address */
+			}
+		}
+
+		if (connected)
+		{
+			/* Start handler */
+			struct mt_client	*mtc_new;
+			pthread_t		mtc_thread;
+			int			mtc_err;
+			void *			mtc_ret;
+
+			/* Spawn a thread */
+
+			mtc_new = eb_malloc(__FILE__, __LINE__, "M-TRUNK", "Allocate new client structure", sizeof(struct mt_client));
+
+			memset(mtc_new, 0, sizeof(struct mt_client));
+
+			mtc_new->socket = mt_socket;
+			mtc_new->multitrunk_parent = me->trunk.mt_parent;
+			mtc_new->mt_type = MT_TYPE_TCP; /* They're all TCP for now. There may be a time when
+     							   we adapt this to cope with UDP too. */
+
+			/* Initialize lock on the data */
+
+			if (pthread_mutex_init(&(mtc_new->mt_lock), NULL) == -1)
+				eb_debug(1, 0, "M-TRUNK", "M-Trunk  %7d Unable to initialize MT lock for new outbound connection to %s:%d", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+
+			if ((mtc_err = pthread_create(&mtc_thread, NULL, eb_multitrunk_handler_thread, mtc_new)))
+				eb_debug(1, 0, "M-TRUNK", "M-Trunk  %7d Unable to spawn new thread for outbound multitrunk connection to %s:%d", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+
+			/* Wait for the handler to finish */
+
+			pthread_join(mtc_thread, &mtc_ret);
+
+			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d closed. Re-opening.", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+		}
+		else
+		{
+			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d unable to connect to any resolved address. Re-trying.", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+			sleep (10); /* Wait ten seconds and try again from the start */
+		}
+	}
 
 	return NULL;
 }
@@ -810,6 +1070,8 @@ void * eb_multitrunk_server_device (void * device)
 
 	eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Server on %s:%d successfully opened %d listener(s)", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port, numfds);
 
+	freeaddrinfo(mt_addresses);
+
 	fds = eb_malloc (__FILE__, __LINE__, "M-TRUNK", "Allocate memory for list of fds to accept on", sizeof(struct pollfd) * numfds);
 
 	memcpy (fds, fds_initial, sizeof(struct pollfd) * numfds);
@@ -871,3 +1133,29 @@ void * eb_multitrunk_server_device (void * device)
 
 	return NULL;
 }
+
+/*
+ * eb_mt_find
+ *
+ * Find a multitrunk by name
+ */
+
+struct __eb_device * eb_mt_find (char * name)
+{
+
+	struct __eb_device *res;
+
+	res = multitrunks;
+
+	while (res)
+	{
+		if (!strcasecmp(res->multitrunk.mt_name, name))
+			return res;
+
+		else res = res->next;
+	}
+
+	return NULL; /* Not found */
+
+}
+

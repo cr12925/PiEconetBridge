@@ -3304,6 +3304,19 @@ static void * eb_device_listener (void * device)
 	if (d->type == EB_DEF_WIRE && !strcasecmp(d->wire.device, "/dev/null")) // Don't even bother
 		return NULL;
 
+	if (d->type == EB_DEF_TRUNK && d->trunk.mt_parent) // Multitrunk child - update the socket we're polling
+	{
+		pthread_mutex_lock(&(d->trunk.mt_mutex));
+		if (!d->trunk.mt_data) // Not connected
+		{
+			pthread_cond_wait(&(d->trunk.mt_cond), &(d->trunk.mt_mutex));
+			/* Connected by now */
+			eb_debug (0, 2, "DESPATCH", "%-8s %7d Trunk now connected - device listener woken", eb_type_str(d->type), d->trunk.local_port);
+		}
+		p->fd = d->trunk.mt_data->trunk_socket;
+		pthread_mutex_unlock(&(d->trunk.mt_mutex));
+	}
+
 	while (poll(p, 1, -1))
 	{
 		if ((p->revents & POLLHUP) && d->type == EB_DEF_PIPE && (d->pipe.skt_write != -1)) // Presumably PIPE - close writer socket
@@ -5432,46 +5445,49 @@ static void * eb_device_despatcher (void * device)
 			//if (!(d->trunk.sharedkey))
 				//eb_debug (1, 0, "DESPATCH", "%-8s         Unable to start trunk for local port %d - No shared key defined!", "Trunk", d->trunk.local_port);
 
-			if (!(d->trunk.is_dynamic)) // IP trunk and is defined
+			if (!d->trunk.mt_parent) // Not a multitrunk connected trunk
 			{
-	
-				if (!(d->trunk.hostname))
-					eb_debug (1, 0, "DESPATCH", "%-8s %7d Unable to open trunk listener socket - Static remote host but no hostname defined!", "Trunk", d->trunk.local_port);
-
-				snprintf(portname, 6, "%d", d->trunk.remote_port);
-
-				memset (&hints, 0, sizeof(struct addrinfo));
-
-				hints.ai_family = AF_INET;
-				hints.ai_socktype = SOCK_DGRAM;
-				hints.ai_flags = 0;
-				hints.ai_protocol = 0;
-
-				if ((s = getaddrinfo(d->trunk.hostname, portname, &hints, &(d->trunk.remote_host))) != 0)
+				if (!(d->trunk.is_dynamic)) // IP trunk and is defined
 				{
-					// 20240607 eb_debug (1, 0, "DESPATCH", "%-8s         Unable to resolve hostname %s: %s", "", d->trunk.hostname, gai_strerror(s));
-					eb_debug (0, 1, "DESPATCH", "TRUNK    %7d Unable to resolve hostname %s: %s - leaving inactive", d->trunk.local_port, d->trunk.hostname, gai_strerror(s));
-					d->trunk.remote_host = NULL; // Flag inactive
+		
+					if (!(d->trunk.hostname))
+						eb_debug (1, 0, "DESPATCH", "%-8s %7d Unable to open trunk listener socket - Static remote host but no hostname defined!", "Trunk", d->trunk.local_port);
+	
+					snprintf(portname, 6, "%d", d->trunk.remote_port);
+	
+					memset (&hints, 0, sizeof(struct addrinfo));
+	
+					hints.ai_family = AF_INET;
+					hints.ai_socktype = SOCK_DGRAM;
+					hints.ai_flags = 0;
+					hints.ai_protocol = 0;
+	
+					if ((s = getaddrinfo(d->trunk.hostname, portname, &hints, &(d->trunk.remote_host))) != 0)
+					{
+						// 20240607 eb_debug (1, 0, "DESPATCH", "%-8s         Unable to resolve hostname %s: %s", "", d->trunk.hostname, gai_strerror(s));
+						eb_debug (0, 1, "DESPATCH", "TRUNK    %7d Unable to resolve hostname %s: %s - leaving inactive", d->trunk.local_port, d->trunk.hostname, gai_strerror(s));
+						d->trunk.remote_host = NULL; // Flag inactive
+					}
+	
 				}
-
+				else if (d->trunk.is_dynamic) // Dynamic
+					d->trunk.remote_host = NULL; // Flags as unresolved dynamic
+	
+				// Set up local listener
+	
+				d->trunk.socket = socket(AF_INET, SOCK_DGRAM, 0);
+	
+				if (d->trunk.socket == -1)
+					eb_debug (1, 0, "DESPATCH", "%-8s %7d Unable to open trunk listener socket to %s:%d", "Trunk", d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0);
+	
+	
+				service.sin_family = AF_INET;
+				service.sin_addr.s_addr = htonl(bindhost); // INADDR_ANY;
+				service.sin_port = htons(d->trunk.local_port);
+	
+				if (bind(d->trunk.socket, (struct sockaddr *) &service, sizeof(service)) != 0)
+					eb_debug (1, 0, "DESPATCH", "%-8s %7d Unable to bind trunk listener socket to %s:%d (%s)", "Trunk", d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0, strerror(errno));
 			}
-			else if (d->trunk.is_dynamic) // Dynamic
-				d->trunk.remote_host = NULL; // Flags as unresolved dynamic
-
-			// Set up local listener
-
-			d->trunk.socket = socket(AF_INET, SOCK_DGRAM, 0);
-
-			if (d->trunk.socket == -1)
-				eb_debug (1, 0, "DESPATCH", "%-8s %7d Unable to open trunk listener socket to %s:%d", "Trunk", d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0);
-
-
-			service.sin_family = AF_INET;
-			service.sin_addr.s_addr = htonl(bindhost); // INADDR_ANY;
-			service.sin_port = htons(d->trunk.local_port);
-
-			if (bind(d->trunk.socket, (struct sockaddr *) &service, sizeof(service)) != 0)
-				eb_debug (1, 0, "DESPATCH", "%-8s %7d Unable to bind trunk listener socket to %s:%d (%s)", "Trunk", d->trunk.local_port, d->trunk.hostname ? d->trunk.hostname : "(Dynamic)", d->trunk.hostname ? d->trunk.remote_port : 0, strerror(errno));
 
 			// Set up keepalive thread
 
@@ -5677,6 +5693,23 @@ static void * eb_device_despatcher (void * device)
 
 		memcpy (&p, &(d->p_reset), sizeof(p));
 
+		/* Update that struct if this is a multitrunk child */
+
+		if (d->type == EB_DEF_TRUNK && d->trunk.mt_parent)
+		{
+			pthread_mutex_lock(&(d->trunk.mt_mutex));
+			if (!d->trunk.mt_data) /* NOT Connected */
+			{
+				pthread_cond_wait(&(d->trunk.mt_cond), &(d->trunk.mt_mutex));
+				eb_debug (0, 2, "DESPATCH", "%-8s %7d Trunk now connected - despatcher woken", eb_type_str(d->type), d->trunk.local_port);
+			}
+			
+			/* Connected now */
+
+			p.fd = d->trunk.mt_data->trunk_socket;
+			pthread_mutex_unlock(&(d->trunk.mt_mutex));
+		}
+
 		// To receive traffic after a poll(), must be not local, or if it is local then it's an IP gateway. Otherwise there should be no traffic arriving at all from a local, because the FS and PS put their stuff straight into the queues! // NB the while below is guarded by the if on this line, but not indented
 
 		if (!(d->type == EB_DEF_WIRE && wire_null) && (d->type != EB_DEF_POOL) && ((d->type != EB_DEF_LOCAL) || (d->local.ip.tunif[0] != '\0'))) while (poll(&p, 1, 0) && (p.revents & POLLIN)) // A 0-time poll() apparently works
@@ -5719,7 +5752,14 @@ static void * eb_device_despatcher (void * device)
 
 					addr_len = sizeof(src_addr);
 
-					length = recvfrom (l_socket, &(d->trunk.cipherpacket), TRUNK_CIPHER_TOTAL, 0, (struct sockaddr *) &src_addr, &addr_len);
+					pthread_mutex_lock(&(d->trunk.mt_mutex));
+
+					if (d->trunk.mt_parent && d->trunk.mt_data) // Part of multitrunk and the connection is live
+						length = recvfrom (d->trunk.mt_data->trunk_socket, &(d->trunk.cipherpacket), TRUNK_CIPHER_TOTAL, 0, (struct sockaddr *) &src_addr, &addr_len);
+					else
+						length = recvfrom (l_socket, &(d->trunk.cipherpacket), TRUNK_CIPHER_TOTAL, 0, (struct sockaddr *) &src_addr, &addr_len);
+
+					pthread_mutex_unlock(&(d->trunk.mt_mutex));
 
 					if (was_dead)
 					{
@@ -5729,9 +5769,9 @@ static void * eb_device_despatcher (void * device)
 							eb_debug (0, 2, "DESPATCH", "%-8s %7d Packet received for trunk which was dead (previous packet was %d ago)", eb_type_str(d->type), d->trunk.local_port, dead_diff);
 					}
 
-					if (d->trunk.sharedkey && (length < (TRUNK_CIPHER_DATA + AES_BLOCK_SIZE)) )
+					if (d->trunk.sharedkey && (length < (TRUNK_CIPHER_DATA + AES_BLOCK_SIZE)) && !d->trunk.mt_parent)
 						eb_debug (0, 2, "DESPATCH", "%-8s %3d     Encrypted runt packet received - discarded", eb_type_str(d->type), d->net);
-					else if (d->trunk.sharedkey) // Encrypted trunk
+					else if (d->trunk.sharedkey && !d->trunk.mt_parent) // Encrypted trunk and not part of multitrunk (which delivers cleartext traffic to us)
 					{
 						if (!(d->trunk.ctx_dec = EVP_CIPHER_CTX_new()))
 							eb_debug (1, 0, "DESPATCH", "%-8s %7d Unable to set up decryption control", "Trunk", d->trunk.local_port);
@@ -5842,7 +5882,7 @@ static void * eb_device_despatcher (void * device)
 
 						EVP_CIPHER_CTX_free(d->trunk.ctx_dec);
 					}
-					else // Plaintext trunk
+					else // Plaintext trunk or part of multitrunk
 					{
 
 						eb_debug (0, 3, "DESPATCH", "%-8s %7d Plaintext trunk packet received - specified length %04x, marking receipt at %d seconds", eb_type_str(d->type), d->trunk.local_port, length, time(NULL));
@@ -6623,7 +6663,7 @@ static void * eb_device_despatcher (void * device)
 							ap->p.dstnet = (d->trunk.xlate_out[ap->p.dstnet] ? d->trunk.xlate_out[ap->p.dstnet] : ap->p.dstnet);
 
 // Encrypted version starts here
-							if (d->trunk.sharedkey) // Encryption on
+							if (d->trunk.sharedkey && !d->trunk.mt_parent) // Encryption on and not multitrunk child
 							{
 								RAND_bytes(d->trunk.iv, AES_BLOCK_SIZE);
 
@@ -6657,14 +6697,36 @@ static void * eb_device_despatcher (void * device)
 
 // Encrypted version stops here
 							}
-							else // Plaintext - just spit the packet out
-								result = sendto (d->trunk.socket, ap, p->length + 12, MSG_DONTWAIT, d->trunk.remote_host->ai_addr, d->trunk.remote_host->ai_addrlen);
+							else // Plaintext - just spit the packet out (or multitrunk child)
+							{
+								if (!d->trunk.mt_parent)
+									result = sendto (d->trunk.socket, ap, p->length + 12, MSG_DONTWAIT, d->trunk.remote_host->ai_addr, d->trunk.remote_host->ai_addrlen);
+								else
+								{
+									pthread_mutex_lock(&(d->trunk.mt_mutex)); // Lock because mt_data is volatile
+									if (d->trunk.mt_data)
+									{
+										/* Base64 & encrypt, then sendto d->trunk.mt_data->socket with start & end markers */ 
+										result = eb_mt_base64_encrypt_tx((uint8_t *) ap->raw, p->length + 12, d);
+										if (result == -1)
+											eb_debug (0, 1, "DESPATCH", "M-Trunk  %7d Packet transmission for trunk %s failed (%s)", d->trunk.mt_parent->multitrunk.port, d->trunk.mt_name, strerror(errno));
+									}
+									else
+									{
+										result = -1;
+										eb_debug (0, 1, "DESPATCH", "M-Trunk  %7d Packet transmission failed for trunk %s - trunk not connected", d->trunk.mt_parent->multitrunk.port, d->trunk.mt_name);
+									}
+									pthread_mutex_unlock(&(d->trunk.mt_mutex));
+
+										
+								}
+							}
 
 					
 							eb_free (__FILE__, __LINE__, "DESPATCH", "Trunk send packet copy free", ap);
 							eb_add_stats (&(d->statsmutex), &(d->b_in), p->length);
 
-							if (result == -1)
+							if (result == -1 && !d->trunk.mt_parent) // Only generate this if not multitrunk, because failure in multitrunk is logged above
 								eb_debug (0, 1, "DESPATCH", "Trunk            Packet transmission failed to %s:%d (%s)", d->trunk.hostname, d->trunk.remote_port, strerror(errno));
 
 							eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
@@ -8935,16 +8997,14 @@ int eb_parse_json_config(struct json_object *jc)
 
 			while (tcount < tlength)
 			{
-				uint16_t	port;
+				uint16_t	port = 0; /* If port unset, this multitrunk only does client connections */
 				int		ai_family = AF_UNSPEC;
-				uint8_t		server = 1;
-				json_object	*jport, *jserver, *jtrunkname, *jhost, *jfamily, *jtimeout;
+				json_object	*jport, *jtrunkname, *jhost, *jfamily, *jtimeout;
 
 				jtrunk = json_object_array_get_idx(jtrunks, tcount);
 
 				json_object_object_get_ex(jtrunk, "port", &jport);
 				json_object_object_get_ex(jtrunk, "host", &jhost);
-				json_object_object_get_ex(jtrunk, "type", &jserver);
 				json_object_object_get_ex(jtrunk, "family", &jfamily);
 				json_object_object_get_ex(jtrunk, "name", &jtrunkname);
 				json_object_object_get_ex(jtrunk, "timeout", &jtimeout); // ms of unacked data before TCP shuts connection
@@ -8967,20 +9027,11 @@ int eb_parse_json_config(struct json_object *jc)
 						eb_debug (1, 0, "JSON", "Multi-Trunk index %d has unknown family parameter '%s'", json_object_get_string(jfamily));
 				}
 
-				if (jserver && !strncmp("client", json_object_get_string(jserver), 6))
-				{
-					if (!jhost) /* Must have a host for a client */
-						eb_debug (1, 0, "JSON", "Multi-Trunk index %d is a client but has no host parameter", tcount);
-
-					server = 0;
-				}
-					
 				eb_device_init_multitrunk(
 						jhost ? (char *) json_object_get_string(jhost) : (char *) NULL,
 						(char *) json_object_get_string(jtrunkname),
 						port,
 						ai_family,
-						server,
 						jtimeout ? json_object_get_int(jtimeout) : 0);
 
 				tcount++;
@@ -9004,12 +9055,13 @@ int eb_parse_json_config(struct json_object *jc)
 			while (tcount < tlength)
 			{
 				uint16_t	local_port, remote_port = 0;
-				char		* remote_host, *key;
+				char		* remote_host, *key, *name, *mt_parent;
 				uint8_t		nat_local, nat_distant, found = 0;
 				uint16_t	nlength, ncount = 0;
 				struct __eb_device	*trunk;
-				struct json_object	*jnat_local, *jnat_remote, *jfw;
+				struct json_object	*jnat_local, *jnat_remote, *jfw, *jname, *jmt_parent;
 				struct __eb_fw_chain	*fw_in = NULL, *fw_out = NULL;
+				struct __eb_device 	*mtp_device;
 
 				remote_host = NULL; // Assume dynamic unless we have a host
 
@@ -9020,6 +9072,8 @@ int eb_parse_json_config(struct json_object *jc)
 				json_object_object_get_ex(jtrunk, "remote-port", &jremoteport);
 				json_object_object_get_ex(jtrunk, "remote-host", &jremotehost);
 				json_object_object_get_ex(jtrunk, "key", &jkey);
+				json_object_object_get_ex(jtrunk, "name", &jname);
+				json_object_object_get_ex(jtrunk, "multitrunk-parent", &jmt_parent);
 	
 				if (!jkey && (!jremotehost || !jremoteport)) 
 				{
@@ -9055,13 +9109,30 @@ int eb_parse_json_config(struct json_object *jc)
 					strcpy (key, json_object_get_string(jkey));
 				}
 
+				if (jname)
+				{
+					name = eb_malloc (__FILE__, __LINE__, "JSON", "New trunk name", json_object_get_string_len(jname) + 1);
+					strcpy (name, json_object_get_string(jname));
+				}
+
+				if (jmt_parent)
+				{
+
+					mt_parent = eb_malloc (__FILE__, __LINE__, "JSON", "New trunk name", json_object_get_string_len(jmt_parent) + 1);
+					strcpy (mt_parent, json_object_get_string(jmt_parent));
+					mtp_device = eb_mt_find(mt_parent);
+					if (!mtp_device)
+						eb_debug (1, 0, "JSON", "Multitrunk parent name %s unknown while creating trunk index %d", mt_parent, tcount);
+				}
+				else	mtp_device = NULL;
+
 				if (json_object_object_get_ex(jtrunk, "fw-in", &jfw))
 					fw_in = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
 
 				if (json_object_object_get_ex(jtrunk, "fw-out", &jfw))
 					fw_out = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
 
-				eb_device_init_singletrunk (remote_host, local_port, remote_port, key, fw_in, fw_out);
+				eb_device_init_singletrunk (remote_host, local_port, remote_port, key, fw_in, fw_out, name, mtp_device);
 
 				if (key)
 					eb_free (__FILE__, __LINE__, "JSON", "New trunk key", key); /* Free - the devinit routine copies it to a new malloced area */
@@ -9914,7 +9985,7 @@ int eb_readconfig(char *f, char *json)
 
 				json_object_array_add(jtrunks, jtrunk);
 #else
-				eb_device_init_singletrunk (destination, local_port, remote_port, psk, NULL, NULL);
+				eb_device_init_singletrunk (destination, local_port, remote_port, psk, NULL, NULL, NULL);
 #endif
 				
 			}
@@ -11942,17 +12013,28 @@ int main (int argc, char **argv)
 
 		eb_debug (0, 2, "MAIN", "%-8s %7d Starting multitrunk handler thread for %s", eb_type_str(p->type), p->multitrunk.port, p->multitrunk.mt_name);
 
+		/*
 		if (p->multitrunk.mt_type == MT_SERVER)
 			e = pthread_create(&(p->me), NULL, eb_multitrunk_server_device, p);
 		else
 			e = pthread_create(&(p->me), NULL, eb_multitrunk_client_device, p);
+		*/
 
-		if (e)
-			eb_debug (1, 0, "MAIN", "Thread creation for multitrunk handler for %s failed", eb_type_str(p->type), p->multitrunk.port, p->multitrunk.mt_name);
+		/* All multitrunks will listen on a port unless the port isn't defined (i.e. client connections outbound only */
 
-		pthread_detach(p->me);
+		if (p->multitrunk.port)
+		{
+			e = pthread_create(&(p->mt_server_thread), NULL, eb_multitrunk_server_device, p);
 
-		eb_thread_started();
+			if (e)
+				eb_debug (1, 0, "MAIN", "Thread creation for multitrunk server handler for %s failed", eb_type_str(p->type), p->multitrunk.port, p->multitrunk.mt_name);
+
+			pthread_detach(p->mt_server_thread);
+
+			eb_thread_started();
+		}
+
+		/* client devices are started on the trunks themselves if they're mt children */
 
 		p = p->next;
 
@@ -11974,6 +12056,19 @@ int main (int argc, char **argv)
 		pthread_detach(p->me);
 
 		eb_thread_started();
+
+		if (p->trunk.mt_parent && p->trunk.mt_type == MT_CLIENT) /* Multitrunk child and it's a client */
+		{
+			/* Start a client device */
+	
+			e = pthread_create(&(p->mt_client_thread), NULL, eb_multitrunk_client_device, p);
+	
+			if (e)
+				eb_debug (1, 0, "MAIN", "Thread creation for multitrunk client handler for %s failed", eb_type_str(p->type), p->multitrunk.port, p->multitrunk.mt_name);
+			pthread_detach(p->mt_client_thread);
+
+			eb_thread_started();
+		}
 
 		p = p->next;
 	}

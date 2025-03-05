@@ -92,7 +92,7 @@ uint8_t	eb_device_init_wire (uint8_t net, char * device, struct __eb_fw_chain *f
  *
  */
 
-uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uint16_t remote_port, char * sharedkey, struct __eb_fw_chain *fw_in, struct __eb_fw_chain *fw_out)
+uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uint16_t remote_port, char * sharedkey, struct __eb_fw_chain *fw_in, struct __eb_fw_chain *fw_out, char *name, struct __eb_device *mt_parent)
 {
 
 	struct __eb_device	* p;
@@ -112,15 +112,17 @@ uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uin
 	p->trunk.pool = NULL;
 	memset(&(p->trunk.use_pool), 0, sizeof(p->trunk.use_pool));
 
-	// Flag NOT part of multitrunk
-
-	p->trunk.mt_parent = NULL;
+	p->trunk.mt_parent = mt_parent; /* Set if we're part of a multitrunk; NULL passed to this function otherwise */
 	p->trunk.mt_data = NULL;
+	p->trunk.mt_name = name;
 
 	if (pthread_mutex_init(&(p->trunk.mt_mutex), NULL) == -1)
 		eb_debug (1, 0, "DEVINIT", "%-8s %5d   Cannot initialize multitrunk mutex this device.", "Trunk", p->trunk.local_port);
 
-	// Initialize shared key to NULL so we can tell if it is unset
+ 	if (pthread_cond_init(&(p->trunk.mt_cond), NULL) == -1)	
+		eb_debug (1, 0, "DEVINIT", "%-8s %5d   Cannot initialize multitrunk condition this device.", "Trunk", p->trunk.local_port);
+
+	 // Initialize shared key to NULL so we can tell if it is unset
 	
 	p->trunk.sharedkey = NULL;
 
@@ -160,7 +162,7 @@ uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uin
  * Set up a multi trunk to listen on (NULL, hostname) port X, IPV4/6/both
  */
 
-uint8_t eb_device_init_multitrunk (char *host, char *trunkname, uint16_t port, int family, uint8_t server, uint16_t timeout)
+uint8_t eb_device_init_multitrunk (char *host, char *trunkname, uint16_t port, int family, uint16_t timeout)
 {
 	struct __eb_device	*p;
 
@@ -169,7 +171,6 @@ uint8_t eb_device_init_multitrunk (char *host, char *trunkname, uint16_t port, i
 	p->multitrunk.mt_name = strdup(trunkname);
 	p->multitrunk.port = port;
 	p->multitrunk.ai_family = family;
-	p->multitrunk.mt_type = (server == 1) ? MT_SERVER : MT_CLIENT;
 	p->multitrunk.timeout = timeout;
 	if (host)
 		p->multitrunk.host = strdup(host);
@@ -180,8 +181,8 @@ uint8_t eb_device_init_multitrunk (char *host, char *trunkname, uint16_t port, i
 
 	multitrunks = p;
 
-	DEVINIT_DEBUG("Created Multi-Trunk with name %s, host %s, port %d, family %d, server %d", 
-			host, trunkname, port, family, server);
+	DEVINIT_DEBUG("Created Multi-Trunk with name %s, host %s, port %d, family %d", 
+			host, trunkname, port, family);
 
 	return 1;
 }

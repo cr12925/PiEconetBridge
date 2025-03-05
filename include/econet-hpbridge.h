@@ -55,6 +55,9 @@
 #include <openssl/aes.h>
 #include <openssl/rand.h>
 
+/* GLIB 2.0 for Base64 */
+#include <glib.h>
+
 #include "econet-gpio-consumer.h"
 
 #define DEVINIT_DEBUG(_fmt, ...) if (dumpconfig) eb_debug (0, 0, "CONFIG", "%-16s " _fmt, "Core", __VA_ARGS__)
@@ -313,6 +316,40 @@ struct __eb_notify {
 	struct __eb_notify	*next;
 };
 
+/* mt_client
+ * 
+ * Data structure used by the eb_multitrunk_handler_thread to identify its client 
+ * and associated data
+ */
+
+struct mt_client {
+        struct __eb_device      *trunk, *multitrunk_parent;
+        int                     trunk_socket; // Socket to trunk device
+        int                     socket; // Socket to distant end
+	uint8_t			death; // Set to 1 when something else wants the handler thread to close down gracefully and die.
+	uint8_t			marker; /* When in MT_START, what was the marker we found at the beginning ? */
+	pthread_mutex_t		mt_lock; 
+        unsigned char *         key; // Will also be NULL until we've found the relevant trunk client // Do we need this? If we've found the trunk client, we'll have a link to its trunk struct...
+	/*
+        uint8_t                 * recv_buffer; // malloced when data turns up after a '*'. The trailing '*' is never put in this buffer. This buffer is decoded from Base64
+        uint16_t                recv_length; // Current malloc'd length of recv_buffer
+        uint8_t                 * packet; // Buffer for transfer to trunk pipe - this will be encrypted on transmission to the trunk client (distant end) if this is a TCP trunk, or a UDP encrypted trunk
+        uint16_t                packet_length;
+        uint8_t                 * decrypted_buffer; // Only used when we are trying to work out which endpoint has connected to us
+	*/
+        enum                    { MT_IDLE = 1, MT_START = 2 } mt_state; // IDLE = waiting for beginning '*', START means '*' received - waiting for data or trailing end marker
+        enum                    { MT_TYPE_UDP = 1, MT_TYPE_TCP = 2 } mt_type; // Not used at present - TCP trunks only for now. This is for later when we might consolidate UDP and TCP listening into the same infrastructure
+        uint8_t                 mt_local_version, mt_remote_version; // Protocol version.
+        /* struct mt_client     * next; */
+};
+
+#define EB_MT_WELCOME_MSG "Private System"
+#define EB_MT_TCP_CHUNKSIZE	4096 // Max number of bytes to allocate each time we need to expand our receive buffer because we've not had a packet termination (we might expand by less if we only read less)
+#define EB_MT_TCP_MAXSIZE	65536 // Maximum size of buffer before we give up and start again, so that people can't just send us rubbish and use all our RAM
+
+/* Multitrunk Admin Command codes */
+#define EB_MT_CMD_VERS	0x01
+
 /* __eb_device
 
    Holds common and per-driver information about devices on which we might send/receive packets.
@@ -377,6 +414,9 @@ struct __eb_device { // Structure holding information about a "physical" device 
 	pthread_mutex_t		bridge_reset_lock; // Ditto for bridge resetter
 	uint8_t			all_nets_pooled; // Used to work out whether not to forward resets on this device (only relevant for wire or trunk)
 
+	/* Multitrunk threads */
+	pthread_t		mt_server_thread, mt_client_thread;
+
 	/* Firewall per device - available with JSON config */
 
 	struct __eb_fw_chain		*fw_in, *fw_out; /* 'in' is for traffic going TO the device (e.g. being sent to a fileserver, pipe, econet, or trunk - i.e. going away from the bridge), 'out' is stuff emanating out of the device (i.e. arriving on a pipe, from a fileserver, off an econet, arriving on a trunk) */
@@ -386,13 +426,19 @@ struct __eb_device { // Structure holding information about a "physical" device 
 
 		struct { // A trunk will simply receive traffic and pass it straight to one of the other drivers for the network concerned, after doing NAT and firewalling
 
-			// General parameters
-			int 		socket;
-			pthread_mutex_t	mt_mutex; // Locks mt_client - which is NULL if we are an inactive multitrunk client. And that structure also containts our pipe2() pair.
-			pthread_cond_t	mt_cond;
-			uint8_t		mt_addr_flags; // Can be used to set IPV6_ONLY
-			// Probably need a struct mt_client *mt_client; here so that we know where our sockets & things are in multitrunk world
+			// If part of multitrunk // If NULL then not part of multi-trunk
+			struct __eb_device	*mt_parent;
 
+			// Multi-trunk parameters
+			uint8_t		mt_addr_flags; // Can be used to set IPV6_ONLY
+			pthread_mutex_t	mt_mutex; // Locks mt_data - which is NULL if we are an inactive multitrunk client.
+			pthread_cond_t	mt_cond; // Used by the multitrunk connection code to wake up an eb_device_listener for a child trunk to say that the trunk is connected
+			struct mt_client	*mt_data;  // Pointer to mt_client struct in the handler to which we're attached via parent. If NULL then we aren't connected. If non-NULL, then we get our sockets etc. out of here.
+			char *		mt_name; // Name of this trunk child for debugging
+			enum		{ MT_CLIENT = 1, MT_SERVER = 2} mt_type;
+
+			// General parameters
+			int 		socket; // UDP trunks only; TCP Multitrunks are in the mt_client struct
 			char 		*hostname;
 			struct addrinfo	*remote_host; // updated by mt_client / mt_server when we're a multitrunk
 			int 		local_port, remote_port; // For UDP trunks only
@@ -417,10 +463,6 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			uint8_t 	xlate_in[256], xlate_out[256]; // Network number translation. _in translates a source network when the trunk receives traffic (and translates bridge advertised network numbers); _out translates a destination network when the trunk sends traffic.  Set up when config is read.
 			uint8_t		filter_in[256], filter_out[256]; // Networks we ignore (i.e. we ditch traffic, and we ignore/don't send adverts)
 	
-			// If part of multitrunk // If NULL then not part of multi-trunk
-
-			struct __eb_device	*mt_parent;
-
 			
 			// Keepalive thread
 			
@@ -434,8 +476,8 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			char 		* host; // NULL if all interfaces
 			int		ai_family; // AF_INET, AF_INET6, AF_UNSPEC
 			uint16_t	listenqueue; // listen queue length
-			enum		{ MT_CLIENT = 1, MT_SERVER = 2} mt_type;
 			unsigned int	timeout; // Timeout in MS to give to TCP to shut a connection if data goes unacked this long. Provides for fast closure on failed trunks
+			//struct mt_client	*mt_data; // Copy of pointer in the handler thread, so that a new connection can kill off the old one.
 
 		} multitrunk;
 
@@ -786,6 +828,7 @@ extern struct __eb_device * eb_new_local (uint8_t, uint8_t, uint16_t);
 extern void eb_set_whole_wire_net (uint8_t, struct __eb_device *);
 extern void eb_set_single_wire_host (uint8_t, uint8_t);
 extern void * eb_malloc (char *, int line, char *, char *, size_t);
+extern void eb_free (char *, int, char *, char *, void *);
 extern struct __eb_device * eb_get_network(uint8_t);
 extern char * eb_type_str (uint16_t);
 extern struct __eb_aun_exposure * eb_is_exposed (uint8_t, uint8_t, uint8_t);
@@ -811,8 +854,8 @@ extern uint8_t	dumpconfig;
 
 extern uint8_t	eb_device_init_wire (uint8_t, char *, struct __eb_fw_chain *, struct __eb_fw_chain *);
 extern uint8_t	eb_device_init_virtual (uint8_t);
-extern uint8_t	eb_device_init_singletrunk (char *, uint16_t, uint16_t, char *, struct __eb_fw_chain *, struct __eb_fw_chain *);
-extern uint8_t	eb_device_init_multitrunk (char *, char *, uint16_t, int, uint8_t, uint16_t);
+extern uint8_t	eb_device_init_singletrunk (char *, uint16_t, uint16_t, char *, struct __eb_fw_chain *, struct __eb_fw_chain *, char *, struct __eb_device *mt_parent);
+extern uint8_t	eb_device_init_multitrunk (char *, char *, uint16_t, int, uint16_t);
 extern uint8_t 	eb_device_init_dynamic (uint8_t, uint8_t, struct __eb_fw_chain *, struct __eb_fw_chain *);
 extern uint8_t	eb_device_init_fs (uint8_t, uint8_t, char *);
 extern uint8_t	eb_device_init_ps (uint8_t, uint8_t, char *, char *, char *, uint8_t, uint8_t);
@@ -835,6 +878,8 @@ extern uint8_t	eb_device_init_set_pooled_nets (struct __eb_pool *, struct __eb_d
 
 extern void * eb_multitrunk_server_device (void *);
 extern void * eb_multitrunk_client_device (void *);
+extern int eb_mt_base64_encrypt_tx(uint8_t *, uint16_t, struct __eb_device *);
+extern struct __eb_device * eb_mt_find (char *);
 
 /* JSON */
 
