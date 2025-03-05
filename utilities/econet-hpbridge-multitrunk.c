@@ -631,6 +631,16 @@ void * eb_multitrunk_handler_thread (void * input)
 	p[1].revents = 0;
 	*/
 
+	{ 
+		/* Send version */
+
+		uint8_t		data[3] = { EB_MT_CMD_VERS, 0, 1 };
+
+		eb_mt_base64_encrypt_tx (data, 3, me->trunk);
+
+	}
+
+
 	while (1) /* We break if we want to die */
 	{
 
@@ -853,6 +863,8 @@ void * eb_multitrunk_client_device (void * device)
 
 	me = (struct __eb_device *) device;
 
+	eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Client to %s:%d connection thread starting", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+
 	if (!me->trunk.hostname)
 		eb_debug (1, 0, "M-TRUNK", "Attempt to start a multitrunk client with no hostname defined!");
 
@@ -879,19 +891,19 @@ void * eb_multitrunk_client_device (void * device)
 		ga_return = getaddrinfo(me->trunk.hostname, portstring, &hints, &mt_addresses);
 		if (ga_return == EAI_AGAIN)
 		{
-			eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Server on %s:%d Temporary failure in name resolution, trying again in 10s", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+			eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Client to %s:%d Temporary failure in name resolution, trying again in 10s", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
 			sleep(10);
 		}
 	}
 
 	if (ga_return != 0)
-		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to resolve listen address: %s", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port, gai_strerror(ga_return));
+		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Client to %s:%d unable to resolve address: %s", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port, gai_strerror(ga_return));
 
 	if (mt_addresses)
-		eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Server on %s:%d successfully resolved hostname", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+		eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Client to %s:%d successfully resolved hostname", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
 	else
 	{
-		eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Server on %s:%d getaddrinfo() returned no addresses - giving up", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+		eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Client to %s:%d getaddrinfo() returned no addresses - giving up", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
 		return NULL;
 	}
 
@@ -945,6 +957,7 @@ void * eb_multitrunk_client_device (void * device)
 
 			mtc_new->socket = mt_socket;
 			mtc_new->multitrunk_parent = me->trunk.mt_parent;
+			mtc_new->trunk = me;
 			mtc_new->mt_type = MT_TYPE_TCP; /* They're all TCP for now. There may be a time when
      							   we adapt this to cope with UDP too. */
 
@@ -1108,6 +1121,7 @@ void * eb_multitrunk_server_device (void * device)
 
 						mtc_new->socket = newconn;
 						mtc_new->multitrunk_parent = me;
+						mtc_new->trunk = me;
 						mtc_new->mt_type = MT_TYPE_TCP; /* They're all TCP for now. There may be a time when
 			     							   we adapt this to cope with UDP too. */
 
