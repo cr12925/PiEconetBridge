@@ -185,6 +185,8 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 	uint8_t		temp_packet[ECONET_MAX_PACKET_SIZE + 12 + 2];
 	int		encrypted_length, tmp_len;
 	
+	fprintf (stderr, "\n\n*** Starting eb_trunk_encrypt(%p, %d, %d, %p, %p)\n", packet, length, port, d, encrypted);
+
 	RAND_bytes(iv, AES_BLOCK_SIZE);
 
 	cipherpacket[TRUNK_CIPHER_ALG] = 1;
@@ -194,12 +196,20 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 	temp_packet[0] = (length & 0xff00) >> 8;
 	temp_packet[1] = (length & 0x00ff);
 
+	fprintf (stderr, "\n\n*** Copying packet to temp_packet[2]\n");
+
 	memcpy (&(temp_packet[2]), packet, length);
+
+	fprintf (stderr, "\n\n*** Calling EVP_CIPHER_CTX_new()\n");
 
 	if (!(ctx_enc = EVP_CIPHER_CTX_new()))
 		eb_debug (1, 0, "(M)TRUNK", "(M)Trunk %7d Unable to set up encryption control", port);
 
+	fprintf (stderr, "\n\n*** Calling EVP_EncryptInit_ex()\n");
+
 	EVP_EncryptInit_ex(ctx_enc, EVP_aes_256_cbc(), NULL, d->trunk.sharedkey, iv);
+
+	fprintf (stderr, "\n\n*** Calling EVP_EncryptUpdate()\n");
 
 	if ((!EVP_EncryptUpdate(ctx_enc, (unsigned char *) &(cipherpacket[TRUNK_CIPHER_DATA]), &encrypted_length, temp_packet, length + 2))) // +2 for the length bytes inserted above
 	{
@@ -216,6 +226,8 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 		encrypted_length += tmp_len;
 		eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encryption succeeded: cleartext length %04X, encrypted length %04X", length + 2, encrypted_length);
 	}
+
+	fprintf (stderr, "\n\n*** Calling EVP_CIPHER_CTX_free()\n");
 
 	EVP_CIPHER_CTX_free(ctx_enc);
 
