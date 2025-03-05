@@ -3307,7 +3307,7 @@ static void * eb_device_listener (void * device)
 	if (d->type == EB_DEF_TRUNK && d->trunk.mt_parent) // Multitrunk child - update the socket we're polling
 	{
 		pthread_mutex_lock(&(d->trunk.mt_mutex));
-		if (!d->trunk.mt_data) // Not connected
+		if (!(d->trunk.mt_data)) // Not connected
 		{
 			pthread_cond_wait(&(d->trunk.mt_cond), &(d->trunk.mt_mutex));
 			/* Connected by now */
@@ -6729,7 +6729,7 @@ static void * eb_device_despatcher (void * device)
 									if (d->trunk.mt_data)
 									{
 										/* Base64 & encrypt, then sendto d->trunk.mt_data->socket with start & end markers */ 
-										result = eb_mt_base64_encrypt_tx((uint8_t *) ap->raw, p->length + 12, d);
+										result = eb_mt_base64_encrypt_tx((uint8_t *) ap->raw, p->length + 12, d, '*');
 										if (result == -1)
 											eb_debug (0, 1, "DESPATCH", "M-Trunk  %7d Packet transmission for trunk %s failed (%s)", d->trunk.mt_parent->multitrunk.port, d->trunk.mt_name, strerror(errno));
 									}

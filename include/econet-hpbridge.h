@@ -879,7 +879,7 @@ extern uint8_t	eb_device_init_set_pooled_nets (struct __eb_pool *, struct __eb_d
 
 extern void * eb_multitrunk_server_device (void *);
 extern void * eb_multitrunk_client_device (void *);
-extern int eb_mt_base64_encrypt_tx(uint8_t *, uint16_t, struct __eb_device *);
+extern int eb_mt_base64_encrypt_tx(uint8_t *, uint16_t, struct __eb_device *, char);
 extern struct __eb_device * eb_mt_find (char *);
 
 /* JSON */

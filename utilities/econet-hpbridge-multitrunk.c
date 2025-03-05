@@ -201,8 +201,6 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 
 	EVP_EncryptInit_ex(ctx_enc, EVP_aes_256_cbc(), NULL, d->trunk.sharedkey, iv);
 
-	fprintf (stderr, "\n\n*** Calling EVP_EncryptUpdate() - shared key %s\n", d->trunk.sharedkey);
-
 	if ((!EVP_EncryptUpdate(ctx_enc, (unsigned char *) &(cipherpacket[TRUNK_CIPHER_DATA]), &encrypted_length, temp_packet, length + 2))) // +2 for the length bytes inserted above
 	{
 		eb_debug (0, 2, "(M)TRUNK", "(M)Trunk %7d EncryptUpdate of (m)trunk packet failed", port);
@@ -218,8 +216,6 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 		encrypted_length += tmp_len;
 		eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encryption succeeded: cleartext length %04X, encrypted length %04X", length + 2, encrypted_length);
 	}
-
-	fprintf (stderr, "\n\n*** Calling EVP_CIPHER_CTX_free()\n");
 
 	EVP_CIPHER_CTX_free(ctx_enc);
 
@@ -302,6 +298,28 @@ uint8_t eb_mt_copy_to_cipherpacket (uint8_t **cipherpacket, uint32_t *cipherpack
 	return ret;
 }
 
+/* 
+ * eb_mt_send_proto_version
+ *
+ * Send our local protocol version to the other side.
+ *
+ */
+
+void eb_mt_send_proto_version (struct mt_client *me)
+{
+	uint8_t		data[3] = { EB_MT_CMD_VERS, 0, EB_MT_PROTOCOL_VERSION };
+
+	eb_mt_base64_encrypt_tx (data, 3, me->trunk, '&');
+
+	me->mt_local_version = EB_MT_PROTOCOL_VERSION;
+
+	eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Sent multitrunk protocol version %d to %s:%d", 
+			me->multitrunk_parent->multitrunk.port,
+			EB_MT_PROTOCOL_VERSION,
+			me->trunk->trunk.hostname,
+			me->trunk->trunk.remote_port);
+}
+
 /* eb_mt_process_admin_packet
  *
  * Handles processing of administrative packets received on multitrunks
@@ -366,6 +384,8 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 
 			if ((decrypted_length = eb_trunk_decrypt(me->multitrunk_parent->multitrunk.port, cipherpacket, size, search_trunk->trunk.sharedkey, buffer)) >= 0)
 			{
+				fprintf (stderr, "\n\n*** Decryptable packet received, length %d\n\n", decrypted_length);
+
 				pthread_mutex_lock(&(search_trunk->trunk.mt_mutex));
 
 				/* If trunk already connected to another handler, set its death flag */
@@ -390,16 +410,7 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 				pthread_mutex_unlock(&(search_trunk->trunk.mt_mutex));
 
 				if (me->mt_local_version == 0)
-				{ 
-					/* Send version */
-
-					uint8_t		data[3] = { EB_MT_CMD_VERS, 0, EB_MT_PROTOCOL_VERSION };
-
-					eb_mt_base64_encrypt_tx (data, 3, me->trunk);
-
-					me->mt_local_version = EB_MT_PROTOCOL_VERSION;
-
-				}
+					eb_mt_send_proto_version(me);
 
 				return 1;
 			}
@@ -428,7 +439,7 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
  *
  */
 
-int eb_mt_base64_encrypt_tx(uint8_t *data, uint16_t datalength, struct __eb_device *mt)
+int eb_mt_base64_encrypt_tx(uint8_t *data, uint16_t datalength, struct __eb_device *mt, char delimiter)
 {
 
 	gchar 		* base64;
@@ -448,9 +459,9 @@ int eb_mt_base64_encrypt_tx(uint8_t *data, uint16_t datalength, struct __eb_devi
 			terminated_length = strlen(base64)+3;
 
 			base64_terminated = eb_malloc(__FILE__, __LINE__, "M-Trunk", "New base64 terminated packet", terminated_length);
-			*base64_terminated = '*';
+			*base64_terminated = delimiter;
 			memcpy ((base64_terminated+1), base64, strlen(base64));
-			*(base64_terminated + terminated_length - 1) = '*';
+			*(base64_terminated + terminated_length - 1) = delimiter;
 			*(base64_terminated + terminated_length) = '\0';
 		
 			g_free(base64); // No need for this any more	
@@ -604,6 +615,12 @@ void * eb_multitrunk_handler_thread (void * input)
 	if ((me->trunk_socket = socket(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK, 0)) == -1)
 		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to create socket to underlying trunk", me->multitrunk_parent->multitrunk.port);
 
+	/* Lock the underlying trunk and update its mt_data */
+
+	pthread_mutex_lock(&(me->trunk->trunk.mt_mutex));
+	me->trunk->trunk.mt_data = me;
+	pthread_mutex_unlock(&(me->trunk->trunk.mt_mutex));
+
 	/* 
 	 * Protocol v1:
 	 * Administrative packets are '&' (base64(encrypted)) '&' 
@@ -618,6 +635,9 @@ void * eb_multitrunk_handler_thread (void * input)
 	 * bytes 2+	Data
 	 * 		For version, this is a 1 byte value
 	 */
+
+	if (me->trunk->trunk.mt_type == MT_CLIENT) /* We need to send our version number up front */
+		eb_mt_send_proto_version(me);
 
 	/* The server can't transmit until it's received something from the client, but the client can because it knows the shared key */
 
@@ -878,7 +898,7 @@ void * eb_multitrunk_client_device (void * device)
 	if (!me->trunk.remote_port)
 		eb_debug (1, 0, "M-TRUNK", "Attempt to start a multitrunk client with no remote port defined!");
 
-	sprintf (portstring, "%5d", me->multitrunk.port);
+	sprintf (portstring, "%5d", me->trunk.remote_port);
 
 	memset (&hints, 0, sizeof(hints));
 	hints.ai_family = me->multitrunk.ai_family;
@@ -926,8 +946,23 @@ void * eb_multitrunk_client_device (void * device)
 		for (mt_iterate = mt_addresses; mt_iterate != NULL; mt_iterate = mt_iterate->ai_next)
 		{
 
+			char	hostname[256];
+
+			switch (mt_iterate->ai_family)
+			{
+				case AF_INET:
+					inet_ntop(AF_INET, &(((struct sockaddr_in *)mt_iterate->ai_addr)->sin_addr), hostname, mt_iterate->ai_addrlen);
+					break;
+				case AF_INET6:
+					inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)mt_iterate->ai_addr)->sin6_addr), hostname, mt_iterate->ai_addrlen);
+					break;
+				default:
+					strcpy (hostname, "Cannot convert hostname string");
+					break;
+			}
+
 			mt_socket = socket (mt_iterate->ai_family,
-						mt_iterate->ai_socktype | SOCK_NONBLOCK,
+						mt_iterate->ai_socktype,
 						mt_iterate->ai_protocol);
 	
 			if (mt_socket == -1)
@@ -943,9 +978,22 @@ void * eb_multitrunk_client_device (void * device)
 
 			if (connect(mt_socket, mt_iterate->ai_addr, mt_iterate->ai_addrlen) != -1)
 			{
+				/* Set non-blocking here rather than in the socket() call, because otherwise connect() will give us EINPROGRESS... */
+
+				int flags;
+
+				flags = fcntl(mt_socket, F_GETFL);
+
+				if (flags == -1)
+					eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d unable to get TCP flags in order to set O_NONBLOCK", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+
+				if (fcntl(mt_socket, F_SETFL, (flags | O_NONBLOCK)) == -1)
+					eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d unable to set O_NONBLOCK", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+
 				connected = 1;
 				break; /* Connected. If not, try the next address */
 			}
+			else eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Client socket to %s(%s):%d failed to connect (%s)", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, hostname, me->trunk.remote_port, strerror(errno));
 		}
 
 		if (connected)
@@ -979,6 +1027,8 @@ void * eb_multitrunk_client_device (void * device)
 			/* Wait for the handler to finish */
 
 			pthread_join(mtc_thread, &mtc_ret);
+
+			eb_free(__FILE__, __LINE__, "M-TRUNK", "Free used client structure", mtc_new);
 
 			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d closed. Re-opening.", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
 		}
