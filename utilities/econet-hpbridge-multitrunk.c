@@ -752,11 +752,11 @@ void * eb_multitrunk_handler_thread (void * input)
 								{
 									realdata_len = ptr - realdata_start;								 
 	
-									//fprintf (stderr, "\n\n*** Found end marker - realdata_len = %d, cipherpacket = %p ***\n\n", realdata_len, cipherpacket);
+									fprintf (stderr, "\n\n*** Found end marker - realdata_len = %d, cipherpacket = %p ***\n\n", realdata_len, cipherpacket);
 
 									eb_mt_copy_to_cipherpacket (&cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, realdata_start, realdata_len);
 
-									//fprintf (stderr, "\n\n*** Cipherpacket = %p ***\n\n", cipherpacket);
+									fprintf (stderr, "\n\n*** Cipherpacket = %p ***\n\n", cipherpacket);
 
 									eb_mt_debase64_decrypt_process(me, cipherpacket, cipherpacket_ptr, remotehost, remoteport);
 
