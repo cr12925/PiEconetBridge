@@ -655,11 +655,12 @@ void * eb_multitrunk_handler_thread (void * input)
 		int poll_result;
 
 		p.fd = me->socket;
-		p.events = POLLIN | POLLERR;
+		p.events = POLLIN | POLLERR | POLLRDHUP;
 		p.revents = 0;
 
 		poll_result = poll(&p, 1, 5000);
 
+		fprintf (stderr, "\n\n *** poll_result = %d \n\n", poll_result);
 		if (poll_result == -1)
 		{
 			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d poll() error reading TCP socket: %s", me->multitrunk_parent->multitrunk.port, strerror(errno));
@@ -1080,6 +1081,9 @@ void * eb_multitrunk_server_device (void * device)
 		if (setsockopt(mt_socket, SOL_SOCKET, SO_REUSEADDR, (char *) &on, sizeof(on)) < 0)
 			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to set SO_REUSEADDR", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port);
 
+		if (setsockopt(mt_socket, SOL_SOCKET, SO_REUSEPORT, (char *) &on, sizeof(on)) < 0)
+			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to set SO_REUSEPORT", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port);
+
 		if (timeout > 0 && (setsockopt(mt_socket, SOL_SOCKET, TCP_USER_TIMEOUT, (char *) &(timeout), sizeof(timeout)) < 0))
 			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to set TCP_USER_TIMEOUT to %d", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port, me->multitrunk.timeout);
 
@@ -1151,8 +1155,8 @@ void * eb_multitrunk_server_device (void * device)
 						mtc_new->mt_type = MT_TYPE_TCP; /* They're all TCP for now. There may be a time when
 			     							   we adapt this to cope with UDP too. */
 
-						if (setsockopt(newconn, IPPROTO_TCP, TCP_NODELAY, (char *) &(flag), sizeof(int)) < 0)
-							eb_debug(1, 0, "M-TRUNK", "M-Trunk  %7d Unable to set TCP_NODELAY on new client connection", me->multitrunk.port);
+						if (setsockopt(newconn, SOL_SOCKET, SO_KEEPALIVE, (char *) &(flag), sizeof(int)) < 0)
+							eb_debug(1, 0, "M-TRUNK", "M-Trunk  %7d Unable to set SO_KEEPALIVE on new client connection", me->multitrunk.port);
 
 						/* Initialize lock on the data */
 
