@@ -1130,7 +1130,7 @@ void * eb_multitrunk_server_device (void * device)
 			{
 				if (fds[count].revents & POLLIN)
 				{
-					newconn = accept4(fds[count].fd, NULL, NULL, O_NONBLOCK);
+					newconn = accept4(fds[count].fd, NULL, NULL, SOCK_NONBLOCK);
 
 					if (newconn >= 0)	
 					{
