@@ -1139,7 +1139,7 @@ void * eb_multitrunk_server_device (void * device)
 						struct mt_client	*mtc_new;
 						pthread_t		mtc_thread;
 						int			mtc_err;
-						int			flag = 1;
+						int			flag = 1, flags;
 
 						/* Spawn a thread */
 	
@@ -1155,6 +1155,14 @@ void * eb_multitrunk_server_device (void * device)
 
 						if (setsockopt(newconn, SOL_SOCKET, SO_KEEPALIVE, (char *) &(flag), sizeof(int)) < 0)
 							eb_debug(1, 0, "M-TRUNK", "M-Trunk  %7d Unable to set SO_KEEPALIVE on new client connection", me->multitrunk.port);
+
+						flags = fcntl(newconn, F_GETFL);
+
+						if (flags == -1)
+							eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server socket unable to get TCP flags in order to set O_RDWR", me->multitrunk.port);
+
+						if (fcntl(newconn, F_SETFL, (flags | O_RDWR)) == -1)
+							eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server socket unable to set O_RDWR", me->multitrunk.port);
 
 						/* Initialize lock on the data */
 
