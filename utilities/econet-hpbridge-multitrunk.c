@@ -1151,7 +1151,7 @@ void * eb_multitrunk_server_device (void * device)
 						mtc_new->mt_type = MT_TYPE_TCP; /* They're all TCP for now. There may be a time when
 			     							   we adapt this to cope with UDP too. */
 
-						if (setsockopt(newconn, SOL_SOCKET, TCP_NODELAY, (char *) &(flag), sizeof(int)) < 0)
+						if (setsockopt(newconn, IPPROTO_TCP, TCP_NODELAY, (char *) &(flag), sizeof(int)) < 0)
 							eb_debug(1, 0, "M-TRUNK", "M-Trunk  %7d Unable to set TCP_NODELAY on new client connection", me->multitrunk.port);
 
 						/* Initialize lock on the data */
