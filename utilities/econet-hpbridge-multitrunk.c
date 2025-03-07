@@ -638,12 +638,10 @@ void * eb_multitrunk_handler_thread (void * input)
 
 	if (me->trunk->trunk.mt_type == MT_CLIENT) /* We need to send our version number up front */
 		eb_mt_send_proto_version(me);
+	else // If server, send welcome message
+		write (me->socket, "$$$" EB_MT_WELCOME_MSG "$$$\r\n", strlen(EB_MT_WELCOME_MSG) + 8);
 
 	/* The server can't transmit until it's received something from the client, but the client can because it knows the shared key */
-
-	/* Except a welcome message which does nothing */
-
-	write (me->socket, "$$$" EB_MT_WELCOME_MSG "$$$\r\n", strlen(EB_MT_WELCOME_MSG) + 8);
 
 	/* Wake up the device listener */
 
@@ -659,9 +657,6 @@ void * eb_multitrunk_handler_thread (void * input)
 		p.fd = me->socket;
 		p.events = POLLIN | POLLERR;
 		p.revents = 0;
-
-		//while ((poll(&p, 1, 1000) != 1) && me->death == 0)
-		//{ }
 
 		poll_result = poll(&p, 1, 5000);
 
@@ -1135,7 +1130,7 @@ void * eb_multitrunk_server_device (void * device)
 			{
 				if (fds[count].revents & POLLIN)
 				{
-					newconn = accept(fds[count].fd, NULL, NULL);
+					newconn = accept4(fds[count].fd, NULL, NULL, O_NONBLOCK);
 
 					if (newconn >= 0)	
 					{
