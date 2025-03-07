@@ -1036,7 +1036,7 @@ void * eb_multitrunk_server_device (void * device)
 	hints.ai_family = me->multitrunk.ai_family;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_flags = (me->multitrunk.host) ? 0 : AI_PASSIVE; // Give us the "all addresses" struct if name is null
-	hints.ai_protocol = 6;
+	hints.ai_protocol = IPPROTO_TCP;
 	hints.ai_canonname = NULL;
 	hints.ai_addr = NULL;
 	hints.ai_next = NULL;
