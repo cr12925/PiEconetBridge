@@ -536,8 +536,7 @@ void eb_mt_unset_endpoint (struct __eb_device *mtc)
 void * eb_multitrunk_handler_thread (void * input)
 {
 	struct mt_client	* me;
-	//struct pollfd		p[2];
-	struct pollfd		p;
+	struct pollfd		p[2];
 	uint8_t			*cipherpacket = NULL;
 	uint32_t		cipherpacket_ptr = 0, cipherpacket_size = 0; // _ptr is pointer into cipherpacket, _size is current allocated size of cipherpacket, which will grow in EB_MT_TCP_CHUNKSIZE chunks up to EB_MT_TCPMAXSIZE
 	union	{
@@ -654,12 +653,11 @@ void * eb_multitrunk_handler_thread (void * input)
 
 		int poll_result;
 
-		//p.fd = me->socket;
-		p.fd = fileno(stdin);
-		p.events = POLLIN | POLLERR | POLLRDHUP;
-		p.revents = 0;
+		p[0].fd = me->socket;
+		p[0].events = POLLIN | POLLERR | POLLRDHUP;
+		//p.revents = 0;
 
-		poll_result = poll(&p, 1, 5000);
+		poll_result = poll(p, 1, 5000);
 
 		if (poll_result == -1)
 		{
@@ -667,7 +665,7 @@ void * eb_multitrunk_handler_thread (void * input)
 			break;
 		}
 
-		if (p.revents & POLLHUP) /* This may not be working... */
+		if (p[0].revents & POLLHUP) /* This may not be working... */
 			break; // Graceful death
 			
 		pthread_mutex_lock(&(me->mt_lock));
@@ -680,7 +678,7 @@ void * eb_multitrunk_handler_thread (void * input)
 
 		pthread_mutex_unlock(&(me->mt_lock));
 
-		if (p.revents & POLLIN)
+		if (p[0].revents & POLLIN)
 		{
 			/* Data on our TCP socket */
 			uint8_t		buffer[EB_MT_TCP_CHUNKSIZE];
