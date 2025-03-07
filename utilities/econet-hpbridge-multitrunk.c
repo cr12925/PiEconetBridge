@@ -654,13 +654,13 @@ void * eb_multitrunk_handler_thread (void * input)
 
 		int poll_result;
 
-		p.fd = me->socket;
+		//p.fd = me->socket;
+		p.fd = fileno(stdin);
 		p.events = POLLIN | POLLERR | POLLRDHUP;
 		p.revents = 0;
 
 		poll_result = poll(&p, 1, 5000);
 
-		fprintf (stderr, "\n\n *** poll_result = %d \n\n", poll_result);
 		if (poll_result == -1)
 		{
 			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d poll() error reading TCP socket: %s", me->multitrunk_parent->multitrunk.port, strerror(errno));
