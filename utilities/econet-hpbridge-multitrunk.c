@@ -955,8 +955,8 @@ void * eb_multitrunk_client_device (void * device)
 				if (flags == -1)
 					eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d unable to get TCP flags in order to set O_NONBLOCK", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
 
-				if (fcntl(mt_socket, F_SETFL, (flags | O_NONBLOCK)) == -1)
-					eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d unable to set O_NONBLOCK", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+				if (fcntl(mt_socket, F_SETFL, (flags | O_RDWR | O_NONBLOCK)) == -1)
+					eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d unable to set O_RDWR | O_NONBLOCK", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
 
 				connected = 1;
 				break; /* Connected. If not, try the next address */
