@@ -651,28 +651,25 @@ void * eb_multitrunk_handler_thread (void * input)
 
 	/* Wait for data */
 
-	/* Change to comms arrangements - we only listen on our TCP socket; underlying trunk writes directly out */
-
-	p.fd = me->socket;
-	p.events = POLLIN;
-	p.revents = 0;
-
-	/*
-	p[0].fd = me->socket;
-	p[0].events = POLLIN;
-	p[0].revents = 0;
-
-	p[1].fd = me->mt_pipe[0]; // Read side from underlying trunk
-	p[1].events = POLLIN;
-	p[1].revents = 0;
-	*/
-
-
 	while (1) /* We break if we want to die */
 	{
 
-		while ((poll(&p, 1, 1000) == 0) && me->death == 0)
-		{ }
+		int poll_result;
+
+		p.fd = me->socket;
+		p.events = POLLIN | POLLERR;
+		p.revents = 0;
+
+		//while ((poll(&p, 1, 1000) != 1) && me->death == 0)
+		//{ }
+
+		poll_result = poll(&p, 1, 5000);
+
+		if (poll_result == -1)
+		{
+			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d poll() error reading TCP socket: %s", me->multitrunk_parent->multitrunk.port, strerror(errno));
+			break;
+		}
 
 		if (p.revents & POLLHUP) /* This may not be working... */
 			break; // Graceful death
@@ -811,30 +808,6 @@ void * eb_multitrunk_handler_thread (void * input)
 				}
 			}
 		}
-
-		/* Trunk will write directly to our socket  
-		if (p[1].revents & POLLIN)
-		{
-		}
-		*/
-
-		// Not clear why we needed this lock
-		// pthread_mutex_unlock(&(me->mt_lock));
-
-		
-		p.fd = me->socket;
-		p.events = POLLIN;
-		p.revents = 0;
-
-		/*
-		p[0].fd = me->socket;
-		p[0].events = POLLIN;
-		p[0].revents = 0;
-	
-		p[1].fd = me->mt_pipe[0]; // Read side from underlying trunk
-		p[1].events = POLLIN;
-		p[1].revents = 0;
-		*/
 
 	}
 
