@@ -424,7 +424,7 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 
 	/* If we get here, we couldn't decrypt - fail */
 
-	eb_debug (0, 2, "MTRUNK", "M-Trunk  %7d Undecryptable packet received from %s:%d length %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteport, length);
+	eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Undecryptable packet received from %s:%d length %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteport, length);
 	me->marker = 0;
 	return 0;
 
@@ -638,7 +638,10 @@ void * eb_multitrunk_handler_thread (void * input)
 	if (me->trunk->trunk.mt_type == MT_CLIENT) /* We need to send our version number up front */
 		eb_mt_send_proto_version(me);
 	else // If server, send welcome message
-		write (me->socket, "$$$" EB_MT_WELCOME_MSG "$$$\r\n", strlen(EB_MT_WELCOME_MSG) + 8);
+	{
+		const char *msg = "$$$" EB_MT_WELCOME_MSG "$$$\r\n";
+		send(me->socket, msg, strlen(msg)-1, MSG_DONTWAIT);
+	}
 
 	/* The server can't transmit until it's received something from the client, but the client can because it knows the shared key */
 
@@ -654,8 +657,8 @@ void * eb_multitrunk_handler_thread (void * input)
 		int poll_result;
 
 		p[0].fd = me->socket;
-		p[0].events = POLLIN | POLLERR | POLLRDHUP;
-		//p.revents = 0;
+		p[0].events = POLLIN | POLLPRI | POLLRDBAND;
+		p[0].revents = 0;
 
 		poll_result = poll(p, 1, 5000);
 
@@ -664,10 +667,9 @@ void * eb_multitrunk_handler_thread (void * input)
 			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d poll() error reading TCP socket: %s", me->multitrunk_parent->multitrunk.port, strerror(errno));
 			break;
 		}
+		else if (poll_result == 0)
+			eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d poll() from client returned 0", me->trunk->trunk.remote_port);
 
-		if (p[0].revents & POLLHUP) /* This may not be working... */
-			break; // Graceful death
-			
 		pthread_mutex_lock(&(me->mt_lock));
 
 		if (me->death) // Graceful death
@@ -681,6 +683,7 @@ void * eb_multitrunk_handler_thread (void * input)
 		if (p[0].revents & POLLIN)
 		{
 			/* Data on our TCP socket */
+		
 			uint8_t		buffer[EB_MT_TCP_CHUNKSIZE];
 			int16_t		ptr = 0, my_ptr = 0;
 			int		len;
@@ -688,22 +691,16 @@ void * eb_multitrunk_handler_thread (void * input)
 
 			len = read (me->socket, buffer, EB_MT_TCP_CHUNKSIZE);
 
-			if (len == 0) /* Socket closure? */
-			{
-				// Not clear why we needed to be locked at this stage
-				// pthread_mutex_unlock(&(me->mt_lock));
+			if (len == 0) /* Socket closure */
 				break;
-			}
-
-			eb_debug (0, 3, "MTRUNK", "M-Trunk  %7d Data received from %s:%d length %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteport, len);
 
 			if (len == -1) // Error - quit
-			{
-				// Not clear why we needed to be locked at this stage
-				// pthread_mutex_unlock(&(me->mt_lock));
 				break;
-			}
 
+			//eb_debug (0, 3, "MTRUNK", "M-Trunk  %7d Data received from %s:%d length %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteport, len);
+
+			eb_debug (0, 2, "MTRUNK", "M-Trunk  %7d Data received from %s:%d length %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteport, len);
+			
 			if ((cipherpacket_size - cipherpacket_ptr) < len)
 			{
 				/* Expand buffer, up to maximum */
@@ -802,7 +799,6 @@ void * eb_multitrunk_handler_thread (void * input)
 				}
 			}
 		}
-
 	}
 
 	eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Disconnect or read error from %s(%s):%d", me->multitrunk_parent->multitrunk.port, remotehost, remoteip, remoteport);
