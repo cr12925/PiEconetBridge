@@ -70,7 +70,7 @@ short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for e
 short use_xattr=1 ; // When set use filesystem extended attributes, otherwise use a dotfile
 short normalize_debug = 0; // Whether we spew out loads of debug about filename normalization
 
-//struct __fs_station	*fileservers; /* Set to NULL in fs_setup() */
+int fsop_scandir_regex(const struct dirent *, struct fsop_data *);
 
 // Parser
 //#define FS_PARSE_DEBUG 1
@@ -82,7 +82,7 @@ uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 
 struct fsop_list fsops[255]; 
 
-regex_t r_discname, r_wildcard;
+//regex_t r_discname; // , r_wildcard;
 
 extern void eb_debug_fmt (uint8_t, uint8_t, char *, char *);
 
@@ -1584,14 +1584,22 @@ void fs_wildcard_to_regex(char *input, char *output, uint8_t infcolon)
 
 // Does a regcomp on string into r_wildcard to save the bother of coding the same every time
 // Puts the right flags on the call too
+/*
 int fs_compile_wildcard_regex(char *string)
 {
 	return regcomp(&(r_wildcard), string, REG_EXTENDED | REG_ICASE | REG_NOSUB);
+}
+*/
+
+int fsop_compile_wildcard_regex (char *string, struct fsop_data *f)
+{
+	return regcomp(&(f->server->r_wildcard), string, REG_EXTENDED | REG_ICASE | REG_NOSUB);
 }
 
 // Makes sure we aren't more than 10 characters long,
 // does a case insensitive regex match on the r_wildcard regex (which
 // the caller must have already provided and compiled)
+#if 0
 int fs_scandir_filter(const struct dirent *d)
 {
 	
@@ -1606,6 +1614,7 @@ int fs_scandir_filter(const struct dirent *d)
 	else	return 0;
 
 }
+#endif
 
 // Frees a *SCANDIR* list of entries. NOT an fs_wildcard_entries chain.
 void fs_free_scandir_list(struct dirent ***list, int n)
@@ -1668,10 +1677,11 @@ int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, ch
 
 	if (normalize_debug) fs_debug (0, 2, "fs_get_wildcard_entries() - needle = '%s', needle_wildcard = '%s'", needle, needle_wildcard);
 
-	if (fs_compile_wildcard_regex(needle_wildcard) != 0) // Error
+	if (fsop_compile_wildcard_regex(needle_wildcard, f) != 0) // Error
 		return -1;
 
-	results = scandir(haystack, &namelist, fs_scandir_filter, fs_alphacasesort);
+	//results = scandir(haystack, &namelist, fs_scandir_filter, fs_alphacasesort);
+	results = scandir(haystack, &namelist, NULL, fs_alphacasesort);
 
 	if (results == -1) // Error - e.g. not found, or not a directory
 		return -1;
@@ -1687,9 +1697,12 @@ int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, ch
 
 		// if() added when long filename support added because scandir filter cannot take server parameter
 
+		// TODO - Filter the scandir() list against the regex here, and do counter++;continue; if not matched. In fact, put it in this if() selection below, that'll do it. (But with a not comparison on it because the if() selects things we DO want...)
+
 		if (	(strlen(namelist[counter]->d_name) <= ECONET_MAX_FILENAME_LENGTH) && 
 			(strcmp(namelist[counter]->d_name, ".")) && 
-			(strcmp(namelist[counter]->d_name, ".."))
+			(strcmp(namelist[counter]->d_name, "..")) &&
+			fsop_scandir_regex(namelist[counter], f) // i.e. it's one we want
 		   )	// Exclude the special directories in case we have COLONMAP turned on
 		{
 
@@ -2088,7 +2101,7 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 		int 	found = 0;
 
 		// Exclude lost+found!
-		if (strcasecmp(path+1, "lost+found") && regexec(&r_discname, (const char * ) path+1, 1, matches, 0) == 0)
+		if (strcasecmp(path+1, "lost+found") && regexec(&(f->server->r_discname), (const char * ) path+1, 1, matches, 0) == 0)
 		{
 			strncpy((char * ) result->discname, (const char * ) path+1, matches[0].rm_eo - matches[0].rm_so);
 			*(result->discname + matches[0].rm_eo - matches[0].rm_so) = '\0';
@@ -3500,6 +3513,8 @@ void fsop_shutdown (struct __fs_station *s)
 	s->users = NULL;
 	s->groups = NULL;
 
+	regfree(&(s->r_discname));
+
 	/* Free the config struct */
 
 	munmap(s->config, 256);
@@ -3741,10 +3756,19 @@ void fsop_bye_internal(struct __fs_active *a, uint8_t do_reply, uint8_t reply_po
 	FS_LIST_SPLICEFREE(s->actives, a, "FS", "fsop_bye_internal() deallocate active struct");
 }
 
+#if 0
 int fs_scandir_regex(const struct dirent *d)
 {
 
 	return (((strcasecmp(d->d_name, "lost+found") == 0) || (strcasecmp(d->d_name, ".") == 0) || (strcasecmp(d->d_name, "..") == 0) || (strcasecmp(d->d_name, "lost+found") == 0) || (regexec(&r_wildcard, d->d_name, 0, NULL, 0) != 0)) ? 0 : 1); // regexec returns 0 on match, so we need to return 0 (no match) if it returns other than 0.
+
+}
+#endif
+
+int fsop_scandir_regex(const struct dirent *d, struct fsop_data *f)
+{
+
+	return (((strcasecmp(d->d_name, "lost+found") == 0) || (strcasecmp(d->d_name, ".") == 0) || (strcasecmp(d->d_name, "..") == 0) || (strcasecmp(d->d_name, "lost+found") == 0) || (regexec(&(f->server->r_wildcard), d->d_name, 0, NULL, 0) != 0)) ? 0 : 1); // regexec returns 0 on match, so we need to return 0 (no match) if it returns other than 0.
 
 }
 
@@ -3765,7 +3789,7 @@ void fs_free_dirent(struct dirent **list, int entries)
 int16_t fsop_get_acorn_entries(struct fsop_data *f, unsigned char *unixpath)
 {
 
-	int16_t entries;
+	int16_t entries, count, final_entries;
 
 	unsigned char regex[1024];
 
@@ -3776,21 +3800,32 @@ int16_t fsop_get_acorn_entries(struct fsop_data *f, unsigned char *unixpath)
 	else
 		sprintf(regex, "^(%s{1,%d})", FSREGEX, ECONET_MAX_FILENAME_LENGTH);
 
-	if (regcomp(&r_wildcard, regex, REG_EXTENDED | REG_ICASE | REG_NOSUB) != 0) // We go extended expression, case insensitive and we aren't bothered about finding *where* the matches are in the string
+	if (regcomp(&(f->server->r_wildcard), regex, REG_EXTENDED | REG_ICASE | REG_NOSUB) != 0) // We go extended expression, case insensitive and we aren't bothered about finding *where* the matches are in the string
 		return -1; // Regex failure!
 
-	entries = scandir(unixpath, &list, fs_scandir_regex, fs_alphacasesort);
+	//entries = scandir(unixpath, &list, fs_scandir_regex, fs_alphacasesort);
+	entries = scandir(unixpath, &list, NULL, fs_alphacasesort);
 
 	//fs_debug (0, 3, "%12s            fs_get_acorn_entries(%d, %d, %s) = %d", "", server, active_id, unixpath, entries);
 
 	if (entries == -1) // Failure
+	{
+		regfree(&(f->server->r_wildcard));
 		return -1;
+	}
 
+	final_entries = 0;
+
+	for (count = 0; count < entries; count++)
+		if (fsop_scandir_regex(list[count], f) == 1) final_entries++;
+
+	// Now discount those which don't match our Acorn regex
+	
 	fs_free_dirent(list, entries); // De-malloc everything
 
-	regfree (&r_wildcard);
+	regfree (&(f->server->r_wildcard));
 
-	return entries;
+	return final_entries;
 
 }
 
@@ -4669,7 +4704,6 @@ uint8_t fsop_writedisclist (struct __fs_station *s, unsigned char *addr)
 void fsop_setup(void)
 {
 
-	unsigned char	regex[128];
 
 	/* Initialize list of tabled FSOP handler functions */
 
@@ -4776,11 +4810,6 @@ void fsop_setup(void)
 	FSOP_OSCLI(SETPASS,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 4);
 	FSOP_OSCLI(UNLINK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 1, 1, 4);
 
-	sprintf(regex, "^(%s{1,16})", FSREGEX);
-
-	if (regcomp(&r_discname, regex, REG_EXTENDED) != 0)
-		fs_debug (1, 0, "Unable to compile regex for disc names.");
-
 	fs_debug (0, 1, "Fileserver infrastructure set up");
 
 }
@@ -4806,6 +4835,7 @@ int8_t fsop_run (struct __fs_station *s)
 
 	int	err;
 	uint8_t	port;
+	unsigned char	regex[128];
 
 	if (!s)	return -2;
 
@@ -4833,6 +4863,11 @@ int8_t fsop_run (struct __fs_station *s)
 
 	s->enabled = 1; /* Turn it on */
 	
+	sprintf(regex, "^(%s{1,16})", FSREGEX);
+
+	if (regcomp(&(s->r_discname), regex, REG_EXTENDED) != 0)
+		fs_debug (1, 0, "Unable to compile regex for disc names.");
+
 	pthread_mutex_unlock (&(s->fs_mutex));
 
 	/* Create the thread & detach */

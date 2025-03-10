@@ -161,8 +161,8 @@ struct __fs_station {
 	pthread_cond_t		fs_condition; // Condition the FS waits on for traffic
 	pthread_t		fs_thread; // FS thread 
 	struct __eb_packetqueue	*fs_workqueue; // Packets to be processed by this FS
-	regex_t			wildcard_regex; // Not yet used. Need to have this local to the FS not global
 	regex_t			r_pathname; // Pathname by filename length
+	regex_t			r_wildcard, r_discname; /* Regexes for filenames */
 	struct __fs_station	*next, *prev; // Up and down the tree
 };
 
