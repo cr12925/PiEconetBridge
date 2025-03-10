@@ -426,6 +426,8 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 					search_trunk->trunk.mt_data = me;
 					me->trunk = search_trunk;
 					eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
+					/* Wake up the child trunk */
+					pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
 				}
 
 				me->trunk = search_trunk;
@@ -653,7 +655,8 @@ void * eb_multitrunk_handler_thread (void * input)
 
 	/* Wake up the device listener */
 
-	pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
+	if (me->trunk)
+		pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
 
 	/* Wait for data */
 
