@@ -1823,6 +1823,8 @@ void fs_unix_to_acorn(char *string)
 
 	unsigned short counter = 0;
 
+	if (normalize_debug) fs_debug (0, 1, "Converting %s to acorn...", string);
+
 	while (*(string+counter) != '\0')
 	{
 		if (*(string+counter) == ':')
@@ -1834,6 +1836,7 @@ void fs_unix_to_acorn(char *string)
 		counter++;
 	}
 
+	if (normalize_debug) fs_debug (0, 1, "Converted to %s", string);
 }
 
 // output must be suitably sized - the regex string is quite long!
@@ -2037,6 +2040,8 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 	
 			fs_unix_to_acorn(new_p->acornname);
 	
+			if (normalize_debug) fs_debug (0, 1, "Converted filename to %s in acorn", new_p->acornname);
+
 			sprintf (new_p->unixpath, "%s/%s", haystack, new_p->unixfname);
 	
 			if (stat(new_p->unixpath, &statbuf) != 0) // Error
@@ -2062,7 +2067,7 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 			*/
 	
 
-			//fs_debug (0, 3, "fs_get_wildcard_entries() loop counter %d of %d - ACORN:'%s', UNIX '%s'", counter+1, results, new_p->acornname, new_p->unixfname);
+			fs_debug (0, 3, "fs_get_wildcard_entries() loop counter %d of %d - ACORN:'%s', UNIX '%s'", counter+1, results, new_p->acornname, new_p->unixfname);
 	
 			p = new_p; // update p
 	
@@ -2966,6 +2971,8 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 					strcpy(result->unixfname, unix_segment); // For use by caller if we didn't find it
 					// Populate the acorn name we were looking for so that things like fs_save() can easily return it
 					strcpy(result->acornname, path_segment);
+					// 20250310 Bugfix - the path_segment is in unix format, not acorn so we need to convert it!
+					fs_unix_to_acorn(result->acornname);
 					result->parent_owner = parent_owner; // Otherwise this doesn't get properly updated
 					if (normalize_debug) fs_debug (0, 1, "Non-Wildcard file (%s, unix %s) not found in dir %s - returning unixpath %s, acornname %s, parent_owner %04X", path_segment, unix_segment, result->unixpath, result->unixpath, result->acornname, result->parent_owner);
 					return 1;
@@ -2983,7 +2990,9 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 		strcat(result->unixpath, unix_segment);
 
 		// Add it to full acorn path
+		// 20250310 path_segment is in unix format - convert it first
 		strcat(result->acornfullpath, ".");
+		fs_unix_to_acorn(path_segment);
 		strcat(result->acornfullpath, path_segment);
 
 		if (normalize_debug) fs_debug (0, 1, "Attempting to stat %s", result->unixpath);
@@ -3108,6 +3117,7 @@ int fs_normalize_path_wildcard(int server, int user, unsigned char *received_pat
 
 			result->acornname[ECONET_MAX_FILENAME_LENGTH] = '\0';
 			fs_unix_to_acorn(result->acornname);
+			if (normalize_debug) fs_debug (0, 1, "Converted (2) filename to %s in acorn", result->acornname);
 
 		}
 		else	return 0; // Something wrong - that should have existed
