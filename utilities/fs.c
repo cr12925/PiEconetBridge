@@ -1853,6 +1853,10 @@ int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, ch
 
 	if (results > 0) fs_free_scandir_list(&namelist, results); // This needs to check results (not 'found') because results is how many scandir returned, not all of which might be 'found' because we apply the length criteria locally.
 
+	// Free the reg
+	
+	regfree (&(f->server->r_wildcard));
+
 	// This version from update to long filenames, because this function (rather than scandir with its filter) now ascertains how many results matched, because scandir cannot apply the length criteria. 
 	return found;
 
@@ -3514,12 +3518,13 @@ void fsop_shutdown (struct __fs_station *s)
 	s->groups = NULL;
 
 	regfree(&(s->r_discname));
+	regfree(&(s->r_pathname));
 
 	/* Free the config struct */
 
 	munmap(s->config, 256);
 
-	fs_debug_full (0, 1, s, 0, 0, "             Server has shut down");
+	fs_debug_full (0, 1, s, 0, 0, "Server has shut down");
 
 	return;
 
