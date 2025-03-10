@@ -3879,14 +3879,14 @@ void fsop_close_interlock(struct __fs_station *s, struct __fs_file * file, uint8
 		file->readers--;
 	else	file->writers--;
 
-	fs_debug_full (0, 2, s, 0, 0, "             Interlock close internal handle: mode %d. Readers now = %d, Writers now = %d, path %s", mode, file->readers, file->writers, file->name);
+	fs_debug_full (0, 2, s, 0, 0, "Interlock close internal handle: mode %d. Readers now = %d, Writers now = %d, path %s", mode, file->readers, file->writers, file->name);
 
 	// Safety valve here - only close when both are 0, not <= 0
 	// Otherwise we sometimes overclose - e.g. in the fs_garbage_collect() routine
 	
 	if (file->readers == 0 && file->writers == 0)
 	{
-		fs_debug_full (0, 2, s, 0, 0, "             Interlock closing internal handle for %s in operating system", file->name);
+		fs_debug_full (0, 2, s, 0, 0, "Interlock closing internal handle for %s in operating system", file->name);
 		fclose(file->handle);
 		FS_LIST_SPLICEFREE(s->files,file,"FS","Freeing internal file structure");
 	}
