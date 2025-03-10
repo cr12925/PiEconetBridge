@@ -8728,7 +8728,7 @@ int eb_parse_json_config(struct json_object *jc)
 
 				fw_chain = eb_malloc (__FILE__, __LINE__, "JSON", "Create new firewall chain head", sizeof(struct __eb_fw_chain));
 
-				fw_chain->fw_chain_name = eb_malloc (__FILE__, __LINE__, "JSON", "Create firewall chain name string", strlen(json_object_get_string(jchain_name)+1));
+				fw_chain->fw_chain_name = eb_malloc (__FILE__, __LINE__, "JSON", "Create firewall chain name string", strlen(json_object_get_string(jchain_name)+2));
 				
 				strcpy((char *) fw_chain->fw_chain_name, json_object_get_string(jchain_name));
 				fw_chain->fw_default = policy;
