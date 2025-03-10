@@ -1645,6 +1645,7 @@ static void * eb_bridge_update_watcher (void *device)
 	uint8_t			tx_count;
 	struct timespec		wait_timeout;
 	int			update_delay = 30;
+	uint8_t			dead;
 
 	struct __econet_packet_aun	* update; 
 
@@ -1672,8 +1673,25 @@ static void * eb_bridge_update_watcher (void *device)
 		else
 			result = pthread_cond_wait(&(me->bridge_update_cond), &(me->bridge_update_lock));
 
+		dead = 0; /* Assume alive */
+
 		if (me->type == EB_DEF_TRUNK && !me->trunk.hostname) // Unconnected trunk
-			continue;
+			dead = 1;
+
+		/* See if we are an unconnected multitrunk child, and continue if so */
+
+		if (me->type == EB_DEF_TRUNK && me->trunk.mt_parent)
+		{
+
+			pthread_mutex_lock(&(me->trunk.mt_mutex));
+			if (!(me->trunk.mt_data))
+				dead = 1; // We're not alive
+			pthread_mutex_unlock(&(me->trunk.mt_mutex));
+
+		}
+
+		if (dead)
+			continue; /* Don't send anything */
 
 		/* We are awake here, and we have the lock
 		 *
@@ -1804,6 +1822,7 @@ static void * eb_bridge_reset_watcher (void *device)
 	uint8_t			qty;
 	uint8_t			sender_net; /* Src net num used for transmission of broadcast */
 	uint8_t			tx_count;
+	uint8_t			dead; /* Whether trunk is not alive yet */
 
 	struct __econet_packet_aun	* update; 
 
@@ -1818,8 +1837,28 @@ static void * eb_bridge_reset_watcher (void *device)
 
 		pthread_cond_wait(&(me->bridge_reset_cond), &(me->bridge_reset_lock));
 
+		//if (me->type == EB_DEF_TRUNK && !me->trunk.hostname) // Unconnected trunk
+			//continue;
+
+		dead = 0; /* Assume alive */
+
 		if (me->type == EB_DEF_TRUNK && !me->trunk.hostname) // Unconnected trunk
-			continue;
+			dead = 1;
+
+		/* See if we are an unconnected multitrunk child, and continue if so */
+
+		if (me->type == EB_DEF_TRUNK && me->trunk.mt_parent)
+		{
+
+			pthread_mutex_lock(&(me->trunk.mt_mutex));
+			if (!(me->trunk.mt_data))
+				dead = 1; // We're not alive
+			pthread_mutex_unlock(&(me->trunk.mt_mutex));
+
+		}
+
+		if (dead)
+			continue; /* Don't send anything */
 
 		/* We are awake here, and we have the lock
 		 *
