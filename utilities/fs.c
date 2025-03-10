@@ -1988,7 +1988,10 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 	results = scandir(haystack, &namelist, fs_scandir_filter, fs_alphacasesort);
 
 	if (results == -1) // Error - e.g. not found, or not a directory
+	{
+		regfree(&r_wildcard);
 		return -1;
+	}
 
 	// Convert to a path_entry chain here and assign head & tail.
 
@@ -2134,6 +2137,8 @@ int fs_get_wildcard_entries (int server, int userid, char *haystack, char *needl
 	}
 
 	if (results > 0) fs_free_scandir_list(&namelist, results); // This needs to check results (not 'found') because results is how many scandir returned, not all of which might be 'found' because we apply the length criteria locally.
+
+	regfree(&r_wildcard);
 
 	// This version from update to long filenames, because this function (rather than scandir with its filter) now ascertains how many results matched, because scandir cannot apply the length criteria. 
 	return found;
