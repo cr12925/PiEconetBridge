@@ -184,7 +184,7 @@ uint8_t eb_device_init_multitrunk (char *host, char *trunkname, uint16_t port, i
 	multitrunks = p;
 
 	DEVINIT_DEBUG("Created Multi-Trunk with name %s, host %s, port %d, family %d", 
-			host, trunkname, port, family);
+			trunkname, host, port, family);
 
 	return 1;
 }

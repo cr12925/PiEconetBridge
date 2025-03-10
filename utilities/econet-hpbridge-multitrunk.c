@@ -86,6 +86,36 @@
  * get it to start trying to connect unconnected multitrunks again.
  */
 
+/* 
+ * eb_mt_set_endpoint_name
+ *
+ * Set the endpoint name and port on a multitrunk child trunk device.
+ *
+ */
+
+void eb_mt_set_endpoint (struct __eb_device *mtc, char *remotehost, uint16_t remoteport)
+{
+
+	mtc->trunk.hostname = eb_malloc(__FILE__, __LINE__, "M-TRUNK", "Allocate new remote hostname string", strlen(remotehost)+1);
+	strcpy(mtc->trunk.hostname, remotehost);
+	mtc->trunk.remote_port = remoteport;
+}
+
+/*
+ * eb_mt_unset_endpoint_name
+ *
+ * Unset the endpoint name and port on a multitrunk child trunk device. Really only for server type devices where
+ * we may not have a connection to the other end we can initiate.
+ */
+
+void eb_mt_unset_endpoint (struct __eb_device *mtc)
+{
+	if (mtc->trunk.hostname)
+		eb_free(__FILE__, __LINE__, "M-TRUNK", "Free trunk hostname string", mtc->trunk.hostname);
+	mtc->trunk.hostname = NULL;
+	mtc->trunk.remote_port = 0;
+}
+
 /* eb_trunk_decrypt
  *
  * Uses the SSL library to decrypt an encrypted packet, and leaves it in
@@ -394,6 +424,8 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 				{
 					search_trunk->trunk.mt_data->death = 1; /* Kill it */
 					search_trunk->trunk.mt_data = me;
+					me->trunk = search_trunk;
+					eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
 				}
 
 				me->trunk = search_trunk;
@@ -501,36 +533,6 @@ int eb_mt_base64_encrypt_tx(uint8_t *data, uint16_t datalength, struct __eb_devi
 	return -1;
 }
 
-/* 
- * eb_mt_set_endpoint_name
- *
- * Set the endpoint name and port on a multitrunk child trunk device.
- *
- */
-
-void eb_mt_set_endpoint (struct __eb_device *mtc, char *remotehost, uint16_t remoteport)
-{
-
-	mtc->trunk.hostname = eb_malloc(__FILE__, __LINE__, "M-TRUNK", "Allocate new remote hostname string", strlen(remotehost)+1);
-	strcpy(mtc->trunk.hostname, remotehost);
-	mtc->trunk.remote_port = remoteport;
-}
-
-/*
- * eb_mt_unset_endpoint_name
- *
- * Unset the endpoint name and port on a multitrunk child trunk device. Really only for server type devices where
- * we may not have a connection to the other end we can initiate.
- */
-
-void eb_mt_unset_endpoint (struct __eb_device *mtc)
-{
-	if (mtc->trunk.hostname)
-		eb_free(__FILE__, __LINE__, "M-TRUNK", "Free trunk hostname string", mtc->trunk.hostname);
-	mtc->trunk.hostname = NULL;
-	mtc->trunk.remote_port = 0;
-}
-
 /* Bidirectional traffic from an underlying trunk device to the multitrunk socket (whether acccept()ed inbound, or connect()ed outbound */
 
 void * eb_multitrunk_handler_thread (void * input)
@@ -608,17 +610,21 @@ void * eb_multitrunk_handler_thread (void * input)
 
 	eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d New connection with remote at %s(%s):%d", me->multitrunk_parent->multitrunk.port, remotehost, remoteip, remoteport);
 
-	if (me->trunk->trunk.mt_type == MT_SERVER) /* Update endpoint address in trunk */
-		eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
+	/* me->trunk won't be set at this point. */
+	//if (me->trunk->trunk.mt_type == MT_SERVER) /* Update endpoint address in trunk */
+		//eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
 
 	if ((me->trunk_socket = socket(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK, 0)) == -1)
 		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to create socket to underlying trunk", me->multitrunk_parent->multitrunk.port);
 
-	/* Lock the underlying trunk and update its mt_data */
+	/* Lock the underlying trunk and update its mt_data  - but only if it's a client, because me->trunk won't be set if it's a server, because we've not received any traffic yet */
 
-	pthread_mutex_lock(&(me->trunk->trunk.mt_mutex));
-	me->trunk->trunk.mt_data = me;
-	pthread_mutex_unlock(&(me->trunk->trunk.mt_mutex));
+	if (me->mt_type == MT_CLIENT) /* If a client, we'll have already set me->trunk when we connected so the data in there will be valid */
+	{
+		pthread_mutex_lock(&(me->trunk->trunk.mt_mutex));
+		me->trunk->trunk.mt_data = me;
+		pthread_mutex_unlock(&(me->trunk->trunk.mt_mutex));
+	}
 
 	/* 
 	 * Protocol v1:
@@ -635,7 +641,7 @@ void * eb_multitrunk_handler_thread (void * input)
 	 * 		For version, this is a 1 byte value
 	 */
 
-	if (me->trunk->trunk.mt_type == MT_CLIENT) /* We need to send our version number up front */
+	if (me->mt_type == MT_CLIENT) /* We need to send our version number up front */
 		eb_mt_send_proto_version(me);
 	else // If server, send welcome message
 	{
@@ -805,12 +811,12 @@ void * eb_multitrunk_handler_thread (void * input)
 
 	/* Graceful close down and unpick links in/to underlying trunk */
 
-	if (me->trunk)
+	if (0 && me->trunk) /* Disabled - All we really need to do is close the sockets & free me - the rest may well generate a race condition with a handler which has just taken over this trunk */
 	{
 		pthread_mutex_lock(&(me->trunk->trunk.mt_mutex));
 		me->trunk->trunk.mt_data = NULL; // Disconnect us
 
-		if (me->trunk->trunk.mt_type == MT_SERVER)
+		if (me->mt_type == MT_SERVER)
 			eb_mt_unset_endpoint(me->trunk);
 
 		// Do we need to clear ->hostname, ->remote_host as well? Probably for dynamic trunks.
@@ -976,8 +982,9 @@ void * eb_multitrunk_client_device (void * device)
 			mtc_new->socket = mt_socket;
 			mtc_new->multitrunk_parent = me->trunk.mt_parent;
 			mtc_new->trunk = me;
-			mtc_new->mt_type = MT_TYPE_TCP; /* They're all TCP for now. There may be a time when
+			mtc_new->mt_mode = MT_TYPE_TCP; /* They're all TCP for now. There may be a time when
      							   we adapt this to cope with UDP too. */
+			mtc_new->mt_type = MT_CLIENT;
 
 			/* Initialize lock on the data */
 
@@ -1145,9 +1152,10 @@ void * eb_multitrunk_server_device (void * device)
 
 						mtc_new->socket = newconn;
 						mtc_new->multitrunk_parent = me;
-						mtc_new->trunk = me;
-						mtc_new->mt_type = MT_TYPE_TCP; /* They're all TCP for now. There may be a time when
+						mtc_new->trunk = NULL; // We don't know which client it is yet. Setting this to 'me' was a very dopey idea.
+						mtc_new->mt_mode = MT_TYPE_TCP; /* They're all TCP for now. There may be a time when
 			     							   we adapt this to cope with UDP too. */
+						mtc_new->mt_type = MT_SERVER;
 
 						if (setsockopt(newconn, SOL_SOCKET, SO_KEEPALIVE, (char *) &(flag), sizeof(int)) < 0)
 							eb_debug(1, 0, "M-TRUNK", "M-Trunk  %7d Unable to set SO_KEEPALIVE on new client connection", me->multitrunk.port);
