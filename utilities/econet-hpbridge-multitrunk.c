@@ -677,7 +677,7 @@ void * eb_multitrunk_handler_thread (void * input)
 			break;
 		}
 		else if (poll_result == 0)
-			eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d poll() from client returned 0", me->trunk->trunk.remote_port);
+			eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d poll() from %sclient returned 0", (me->trunk) ? me->trunk->trunk.remote_port : me->multitrunk_parent->multitrunk.port, me->trunk ? "unauthenticated " : "");
 
 		pthread_mutex_lock(&(me->mt_lock));
 
