@@ -610,7 +610,7 @@ void * eb_multitrunk_handler_thread (void * input)
 		strcpy(remotehost, remoteip);
 	}
 
-	eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d New connection with remote at %s(%s):%d", me->multitrunk_parent->multitrunk.port, remotehost, remoteip, remoteport);
+	eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d New connection with remote at %s(%s):%d - sock fd %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteip, remoteport, me->socket);
 
 	/* me->trunk won't be set at this point. */
 	//if (me->trunk->trunk.mt_type == MT_SERVER) /* Update endpoint address in trunk */
@@ -668,6 +668,8 @@ void * eb_multitrunk_handler_thread (void * input)
 		p[0].fd = me->socket;
 		p[0].events = POLLIN | POLLPRI | POLLRDBAND;
 		p[0].revents = 0;
+
+		eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d poll()ing sock fd %d", me->multitrunk_parent->multitrunk.port, me->socket);
 
 		poll_result = poll(p, 1, 5000);
 
