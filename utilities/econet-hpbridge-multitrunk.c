@@ -541,6 +541,7 @@ void * eb_multitrunk_handler_thread (void * input)
 {
 	struct mt_client	* me;
 	struct pollfd		p[2];
+	int			timeout;
 	uint8_t			*cipherpacket = NULL;
 	uint32_t		cipherpacket_ptr = 0, cipherpacket_size = 0; // _ptr is pointer into cipherpacket, _size is current allocated size of cipherpacket, which will grow in EB_MT_TCP_CHUNKSIZE chunks up to EB_MT_TCPMAXSIZE
 	union	{
@@ -618,6 +619,11 @@ void * eb_multitrunk_handler_thread (void * input)
 
 	if ((me->trunk_socket = socket(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK, 0)) == -1)
 		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to create socket to underlying trunk", me->multitrunk_parent->multitrunk.port);
+
+	timeout = me->multitrunk_parent->multitrunk.timeout;
+
+	if (timeout > 0 && (setsockopt(me->trunk_socket, SOL_SOCKET, TCP_USER_TIMEOUT, (char *) &(timeout), sizeof(timeout)) < 0))
+		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server unable to set TCP_USER_TIMEOUT to %d", me->multitrunk_parent->multitrunk.port, me->multitrunk_parent->multitrunk.timeout);
 
 	/* Lock the underlying trunk and update its mt_data  - but only if it's a client, because me->trunk won't be set if it's a server, because we've not received any traffic yet */
 
@@ -1075,7 +1081,7 @@ void * eb_multitrunk_server_device (void * device)
 	{
 		int mt_socket;
 		int on = 1;
-		unsigned int timeout = me->multitrunk.timeout;
+		//unsigned int timeout = me->multitrunk.timeout;
 
 		mt_socket = socket (mt_iterate->ai_family,
 					mt_iterate->ai_socktype | SOCK_NONBLOCK,
@@ -1089,11 +1095,6 @@ void * eb_multitrunk_server_device (void * device)
 
 		if (setsockopt(mt_socket, SOL_SOCKET, SO_REUSEPORT, (char *) &on, sizeof(on)) < 0)
 			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to set SO_REUSEPORT", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port);
-
-		/* Disable this
-		if (timeout > 0 && (setsockopt(mt_socket, SOL_SOCKET, TCP_USER_TIMEOUT, (char *) &(timeout), sizeof(timeout)) < 0))
-			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to set TCP_USER_TIMEOUT to %d", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port, me->multitrunk.timeout);
-		*/
 
 		if (bind(mt_socket, mt_iterate->ai_addr, mt_iterate->ai_addrlen) != 0)
 			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to bind to %s (addr family %d)", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port, mt_iterate->ai_canonname, mt_iterate->ai_protocol);
