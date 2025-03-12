@@ -761,7 +761,11 @@ void * eb_multitrunk_handler_thread (void * input)
 
 									eb_mt_copy_to_cipherpacket (&cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, realdata_start, realdata_len);
 
-									fprintf (stderr, "\n\n*** Cipherpacket = %p ***\n\n", cipherpacket);
+									fprintf (stderr, "\n\n*** Cipherpacket = %p, ptr %d, size %d ***\n\n PACKET:\n\n", cipherpacket, cipherpacket_ptr, cipherpacket_size);
+
+									for (uint16_t mycounter = 0; mycounter < cipherpacket_size; mycounter++)
+										fprintf (stderr, "%c", cipherpacket[mycounter]);
+									fprintf (stderr, "\n\n");
 
 									eb_mt_debase64_decrypt_process(me, cipherpacket, cipherpacket_ptr, remotehost, remoteport);
 
