@@ -243,8 +243,9 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 	}
 	else
 	{
+		eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encrypted length from EVP_EncrypUpdate = %04X", port, encrypted_length);
 		encrypted_length += tmp_len;
-		eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encryption succeeded: cleartext length %04X, encrypted length %04X", length + 2, encrypted_length);
+		eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encryption succeeded: cleartext length %04X, encrypted length %04X", port, length + 2, encrypted_length);
 	}
 
 	EVP_CIPHER_CTX_free(ctx_enc);
@@ -391,12 +392,14 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 
 	g_base64_decode_inplace ((gchar *) cipherpacket, (gsize *) &size);
 
-	fprintf (stderr, "Decrypted data as follows, length %d:\n\n", size);
+	/*
+	fprintf (stderr, "Encrypted data as follows, length %d:\n\n", size);
 
 	for (int mycount = 0; mycount < size; mycount++)
 		fprintf (stderr, "%02X ", cipherpacket[mycount]);
 
 	fprintf (stderr, "\n\n");
+	*/
 
 	/* Now decrypt */
 
@@ -417,11 +420,11 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 
 			/* Probably want to curtail encrypted data which is too long... TODO! */
 
-			fprintf (stderr, "Attempting to decrypt with key %s\n\n", search_trunk->trunk.sharedkey);
+			//fprintf (stderr, "Attempting to decrypt with key %s\n\n", search_trunk->trunk.sharedkey);
 
 			if ((decrypted_length = eb_trunk_decrypt(me->multitrunk_parent->multitrunk.port, cipherpacket, size, search_trunk->trunk.sharedkey, buffer)) >= 0)
 			{
-				fprintf (stderr, "\n\n*** Decryptable packet received, length %d\n\n", decrypted_length);
+				//fprintf (stderr, "\n\n*** Decryptable packet received, length %d\n\n", decrypted_length);
 
 				pthread_mutex_lock(&(search_trunk->trunk.mt_mutex));
 
@@ -490,6 +493,13 @@ int eb_mt_base64_encrypt_tx(uint8_t *data, uint16_t datalength, struct __eb_devi
 
 	if ((encrypted_length = eb_trunk_encrypt(data, datalength, mt->trunk.local_port, mt, &encrypted)) >= 0)
 	{
+		/*
+		fprintf (stderr, "Sending encrypted data of length %d:\n\n", encrypted_length);
+		for (int mycount = 0; mycount < encrypted_length; mycount++)
+			fprintf (stderr, "%02X ", encrypted[mycount]);
+		fprintf (stderr, "\n\n");
+		*/
+
 		base64 = g_base64_encode((const guchar *) encrypted, encrypted_length);
 
 		if (base64)
@@ -682,7 +692,7 @@ void * eb_multitrunk_handler_thread (void * input)
 		p[0].events = POLLIN | POLLPRI | POLLRDBAND;
 		p[0].revents = 0;
 
-		eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d poll()ing sock fd %d", me->multitrunk_parent->multitrunk.port, me->socket);
+		eb_debug (0, 4, "M-TRUNK", "M-Trunk  %7d poll()ing sock fd %d", me->multitrunk_parent->multitrunk.port, me->socket);
 
 		poll_result = poll(p, 1, 5000);
 
@@ -692,7 +702,7 @@ void * eb_multitrunk_handler_thread (void * input)
 			break;
 		}
 		else if (poll_result == 0)
-			eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d poll() from %sclient returned 0", (me->trunk) ? me->trunk->trunk.remote_port : me->multitrunk_parent->multitrunk.port, me->trunk ? "": "unauthenticated ");
+			eb_debug (0, 4, "M-TRUNK", "M-Trunk  %7d poll() from %sclient returned 0", (me->trunk) ? me->trunk->trunk.remote_port : me->multitrunk_parent->multitrunk.port, me->trunk ? "": "unauthenticated ");
 
 		pthread_mutex_lock(&(me->mt_lock));
 
