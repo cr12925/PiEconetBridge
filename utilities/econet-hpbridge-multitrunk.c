@@ -311,12 +311,10 @@ uint8_t eb_mt_copy_to_cipherpacket (uint8_t **cipherpacket, uint32_t *cipherpack
 	{
 		*cipherpacket_ptr = 0;
 		realloc_size = length > EB_MT_TCP_MAXSIZE ? EB_MT_TCP_MAXSIZE : length;
-		//fprintf (stderr, "\n\n*** Cipherpacket null - allocating %d bytes***\n\n", realloc_size);
 		*cipherpacket = eb_malloc(__FILE__, __LINE__, "MTRUNK", "New cipherpacket", realloc_size);
 	}
 	else
 	{
-		//fprintf (stderr, "\n\n*** Cipherpacket not null - re-allocating to %d***\n\n", realloc_size);
 		*cipherpacket = realloc(cipherpacket, realloc_size);
 	}
 
@@ -411,6 +409,8 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 			/* Attempt a decrypt with its key */
 
 			/* Probably want to curtail encrypted data which is too long... TODO! */
+
+			fprintf (stderr, "Attempting to decrypt with key %s\n\n", search_trunk->trunk.sharedkey);
 
 			if ((decrypted_length = eb_trunk_decrypt(me->multitrunk_parent->multitrunk.port, cipherpacket, size, search_trunk->trunk.sharedkey, buffer)) >= 0)
 			{
@@ -757,15 +757,7 @@ void * eb_multitrunk_handler_thread (void * input)
 								{
 									realdata_len = ptr - realdata_start;								 
 	
-									fprintf (stderr, "\n\n*** Found end marker - realdata_len = %d, cipherpacket = %p ***\n\n", realdata_len, cipherpacket);
-
 									eb_mt_copy_to_cipherpacket (&cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, realdata_start, realdata_len);
-
-									fprintf (stderr, "\n\n*** Cipherpacket = %p, ptr %d, size %d ***\n\n PACKET:\n\n", cipherpacket, cipherpacket_ptr, cipherpacket_size);
-
-									for (uint16_t mycounter = 0; mycounter < cipherpacket_size; mycounter++)
-										fprintf (stderr, "%c", cipherpacket[mycounter]);
-									fprintf (stderr, "\n\n");
 
 									eb_mt_debase64_decrypt_process(me, cipherpacket, cipherpacket_ptr, remotehost, remoteport);
 
