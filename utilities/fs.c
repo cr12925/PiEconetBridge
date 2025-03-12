@@ -9291,7 +9291,7 @@ void fs_printout(int server, uint8_t reply_port, unsigned int active_id, uint8_t
 	}
 
 	printer = fs_get_user_printer(server, net, stn);
-	handler = get_user_print_handler (fs_stations[server].net, fs_stations[server].stn, printer = 0xff ? 1 : printer, unixprinter, acornprinter);
+	handler = get_user_print_handler (fs_stations[server].net, fs_stations[server].stn, printer == 0xff ? 1 : printer, unixprinter, acornprinter);
 
 	fs_debug (0, 2, "%12sfrom %3d.%3d *PRINTOUT %s (destination %s)", "", net, stn, file, acornprinter);
 
