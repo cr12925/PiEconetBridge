@@ -381,7 +381,7 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 {
 
 	int32_t		decrypted_length;
-	uint32_t	size = length;
+	gsize		size;
 
 	struct __eb_device	*search_trunk;
 
@@ -390,6 +390,13 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 	/* Undo Base64 in place */
 
 	g_base64_decode_inplace ((gchar *) cipherpacket, (gsize *) &size);
+
+	fprintf (stderr, "Decrypted data as follows, length %d:\n\n", size);
+
+	for (int mycount = 0; mycount < size; mycount++)
+		fprintf (stderr, "%02X ", cipherpacket[mycount]);
+
+	fprintf (stderr, "\n\n");
 
 	/* Now decrypt */
 
