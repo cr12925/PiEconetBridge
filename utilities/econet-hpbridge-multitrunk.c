@@ -140,6 +140,11 @@ int32_t	eb_trunk_decrypt(uint16_t port, uint8_t *cipherpacket, uint32_t length, 
 
 	 eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encrypted trunk packet received - type %d, IV bytes %02x %02x %02x ...", port, cipherpacket[TRUNK_CIPHER_ALG], cipherpacket[TRUNK_CIPHER_IV], cipherpacket[TRUNK_CIPHER_IV+1], cipherpacket[TRUNK_CIPHER_IV+2]);
 
+	 fprintf (stderr, "\n\nCipher packet being decrypted, length %d\n", length);
+	 for (int mycount = 0; mycount < length; mycount++)
+		 fprintf (stderr, "%02X ", *(cipherpacket + mycount));
+	 fprintf (stderr, "\n\n");
+
 	switch (cipherpacket[TRUNK_CIPHER_ALG])
 	{
 		case 1:
@@ -229,7 +234,16 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 	if (!(ctx_enc = EVP_CIPHER_CTX_new()))
 		eb_debug (1, 0, "(M)TRUNK", "(M)Trunk %7d Unable to set up encryption control", port);
 
+	//fprintf (stderr, "Encrypting with shared key %s\n", d->trunk.sharedkey);
+
 	EVP_EncryptInit_ex(ctx_enc, EVP_aes_256_cbc(), NULL, d->trunk.sharedkey, iv);
+
+	fprintf (stderr, "\n\nData being encrypted, length %d:\n", length+2);
+
+	for (int mycount = 0; mycount < length+2; mycount++)
+		fprintf (stderr, "%02X ", temp_packet[mycount]);
+
+	fprintf (stderr, "\n\n");
 
 	if ((!EVP_EncryptUpdate(ctx_enc, (unsigned char *) &(cipherpacket[TRUNK_CIPHER_DATA]), &encrypted_length, temp_packet, length + 2))) // +2 for the length bytes inserted above
 	{
@@ -254,6 +268,10 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 	{
 		*encrypted = eb_malloc(__FILE__, __LINE__, "(M)TRUNK", "New encrypted packet", encrypted_length);
 		memcpy (*encrypted, &cipherpacket, encrypted_length);
+		fprintf (stderr, "\n\nEncrypted data, length %d:\n", encrypted_length);
+		for (int mycount = 0; mycount < encrypted_length; mycount++)
+			fprintf (stderr, "%02X ", *(encrypted + mycount));
+		fprintf (stderr, "\n\n");
 		return encrypted_length;
 	}
 
@@ -312,7 +330,7 @@ uint8_t eb_mt_copy_to_cipherpacket (uint8_t **cipherpacket, uint32_t *cipherpack
 	{
 		*cipherpacket_ptr = 0;
 		realloc_size = length > EB_MT_TCP_MAXSIZE ? EB_MT_TCP_MAXSIZE : length;
-		*cipherpacket = eb_malloc(__FILE__, __LINE__, "MTRUNK", "New cipherpacket", realloc_size);
+		*cipherpacket = eb_malloc(__FILE__, __LINE__, "M-TRUNK", "New cipherpacket", realloc_size);
 	}
 	else
 	{
@@ -360,10 +378,10 @@ void eb_mt_process_admin_packet (struct mt_client *me, uint8_t *cipherpacket, ch
 	{
 		case EB_MT_CMD_VERS:
 			me->mt_remote_version = *(cipherpacket + 2);
-			eb_debug (0, 1, "MTRUNK", "M-Trunk %7d Multitrunk protocol version %02d from %s:%d", me->multitrunk_parent->multitrunk.port, me->mt_remote_version, remotehost, remoteport);
+			eb_debug (0, 1, "M-TRUNK", "M-Trunk %7d Multitrunk protocol version %02d from %s:%d", me->multitrunk_parent->multitrunk.port, me->mt_remote_version, remotehost, remoteport);
 			break;
 		default:
-			eb_debug (0, 1, "MTRUNK", "M-Trunk %7d Unknown multitrunk admin command %02X from %s:%d", me->multitrunk_parent->multitrunk.port, *(cipherpacket), remotehost, remoteport);
+			eb_debug (0, 1, "M-TRUNK", "M-Trunk %7d Unknown multitrunk admin command %02X from %s:%d", me->multitrunk_parent->multitrunk.port, *(cipherpacket), remotehost, remoteport);
 			break;
 	}
 }
@@ -386,7 +404,7 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 
 	struct __eb_device	*search_trunk;
 
-	eb_debug (0, 3, "MTRUNK", "M-Trunk  %7d Processing incoming base64 data of length %d from %s:%d %c %c %c %c", me->multitrunk_parent->multitrunk.port, length, remotehost, remoteport, *(cipherpacket), *(cipherpacket+1), *(cipherpacket+2), *(cipherpacket+3));
+	eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Processing incoming base64 data of length %d from %s:%d %c %c %c %c", me->multitrunk_parent->multitrunk.port, length, remotehost, remoteport, *(cipherpacket), *(cipherpacket+1), *(cipherpacket+2), *(cipherpacket+3));
 
 	/* Undo Base64 in place */
 
@@ -731,9 +749,9 @@ void * eb_multitrunk_handler_thread (void * input)
 			if (len == -1) // Error - quit
 				break;
 
-			//eb_debug (0, 3, "MTRUNK", "M-Trunk  %7d Data received from %s:%d length %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteport, len);
+			//eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Data received from %s:%d length %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteport, len);
 
-			eb_debug (0, 2, "MTRUNK", "M-Trunk  %7d Data received from %s:%d length %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteport, len);
+			eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Data received from %s:%d length %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteport, len);
 			
 			if ((cipherpacket_size - cipherpacket_ptr) < len)
 			{
@@ -756,7 +774,7 @@ void * eb_multitrunk_handler_thread (void * input)
 					{
 						if (cipherpacket) /* Free memory if currently in use */
 						{
-							eb_free(__FILE__, __LINE__, "MTRUNK", "Free current inbound packet memory ready for new reception", cipherpacket);
+							eb_free(__FILE__, __LINE__, "M-TRUNK", "Free current inbound packet memory ready for new reception", cipherpacket);
 							cipherpacket = NULL;
 							cipherpacket_size = cipherpacket_ptr = 0;
 						}
