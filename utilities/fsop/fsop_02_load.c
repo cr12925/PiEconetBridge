@@ -76,7 +76,9 @@ FSOP(02)
 	 * to our most recently cached one.
 	 */
 
-        if ((!result || (p.ftype == FS_FTYPE_NOTFOUND)) && loadas && !fsop_normalize_path(f, command, f->active->lib, &p))   // Either in current, or lib if loadas set
+	/* 20250315 Now searches lib if sjfunc enabled - apparently MDFS does this! You can *LOAD something from the library... */
+
+        if ((!result || (p.ftype == FS_FTYPE_NOTFOUND)) && (loadas || (FS_CONFIG(f->server,fs_sjfunc))) && !fsop_normalize_path(f, command, f->active->lib, &p))   // Either in current, or lib if loadas set
         {
                 fsop_error(f, 0xFE, "Bad command");
                 return;

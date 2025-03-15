@@ -90,6 +90,13 @@ FSOP(06)
 	
 	result = fsop_normalize_path_wildcard(f, filename, FSOP_CWD, &p, 1);
 
+	if ((!result || p.ftype == FS_FTYPE_NOTFOUND) && (FS_CONFIG(f->server,fs_sjfunc)) && existingfile) /* If MDFS functionality is on, OPENIN and OPENUP will search library, apparently, if not found in CWD... */
+	{
+		fs_free_wildcard_list(&p);
+		result = fsop_normalize_path_wildcard(f, filename, FSOP_LIB, &p, 1);
+		/* Fall through to old code */
+	}
+
 	if (!result) // The || !e was addded for wildcard version
 	{
 		fs_free_wildcard_list(&p);
