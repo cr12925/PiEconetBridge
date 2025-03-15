@@ -481,27 +481,33 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 
 				pthread_mutex_lock(&(search_trunk->trunk.mt_mutex));
 
-				/* If trunk already connected to another handler, set its death flag */
-				
+				me->trunk = search_trunk;
+
 				if (!search_trunk->trunk.mt_data)
 				{
+					/* If search trunk doesn't have a multitrunk client handler struct, update it. */
+
 					search_trunk->trunk.mt_data = me;
 					me->trunk = search_trunk;
 					eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
+					pthread_mutex_unlock(&(search_trunk->trunk.mt_mutex));
 					/* Wake up the child trunk */
 					pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
 				}
 				else if ((search_trunk->trunk.mt_data) && (search_trunk->trunk.mt_data != me))
 				{
+					/* If trunk already connected to another handler, set its death flag */
+				
 					search_trunk->trunk.mt_data->death = 1; /* Kill it */
 					search_trunk->trunk.mt_data = me;
 					me->trunk = search_trunk;
 					eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
+					pthread_mutex_unlock(&(search_trunk->trunk.mt_mutex));
 					/* Wake up the child trunk */
 					pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
 				}
-
-				me->trunk = search_trunk;
+				else
+					pthread_mutex_unlock(&(search_trunk->trunk.mt_mutex));
 
 				/* If marker = &, call eb_mt_process_admin_packet, or otherwise write to the trunk child */
 
@@ -511,8 +517,6 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 					write (me->trunk_socket, buffer, decrypted_length);
 
 				me->marker = 0;
-
-				pthread_mutex_unlock(&(search_trunk->trunk.mt_mutex));
 
 				if (me->mt_local_version == 0)
 					eb_mt_send_proto_version(me);
