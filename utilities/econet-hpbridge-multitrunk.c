@@ -195,7 +195,7 @@ int32_t	eb_trunk_decrypt(uint16_t port, uint8_t *cipherpacket, uint32_t length, 
 
 	EVP_CIPHER_CTX_free(ctx_dec);
 	
-	
+	/*	
 	if (dec_datalen > 0)
 	{
 		fprintf (stderr, "Decrypted data being returned, length %d\n", dec_datalen);
@@ -203,7 +203,7 @@ int32_t	eb_trunk_decrypt(uint16_t port, uint8_t *cipherpacket, uint32_t length, 
 			fprintf (stderr, "%02X ", *(dec_data + mycount));
 		fprintf (stderr, "\n\n");
 	}
-
+	*/
 
 	if (dec_datalen == 0)
 		return -1;
@@ -464,12 +464,12 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 
 			//fprintf (stderr, "Attempting to decrypt with key %s\n\n", search_trunk->trunk.sharedkey);
 
-			if ((decrypted_length = eb_trunk_decrypt(me->multitrunk_parent->multitrunk.port, cipherpacket, size, search_trunk->trunk.sharedkey, buffer)) >= 0)
+			if ((decrypted_length = eb_trunk_decrypt(me->multitrunk_parent->multitrunk.port, cipherpacket, size, search_trunk->trunk.sharedkey, buffer)) > 0)
 			{
 				fprintf (stderr, "\n\n*** Decryptable packet received, length %d\n\n", decrypted_length);
 
 				for (int mycount = 0; mycount < decrypted_length; mycount++)
-					fprintf (stderr, "%02X ", *(buffer + mycount));
+					fprintf (stderr, "%02X ", buffer[mycount]);
 				fprintf (stderr, "\n\n");
 
 				pthread_mutex_lock(&(search_trunk->trunk.mt_mutex));
