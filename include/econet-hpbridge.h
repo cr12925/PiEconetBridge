@@ -876,6 +876,7 @@ extern void * eb_multitrunk_server_device (void *);
 extern void * eb_multitrunk_client_device (void *);
 extern int eb_mt_base64_encrypt_tx(uint8_t *, uint16_t, struct __eb_device *, char);
 extern struct __eb_device * eb_mt_find (char *);
+void eb_bridge_reset (struct __eb_device *);
 
 /* JSON */
 

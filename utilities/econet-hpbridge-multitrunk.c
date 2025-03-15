@@ -908,9 +908,7 @@ void * eb_multitrunk_handler_thread (void * input)
 	eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Disconnect or read error from %s(%s):%d", me->multitrunk_parent->multitrunk.port, remotehost, remoteip, remoteport);
 
 	/* Cause the trunk to do a bridge reset */
-	pthread_mutex_lock (&(me->trunk->statsmutex));
-	me->trunk->last_rx = 0;
-        pthread_mutex_unlock (&(me->trunk->statsmutex));
+	eb_bridge_reset(NULL);
 
 	/* Graceful close down and unpick links in/to underlying trunk */
 
