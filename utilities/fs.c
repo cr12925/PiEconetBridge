@@ -8146,18 +8146,14 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		return;
 	}
 
-	if ((!result || (p.ftype == FS_FTYPE_NOTFOUND)) && loadas && !fs_normalize_path(server, active_id, command, active[server][active_id].lib, &p))   // Either in current, or lib if loadas set
+	/* this next if() will search lib. Note 20250315 - also triggered if fs_sjfunc enabled, since MDFS apparently searches the library on LOAD, CHAIN, *LOAD, *RUN - which I suspect all use fs_load() ! */
+
+	if ((!result || (p.ftype == FS_FTYPE_NOTFOUND)) && (loadas || fs_config[server].fs_sjfunc) && !fs_normalize_path(server, active_id, command, active[server][active_id].lib, &p))   // Either in current, or lib if loadas set
 	{
-/* OLD code - doesn't need to differentiate between loaas and !loadas - see the if() statement above
 		if (loadas)
 			fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
 		else
 			fs_error(server, reply_port, net, stn, 0xD6, "Not found");
-		return;
-*/
-
-		// Just barf
-		fs_error(server, reply_port, net, stn, 0xFE, "Bad command");
 		return;
 	}
 
@@ -9101,6 +9097,15 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 	// Then, below, if the file doesn't exist we barf if the tail has wildcards in it.
 	//
 	result = fs_normalize_path_wildcard(server, active_id, filename, active[server][active_id].current, &p, 1);
+
+	/* 20250315 - if fs_sjfunc enabled and not found in current, look in the library, since MDFS apparently searches the library on OPENIN, OPENUP - so only do this if existingfile is true */
+
+	if ((!result || (p.ftype == FS_FTYPE_NOTFOUND)) && fs_config[server].fs_sjfunc && existingfile)
+	{
+		fs_free_wildcard_list(&p);
+		result = fs_normalize_path_wildcard(server, active_id, filename, active[server][active_id].lib, &p, 1);
+		// Let this then fall through to the rest of the stuff below
+	}
 
 	//fs_debug(0,2, "%12sfrom %3d.%3d Attempt to open %s - p.parent_owner = %d, p.parent_perm = %02X, p.perm = %02X, userid = %d", "", net, stn, filename, p.parent_owner, p.parent_perm, p.perm, active[server][active_id].userid);
 
