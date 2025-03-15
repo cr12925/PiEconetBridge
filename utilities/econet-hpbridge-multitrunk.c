@@ -1079,7 +1079,8 @@ void * eb_multitrunk_client_device (void * device)
 
 			pthread_join(mtc_thread, &mtc_ret);
 
-			eb_free(__FILE__, __LINE__, "M-TRUNK", "Free used client structure", mtc_new);
+			/* eb_multitrunk_handler_thread does the free. */
+			//eb_free(__FILE__, __LINE__, "M-TRUNK", "Free used client structure", mtc_new);
 
 			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d closed. Re-opening.", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
 		}
