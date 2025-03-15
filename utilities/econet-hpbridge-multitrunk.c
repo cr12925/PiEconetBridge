@@ -195,6 +195,14 @@ int32_t	eb_trunk_decrypt(uint16_t port, uint8_t *cipherpacket, uint32_t length, 
 
 	EVP_CIPHER_CTX_free(ctx_dec);
 	
+	if (dec_datalen > 0)
+	{
+		fprintf (stderr, "Decrypted data being returned, length %d\n", dec_datalen);
+		for (int mycount = 0; mycount < dec_datalen; mycount++)
+			fprintf (stderr, "%02X ", *(dec_data + mycount));
+		fprintf (stderr, "\n\n");
+	}
+
 	if (dec_datalen == 0)
 		return -1;
 	else	return datalength;
@@ -243,12 +251,14 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 
 	EVP_EncryptInit_ex(ctx_enc, EVP_aes_256_cbc(), NULL, d->trunk.sharedkey, iv);
 
-	//fprintf (stderr, "\n\nData being encrypted, length %d:\n", length+2);
+	/*
+	fprintf (stderr, "\n\nData being encrypted, length %d:\n", length+2);
 
 	for (int mycount = 0; mycount < length+2; mycount++)
 		fprintf (stderr, "%02X ", temp_packet[mycount]);
 
 	fprintf (stderr, "\n\n");
+	*/
 
 	if ((!EVP_EncryptUpdate(ctx_enc, (unsigned char *) &(cipherpacket[TRUNK_CIPHER_DATA]), &encrypted_length, temp_packet, length + 2))) // +2 for the length bytes inserted above
 	{
@@ -390,10 +400,10 @@ void eb_mt_process_admin_packet (struct mt_client *me, uint8_t *cipherpacket, ch
 	{
 		case EB_MT_CMD_VERS:
 			me->mt_remote_version = *(cipherpacket + 2);
-			eb_debug (0, 1, "M-TRUNK", "M-Trunk %7d Multitrunk protocol version %02d from %s:%d", me->multitrunk_parent->multitrunk.port, me->mt_remote_version, remotehost, remoteport);
+			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Multitrunk protocol version %02d from %s:%d", me->multitrunk_parent->multitrunk.port, me->mt_remote_version, remotehost, remoteport);
 			break;
 		default:
-			eb_debug (0, 1, "M-TRUNK", "M-Trunk %7d Unknown multitrunk admin command %02X from %s:%d", me->multitrunk_parent->multitrunk.port, *(cipherpacket), remotehost, remoteport);
+			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Unknown multitrunk admin command %02X from %s:%d", me->multitrunk_parent->multitrunk.port, *(cipherpacket), remotehost, remoteport);
 			break;
 	}
 }
