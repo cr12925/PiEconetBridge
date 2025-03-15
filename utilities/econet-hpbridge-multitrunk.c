@@ -172,17 +172,22 @@ int32_t	eb_trunk_decrypt(uint16_t port, uint8_t *cipherpacket, uint32_t length, 
 
 			datalength = (temp_packet[0] * 256) + temp_packet[1];
 
+			/* Commented out - because the Multitrunk administative signalling may well give you a packet less than 12 bytes */
+			/*
 			if (datalength >= 12) // Valid packet size received
 			{
+			*/
 				eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encrypted trunk packet validly received - specified length %04x, decrypted length %04x, marking receipt at %d seconds", port, datalength, encrypted_length, time(NULL));
 
 				dec_data = eb_malloc(__FILE__, __LINE__, "(M)TRUNK", "Allocate memory for decrypted packet received on trunk", datalength);
 
-				memcpy(dec_data, &(temp_packet[2]), datalength); // data length always ignores the ECONET part of the data
+				memcpy(dec_data, &(temp_packet[2]), datalength);
 				dec_datalen = datalength;
+			/*
 			}
 			else
 				eb_debug (0, 2, "(M)TRUNK", "(M)Trunk %7d Decrypted trunk packet too small (data length = %04x) - discarded", port, datalength);
+			*/
 		}
 		else
 			eb_debug (0, 2, "(M)TRUNK", "(M)Trunk %7d DecryptFinal of trunk packet failed - decrypted length before call was %04x", port, encrypted_length);
@@ -266,9 +271,10 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 
 	if (encrypted_length > 0)
 	{
+		encrypted_length += TRUNK_CIPHER_DATA;
 		*encrypted = eb_malloc(__FILE__, __LINE__, "(M)TRUNK", "New encrypted packet", encrypted_length);
-		memcpy (*encrypted, &cipherpacket, TRUNK_CIPHER_DATA + encrypted_length);
-		fprintf (stderr, "\n\nEncrypted data, length %d:\n", TRUNK_CIPHER_DATA + encrypted_length);
+		memcpy (*encrypted, &cipherpacket, encrypted_length);
+		fprintf (stderr, "\n\nEncrypted data, length %d:\n", encrypted_length);
 		for (int mycount = 0; mycount < encrypted_length; mycount++)
 		{
 			uint8_t		b;
