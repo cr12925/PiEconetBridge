@@ -135,6 +135,8 @@ int32_t	eb_trunk_decrypt(uint16_t port, uint8_t *cipherpacket, uint32_t length, 
 	uint16_t	datalength;
 	int32_t		dec_datalen = 0;
 
+	fprintf (stderr, "eb_trunk_decrypt - dec_data = %p\n", dec_data);
+
 	if (!(ctx_dec = EVP_CIPHER_CTX_new()))
 		eb_debug (1, 0, "(M)TRUNK", "(M)Trunk %7d Failed to establish decrypt cipher control!", port);
 
@@ -463,6 +465,8 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 			/* Probably want to curtail encrypted data which is too long... TODO! */
 
 			//fprintf (stderr, "Attempting to decrypt with key %s\n\n", search_trunk->trunk.sharedkey);
+
+			fprintf (stderr, "buffer = %p\n", buffer);
 
 			if ((decrypted_length = eb_trunk_decrypt(me->multitrunk_parent->multitrunk.port, cipherpacket, size, search_trunk->trunk.sharedkey, buffer)) > 0)
 			{
