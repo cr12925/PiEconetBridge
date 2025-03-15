@@ -26,6 +26,7 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/resource.h>
+#include <sys/un.h>
 #include <resolv.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -324,19 +325,12 @@ struct __eb_notify {
 
 struct mt_client {
         struct __eb_device      *trunk, *multitrunk_parent;
-        int                     trunk_socket; // Socket to trunk device
+        int                     trunk_socket[2]; // Socket to trunk device
         int                     socket; // Socket to distant end
 	uint8_t			death; // Set to 1 when something else wants the handler thread to close down gracefully and die.
 	uint8_t			marker; /* When in MT_START, what was the marker we found at the beginning ? */
 	pthread_mutex_t		mt_lock; 
         unsigned char *         key; // Will also be NULL until we've found the relevant trunk client // Do we need this? If we've found the trunk client, we'll have a link to its trunk struct...
-	/*
-        uint8_t                 * recv_buffer; // malloced when data turns up after a '*'. The trailing '*' is never put in this buffer. This buffer is decoded from Base64
-        uint16_t                recv_length; // Current malloc'd length of recv_buffer
-        uint8_t                 * packet; // Buffer for transfer to trunk pipe - this will be encrypted on transmission to the trunk client (distant end) if this is a TCP trunk, or a UDP encrypted trunk
-        uint16_t                packet_length;
-        uint8_t                 * decrypted_buffer; // Only used when we are trying to work out which endpoint has connected to us
-	*/
         enum                    { MT_IDLE = 1, MT_START = 2 } mt_state; // IDLE = waiting for beginning '*', START means '*' received - waiting for data or trailing end marker
         enum                    { MT_TYPE_UDP = 1, MT_TYPE_TCP = 2 } mt_mode; // Not used at present - TCP trunks only for now. This is for later when we might consolidate UDP and TCP listening into the same infrastructure
 	enum			{ MT_CLIENT = 1, MT_SERVER = 2} mt_type;

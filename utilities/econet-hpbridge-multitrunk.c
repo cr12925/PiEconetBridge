@@ -514,7 +514,16 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 				if (me->marker == '&')
 					eb_mt_process_admin_packet(me, buffer, remotehost, remoteport);
 				else /* Write to underlying trunk */
-					write (me->trunk_socket, buffer, decrypted_length);
+				{
+					int w_result;
+
+					w_result = write (me->trunk_socket[1], buffer, decrypted_length);
+
+					if (w_result < 0)
+						eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Unable to write to child trunk (%s)", me->multitrunk_parent->multitrunk.port, strerror(errno));
+
+					pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
+				}
 
 				me->marker = 0;
 
@@ -699,13 +708,15 @@ void * eb_multitrunk_handler_thread (void * input)
 	//if (me->trunk->trunk.mt_type == MT_SERVER) /* Update endpoint address in trunk */
 		//eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
 
-	if ((me->trunk_socket = socket(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK, 0)) == -1)
-		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to create socket to underlying trunk", me->multitrunk_parent->multitrunk.port);
+	if (pipe(me->trunk_socket) < 0)
+		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to create pipe to underlying trunk (%s)", me->multitrunk_parent->multitrunk.port, strerror(errno));
 
 	timeout = me->multitrunk_parent->multitrunk.timeout;
 
-	if (timeout > 0 && (setsockopt(me->trunk_socket, SOL_SOCKET, TCP_USER_TIMEOUT, (char *) &(timeout), sizeof(timeout)) < 0))
-		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server unable to set TCP_USER_TIMEOUT to %d", me->multitrunk_parent->multitrunk.port, me->multitrunk_parent->multitrunk.timeout);
+	/* This breaks read() 
+	if (timeout > 0 && (setsockopt(me->socket, SOL_SOCKET, TCP_USER_TIMEOUT, (char *) &(timeout), sizeof(timeout)) < 0))
+		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to set TCP_USER_TIMEOUT to %d", me->multitrunk_parent->multitrunk.port, me->multitrunk_parent->multitrunk.timeout);
+		*/
 
 	/* Lock the underlying trunk and update its mt_data  - but only if it's a client, because me->trunk won't be set if it's a server, because we've not received any traffic yet */
 
@@ -909,7 +920,7 @@ void * eb_multitrunk_handler_thread (void * input)
 		// Do we need to clear ->hostname, ->remote_host as well? Probably for dynamic trunks.
 		pthread_mutex_unlock(&(me->trunk->trunk.mt_mutex));
 	}
-	close(me->trunk_socket);
+	close(me->trunk_socket[1]); // Close the write side
 	close(me->socket);
 
 	eb_free (__FILE__, __LINE__, "M-TRUNK", "Free multitrunk handler struct mt_client", me);
@@ -1053,7 +1064,7 @@ void * eb_multitrunk_client_device (void * device)
 				connected = 1;
 				break; /* Connected. If not, try the next address */
 			}
-			else eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Client socket to %s(%s):%d failed to connect (%s)", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, hostname, me->trunk.remote_port, strerror(errno));
+			else eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Client socket to %s(%s):%d failed to connect (%s)", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, hostname, me->trunk.remote_port, strerror(errno));
 		}
 
 		if (connected)

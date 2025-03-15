@@ -3053,7 +3053,7 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 
 	if (!(q = eb_malloc(__FILE__, __LINE__, "Q-IN", "Create packetq structure", sizeof(struct __eb_packetqueue))))
 	{
-		eb_debug (0, 1, "BRIDGE", "malloc(input, packetqueue) for packet from %3d.%3d to %3d.%3d port &%02X ctrl &%02X length &%04X seq 0x%08lX",
+		eb_debug (0, 1, "BRIDGE", "malloc(input, packetqueue) failed for packet from %3d.%3d to %3d.%3d port &%02X ctrl &%02X length &%04X seq 0x%08lX",
 			packet->p.srcnet,
 			packet->p.srcstn,
 			packet->p.dstnet,
@@ -3064,7 +3064,7 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 			packet->p.seq
 		);
 
-		eb_free (__FILE__, __LINE__, "Q-IN", "Freeing inbound packet after malloc(packetq) files", packet);
+		eb_free (__FILE__, __LINE__, "Q-IN", "Freeing inbound packet after malloc(packetq) failed", packet);
 		result = 0;
 	}
 	else
@@ -3352,7 +3352,7 @@ static void * eb_device_listener (void * device)
 			/* Connected by now */
 			eb_debug (0, 2, "DESPATCH", "%-8s %7d Trunk now connected - device listener woken", eb_type_str(d->type), d->trunk.local_port);
 		}
-		p->fd = d->trunk.mt_data->trunk_socket;
+		p->fd = d->trunk.mt_data->trunk_socket[0];
 		pthread_mutex_unlock(&(d->trunk.mt_mutex));
 	}
 
@@ -5767,7 +5767,7 @@ static void * eb_device_despatcher (void * device)
 			
 			/* Connected now */
 
-			p.fd = d->trunk.mt_data->trunk_socket;
+			p.fd = d->trunk.mt_data->trunk_socket[0];
 			pthread_mutex_unlock(&(d->trunk.mt_mutex));
 		}
 
@@ -5816,7 +5816,7 @@ static void * eb_device_despatcher (void * device)
 					pthread_mutex_lock(&(d->trunk.mt_mutex));
 
 					if (d->trunk.mt_parent && d->trunk.mt_data) // Part of multitrunk and the connection is live
-						length = recvfrom (d->trunk.mt_data->trunk_socket, &(d->trunk.cipherpacket), TRUNK_CIPHER_TOTAL, 0, (struct sockaddr *) &src_addr, &addr_len);
+						length = read (d->trunk.mt_data->trunk_socket[0], &(d->trunk.cipherpacket), TRUNK_CIPHER_TOTAL);
 					else
 						length = recvfrom (l_socket, &(d->trunk.cipherpacket), TRUNK_CIPHER_TOTAL, 0, (struct sockaddr *) &src_addr, &addr_len);
 
@@ -5922,14 +5922,14 @@ static void * eb_device_despatcher (void * device)
 									if (was_dead && d->all_nets_pooled) // It needs some updates, just in case it has restarted and we missed its reset
 									{
 										if (!EB_CONFIG_NOBRIDGEANNOUNCEDEBUG)
-											eb_debug (0, 2, "DESPATCH", "%-8s %5d   Trunk received traffic after being dead - all nets pooled - send bridge updates", eb_type_str(d->type), d->trunk.remote_port);
+											eb_debug (0, 2, "DESPATCH", "%-8s %7d Trunk received traffic after being dead - all nets pooled - send bridge updates", eb_type_str(d->type), d->trunk.remote_port);
 										pthread_cond_signal(&(d->bridge_update_cond));
 
 									}
 									else if (was_dead && (packet.p.port != BRIDGE_PORT || packet.p.ctrl != BRIDGE_RESET)) // If this trunk was dead before this packet arrived, do a bridge reset - which will also start the update process - but don't do a reset if what's just turned up is a reset
 									{
 										if (!EB_CONFIG_NOBRIDGEANNOUNCEDEBUG)
-											eb_debug (0, 2, "DESPATCH", "%-8s %5d   Trunk received traffic after being dead - send bridge reset", eb_type_str(d->type), d->trunk.remote_port);
+											eb_debug (0, 2, "DESPATCH", "%-8s %7d Trunk received traffic after being dead - send bridge reset", eb_type_str(d->type), d->trunk.remote_port);
 										eb_bridge_reset(NULL);
 
 									}
@@ -10047,6 +10047,13 @@ int eb_readconfig(char *f, char *json)
 					json_object_object_add(jtrunk, "key", json_object_new_string(psk));
 
 				json_object_array_add(jtrunks, jtrunk);
+
+				// Free destination - not required any more and it's a leak otherwise
+				eb_free (__FILE__, __LINE__, "CONFIG", "Free trunk destination string - copied to JSON", destination);
+				// Similarly the psk if there is one
+				if (psk)
+					eb_free (__FILE__, __LINE__, "CONFIG", "Free trunk key string - copied to JSON", psk);
+
 #else
 				eb_device_init_singletrunk (destination, local_port, remote_port, psk, NULL, NULL, NULL);
 #endif
