@@ -270,7 +270,11 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 		memcpy (*encrypted, &cipherpacket, encrypted_length);
 		fprintf (stderr, "\n\nEncrypted data, length %d:\n", encrypted_length);
 		for (int mycount = 0; mycount < encrypted_length; mycount++)
-			fprintf (stderr, "%02X ", *(encrypted + mycount));
+		{
+			uint8_t		b;
+			b = *(*encrypted + mycount);
+			fprintf (stderr, "%02X ", b);
+		}
 		fprintf (stderr, "\n\n");
 		return encrypted_length;
 	}
