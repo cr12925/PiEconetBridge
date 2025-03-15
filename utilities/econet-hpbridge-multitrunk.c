@@ -786,10 +786,8 @@ void * eb_multitrunk_handler_thread (void * input)
 			if (len == -1) // Error - quit
 				break;
 
-			//eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Data received from %s:%d length %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteport, len);
+			eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Data received from %s:%d length %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteport, len);
 
-			eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Data received from %s:%d length %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteport, len);
-			
 			if ((cipherpacket_size - cipherpacket_ptr) < len)
 			{
 				/* Expand buffer, up to maximum */
@@ -890,7 +888,7 @@ void * eb_multitrunk_handler_thread (void * input)
 
 	/* Graceful close down and unpick links in/to underlying trunk */
 
-	if (0 && me->trunk) /* Disabled - All we really need to do is close the sockets & free me - the rest may well generate a race condition with a handler which has just taken over this trunk */
+	if (me->trunk) /* Disabled - All we really need to do is close the sockets & free me - the rest may well generate a race condition with a handler which has just taken over this trunk */
 	{
 		pthread_mutex_lock(&(me->trunk->trunk.mt_mutex));
 		me->trunk->trunk.mt_data = NULL; // Disconnect us
