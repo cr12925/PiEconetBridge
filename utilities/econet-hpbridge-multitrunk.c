@@ -140,10 +140,10 @@ int32_t	eb_trunk_decrypt(uint16_t port, uint8_t *cipherpacket, uint32_t length, 
 
 	 eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encrypted trunk packet received - type %d, IV bytes %02x %02x %02x ...", port, cipherpacket[TRUNK_CIPHER_ALG], cipherpacket[TRUNK_CIPHER_IV], cipherpacket[TRUNK_CIPHER_IV+1], cipherpacket[TRUNK_CIPHER_IV+2]);
 
-	 fprintf (stderr, "\n\nCipher packet being decrypted, length %d\n", length);
-	 for (int mycount = 0; mycount < length; mycount++)
-		 fprintf (stderr, "%02X ", *(cipherpacket + mycount));
-	 fprintf (stderr, "\n\n");
+	 //fprintf (stderr, "\n\nCipher packet being decrypted, length %d\n", length);
+	 //for (int mycount = 0; mycount < length; mycount++)
+		 //fprintf (stderr, "%02X ", *(cipherpacket + mycount));
+	 //fprintf (stderr, "\n\n");
 
 	switch (cipherpacket[TRUNK_CIPHER_ALG])
 	{
@@ -243,7 +243,7 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 
 	EVP_EncryptInit_ex(ctx_enc, EVP_aes_256_cbc(), NULL, d->trunk.sharedkey, iv);
 
-	fprintf (stderr, "\n\nData being encrypted, length %d:\n", length+2);
+	//fprintf (stderr, "\n\nData being encrypted, length %d:\n", length+2);
 
 	for (int mycount = 0; mycount < length+2; mycount++)
 		fprintf (stderr, "%02X ", temp_packet[mycount]);
@@ -274,7 +274,8 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 		encrypted_length += TRUNK_CIPHER_DATA;
 		*encrypted = eb_malloc(__FILE__, __LINE__, "(M)TRUNK", "New encrypted packet", encrypted_length);
 		memcpy (*encrypted, &cipherpacket, encrypted_length);
-		fprintf (stderr, "\n\nEncrypted data, length %d:\n", encrypted_length);
+		/*
+		printf (stderr, "\n\nEncrypted data, length %d:\n", encrypted_length);
 		for (int mycount = 0; mycount < encrypted_length; mycount++)
 		{
 			uint8_t		b;
@@ -282,6 +283,7 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 			fprintf (stderr, "%02X ", b);
 		}
 		fprintf (stderr, "\n\n");
+		*/
 		return encrypted_length;
 	}
 
