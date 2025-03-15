@@ -469,7 +469,7 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 				fprintf (stderr, "\n\n*** Decryptable packet received, length %d\n\n", decrypted_length);
 
 				for (int mycount = 0; mycount < decrypted_length; mycount++)
-					fprintf (stderr, "%02X ", *(cipherpacket + mycount));
+					fprintf (stderr, "%02X ", *(buffer + mycount));
 				fprintf (stderr, "\n\n");
 
 				pthread_mutex_lock(&(search_trunk->trunk.mt_mutex));
