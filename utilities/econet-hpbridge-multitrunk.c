@@ -257,7 +257,7 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 	}
 	else
 	{
-		eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encrypted length from EVP_EncrypUpdate = %04X", port, encrypted_length);
+		eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encrypted length from EVP_EncryptUpdate = %04X", port, encrypted_length);
 		encrypted_length += tmp_len;
 		eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encryption succeeded: cleartext length %04X, encrypted length %04X", port, length + 2, encrypted_length);
 	}
@@ -267,8 +267,8 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 	if (encrypted_length > 0)
 	{
 		*encrypted = eb_malloc(__FILE__, __LINE__, "(M)TRUNK", "New encrypted packet", encrypted_length);
-		memcpy (*encrypted, &cipherpacket, encrypted_length);
-		fprintf (stderr, "\n\nEncrypted data, length %d:\n", encrypted_length);
+		memcpy (*encrypted, &cipherpacket, TRUNK_CIPHER_DATA + encrypted_length);
+		fprintf (stderr, "\n\nEncrypted data, length %d:\n", TRUNK_CIPHER_DATA + encrypted_length);
 		for (int mycount = 0; mycount < encrypted_length; mycount++)
 		{
 			uint8_t		b;
