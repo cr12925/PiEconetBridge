@@ -483,7 +483,9 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 
 				/* If trunk already connected to another handler, set its death flag */
 				
-				if ((search_trunk->trunk.mt_data) && (search_trunk->trunk.mt_data != me))
+				if (!search_trunk->trunk.mt_data)
+					search_trunk->trunk.mt_data = me;
+				else if ((search_trunk->trunk.mt_data) && (search_trunk->trunk.mt_data != me))
 				{
 					search_trunk->trunk.mt_data->death = 1; /* Kill it */
 					search_trunk->trunk.mt_data = me;
