@@ -457,7 +457,7 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 
 	while (search_trunk)
 	{
-		if (search_trunk->trunk.mt_parent && search_trunk->trunk.mt_type == MT_SERVER) /* I.e. the trunk is a multitrunk child and is a server instance, so we can accept connections and this might therefore be one whose key we can check decryption on */
+		if (search_trunk->trunk.mt_parent && (me->trunk || search_trunk->trunk.mt_type == MT_SERVER)) /* I.e. the trunk is a multitrunk child and is either already identified as the right trunk, or is a server instance, so we can accept connections and this might therefore be one whose key we can check decryption on */
 		{
 			uint8_t	buffer[ECONET_MAX_PACKET_SIZE+12];
 
@@ -484,7 +484,13 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 				/* If trunk already connected to another handler, set its death flag */
 				
 				if (!search_trunk->trunk.mt_data)
+				{
 					search_trunk->trunk.mt_data = me;
+					me->trunk = search_trunk;
+					eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
+					/* Wake up the child trunk */
+					pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
+				}
 				else if ((search_trunk->trunk.mt_data) && (search_trunk->trunk.mt_data != me))
 				{
 					search_trunk->trunk.mt_data->death = 1; /* Kill it */
