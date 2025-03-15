@@ -195,7 +195,7 @@ int32_t	eb_trunk_decrypt(uint16_t port, uint8_t *cipherpacket, uint32_t length, 
 
 	EVP_CIPHER_CTX_free(ctx_dec);
 	
-	/*
+	
 	if (dec_datalen > 0)
 	{
 		fprintf (stderr, "Decrypted data being returned, length %d\n", dec_datalen);
@@ -203,7 +203,7 @@ int32_t	eb_trunk_decrypt(uint16_t port, uint8_t *cipherpacket, uint32_t length, 
 			fprintf (stderr, "%02X ", *(dec_data + mycount));
 		fprintf (stderr, "\n\n");
 	}
-	*/
+
 
 	if (dec_datalen == 0)
 		return -1;
