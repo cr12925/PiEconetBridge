@@ -34,7 +34,7 @@ FSOP_00(COPY)
 	unsigned char	source[127], destination[127];
 	struct path	p_src, p_dst;
 	struct path_entry	*e;
-	uint16_t	to_copy;
+	uint16_t	to_copy = 0;
 
 	if (num > 2)
 	{

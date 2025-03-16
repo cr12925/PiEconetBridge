@@ -43,9 +43,13 @@ FSOP(0a)
 
 	uint32_t		seq;
 
+	uint8_t			is_32bit = 0;
+
 	struct __fs_active_load_queue	*alq;
 
 	a = f->active;
+
+	is_32bit = (*(f->data+1) == 0x2A) ? 1 : 0; 
 
 	handle = FS_DIVHANDLE(a,*(f->data+5));
 	//ctrl = FSOP_CTRL;
@@ -60,7 +64,9 @@ FSOP(0a)
 		return;
 	}
 
-	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Get %04lX from offset %04lX (%s) by user %04x on handle %02X", bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), f->userid, handle);
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB%s Get %08lX from offset %08lX (%s) by user %04x on handle %02X", 
+			(is_32bit ? "32" : ""),
+			bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), f->userid, handle);
 
 	internal_handle = a->fhandles[handle].handle;
 
@@ -128,6 +134,7 @@ FSOP(0a)
         alq->valid_bytes = 0; /* Initialize */
         alq->pasteof = eofreached; /* Initialize */
         alq->chunk_size = f->active->chunk_size;  /* Copy from login process */
+	alq->is_32bit = is_32bit;
 
 	fsop_aun_send_noseq(&r, 2, f);
 
@@ -146,7 +153,9 @@ FSOP(0b)
 	uint8_t		incoming_port;
 	struct __fs_active	*a;
 	FILE		*h;
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 	struct __fs_bulk_port	*bp;
+#pragma GCC diagnostic warning "-Wmaybe-uninitialized"
 
 	struct tm 	t;
 	uint8_t		day, monthyear;
@@ -154,9 +163,13 @@ FSOP(0b)
 
 	uint8_t		handle;
 
+	uint8_t			is_32bit = 0;
+
 	now = time(NULL);
 	t = *localtime(&now);
 	a = f->active;
+
+	is_32bit = (*(f->data+1) == 0x2B) ? 1 : 0; 
 
 	handle = FS_DIVHANDLE(a,*(f->data + 5));
 	txport = *(f->data+2);
@@ -187,7 +200,8 @@ FSOP(0b)
 	if (offsetstatus) // write to current position
 		offset = a->fhandles[handle].cursor;
 
-	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Put %06lX at offset %06lX by user %04X on handle %02X",
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB%s Put %08lX at offset %08lX by user %04X on handle %02X",
+			(is_32bit ? "32" : ""),
 			bytes, offset, f->userid,  handle);
 
 	if (offset > length) // Beyond EOF
@@ -197,6 +211,8 @@ FSOP(0b)
 		fs_debug_full (0, 3, f->server, f->net, f->stn, "OSGBPB Put Attempt to write at offset %06X beyond file end (length %06X) - padding with nulls", offset, length);
 
 		fseek(h, 0, SEEK_END);
+
+		count = 0;
 
 		while (count++ < (offset-length))
 			fputc('\0', h);
@@ -234,6 +250,7 @@ FSOP(0b)
 		bp->bulkport = incoming_port;
 		bp->last_receive = (unsigned long long) time(NULL);
 		bp->is_gbpb = 1; /* Flags to the dequeuer not to close the file at the end */
+		bp->is_32bit = is_32bit;
 		fs_store_tail_path(bp->acornname, a->fhandles[handle].acornfullpath);
 
 		// Send acknowledge

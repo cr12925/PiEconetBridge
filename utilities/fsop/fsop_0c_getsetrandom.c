@@ -81,7 +81,7 @@ FSOP(0c)
 			r.p.data[4] = (s.st_size & 0xff0000) >> 16;
 			break;
 		}
-
+		break;
 	}
 
 	fsop_aun_send(&r, 5, f);
@@ -111,7 +111,25 @@ FSOP(0d)
 	value = (*(f->data+7)) + ((*(f->data+8)) << 8) + ((*(f->data+9)) << 16);
 
 	if (is_32bit)
+	{
 		value += (*(f->data+8)) << 24;
+
+		// see mdfs.net. Apparently AL4FS 2.09 gives Channel? for all calls (!)
+		// and NetFS 6.07/6.08 send arg & channel the wrong way round, and this can 
+		// be detected and remedied using the procedure below.
+		// TODO: See if the MachinePeek we do at login will reveal this.
+		
+		if ((handle == 0) || (function > 3))
+		{
+			uint8_t	t;
+	
+			// Swap handle & function - we've detected a broken NetFS version that has them the wrong way round.
+			
+			t = handle;
+			handle = function;
+			function = t;
+		}
+	}
 
 	if (handle < 1 || (handle > FS_MAX_OPEN_FILES) || !(a->fhandles[handle].handle))
 	{
@@ -183,7 +201,6 @@ FSOP(0d)
 			a->fhandles[handle].pasteof = 0; // We have no longer just read the last byte of the file
 		}
 		break;
-		case 2:
 		case 1: // Set file extent
 		{
 			fs_debug_full (0, 2, f->server, f->net, f->stn, "Set file extent%s on channel %02X to %06lX, current extent %06lX%s", (is_32bit ? " (32 bit)" : ""), handle, value, extent, (value > extent) ? " so adding bytes to end of file" : "");
@@ -205,8 +222,37 @@ FSOP(0d)
 			}
 		}
 		break;
+		case 2:
+		{
+			if (is_32bit)
+			{
+				uint32_t	load, exec;
+				struct objattr	attr;
+
+				// Set load & execute	
+
+				load = value; // We got that for the other calls, above.
+
+				exec = (*(f->data+11)) + ((*(f->data+12)) << 8) + ((*(f->data+13)) << 16) + ((*(f->data+14)) << 24);
+
+				fsop_read_xattr(a->fhandles[handle].handle->name, &attr, f);
+
+				attr.load = load;
+				attr.exec = exec;
+
+				fsop_write_xattr(a->fhandles[handle].handle->name,
+						attr.owner,
+						attr.perm,
+						attr.load,
+						attr.exec,
+						attr.homeof,
+						f);
+			}
+			else
+				fsop_error(f, 0xFF, "Bad argument");
+		}
 		default:
-			fsop_error(f, 0xFF, "FS Error - unknown function");
+			fsop_error(f, 0xFF, "Bad argument");
 			return;
 
 	}
@@ -233,6 +279,22 @@ FSOP(29)
 	handle = FS_DIVHANDLE(a,*(f->data+5));
 	function = (*(f->data+6));
 
+	// see mdfs.net. Apparently AL4FS 2.09 gives Channel? for all calls (!)
+	// and NetFS 6.07/6.08 send arg & channel the wrong way round, and this can 
+	// be detected and remedied using the procedure below.
+	// TODO: See if the MachinePeek we do at login will reveal this.
+	
+	if ((handle == 0) || (function > 3))
+	{
+		uint8_t	t;
+
+		// Swap handle & function - we've detected a broken NetFS version that has them the wrong way round.
+		
+		t = handle;
+		handle = function;
+		function = t;
+	}
+
 	if ((handle > FS_MAX_OPEN_FILES) || !(a->fhandles[handle].handle)) // Invalid handle
 	{
 		fsop_error(f, 0xDE, "Channel ?");
@@ -252,11 +314,17 @@ FSOP(29)
 	{
 		case 0:
 		{
+			struct objattr	attr;
+
 			if (fstat(fileno(h), &s)) // Non-zero == error
 			{
 				fsop_error(f, 0xFF, "FS error");
 				return;
 			}
+
+			fsop_read_xattr(a->fhandles[handle].handle->name, &attr, f); // TODO - check this is right - is .name the full filesystem path in unix world?
+
+			/* Now get xattr */
 
 			fs_debug_full (0, 2, f->server, f->net, f->stn, "Get random access info (32 bit) on handle %02X, function %02X - cursor %08lX, size %08lX (extent is same)", handle, function, a->fhandles[handle].cursor, s.st_size);
 
@@ -268,7 +336,15 @@ FSOP(29)
 			r.p.data[7] = (s.st_size & 0xff00) >> 8;
 			r.p.data[8] = (s.st_size & 0xff0000) >> 16;
 			r.p.data[9] = (s.st_size & 0xff000000) >> 24;
-			memcpy(&(r.p.data[10]), &(r.p.data[6]), 4);
+			memcpy(&(r.p.data[10]), &(r.p.data[6]), 4); // Space allocation
+			r.p.data[14] = (attr.load & 0xff);
+			r.p.data[15] = (attr.load & 0xff00) >> 8;
+			r.p.data[16] = (attr.load & 0xff0000) >> 16;
+			r.p.data[17] = (attr.load & 0xff000000) >> 24;
+			r.p.data[18] = (attr.exec & 0xff);
+			r.p.data[19] = (attr.exec & 0xff00) >> 8;
+			r.p.data[20] = (attr.exec & 0xff0000) >> 16;
+			r.p.data[21] = (attr.exec & 0xff000000) >> 24;
 
 		} break;
 		default:
@@ -276,7 +352,7 @@ FSOP(29)
 
 	}
 
-	fsop_aun_send(&r, 10, f);
+	fsop_aun_send(&r, 22, f);
 
 	return;
 

@@ -56,8 +56,14 @@ void	fsop_setlibhome(struct fsop_data *f, uint16_t userid, char *path, uint8_t l
 		}
 
 
-		if (*path != '%' && fsop_normalize_path(f, path, FSOP_CWD, &p) && (p.ftype == FS_FTYPE_DIR) && strlen((const char *) p.path_from_root) < 94 && (p.disc == f->user->home_disc))
+		if (*path != '%' && fsop_normalize_path(f, path, FSOP_CWD, &p) && (p.ftype == FS_FTYPE_DIR) && strlen((const char *) p.path_from_root) < 94 && (!lib || p.disc == f->server->users[userid].home_disc))
 		{
+			/* !lib || p.disc == .... is to ensure that if setting library 
+			 * then the library we found was on the home disc of the user. 
+			 *
+			 * For setting home directory, we can change disc.
+			 */
+
 			struct objattr	oa;
 
 			if (lib)
@@ -68,7 +74,7 @@ void	fsop_setlibhome(struct fsop_data *f, uint16_t userid, char *path, uint8_t l
 			{
 				if (lib)
 					strcat(f->server->users[userid].lib, ".");
-				else	strcpy(f->server->users[userid].home, ".");
+				else	strcat(f->server->users[userid].home, ".");
 			}
 
 			if (lib)
@@ -106,8 +112,8 @@ void	fsop_setlibhome(struct fsop_data *f, uint16_t userid, char *path, uint8_t l
 
 FSOP_00(SETLIB)
 {
-	unsigned char	path[1024], userstr[11];;
-	int16_t		userid;
+	unsigned char	path[1024], userstr[11];
+	int16_t		userid = -1;
 
 	if (!FS_ACTIVE_SYST(f->active) && num == 2)
 		fsop_error(f, 0xFF, "Bad parameters");
@@ -133,8 +139,13 @@ FSOP_00(SETLIB)
 
 FSOP_00(SETHOME)
 {
-	unsigned char   path[1024], userstr[11];;
-	int16_t	 	userid;
+	unsigned char   path[1024], userstr[11];
+	int16_t	 	userid = -1;
+
+	/* No SYST checks needed here because the
+	 * parser only lets you use SETHOME if you are
+	 * SYST.
+	 */
 
 	if (num == 2)
 	{
@@ -148,7 +159,10 @@ FSOP_00(SETHOME)
 		FSOP_EXTRACT(f,0,path,255);
 	}
 
-	fsop_setlibhome(f, userid, path, 0);
+	if (userid < 0)
+		fsop_error (f, 0xFF, "Unknown user");
+	else
+		fsop_setlibhome(f, userid, path, 0);
 
 }
 

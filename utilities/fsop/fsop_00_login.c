@@ -474,7 +474,7 @@ FSOP_00(LOGIN)
 			machine = (mtype & 0xFF000000) >> 24;
 			ver = (mtype & 0xFF);
 			a->manyhandles = 0;
-			if (	(machine == 0x07 /* || machine == 0x0F */) // Archimedes or RISC PC
+			if (	(machine == 0x07 || machine == 0x0F ) // Archimedes or RISC PC
 			||	(ver >= 4 && (machine == 0x05 || machine == 0x0A || machine == 0x0C)) // M128, Master ET, Master Compact & ANFS or greater
 			)
 			{

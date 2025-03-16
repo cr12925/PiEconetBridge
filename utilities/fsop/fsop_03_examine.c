@@ -120,6 +120,11 @@ FSOP(03)
 		case 2: replyseglen = ECONET_MAX_FILENAME_LENGTH + 1; break;
 		case 3: replyseglen = ECONET_MAX_FILENAME_LENGTH + 9; break;
 		case 4: replyseglen = 34; break; /* 32 bit machine-readable, but 10 character FN */
+		default:
+			{
+				fsop_error(f, 0xFF, "Bad argument");
+				return;
+			} break;
 	}
 
 	while (examined < n && (e != NULL) && (replylen < (255-replyseglen)))
@@ -265,6 +270,10 @@ FSOP(03)
 			reply.p.data[replylen++] = (e->n & 0xff0000) >> 16; \
 			reply.p.data[replylen++] = (e->n & 0xff000000) >> 24;
 
+					uint8_t		c_hour, c_min, c_sec, c_monthyear, c_day;
+
+					fsop_get_create_time (e->unixpath, &c_day, &c_monthyear, &c_hour, &c_min, &c_sec);
+
 					FSOP_03_STORE32(load);
 					FSOP_03_STORE32(exec);
 					FSOP_03_STORE32(length);
@@ -274,8 +283,8 @@ FSOP(03)
 
 					reply.p.data[replylen++] = fsop_perm_to_acorn(f->server, e->perm, (e->ftype == FS_FTYPE_DIR ? 1 : 0));
 					reply.p.data[replylen++] = 0x00;
-					reply.p.data[replylen++] = e->day;
-					reply.p.data[replylen++] = e->monthyear;
+					reply.p.data[replylen++] = c_day; // e->day;
+					reply.p.data[replylen++] = c_monthyear; // e->monthyear;
 
 					FSOP_03_STORE32(internal);
 

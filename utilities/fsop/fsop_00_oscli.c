@@ -90,7 +90,9 @@ struct fsop_00_cmd * fsop_00_match (unsigned char *c, uint8_t *nextchar)
 
 		//fprintf (stderr, "fsop_00_match: Looking at %s (len %d) at %p...", t->cmd, strlen(t->cmd), t);
 
-		while (count < strlen(t->cmd))
+		// 20241017
+		//while (count < strlen(t->cmd))
+		while ((count < strlen(t->cmd)) && (*(c+5+count) != 0x0D)) // Catch end of command in packet
 		{
 			/* Uppercase-ify the command */
 
@@ -307,8 +309,16 @@ FSOP(00)
 	uint8_t		num;
 	uint8_t		param_start;
 
+	char *		crptr;
+
 	cr = f->data + f->datalen - 1;
 	if (*cr == 0x0d) 	*cr = 0x00; /* Null terminate instead of 0x0d */	
+
+	// 20241017 Need a fix here. Sometimes there is stray data after the 0x0d, eg from an Atom
+	
+	crptr = memchr(f->data, 0x0d, f->datalen);
+	if (crptr)
+		*crptr = 0x00;
 
 	if ((cmd = fsop_00_match(f->data, &param_start)))
 	{

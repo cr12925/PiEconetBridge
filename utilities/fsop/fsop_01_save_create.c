@@ -50,6 +50,8 @@ void fsop_save_internal(struct fsop_data *f, uint8_t is_32bit)
 
 	fs_debug_full (0, 1, f->server, f->net, f->stn, "%s%s %s %08lx %08lx %06lx", (create_only ? "CREATE" : "SAVE"), (is_32bit ? "32" : ""), filename, load, exec, length);
 
+	incoming_port = 0; // Dummy to stop a warning
+
 	if (create_only || (incoming_port = fsop_find_bulk_port(f->server)))
 	{
 		struct path p;
@@ -127,6 +129,7 @@ void fsop_save_internal(struct fsop_data *f, uint8_t is_32bit)
 							struct tm t;
 							struct stat s;
 							unsigned char day, monthyear;
+							uint8_t		fnlength;
 
 							day = monthyear = 0;
 
@@ -143,7 +146,14 @@ void fsop_save_internal(struct fsop_data *f, uint8_t is_32bit)
 							r.p.data[3] = day;
 							r.p.data[4] = monthyear;
 
-							fsop_aun_send (&r, 5, f);
+							if (is_32bit)
+							{
+								fnlength = strlen(p.acornname);
+								strcpy((char *) &(r.p.data[5]), p.acornname);
+								r.p.data[5+fnlength] = 0x0D; // See mdfs.net
+							}
+
+							fsop_aun_send (&r, 5 + (is_32bit ? (1 + fnlength) : 0), f);
 						}
 						else
 						{
@@ -164,6 +174,7 @@ void fsop_save_internal(struct fsop_data *f, uint8_t is_32bit)
 							bp->mode = 3;
 							bp->is_gbpb = 0;
 							bp->user_handle = 0; // Rogue for no user handle, because never hand out user handle 0. This stops the bulk transfer routine trying to increment a cursor on a user handle which doesn't exist.
+							bp->is_32bit = is_32bit;
 							strncpy(bp->acornname, p.acornname, 12);
 							bp->last_receive = (unsigned long long) time(NULL);
 						}

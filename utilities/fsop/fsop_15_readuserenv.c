@@ -30,7 +30,8 @@ FSOP(15)
 	a = f->active;
 
 	//fs_debug (0, 2, "%12sfrom %3d.%3d Read user environment - current user handle %d, current lib handle %d", "", f->net, f->stn, f->active->current, f->active->lib);
-	fs_debug_full (0, 2, f->server, f->net, f->stn, "Read user environment - current user handle %d, current lib handle %d", f->cwd, f->lib);
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "Read user environment - current user handle %d (dir:%c ptr:%p), current lib handle %d (dir:%c ptr:%p)", f->cwd, a->fhandles[a->current].is_dir ? 'Y' : 'N',
+				a->fhandles[a->current].handle, f->lib, a->fhandles[a->lib].is_dir ? 'Y' : 'N', a->fhandles[a->lib].handle);
 
 	// If either current or library handle is invalid, barf massively.
 

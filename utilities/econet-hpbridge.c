@@ -8921,7 +8921,10 @@ int eb_parse_json_config(struct json_object *jc)
 
 						net = json_object_get_int(jaun_net);
 
-						eb_device_init (net, EB_DEF_NULL, 0);
+						/* Not sure this is needed. If it's a whole network, the devinit should create it, and if it's a host, the new AUN host thing will create the divert */
+
+						//if (!networks[net]) // Create if not exist
+							//eb_device_init (net, EB_DEF_NULL, 0);
 
 						if (json_object_object_get_ex(jaun_entry, "fw-in", &jfw))
 							fw_in = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
@@ -9416,8 +9419,12 @@ int eb_parse_json_config(struct json_object *jc)
 
 						s_addr = eb_malloc (__FILE__, __LINE__, "JSON", "Expose net address", json_object_get_string_len(jipaddr)+1);
 						strcpy ((char *) s_addr, json_object_get_string(jipaddr));
-						if ((sscanf (s_addr, "%hhd.%hhd.%hhd.%hhd", &addr_parts[0], &addr_parts[1], &addr_parts[2], &addr_parts[3])) != 4)
+
+						addr_parts[0] = addr_parts[1] = addr_parts[2] = addr_parts[3] = 0 ; // Any
+
+						if (strcmp(s_addr, "*") && ((sscanf (s_addr, "%hhd.%hhd.%hhd.%hhd", &addr_parts[0], &addr_parts[1], &addr_parts[2], &addr_parts[3])) != 4))
 							eb_debug (1, 0, "JSON", "Cannot create exposure for net %d index %d - bad ip address %s", net, ecount, s_addr);
+						
 						addr =	(addr_parts[0] << 24) |
 							(addr_parts[1] << 16) |
 							(addr_parts[2] << 8) |
@@ -9468,8 +9475,14 @@ int eb_parse_json_config(struct json_object *jc)
 							s_addr = eb_malloc (__FILE__, __LINE__, "JSON", "Expose host address string", json_object_get_string_len(jhost) + 1);
 							strcpy ((char *) s_addr, json_object_get_string(jhost));
 
-							if ((sscanf(s_addr, "%hhd.%hhd.%hhd.%hhd", &addr_parts[0], &addr_parts[1], &addr_parts[2], &addr_parts[3])) != 4)
-								eb_debug (1, 0, "JSON", "Cannot create exposure for station index %d in net %d - bad host IP address %s", scount, net, s_addr);
+							addr_parts[0] = addr_parts[1] = addr_parts[2] = addr_parts[3] = 0 ; // Any
+	
+							if (strcmp(s_addr, "*") && ((sscanf (s_addr, "%hhd.%hhd.%hhd.%hhd", &addr_parts[0], &addr_parts[1], &addr_parts[2], &addr_parts[3])) != 4))
+								eb_debug (1, 0, "JSON", "Cannot create exposure for net %d index %d - bad ip address %s", net, ecount, s_addr);
+						
+							//if ((sscanf(s_addr, "%hhd.%hhd.%hhd.%hhd", &addr_parts[0], &addr_parts[1], &addr_parts[2], &addr_parts[3])) != 4)
+								//eb_debug (1, 0, "JSON", "Cannot create exposure for station index %d in net %d - bad host IP address %s", scount, net, s_addr);
+								
 							eb_free (__FILE__, __LINE__, "JSON", "Expose host address string", s_addr);
 
 							addr = (addr_parts[0] << 24) | (addr_parts[1] << 16) | (addr_parts[2] << 8) | addr_parts[3];

@@ -131,7 +131,7 @@ FSOP(02)
 	if (is_32bit)
 		r.p.data[13] = (p.length & 0xff000000) >> 24;
         r.p.data[13+is_32bit] = p.perm;
-        r.p.data[14+is_32bit] = p.day;
+        r.p.data[14+is_32bit] = p.day; // TODO - Change to create day/month/year
         r.p.data[15+is_32bit] = p.monthyear;
         r.p.seq = eb_get_local_seq(f->server->fs_device);
 
@@ -159,6 +159,7 @@ FSOP(02)
 	alq->valid_bytes = 0; /* Initialize */
 	alq->pasteof = 0; /* Initialize */
 	alq->chunk_size = f->active->chunk_size; /* Copy from login process */
+	alq->is_32bit = is_32bit;
 
 	/* Send OK response and wait to see what happens */
 

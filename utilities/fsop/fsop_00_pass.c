@@ -65,14 +65,14 @@ FSOP_00(PASS)
 
 	fs_copy_padded(pw_new_padded, pw_new_unq, 10);
 
-	fprintf (stderr, "pw_old = '%s', pw_cur = '%s', pw_new = '%s', pw_new_unq = '%s', pw_new_padded = '%s'\n", pw_old, pw_cur, pw_new, pw_new_unq, pw_new_padded);
+	//fprintf (stderr, "pw_old = '%s', pw_cur = '%s', pw_new = '%s', pw_new_unq = '%s', pw_new_padded = '%s'\n", pw_old, pw_cur, pw_new, pw_new_unq, pw_new_padded);
 
 	if (
 			(!strcmp(pw_old, "\"\"") && !strcmp(pw_cur, "          "))
 		||	(!strncasecmp(pw_cur, pw_old, 10))
 	) /* Old password verified */
 	{
-		unsigned char username[10];
+		unsigned char username[11];
 		unsigned char blank_pw[11];
 
 		strcpy ((char * ) blank_pw, (const char * ) "          ");

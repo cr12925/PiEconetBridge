@@ -153,6 +153,8 @@ FSOP_00(NEWUSER)
 	disc = f->server->discs;
 	disc_index = 255;
 
+	disc_found = NULL;
+
 	while (disc)
 	{
 		if (disc->index < disc_index)
@@ -162,6 +164,12 @@ FSOP_00(NEWUSER)
 		}
 
 		disc = disc->next;
+	}
+
+	if (!disc_found)
+	{
+		fsop_error (f, 0xFF, "No discs found");
+		return;
 	}
 
 	user = &(f->server->users[userid]);

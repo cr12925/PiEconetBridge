@@ -551,15 +551,80 @@ void fsop_make_mdfs_pw_file(struct __fs_station *s)
 int fsop_get_discno(struct fsop_data *f, char *discname)
 {
 	struct __fs_disc	*d;
+	unsigned char		wildcard_regex[2048];
+	uint8_t			wildcard = 0;
 
 	d = f->server->discs;
 
+	if (strchr(discname, '*') || strchr(discname, '#'))
+	{
+		// Wildcard search
+		
+		uint8_t		counter;
+
+		wildcard = 1;
+
+		strcpy(wildcard_regex, "^");
+
+		for (counter = 0; counter < strlen(discname); counter++)
+		{
+			switch (*(discname+counter))
+			{
+				case '*':
+					strcat(wildcard_regex, FSDISCREGEX);
+					strcat(wildcard_regex, "*");
+					break;
+				case '#':
+					strcat(wildcard_regex, FSDISCREGEX);
+					strcat(wildcard_regex, "{1}");
+					break;
+				case '-': // Fall through
+				case '(': // Fall through
+				case ')': // Fall through
+				case '?': // Fall through
+				case '[': // Fall through
+				case '+': // Escape these
+				{
+					unsigned char t[3];
+					t[0] = '\\';
+					t[1] = *(discname+counter);
+					t[2] = '\0';
+					strcat(wildcard_regex, t);
+				}
+					break;
+				default:
+					{
+						char	s[2];
+
+						s[0] = *(discname+counter);
+						s[1] = 0;
+						strcat(wildcard_regex, s);
+					}
+					break;
+			}
+		}
+
+		strcat(wildcard_regex, "$");
+
+
+		if (regcomp(&(f->server->r_discwildcard), wildcard_regex, REG_EXTENDED | REG_ICASE | REG_NOSUB))
+			return -1;
+	}
+
 	while (d)
 	{
-		if (!strcasecmp(d->name, discname))
+		if (wildcard && !regexec(&(f->server->r_discwildcard), d->name, 0, NULL, 0))
+		{
+			regfree(&(f->server->r_discwildcard));
+			return d->index;
+		}
+		else if (!strcasecmp(d->name, discname))
 			return d->index;
 		d = d->next;
 	}
+
+	if (wildcard)
+		regfree(&(f->server->r_discwildcard));
 
 	return -1;
 }
@@ -2103,6 +2168,8 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 	{
 
 		int 	found = 0;
+
+		/* TO DO - Make this handle wildcard disc names */
 
 		// Exclude lost+found!
 		if (strcasecmp(path+1, "lost+found") && regexec(&(f->server->r_discname), (const char * ) path+1, 1, matches, 0) == 0)
@@ -4166,7 +4233,7 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t len, void 
 	struct __fs_bulk_port	*bp;
 	struct __fs_station 	*s = (struct __fs_station *) param;
 
-	off_t	 writeable, remaining, old_cursor, new_cursor, new_cursor_read;
+	off_t	 writeable, remaining, old_cursor = 0, new_cursor = 0, new_cursor_read;
 	FILE 	*h;
 	uint16_t	datalen = (len - 12);
 
@@ -4262,8 +4329,10 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t len, void 
 			r.p.data[3] = bp->received & 0xff;
 			r.p.data[4] = (bp->received & 0xff00) >> 8;
 			r.p.data[5] = (bp->received & 0xff0000) >> 16;
+			if (bp->is_32bit) // I'm going to assume that on a 32-bit transaction, we want a 32-bit received value...
+				r.p.data[6] = (bp->received & 0xff000000) >> 24;
 			r.p.seq = eb_get_local_seq(s->fs_device);
-			raw_fsop_aun_send (&r, 6, s, bp->active->net, bp->active->stn);
+			raw_fsop_aun_send (&r, 6+(bp->is_32bit), s, bp->active->net, bp->active->stn);
 		}
 		else // Was a save
 		{

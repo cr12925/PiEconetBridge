@@ -27,7 +27,15 @@
 FSOP(1e)
 {
 
-	fsop_reply_ok(f);
+	uint8_t		data[4];
+	uint32_t	space = 0x05F5E0FF; // A magic figure which doesn't upset DRDOS with Econet
+
+	data[0] = (space & 0x000000FF);
+	data[1] = (space & 0x0000FF00) >> 8;
+	data[2] = (space & 0x00FF0000) >> 16;
+	data[3] = (space & 0xFF000000) >> 24;
+
+	fsop_reply_ok_with_data(f, data, 4);
 
 	return;
 

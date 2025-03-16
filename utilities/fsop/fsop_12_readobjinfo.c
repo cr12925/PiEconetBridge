@@ -108,14 +108,12 @@ void fsop_12_internal (struct fsop_data *f, uint8_t is_32bit)
 	if (command == 7)
 	{
 		// According to MDFS.NET...
-
-		reply.p.data[replylen++] = p.disc; // Disc number
 		// SIN
                 reply.p.data[replylen++] = (p.internal & 0xff);
                 reply.p.data[replylen++] = (p.internal & 0xff00) >> 8;
                 reply.p.data[replylen++] = (p.internal & 0xff0000) >> 16;
-		reply.p.data[replylen++] = p.disc; // Disc number, again
 		reply.p.data[replylen++] = 1; // Server filing system number (!?)
+		reply.p.data[replylen++] = p.disc; // Disc number
 	}
 	
         if (command == 2 || command == 5 || command == 8 || command == 96)
@@ -147,8 +145,11 @@ void fsop_12_internal (struct fsop_data *f, uint8_t is_32bit)
 
         if (command == 1 || command == 5 || command == 8 || command == 96)
         {
-                reply.p.data[replylen++] = p.day;
-                reply.p.data[replylen++] = p.monthyear;
+		uint8_t		c_hour, c_min, c_sec, c_monthyear, c_day;
+
+		fsop_get_create_time(p.unixpath, &c_day, &c_monthyear, &c_hour, &c_min, &c_sec);
+                reply.p.data[replylen++] = c_day; // p.day;
+                reply.p.data[replylen++] = c_monthyear; // p.monthyear;
         }
 
         if (command == 4 || command == 5 || command == 8 || command == 96) // arg 4 doesn't request ownership - but the RISC OS PRM says it does, so we'll put this back
