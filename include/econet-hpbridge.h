@@ -17,6 +17,8 @@
 #ifndef __ECONETBRIDGE_H__
 #define __ECONETBRIDGE_H__
 
+#pragma GCC diagnostic ignored "-Wstringop-truncation"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

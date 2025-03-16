@@ -162,7 +162,7 @@ struct __fs_station {
 	pthread_t		fs_thread; // FS thread 
 	struct __eb_packetqueue	*fs_workqueue; // Packets to be processed by this FS
 	regex_t			r_pathname; // Pathname by filename length
-	regex_t			r_wildcard, r_discname; /* Regexes for filenames */
+	regex_t			r_wildcard, r_discname, r_discwildcard; /* Regexes for filenames */
 	struct __fs_station	*next, *prev; // Up and down the tree
 };
 
@@ -230,6 +230,7 @@ struct __fs_bulk_port {
         unsigned short user_handle; // index into active[server][active_id].fhandles[] so that cursor can be updated
         unsigned long long last_receive; // Time of last receipt so that we can garbage collect
         unsigned char acornname[ECONET_ABS_MAX_FILENAME_LENGTH+2]; // Tail path segment - enables *SAVE to return it on final close // Was 12
+	uint8_t		is_32bit; // Used to signal whether the close packet needs to be 32 bit
 	struct __fs_bulk_port		*next, *prev; /* Pointers for new structure */
 };
 
@@ -465,8 +466,9 @@ struct __fs_active_load_queue {
         /* For future use - when implemented, we can dump the packet queue and its memory usage ...  */
         uint32_t                start_ptr, send_bytes, sent_bytes, cursor, valid_bytes; /* filepos to start at, length to send (in chunk_size lumps), amount sent already - to calculate next packet start pos */
 	uint8_t			pasteof; /* Signals to the dequeuer if it is already past EOF so it doesn't bother trying to read again */
+	uint8_t			is_32bit; /* Signals whether we need a 32 bit close packet */
         uint16_t                chunk_size;
-        struct __fs_active_load_queue       *next, *prev;;
+        struct __fs_active_load_queue       *next, *prev;
 };
 
 /* Main user structs etc. */
@@ -861,6 +863,8 @@ extern float timediffstart(void);
 #define FSACORNREGEX    "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 #define FSREGEX    "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 #define FSDOTREGEX "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;\\.[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
+/* 20250315 Next line added to support wildcard disc names */
+#define FSDISCREGEX    "[]\\(\\)\\'A-Za-z0-9\\+_\x81-\xfe;[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 #define FS_NETCONF_REGEX_ONE "^NETCONF(IG)?\\s+([\\+\\-][A-Z]+)\\s*"
 
 #define FS_DIVHANDLE(a,x) ((a->manyhandles == 0) ? (  (  ((x) == 128) ? 8 : ((x) == 64) ? 7 : ((x) == 32) ? 6 : ((x) == 16) ? 5 : ((x) == 8) ? 4 : ((x) == 4) ? 3 : ((x) == 2) ? 2 : ((x) == 1) ? 1 : (x))) : (x))
