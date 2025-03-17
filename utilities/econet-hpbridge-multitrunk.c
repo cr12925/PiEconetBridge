@@ -714,10 +714,9 @@ void * eb_multitrunk_handler_thread (void * input)
 
 	timeout = me->multitrunk_parent->multitrunk.timeout;
 
-	/* This breaks read() 
-	if (timeout > 0 && (setsockopt(me->socket, SOL_SOCKET, TCP_USER_TIMEOUT, (char *) &(timeout), sizeof(timeout)) < 0))
-		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to set TCP_USER_TIMEOUT to %d", me->multitrunk_parent->multitrunk.port, me->multitrunk_parent->multitrunk.timeout);
-		*/
+	/* This breaks read() */
+	//if (timeout > 0 && (setsockopt(me->socket, SOL_SOCKET, TCP_USER_TIMEOUT, &timeout, sizeof(timeout)) < 0))
+		//eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to set TCP_USER_TIMEOUT to %d", me->multitrunk_parent->multitrunk.port, me->multitrunk_parent->multitrunk.timeout);
 
 	/* Lock the underlying trunk and update its mt_data  - but only if it's a client, because me->trunk won't be set if it's a server, because we've not received any traffic yet */
 
@@ -1045,7 +1044,7 @@ void * eb_multitrunk_client_device (void * device)
 				*/
 	
 			/* Putting this here breaks read() ! */
-			//if (timeout > 0 && (setsockopt(mt_socket, SOL_SOCKET, TCP_USER_TIMEOUT, (char *) &(timeout), sizeof(timeout)) < 0))
+			//if (timeout > 0 && (setsockopt(mt_socket, SOL_SOCKET, TCP_USER_TIMEOUT, &timeout, sizeof(timeout)) < 0))
 				//eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d unable to set TCP_USER_TIMEOUT to %d", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port, me->trunk.mt_parent->multitrunk.timeout);
 
 			if (connect(mt_socket, mt_iterate->ai_addr, mt_iterate->ai_addrlen) != -1)
@@ -1062,7 +1061,7 @@ void * eb_multitrunk_client_device (void * device)
 				if (fcntl(mt_socket, F_SETFL, (flags | O_RDWR | O_NONBLOCK)) == -1)
 					eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d unable to set O_RDWR | O_NONBLOCK", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
 
-				//if (timeout > 0 && (setsockopt(mt_socket, SOL_SOCKET, TCP_USER_TIMEOUT, (char *) &(timeout), sizeof(timeout)) < 0))
+				//if (timeout > 0 && (setsockopt(mt_socket, SOL_SOCKET, TCP_USER_TIMEOUT, &timeout, sizeof(timeout)) < 0))
 					//eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d unable to set TCP_USER_TIMEOUT to %d", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port, me->trunk.mt_parent->multitrunk.timeout);
 
 				connected = 1;
@@ -1215,6 +1214,11 @@ void * eb_multitrunk_server_device (void * device)
 		numfds++;
 	}
 
+	if (numfds == 0)
+	{
+		eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Server on %s:%d found nothing to listen for", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port, numfds);
+		return NULL;
+	}
 	eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Server on %s:%d successfully opened %d listener(s)", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port, numfds);
 
 	freeaddrinfo(mt_addresses);
