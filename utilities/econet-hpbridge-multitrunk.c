@@ -699,11 +699,10 @@ void * eb_multitrunk_handler_thread (void * input)
 			break;
 	}
 
-	if (getnameinfo((struct sockaddr *) &(mt_sa), mt_sa_len, remotehost, HOST_NAME_MAX-1, NULL, 0, NI_NAMEREQD))
-	{
+	strcpy(remotehost, remoteip);
+
+	if (getnameinfo((struct sockaddr *) &(mt_sa), mt_sa_len, remotehost, HOST_NAME_MAX-1, NULL, 0, 0))
 		eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Unable to resolve hostname for %s:%d", me->multitrunk_parent->multitrunk.port, remoteip, remoteport);
-		strcpy(remotehost, remoteip);
-	}
 
 	if (!(tcpproto = getprotobyname("tcp")))
 		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Cannot get tcp protocol number!", me->multitrunk_parent->multitrunk.port);
