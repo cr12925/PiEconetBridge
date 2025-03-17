@@ -2986,20 +2986,6 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 	if (eb_firewall(bridge_fw, packet) != EB_FW_ACCEPT)
 	{
 		eb_dump_packet (dest, EB_PKT_DUMP_DUMPED, packet, length);
-		/*
-		eb_debug (0, 1, "BRIDGE", "%-8s %3d.%3d from %3d.%3d PACKET FIREWALLED port &%02X ctrl &%02X length &%04X seq 0x%08lX",
-			eb_type_str(dest->type),
-			packet->p.dstnet,
-			packet->p.dststn,
-			packet->p.srcnet,
-			packet->p.srcstn,
-			packet->p.port,
-			packet->p.ctrl,
-			length,
-			packet->p.seq
-		);
-		*/
-
 		eb_free (__FILE__, __LINE__, "Q-IN", "Freeing inbound packet after packet firewalled", packet);
 
 		return 0;
@@ -3721,7 +3707,7 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 				incoming.p.srcstn = source_device->aun->stn;
 				incoming.p.ctrl |= 0x80;
 
-				if ((fw_result = eb_firewall(source_device->fw_in, &incoming)) == EB_FW_REJECT)
+				if ((fw_result = eb_firewall(source_device->fw_out, &incoming)) == EB_FW_REJECT) // fw_out because this is traffic coming *from* the AUN device. fw_in is for traffic going *to* it.
 				{
 					eb_dump_packet (e->parent, EB_PKT_DUMP_DUMPED, &incoming, length - 8); // (Drop the header length)
 				}
@@ -5184,7 +5170,7 @@ static void * eb_device_aun_sender (void *device)
 
 
 						eb_add_stats(&(o->destdevice->statsmutex), &(o->destdevice->b_in), p->length);
-						if (eb_firewall(o->destdevice->fw_out, p->p) == EB_FW_REJECT)
+						if (eb_firewall(o->destdevice->fw_in, p->p) == EB_FW_REJECT)
 							eb_dump_packet (o->destdevice, EB_PKT_DUMP_DUMPED, p->p, p->length);
 						else
 						{
@@ -6250,7 +6236,7 @@ static void * eb_device_despatcher (void * device)
 				 * it is given is NULL
 				 */
 
-				if (eb_firewall (d->fw_in, &packet) == EB_FW_REJECT)
+				if (eb_firewall (d->fw_out, &packet) == EB_FW_REJECT) // fw_out - this has come from the device itself
 				{
 					eb_dump_packet (d, EB_PKT_DUMP_DUMPED, &packet, length);
 					dump_traffic = 1;
@@ -6721,9 +6707,9 @@ static void * eb_device_despatcher (void * device)
 			{
 				remove = 0;
 	
-				/* Apply outbound firewall */
+				/* Apply inbound firewall - this is traffic going to the device */
 
-				if ((eb_firewall(d->fw_out, p->p) == EB_FW_REJECT))
+				if ((eb_firewall(d->fw_in, p->p) == EB_FW_REJECT))
 				{
 					eb_dump_packet (d, EB_PKT_DUMP_DUMPED, p->p, p->length);
 					remove = 1;
@@ -11623,7 +11609,7 @@ int main (int argc, char **argv)
 		{
 			case 0: // Long option
 			{
-				switch (optind)
+				switch (long_index)
 				{
 					/* Commented - these are implemented after reading the config file 
 					case 0: 	EB_CONFIG_WIRE_RETRIES = atoi(optarg); break;
