@@ -645,6 +645,8 @@ void * eb_multitrunk_handler_thread (void * input)
 	uint16_t		remoteport;
 	char			remotehost[HOST_NAME_MAX];
 
+	struct protoent		*tcpproto;
+
 	me = (struct mt_client *) input; // Once we've found the underlying trunk, we copy this pointer into its mt_client struct in the device so that it can be found by later connections
 
 	/* When called, the trunk which might be being connected to is unknown.
@@ -703,6 +705,9 @@ void * eb_multitrunk_handler_thread (void * input)
 		strcpy(remotehost, remoteip);
 	}
 
+	if (!(tcpproto = getprotobyname("tcp")))
+		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Cannot get tcp protocol number!", me->multitrunk_parent->multitrunk.port);
+
 	eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d New connection with remote at %s(%s):%d - sock fd %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteip, remoteport, me->socket);
 
 	/* me->trunk won't be set at this point. */
@@ -715,8 +720,8 @@ void * eb_multitrunk_handler_thread (void * input)
 	timeout = me->multitrunk_parent->multitrunk.timeout;
 
 	/* This breaks read() */
-	//if (timeout > 0 && (setsockopt(me->socket, SOL_SOCKET, TCP_USER_TIMEOUT, &timeout, sizeof(timeout)) < 0))
-		//eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to set TCP_USER_TIMEOUT to %d", me->multitrunk_parent->multitrunk.port, me->multitrunk_parent->multitrunk.timeout);
+	if (timeout > 0 && (setsockopt(me->socket, tcpproto->p_proto, TCP_USER_TIMEOUT, &timeout, sizeof(timeout)) < 0))
+		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to set TCP_USER_TIMEOUT to %d", me->multitrunk_parent->multitrunk.port, me->multitrunk_parent->multitrunk.timeout);
 
 	/* Lock the underlying trunk and update its mt_data  - but only if it's a client, because me->trunk won't be set if it's a server, because we've not received any traffic yet */
 
