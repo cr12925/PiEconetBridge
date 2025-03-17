@@ -81,7 +81,7 @@ FSOP(0a)
 
 	internal_handle = a->fhandles[handle].handle;
 
-	if ((!is_32bit && f->datalen < 13) || (f->datalen < 17))
+	if ((!is_32bit && f->datalen < 13) || (is_32bit && f->datalen < 17))
 	{
 		fsop_error(f, 0xFF, "Bad server request");
 		return;
