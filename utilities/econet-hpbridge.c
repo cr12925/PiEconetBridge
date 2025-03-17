@@ -3355,11 +3355,14 @@ static void * eb_device_listener (void * device)
 			eb_debug (0, 2, "DESPATCH", "%-8s %7d Trunk now connected - device listener woken", eb_type_str(d->type), d->trunk.local_port);
 		}
 		p->fd = d->trunk.mt_data->trunk_socket[0];
+		p_reset->fd = d->trunk.mt_data->trunk_socket[0];
 		pthread_mutex_unlock(&(d->trunk.mt_mutex));
 	}
 
 	while (poll(p, 1, -1))
 	{
+		/* TODO - Handle multitrunk pipe disconnections here */
+
 		if ((p->revents & POLLHUP) && d->type == EB_DEF_PIPE && (d->pipe.skt_write != -1)) // Presumably PIPE - close writer socket
 		{
 			struct __eb_packetqueue 	*q, *q_next;
