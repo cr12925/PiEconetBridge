@@ -3363,6 +3363,18 @@ static void * eb_device_listener (void * device)
 	{
 		/* TODO - Handle multitrunk pipe disconnections here */
 
+		if (p->revents & POLLHUP && d->type == EB_DEF_TRUNK && d->trunk.mt_parent) // Looks like our pipe to the MT parent has closed. Wait to be woken up again.
+		{
+			eb_debug (0, 2, "DESPATCH", "%-8s %7d Trunk disconnected - device listener sleeping", eb_type_str(d->type), d->trunk.local_port);
+			pthread_mutex_lock(&(d->trunk.mt_mutex));
+			pthread_cond_wait(&(d->trunk.mt_cond), &(d->trunk.mt_mutex));
+			eb_debug (0, 2, "DESPATCH", "%-8s %7d Trunk now connected - device listener woken", eb_type_str(d->type), d->trunk.local_port);
+			p->fd = d->trunk.mt_data->trunk_socket[0];
+			p_reset->fd = d->trunk.mt_data->trunk_socket[0];
+			pthread_mutex_unlock(&(d->trunk.mt_mutex));
+			poll(p, 1, -1);
+		}
+
 		if ((p->revents & POLLHUP) && d->type == EB_DEF_PIPE && (d->pipe.skt_write != -1)) // Presumably PIPE - close writer socket
 		{
 			struct __eb_packetqueue 	*q, *q_next;
@@ -5624,6 +5636,7 @@ static void * eb_device_despatcher (void * device)
 			l_socket = 0; // Shouldn't be used on a NULL or Pool device anyway
 			break;
 		default:
+			l_socket = 0;
 			eb_debug (1, 0, "DESPATCH", "Cannot identify device type so as to local appropriate listener socket! (Device type %08X)", d->type);
 	}
 
