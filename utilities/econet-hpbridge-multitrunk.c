@@ -387,7 +387,7 @@ void eb_mt_send_proto_version (struct mt_client *me)
 
 	me->mt_local_version = EB_MT_PROTOCOL_VERSION;
 
-	eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Sent multitrunk protocol version %d to %s:%d", 
+	eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Multitrunk protocol version %02d to %s:%d", 
 			me->multitrunk_parent->multitrunk.port,
 			EB_MT_PROTOCOL_VERSION,
 			me->trunk->trunk.hostname,
