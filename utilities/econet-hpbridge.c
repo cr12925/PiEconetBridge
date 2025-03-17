@@ -8325,9 +8325,10 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 	uint16_t	jcount, jlength;
 	struct json_object	*jdiverts, *jstation, *jstation_number, *jprinters, *jfs, *jips, *jpipepath, *jnetclock;
 
-	if (json_object_object_get_ex(o, "net", &jdiverts)) /* Temp use of jdiverts */
-		net = json_object_get_int(jdiverts);
-	else	eb_debug (1, 0, "JSON", "Econet or virtual device in %s JSON config without a network numbers", (otype == 2) ? "Econet" : "Virtual");
+	if (!json_object_object_get_ex(o, "net", &jdiverts)) /* Temp use of jdiverts */
+		eb_debug (1, 0, "JSON", "Econet or virtual device in %s JSON config without a network numbers", (otype == 2) ? "Econet" : "Virtual");
+
+	net = json_object_get_int(jdiverts);
 
 	if (otype == 2)
 	{
@@ -8371,10 +8372,10 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 		{
 			jstation = json_object_array_get_idx(jdiverts, jcount);	
 
-			if (json_object_object_get_ex(jstation, "station", &jstation_number))
-				stn = json_object_get_int(jstation_number);
-			else
+			if (!json_object_object_get_ex(jstation, "station", &jstation_number))
 				eb_debug (1, 0, "JSON", "No station number in divert number %d in %s net %d", jcount, (otype == 1) ? "virtual" : "econet", net);
+
+			stn = json_object_get_int(jstation_number);
 
 			json_object_object_get_ex(jstation, "printers", &jprinters);
 			json_object_object_get_ex(jstation, "ipservers", &jips);
@@ -9127,7 +9128,7 @@ int eb_parse_json_config(struct json_object *jc)
 			while (tcount < tlength)
 			{
 				uint16_t	local_port, remote_port = 0;
-				char		* remote_host, *key, *name;
+				char		* remote_host, *key, *name = NULL;
 				uint8_t		nat_local, nat_distant, found = 0;
 				uint16_t	nlength, ncount = 0;
 				struct __eb_device	*trunk;
@@ -9569,6 +9570,8 @@ int eb_parse_json_config(struct json_object *jc)
 
 		EB_JSON_TUNABLE_BOOL("disable-econet", EB_CONFIG_LOCAL);
 		EB_JSON_TUNABLE_INT("debug-level", EB_DEBUG_LEVEL);
+		if (!j) // No debug-level
+			EB_DEBUG_LEVEL = 0;
 		EB_JSON_TUNABLE_INT("packet-dump-bytes", EB_CONFIG_MAX_DUMP_BYTES);
 		EB_JSON_TUNABLE_BOOL("kernel-extralogs", EB_CONFIG_EXTRALOGS);
 		EB_JSON_TUNABLE_INT("fs-stats-port", EB_CONFIG_FS_STATS_PORT);
@@ -10016,7 +10019,8 @@ int eb_readconfig(char *f, char *json)
 				destination = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create Trunk destination host string", strlen(eb_getstring(line, &matches[2])) + 1);
 				if (!destination)	eb_debug (1, 0, "CONFIG", "Unable to malloc() string for trunk destination %s", eb_getstring(line, &matches[2]));
 
-				strncpy (destination, eb_getstring(line, &matches[2]), strlen(eb_getstring(line, &matches[2])) + 1);
+				//strncpy (destination, eb_getstring(line, &matches[2]), strlen(eb_getstring(line, &matches[2])) + 1);
+				strcpy (destination, eb_getstring(line, &matches[2])); // Won't overflow because of the eb_malloc above.
 				local_port = atoi(eb_getstring(line, &matches[1]));
 				remote_port = 0;
 
@@ -10048,7 +10052,9 @@ int eb_readconfig(char *f, char *json)
 	
 					if (!psk)
 						eb_debug (1, 0, "CONFIG", "Unable to malloc() string for trunk shared key - trunk port %d", local_port);
-					strncpy ((char *) psk, eb_getstring (line, &matches[3]), strlen(eb_getstring(line, &matches[3])) + 1);
+
+					//strncpy ((char *) psk, eb_getstring (line, &matches[3]), strlen(eb_getstring(line, &matches[3])) + 1);
+					strncpy ((char *) psk, eb_getstring (line, &matches[3]), 31);
 				}
 				else	psk = NULL;
 
@@ -11290,6 +11296,7 @@ Options:\n\
 \t-n <num>\tMax data bytes in a packet dump (default 0)\n\
 \t-p [iIoO]\tPacket dump - i/I: input phase, before/after NAT; o/O: output phase, likewise\n\
 \t-s\t\tDump configuration at startup (repeat for extra debug)\n\
+\t-y\t\tDebug Level during configuration phase (each occurrence increases; max 5)\n\
 \t-z\t\tDebug Level (each occurrence increases; max 5)\n\
 \t-e\t\tTurn on extra logging from kernel module to dmesg\n\
 \n\
@@ -11383,7 +11390,7 @@ int main (int argc, char **argv)
 	int	opt;
 	struct __eb_device *p;
 	struct __eb_aun_exposure *e;
-	int	optind;
+	int	long_index;
 	struct rlimit	max_fds;
 	char 	config_path[256];
 	char	jsonconfig_path[256], jsonconfigout_path[256];
@@ -11545,7 +11552,7 @@ int main (int argc, char **argv)
 	 * wrong.
 	 */
 
-	while ((opt = getopt_long(argc, argv, "hc:d:eln:p:sz", long_options, &optind)) != -1)	
+	while ((opt = getopt_long(argc, argv, "hc:d:eln:p:syz", long_options, &long_index)) != -1)	
 	{
 		switch (opt)
 		{
@@ -11609,7 +11616,8 @@ int main (int argc, char **argv)
 			}; break;
 			*/
 			case 's':	dumpconfig++; break;	
-			case 'z':	EB_DEBUG_LEVEL++; break;
+			case 'y':	EB_DEBUG_LEVEL++; break;
+			
 		}
 	}
 
@@ -11695,13 +11703,13 @@ int main (int argc, char **argv)
 
 	optind = 1; /* Reset option processing */
 
-	while ((opt = getopt_long(argc, argv, "hc:d:eln:p:sz", long_options, &optind)) != -1)	
+	while ((opt = getopt_long(argc, argv, "hc:d:eln:p:sz", long_options, &long_index)) != -1)	
 	{
 		switch (opt)
 		{
 			case 0: // Long option
 			{
-				switch (optind)
+				switch (long_index)
 				{
 					case 0: 	EB_CONFIG_WIRE_RETRIES = atoi(optarg); break;
 					case 1:		EB_CONFIG_AUN_RETRIES = atoi(optarg); break;
