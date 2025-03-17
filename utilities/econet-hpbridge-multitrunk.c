@@ -479,6 +479,7 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 				fprintf (stderr, "\n\n");
 				*/
 
+				eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Processing decrypted data of length %d from %s:%d %02X %02X %02X %02X", me->multitrunk_parent->multitrunk.port, decrypted_length, remotehost, remoteport, buffer[0], buffer[1], buffer[2], buffer[3]);
 				pthread_mutex_lock(&(search_trunk->trunk.mt_mutex));
 
 				me->trunk = search_trunk;
@@ -708,7 +709,7 @@ void * eb_multitrunk_handler_thread (void * input)
 	//if (me->trunk->trunk.mt_type == MT_SERVER) /* Update endpoint address in trunk */
 		//eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
 
-	if (pipe(me->trunk_socket) < 0)
+	if (pipe2(me->trunk_socket, (O_DIRECT | O_NONBLOCK | O_CLOEXEC)) < 0)
 		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to create pipe to underlying trunk (%s)", me->multitrunk_parent->multitrunk.port, strerror(errno));
 
 	timeout = me->multitrunk_parent->multitrunk.timeout;
