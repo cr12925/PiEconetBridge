@@ -51,12 +51,23 @@ FSOP(0a)
 
 	is_32bit = (*(f->data+1) == 0x2A) ? 1 : 0; 
 
-	handle = FS_DIVHANDLE(a,*(f->data+5));
-	//ctrl = FSOP_CTRL;
-	txport = FSOP_URD; /* Takes URD slot */
-	offsetstatus = *(f->data+6);
-	bytes = (((*(f->data+7))) + ((*(f->data+8)) << 8) + (*(f->data+9) << 16));
-	offset = (((*(f->data+10))) + ((*(f->data+11)) << 8) + (*(f->data+12) << 16));
+	if (!is_32bit)
+	{
+		handle = FS_DIVHANDLE(a,*(f->data+5));
+		//ctrl = FSOP_CTRL;
+		txport = FSOP_URD; /* Takes URD slot */
+		offsetstatus = *(f->data+6);
+		bytes = (((*(f->data+7))) + ((*(f->data+8)) << 8) + (*(f->data+9) << 16));
+		offset = (((*(f->data+10))) + ((*(f->data+11)) << 8) + (*(f->data+12) << 16));
+	}
+	else
+	{
+		handle = FS_DIVHANDLE(a,*(f->data+8)); // See mdfs.net. Things are not in the analogous place to the 24-bit version
+		txport = *(f->data+7); 
+		offsetstatus = *(f->data+6);
+		bytes = (((*(f->data+9))) + ((*(f->data+10)) << 8) + (*(f->data+11) << 16) + (*(f->data+12) << 24));
+		offset = (((*(f->data+13))) + ((*(f->data+14)) << 8) + (*(f->data+15) << 16) + (*(f->data+16) << 24));
+	}
 
 	if (handle < 1 || handle > FS_MAX_OPEN_FILES || !a->fhandles[handle].handle)
 	{
@@ -70,7 +81,7 @@ FSOP(0a)
 
 	internal_handle = a->fhandles[handle].handle;
 
-	if (f->datalen < 13)
+	if ((!is_32bit && f->datalen < 13) || (f->datalen < 17))
 	{
 		fsop_error(f, 0xFF, "Bad server request");
 		return;
@@ -102,7 +113,7 @@ FSOP(0a)
 	else
 		eofreached = 0;
 
-	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Get offset %06lX, file length %06lX, beyond EOF %s", offset, length, (eofreached ? "Yes" : "No"));
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Get from offset %06lX, file length %06lX, beyond EOF %s", offset, length, (eofreached ? "Yes" : "No"));
 
 	// Send acknowledge
 
@@ -171,11 +182,22 @@ FSOP(0b)
 
 	is_32bit = (*(f->data+1) == 0x2B) ? 1 : 0; 
 
-	handle = FS_DIVHANDLE(a,*(f->data + 5));
-	txport = *(f->data+2);
-	offsetstatus = *(f->data+6);
-	bytes = (((*(f->data+9)) << 16) + ((*(f->data+8)) << 8) + (*(f->data+7)));
-	offset = (((*(f->data+12)) << 16) + ((*(f->data+11)) << 8) + (*(f->data+10)));
+	if (!is_32bit)
+	{
+		handle = FS_DIVHANDLE(a,*(f->data + 5));
+		txport = *(f->data+2);
+		offsetstatus = *(f->data+6);
+		bytes = (((*(f->data+9)) << 16) + ((*(f->data+8)) << 8) + (*(f->data+7)));
+		offset = (((*(f->data+12)) << 16) + ((*(f->data+11)) << 8) + (*(f->data+10)));
+	}
+	else
+	{
+		handle = FS_DIVHANDLE(a,*(f->data + 8));
+		txport = *(f->data+7);
+		offsetstatus = *(f->data+6);
+		bytes = (((*(f->data+9))) + ((*(f->data+10)) << 8) + (*(f->data+11) << 16) + (*(f->data+12) << 24));
+		offset = (((*(f->data+13))) + ((*(f->data+14)) << 8) + (*(f->data+15) << 16) + (*(f->data+16) << 24));
+	}
 
 	fs_date_to_two_bytes(t.tm_mday, t.tm_mon+1, t.tm_year, &monthyear, &day);
 
@@ -280,13 +302,10 @@ FSOP(0b)
 
 FSOP(2b)
 {
-
-	fsop_error(f, 0xFF, "Not implemented (yet)");
+	fsop_0a(f);
 }
 
 FSOP(2c)
 {
-
-	fsop_error(f, 0xFF, "Not implemented (yet)");
-
+	fsop_0b(f);
 }

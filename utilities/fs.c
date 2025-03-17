@@ -504,7 +504,11 @@ void fsop_make_mdfs_pw_file(struct __fs_station *s)
 			pointer_index = ((firstchar - 'A') / 2) + 1;
 		else if (firstchar < 'A')
 			pointer_index = 0;
-		else firstchar = 14;
+		else 
+		{
+			firstchar = 14;
+			pointer_index = 28;
+		}
 
 		if (pointers[pointer_index][0] == 0 && pointers[pointer_index][1] == 0)
 		{
@@ -1462,9 +1466,9 @@ void fsop_get_create_time (unsigned char *path, uint8_t *day, uint8_t *myear, ui
 
 void fsop_set_create_time (unsigned char *path, uint8_t day, uint8_t myear, uint8_t hour, uint8_t min, uint8_t sec)
 {
-	unsigned char	tmp[11];
+	unsigned char	tmp[16];
 
-	snprintf(tmp, 11, "%02X%02X%02d%02d%02d", day, myear, hour, min, sec);
+	snprintf(tmp, 14, "%02X%02X%02d%02d%02d", day, myear, hour, min, sec);
 
 	setxattr((const char *) path, "user.econet_birth", (const void *) tmp, 10, 0);
 
@@ -4078,8 +4082,10 @@ void fsop_bulk_dequeue (struct __fs_station *s, uint8_t net, uint8_t stn, uint32
 			reply->p.data[3] = (alq->valid_bytes & 0xFF);
 			reply->p.data[4] = (alq->valid_bytes & 0xFF00) >> 8;
 			reply->p.data[5] = (alq->valid_bytes & 0xFF0000) >> 16;
+			if (alq->is_32bit)
+				reply->p.data[6] = (alq->valid_bytes & 0xFF000000) >> 24;
 
-			raw_fsop_aun_send(reply, 6, s, a->net, a->stn);
+			raw_fsop_aun_send(reply, 6 + (alq->is_32bit ? 1 : 0), s, a->net, a->stn);
 		}
 
 		eb_free(__FILE__, __LINE__, "FS", "Deallocate bulk transfer completion packet after transmission", reply);
@@ -4290,8 +4296,10 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t len, void 
 
 	fs_debug_full (0, 2, s, bp->active->net, bp->active->stn, "Bulk transfer in on port &%02X data length &%04X, expected total length &%04lX, writeable &%04X", bp->bulkport, datalen, bp->length, writeable
 			);
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 	if (bp->is_gbpb) // Produce additional debug
 		fs_debug_full (0, 2, s, bp->active->net, bp->active->stn, "Bulk trasfer on port %02X old cursor = %06X, new cursor in FS = %06X, new cursor from OS = %06X - %s", bp->bulkport, old_cursor, new_cursor, new_cursor_read, (new_cursor == new_cursor_read) ? "CORRECT" : " *** ERROR ***");
+#pragma GCC diagnostic warning "-Wmaybe-uninitialized"
 
 	bp->last_receive = (unsigned long long) time(NULL);
 

@@ -5614,6 +5614,11 @@ static void * eb_device_despatcher (void * device)
 		case EB_DEF_LOCAL:
 			l_socket = d->local.ip.socket;
 			break;
+		case EB_DEF_NULL:
+			l_socket = 0; // Shouldn't be used on a NULL device anyway
+			break;
+		default:
+			eb_debug (1, 0, "DESPATCH", "Cannot identify device type so as to local appropriate listener socket! (Device type %08X)", d->type);
 	}
 
 	d->p_reset.fd = l_socket;
@@ -6707,7 +6712,6 @@ static void * eb_device_despatcher (void * device)
 								eb_debug (0, 1, "TRUNK", "%-8s %7d Trunk endpoint address %s resolved. Trunk now active.", "Trunk", d->trunk.local_port, d->trunk.hostname);
 
 								// Trigger a reset
-								//
 
 								pthread_cond_signal (&(d->bridge_reset_cond));
 							}
@@ -6723,6 +6727,7 @@ static void * eb_device_despatcher (void * device)
 
 							ap->p.dstnet = (d->trunk.xlate_out[ap->p.dstnet] ? d->trunk.xlate_out[ap->p.dstnet] : ap->p.dstnet);
 
+							result = -1; // Gets overwritten on success
 // Encrypted version starts here
 							if (d->trunk.sharedkey && !d->trunk.mt_parent) // Encryption on and not multitrunk child
 							{
@@ -10664,7 +10669,7 @@ int eb_readconfig(char *f, char *json)
 				char		device[128];
 				regex_t		r_wort;
 #ifdef EB_JSONCONFIG
-				struct json_object	*jfw_array, *jdevice, *jfw_entry, *jfw_entries;
+				struct json_object	*jfw_array, *jdevice = NULL, *jfw_entry, *jfw_entries;
 				uint8_t		is_trunk = 0;
 				char		fw_name[128];
 #endif
