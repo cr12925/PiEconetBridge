@@ -146,16 +146,17 @@ struct __eb_outq { // Definition of outbound queue from device (i.e. going from 
 	struct __eb_outq *next;
 };
 
+#define EB_FW_NOMATCH 0x00
 #define EB_FW_ACCEPT 0x01
 #define EB_FW_REJECT 0x02
 #define EB_FW_CHAIN  0x04 /* Pass to another chain */
-//#define EB_FW_DEFAULT EB_FW_ACCEPT
 
 /* Firewall entry. */
 struct __eb_fw { // Firewall entry - any value which is &FF is the wildcard
 	uint8_t srcnet, srcstn, dstnet, dststn;
 	uint8_t port;
 	uint8_t action;
+	struct __eb_fw_chain 	*fw_subchain;
 	struct __eb_fw *next;
 };
 

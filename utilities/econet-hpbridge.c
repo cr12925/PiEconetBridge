@@ -3268,12 +3268,15 @@ uint8_t eb_ipgw_transmit (struct __eb_device *d, uint32_t addr)
 	return result;
 }
 
-/* Implement a firewall chain on a packet traversing the bridge. 
+/* Implement a firewall chain without a policy, and recursively call sub-chains */
+
+/* Implement a firewall chain on a packet traversing the bridge, and recursively call subchains.
+ * Don't apply policy
    Used by the bridge transfer routines immediately prior to eb_enqueue_input()
-   Returns EB_FW_ACCEPT or EB_FW_REJECT. Defaults to the defined default.
+   Returns EB_FW_ACCEPT or EB_FW_REJECT, or EB_FW_NOMATCH if not matched. Defaults to the defined default.
 */
 
-uint8_t eb_firewall (struct __eb_fw_chain *chain, struct __econet_packet_aun *p)
+uint8_t eb_firewall_inner (struct __eb_fw_chain *chain, struct __econet_packet_aun *p)
 {
 
 	uint8_t		result;
@@ -3282,7 +3285,8 @@ uint8_t eb_firewall (struct __eb_fw_chain *chain, struct __econet_packet_aun *p)
 	if (!chain)
 		return EB_FW_ACCEPT;
 
-	result = chain->fw_default;
+	//result = chain->fw_default;
+	result = EB_FW_NOMATCH;
 
 	f = chain->fw_chain_start;
 
@@ -3298,8 +3302,24 @@ uint8_t eb_firewall (struct __eb_fw_chain *chain, struct __econet_packet_aun *p)
 			)
 		)
 		{
-			result = f->action;
-			break;
+			if (f->action == EB_FW_CHAIN)
+			{
+				uint8_t inner_result;
+
+				inner_result = eb_firewall_inner(f->fw_subchain, p);
+
+				if (inner_result != EB_FW_NOMATCH)
+				{
+					result = inner_result;
+					break;
+				}
+				// Otherwise we keep going through the current chain.
+			}
+			else
+			{
+				result = f->action;
+				break;
+			}
 		}
 		
 		f = f->next;
@@ -3309,6 +3329,27 @@ uint8_t eb_firewall (struct __eb_fw_chain *chain, struct __econet_packet_aun *p)
 	return result;
 
 }
+
+/* eb_firewall
+ * Wrapper which applies default on a chain
+ */
+
+uint8_t eb_firewall (struct __eb_fw_chain *chain, struct __econet_packet_aun *p)
+{
+
+	uint8_t	result;
+
+	if (!chain)
+		return EB_FW_ACCEPT;
+
+	result = eb_firewall_inner(chain, p);
+
+	if (result == EB_FW_NOMATCH)
+		result = chain->fw_default;
+
+	return result;
+}
+
 
 /* Generic device listener loop
  */
@@ -8798,11 +8839,19 @@ int eb_parse_json_config(struct json_object *jc)
 						if (json_object_object_get_ex(jentry, "port", &jint))
 							fw_entry->port = json_object_get_int(jint);
 						
+						fw_entry->fw_subchain = NULL;
+
 						if ((json_object_object_get_ex(jentry, "accept", &jpolicy)))
 						{
 							if (json_object_get_boolean(jpolicy))
 								fw_entry->action = EB_FW_ACCEPT;
 							else	fw_entry->action = EB_FW_REJECT;
+						}
+						else if ((json_object_object_get_ex(jentry, "subchain", &jpolicy)))
+						{
+							fw_entry->fw_subchain = eb_get_fw_chain_byname((char *) json_object_get_string(jpolicy));
+							if (!fw_entry->fw_subchain)
+								eb_debug (1, 0, "JSON", "Cannot find firewall sub-chain named %s in chain name %s entry index %d", json_object_get_string(jpolicy), fw_chain->fw_chain_name, ecount);
 						}
 
 						//fprintf (stderr, "Adding firewall entry to chain %s: %d.%d -> %d.%d port %d %s\n", fw_chain->fw_chain_name, fw_entry->srcnet, fw_entry->srcstn, fw_entry->dstnet, fw_entry->dststn, fw_entry->port, fw_entry->action == EB_FW_ACCEPT ? "Accept" : "Reject");
