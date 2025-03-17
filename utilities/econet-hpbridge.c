@@ -3215,6 +3215,8 @@ uint8_t eb_ipgw_transmit (struct __eb_device *d, uint32_t addr)
 	eb_debug (0, 3, "IPGW", "%-8s %3d.%3d Examining transmit queue after ARP reply received for network order address %08X",
 		eb_type_str(d->type), d->net, d->local.stn, addr);
 
+	gettimeofday(&now, NULL);
+
 	while (q)
 	{
 		int32_t		diff;
@@ -5614,8 +5616,9 @@ static void * eb_device_despatcher (void * device)
 		case EB_DEF_LOCAL:
 			l_socket = d->local.ip.socket;
 			break;
+		case EB_DEF_POOL:
 		case EB_DEF_NULL:
-			l_socket = 0; // Shouldn't be used on a NULL device anyway
+			l_socket = 0; // Shouldn't be used on a NULL or Pool device anyway
 			break;
 		default:
 			eb_debug (1, 0, "DESPATCH", "Cannot identify device type so as to local appropriate listener socket! (Device type %08X)", d->type);
