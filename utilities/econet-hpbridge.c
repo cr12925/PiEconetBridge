@@ -1706,7 +1706,7 @@ static void * eb_bridge_update_watcher (void *device)
 		if (!sender_net) // No bridge sender net available!
 		{
 			/* Go around again */
-			eb_debug (0,2, "BRIDGE", "%-8s   %5d   Unable to find sender net. Not sending bridge update.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.local_port);
+			eb_debug (0,2, "BRIDGE", "%-8s   %7d Unable to find sender net. Not sending bridge update.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.local_port);
 			continue;
 		}
 
@@ -5575,7 +5575,7 @@ static void * eb_device_despatcher (void * device)
 				eb_debug (1, 0, "DESPATCH", "%-8s %7d Cannot start second bridge updater on this device.", "Trunk", d->trunk.local_port);
 		
 			if (pthread_create(&d->bridge_reset_thread, NULL, eb_bridge_reset_watcher, d))
-				eb_debug (1, 0, "DESPATCH", "%-8s %5d   Cannot start bridge reset thread on this device.", "Trunk", d->trunk.local_port);
+				eb_debug (1, 0, "DESPATCH", "%-8s %7d Cannot start bridge reset thread on this device.", "Trunk", d->trunk.local_port);
 		
 			// Added 20240607
 			
@@ -5966,7 +5966,7 @@ static void * eb_device_despatcher (void * device)
 
 							if (was_dead && (packet.p.port != BRIDGE_PORT || packet.p.ctrl != BRIDGE_RESET)) // If this trunk was dead before this packet arrived, do a bridge reset - which will also start the update process - but dont do this if what we received was a reset, because there'll just be lots of resets flying around.
 							{
-								eb_debug (0, 2, "DESPATCH", "%-8s %5d   Trunk received traffic after being dead - send bridge reset", eb_type_str(d->type), d->trunk.remote_port);
+								eb_debug (0, 2, "DESPATCH", "%-8s %7d Trunk received traffic after being dead - send bridge reset", eb_type_str(d->type), d->trunk.remote_port);
 								eb_bridge_reset(NULL);
 							}
 						}
