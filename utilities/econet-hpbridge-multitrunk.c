@@ -721,7 +721,7 @@ void * eb_multitrunk_handler_thread (void * input)
 
 	/* This breaks read() */
 	if (timeout > 0 && (setsockopt(me->socket, tcpproto->p_proto, TCP_USER_TIMEOUT, &timeout, sizeof(timeout)) < 0))
-		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to set TCP_USER_TIMEOUT to %d", me->multitrunk_parent->multitrunk.port, me->multitrunk_parent->multitrunk.timeout);
+		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to set TCP_USER_TIMEOUT to %d (%s)", me->multitrunk_parent->multitrunk.port, me->multitrunk_parent->multitrunk.timeout, strerror(errno));
 
 	/* Lock the underlying trunk and update its mt_data  - but only if it's a client, because me->trunk won't be set if it's a server, because we've not received any traffic yet */
 
@@ -1188,7 +1188,7 @@ void * eb_multitrunk_server_device (void * device)
 					mt_iterate->ai_protocol);
 
 		if (mt_socket == -1)
-			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to create a required socket", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port);
+			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to create a required socket (%s)", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port, strerror(errno));
 
 		if (setsockopt(mt_socket, SOL_SOCKET, SO_REUSEADDR, (char *) &on, sizeof(on)) < 0)
 			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to set SO_REUSEADDR", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port);
@@ -1197,10 +1197,10 @@ void * eb_multitrunk_server_device (void * device)
 			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to set SO_REUSEPORT", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port);
 
 		if (bind(mt_socket, mt_iterate->ai_addr, mt_iterate->ai_addrlen) != 0)
-			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to bind to %s (addr family %d)", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port, mt_iterate->ai_canonname, mt_iterate->ai_protocol);
+			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to bind to %s (addr family %d) (%s)", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port, mt_iterate->ai_canonname, mt_iterate->ai_protocol, strerror(errno));
 
 		if (listen(mt_socket, me->multitrunk.listenqueue ? me->multitrunk.listenqueue : 10) < 0)
-			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to set listen queue length", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port);
+			eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Server on %s:%d unable to set listen queue length (%s)", me->multitrunk.port, me->multitrunk.host, me->multitrunk.port, strerror(errno));
 
 		/* Set non-blocking - inherited by children we think */
 
