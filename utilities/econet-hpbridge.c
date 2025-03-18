@@ -6816,6 +6816,7 @@ static void * eb_device_despatcher (void * device)
 								else
 								{
 									pthread_mutex_lock(&(d->trunk.mt_mutex)); // Lock because mt_data is volatile
+									fprintf (stderr, "\n\n** d->trunk.mt_data = %p\n\n", d->trunk.mt_data);
 									if (d->trunk.mt_data)
 									{
 										/* Base64 & encrypt, then sendto d->trunk.mt_data->socket with start & end markers */ 
