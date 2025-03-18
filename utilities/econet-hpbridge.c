@@ -6733,6 +6733,7 @@ static void * eb_device_despatcher (void * device)
 					{
 						int result;
 						struct __econet_packet_aun *ap;
+						struct mt_client *mtc;
 
 						ap = eb_malloc(__FILE__, __LINE__, "DESPATCH", "Trunk send packet copy", p->length+12 + 6);
 
@@ -6763,9 +6764,16 @@ static void * eb_device_despatcher (void * device)
 							}
 						}
 
-						fprintf (stderr, "\n\n*** d->trunk.remote_host = %s\n\n", d->trunk.remote_host);
+						pthread_mutex_lock(&(d->trunk.mt_lock));
+						mtc = d->trunk.mt_data;
+						pthread_mutex_unlock(&(d->trunk.mt_lock)):
 
-						if (ap && (d->trunk.remote_host)) // And if !ap, just remove, below. If remote_host is NULL, this is a dynamic trunk with no remote endpoint yet
+						// This if() tests:
+						// (i) that the packet copy malloc() worked
+						// AND
+						// either (ii)(a) there's an addrinfo in remote_host, for non-multitrunks, or
+						//        (ii)(b) for multitrunk children, that there's a mt_client struct in existence (i.e. connected)
+						if (ap && (d->trunk.remote_host || (d->trunk.mt_parent && mtc))) // And if !ap, just remove, below. If remote_host is NULL, this is a dynamic trunk with no remote endpoint yet
 						{
 
 							unsigned char temp_packet[ECONET_MAX_PACKET_SIZE + 12 + 2];
