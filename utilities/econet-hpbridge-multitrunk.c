@@ -760,7 +760,10 @@ void * eb_multitrunk_handler_thread (void * input)
 	/* Wake up the device listener */
 
 	if (me->trunk)
+	{
 		pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
+		pthread_cond_signal(&(me->trunk->trunk.bridge_reset_cond)); // Do a bridge reset
+	}
 
 	/* Wait for data */
 
