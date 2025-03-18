@@ -483,7 +483,6 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 					search_trunk->trunk.mt_data = me;
 					me->trunk = search_trunk;
 					eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
-					fprintf (stderr, "\n\n** me->trunk->trunk.mt_data (server) = %p\n\n", me->trunk->trunk.mt_data);
 					pthread_mutex_unlock(&(search_trunk->trunk.mt_mutex));
 					/* Wake up the child trunk */
 					pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
@@ -499,6 +498,7 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 					pthread_mutex_unlock(&(search_trunk->trunk.mt_mutex));
 					/* Wake up the child trunk */
 					pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
+					pthread_cond_signal(&(me->trunk->bridge_reset_cond)); // Send a reset
 				}
 				else
 					pthread_mutex_unlock(&(search_trunk->trunk.mt_mutex));
@@ -720,7 +720,6 @@ void * eb_multitrunk_handler_thread (void * input)
 
 	if (me->mt_type == MT_CLIENT) /* If a client, we'll have already set me->trunk when we connected so the data in there will be valid */
 	{
-		fprintf (stderr, "\n\n** Setting mt_data in trunk client and endpoint.\n\n");
 		pthread_mutex_lock(&(me->trunk->trunk.mt_mutex));
 		me->trunk->trunk.mt_data = me;
 		eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
