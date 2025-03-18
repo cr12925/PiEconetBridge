@@ -6763,6 +6763,8 @@ static void * eb_device_despatcher (void * device)
 							}
 						}
 
+						fprintf (stderr, "\n\n*** d->trunk.remote_host = %s\n\n", d->trunk.remote_host);
+
 						if (ap && (d->trunk.remote_host)) // And if !ap, just remove, below. If remote_host is NULL, this is a dynamic trunk with no remote endpoint yet
 						{
 
@@ -6816,7 +6818,6 @@ static void * eb_device_despatcher (void * device)
 								else
 								{
 									pthread_mutex_lock(&(d->trunk.mt_mutex)); // Lock because mt_data is volatile
-									fprintf (stderr, "\n\n** d->trunk.mt_data = %p\n\n", d->trunk.mt_data);
 									if (d->trunk.mt_data)
 									{
 										/* Base64 & encrypt, then sendto d->trunk.mt_data->socket with start & end markers */ 
