@@ -471,14 +471,6 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 
 			if ((decrypted_length = eb_trunk_decrypt(me->multitrunk_parent->multitrunk.port, cipherpacket, size, search_trunk->trunk.sharedkey, buffer)) > 0)
 			{
-				/*
-				fprintf (stderr, "\n\n*** Decryptable packet received, length %d\n\n", decrypted_length);
-
-				for (int mycount = 0; mycount < decrypted_length; mycount++)
-					fprintf (stderr, "%02X ", buffer[mycount]);
-				fprintf (stderr, "\n\n");
-				*/
-
 				eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Processing decrypted data of length %d from %s:%d %02X %02X %02X %02X", me->multitrunk_parent->multitrunk.port, decrypted_length, remotehost, remoteport, buffer[0], buffer[1], buffer[2], buffer[3]);
 				pthread_mutex_lock(&(search_trunk->trunk.mt_mutex));
 
@@ -729,6 +721,7 @@ void * eb_multitrunk_handler_thread (void * input)
 	{
 		pthread_mutex_lock(&(me->trunk->trunk.mt_mutex));
 		me->trunk->trunk.mt_data = me;
+		eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
 		pthread_mutex_unlock(&(me->trunk->trunk.mt_mutex));
 	}
 
@@ -1015,7 +1008,6 @@ void * eb_multitrunk_client_device (void * device)
 	while (1) /* Connect and keep trying */
 	{
 		int mt_socket;
-		unsigned int timeout = me->trunk.mt_parent->multitrunk.timeout;
 		uint8_t connected;
 
 		mt_socket = -1;
@@ -1068,9 +1060,6 @@ void * eb_multitrunk_client_device (void * device)
 
 				if (fcntl(mt_socket, F_SETFL, (flags | O_RDWR | O_NONBLOCK)) == -1)
 					eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d unable to set O_RDWR | O_NONBLOCK", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
-
-				//if (timeout > 0 && (setsockopt(mt_socket, SOL_SOCKET, TCP_USER_TIMEOUT, &timeout, sizeof(timeout)) < 0))
-					//eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d unable to set TCP_USER_TIMEOUT to %d", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port, me->trunk.mt_parent->multitrunk.timeout);
 
 				connected = 1;
 				break; /* Connected. If not, try the next address */
