@@ -480,10 +480,10 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 				{
 					/* If search trunk doesn't have a multitrunk client handler struct, update it. */
 
-					fprintf (stderr, "\n\n** Setting mt_data in trunk server and endpoint.\n\n");
 					search_trunk->trunk.mt_data = me;
 					me->trunk = search_trunk;
 					eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
+					fprintf (stderr, "\n\n** me->trunk->trunk.mt_data (server) = %p\n\n", me->trunk->trunk.mt_data);
 					pthread_mutex_unlock(&(search_trunk->trunk.mt_mutex));
 					/* Wake up the child trunk */
 					pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
