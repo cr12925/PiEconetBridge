@@ -6764,9 +6764,9 @@ static void * eb_device_despatcher (void * device)
 							}
 						}
 
-						pthread_mutex_lock(&(d->trunk.mt_lock));
+						pthread_mutex_lock(&(d->trunk.mt_mutex));
 						mtc = d->trunk.mt_data;
-						pthread_mutex_unlock(&(d->trunk.mt_lock)):
+						pthread_mutex_unlock(&(d->trunk.mt_mutex));
 
 						// This if() tests:
 						// (i) that the packet copy malloc() worked
