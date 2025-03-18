@@ -480,6 +480,7 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 				{
 					/* If search trunk doesn't have a multitrunk client handler struct, update it. */
 
+					fprintf (stderr, "\n\n** Setting mt_data in trunk server and endpoint.\n\n");
 					search_trunk->trunk.mt_data = me;
 					me->trunk = search_trunk;
 					eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
@@ -719,6 +720,7 @@ void * eb_multitrunk_handler_thread (void * input)
 
 	if (me->mt_type == MT_CLIENT) /* If a client, we'll have already set me->trunk when we connected so the data in there will be valid */
 	{
+		fprintf (stderr, "\n\n** Setting mt_data in trunk client and endpoint.\n\n");
 		pthread_mutex_lock(&(me->trunk->trunk.mt_mutex));
 		me->trunk->trunk.mt_data = me;
 		eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
