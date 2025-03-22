@@ -1801,7 +1801,7 @@ unexpected_scout:
 
 							econet_flagfill();
 
-							// TODO: If we are in 'resilience' mode where we do not
+							// If we are in 'resilience' mode where we do not
 							// send the final ACK until we get an ACK from the distant
 							// station over AUN (or spoofed from Pipe/Local/etc.)
 							// then at this point we just go into flag fill, move
@@ -1829,7 +1829,12 @@ unexpected_scout:
 								econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2);
 							}
 							else // resilience - stay in flag fill and wait
+							{
+								// Deliver to userspace
+								kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
+								wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
 								econet_set_aunstate(EA_R_PENDINGFINALACK);
+							}
 						}
 						else // Soemthing went wrong - clear down
 						{
@@ -2218,8 +2223,11 @@ irqreturn_t econet_irq(int irq, void *ident)
 				case EA_R_WRITEFINALACK: // Just written final ACK after a data packet - go back to IDLE & dump received packet to userspace
 				{
 					
-					kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
-					wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
+					if (!(econet_data->resilience)) // Don't sent to userspace again if in resilience mode
+					{
+						kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
+						wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
+					}
 					econet_set_aunstate(EA_IDLE);
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "econet-gpio: econet_irq(): AUN: Final ACK to %d.%d, packet delivered to userspace\n", aun_rx.d.p.srcnet, aun_rx.d.p.srcstn);
@@ -3651,7 +3659,7 @@ static int econet_probe (struct platform_device *pdev)
 
 	econet_data->aun_mode = 0;
 
-	/* Start with resilience mode (not yet implemented) off */
+	/* Start with resilience mode off */
 
 	econet_data->resilience = 0; // Rest of resilience not implemented yet! (20240317)
 
