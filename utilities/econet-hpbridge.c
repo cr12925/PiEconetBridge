@@ -2991,18 +2991,21 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 		return 0;
 	}
 
-	/* See if this was an INK reply to a priority packet, and drop flag fill if it was. */
+	/* See if this was an INK reply to a priority packet, and drop flag fill if it was. If it was an ACK to a data packet we sent in resilience mode, send the final ACK on the wire */
 
 	pthread_mutex_lock (&(dest->priority_mutex));
 
 	if (dest->type == EB_DEF_WIRE)
 	{
-		eb_debug (0, 3, "WIRE", "%-8s %3d     Checking priority markers net (%3d = %3d), stn (%3d = %3d), seq (%08X = %08X), type (%02X = %02X)",
+		eb_debug (0, 3, "WIRE", "%-8s %3d     Checking priority markers net (%3d = %3d), stn (%3d = %3d), seq (%08X = %08X), type (%02X = %02X), resilience mode %s, waiting for resilient ACK: %s",
 			"", dest->net, 
 			dest->p_net, packet->p.srcnet, 
 			dest->p_stn, packet->p.srcstn,
 			dest->p_seq, packet->p.seq,
-			ECONET_AUN_INK, packet->p.aun_ttype);
+			ECONET_AUN_INK, packet->p.aun_ttype,
+			dest->wire.resilience ? "ON" : "OFF",
+			dest->p_isresilience ? "YES" : "NO"
+			 );
 
 		// TODO: This is where to implement resilience - for this next bit just check we aren't waiting for a resilient ACK
 
@@ -3014,7 +3017,7 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 	
 			ioctl(dest->wire.socket, ECONETGPIO_IOC_READGENTLE);
 	
-			eb_debug (0, 3, "WIRE", "%-8s %3d    Dropping flag fill on failed immedaite", "", dest->net);
+			eb_debug (0, 3, "WIRE", "%-8s %3d    Dropping flag fill on failed immedaite / failed data transmission in resilience mode", "", dest->net);
 		}
 
 		// TODO and if we are in resilience and it matches, do the magic "get on with it" ioctl()
