@@ -6516,8 +6516,10 @@ static void * eb_device_despatcher (void * device)
 							else
 							{
 								// Move it and wake the in queue
-
-								if (o->destdevice->type == EB_DEF_WIRE && (p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK))
+								
+								// Only dump ACK/NAK if not in resilience mode
+								
+								if (o->destdevice->type == EB_DEF_WIRE && (o->destdevice->wire.resilience == 0) && (p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK))
 									eb_debug (0, 4, "DESPATCH", "%-8s %3d     Dropping packetqueue at %p because it is an ACK/NAK and input device %p is %s", eb_type_str(d->type), d->net, p, o->destdevice, eb_type_str(o->destdevice->type));
 								else
 								{
@@ -6751,6 +6753,14 @@ static void * eb_device_despatcher (void * device)
 
 				if (!remove && p->p->p.port == 0x99 && p->p->p.aun_ttype == ECONET_AUN_DATA) // Track fileservers
 					eb_mark_fileserver(p->p->p.dstnet, p->p->p.dststn);
+
+				if (d->type == EB_DEF_WIRE) // Get rid of things we won't send to the kernel
+				{
+					if (p->p->p.aun_ttype == ECONET_AUN_ACK ||
+					    p->p->p.aun_ttype == ECONET_AUN_NAK ||
+					    p->p->p.aun_ttype == ECONET_AUN_INK)
+						remove = 1;
+				}
 
 				if (!remove) switch (d->type)
 				{
