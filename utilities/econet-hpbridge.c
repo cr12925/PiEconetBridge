@@ -3094,7 +3094,7 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 			q->n = dest->in;
 			dest->in = q;
 
-			dest->p_net = dest->p_stn = dest->p_seq = 0;
+			dest->p_isresilience = dest->p_net = dest->p_stn = dest->p_seq = 0;
 
 		}
 		else // Put on tail
@@ -6329,7 +6329,7 @@ static void * eb_device_despatcher (void * device)
 									ioctl(d->wire.socket, ECONETGPIO_IOC_READMODE);	
 									// And clear any priority flags
 									pthread_mutex_lock (&(d->priority_mutex));
-									d->p_net = d->p_stn = d->p_seq = 0;
+									d->p_isresilience = d->p_net = d->p_stn = d->p_seq = 0;
 									pthread_mutex_unlock (&(d->priority_mutex));
 								}
 
