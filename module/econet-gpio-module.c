@@ -3503,6 +3503,8 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 				econet_set_chipstate(EM_WRITE);
 				econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2);
 
+				if (econet_data->extralogs) printk (KERN_INFO "econet-gpio: Sent resilient 4-way final ACK\n");
+
 			} break;
 
 		case ECONETGPIO_IOC_RESILIENCEMODE:

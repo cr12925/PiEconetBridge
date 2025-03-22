@@ -5095,9 +5095,9 @@ void *fsop_thread(void *p)
 		
 						}
 #endif
-						struct __fs_active_load_queue	*alq;
+						struct __fs_active_load_queue	*alq = NULL;
 
-						alq = a->load_queue;
+						if (a)	alq = a->load_queue;
 
 						while (alq)
 						{
