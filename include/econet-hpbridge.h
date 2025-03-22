@@ -385,6 +385,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 	pthread_mutex_t		device_input_mutex; // Locks device_input queue
 	uint8_t 		p_net, p_stn; // Priority net, stn - if an immediate arrives from outside world from this net, stn, put it on head of inbound queue
 	uint32_t		p_seq; // Priority sequence number
+	uint8_t			p_isresilience; // 0 = we are waiting for an immediate reply; 1 = we are waiting for an ACK to trigger a resilient mode 4-way final ACK - if we're in resilience mode, this will always be 1 when we transmit a DAT type packet on the wire - this is locked by priority_mutex as well
 	pthread_mutex_t		priority_mutex; // Locks the priority variables above, read & write
 	uint8_t			config; // Config bits - EB_DEV_CONF_XXX
 	pthread_mutex_t		statsmutex; // Lock on the stats values - they are written to and read by different threads
@@ -496,6 +497,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			uint8_t		period, mark; // clock speed. 0 = not set by user.
 			struct timeval	last_bridge_whatnet[256]; // This and the corresponding _isnet array tell us when we last successfully sent a reply to such a query to a station on this wire.
 			struct timeval  last_bridge_isnet[256];
+			uint8_t		resilience; // 0 = off, 1 = on
 
 			// Pool nat config
 			uint8_t			use_pool[255];

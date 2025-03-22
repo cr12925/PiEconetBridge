@@ -19,6 +19,10 @@
 
 #include <linux/ioctl.h>
 #include <linux/types.h>
+//#ifndef u32
+#ifndef ECONETGPIO_KERNEL
+	#include <stdint.h>
+#endif
 
 /* This is the map of stations we want to handle traffic for that
    are not on the local econet wire. One bit per station, arranged
@@ -140,7 +144,8 @@ struct __econet_packet_aun {
 			unsigned char port;
 			unsigned char ctrl; // Internally, this will have high bit set. On the UDP packet it is stripped off
 			unsigned char padding;
-#ifdef u32
+//#ifdef u32
+#ifdef ECONETGPIO_KERNEL
 			u32 seq;
 #else
 			uint32_t seq;
@@ -179,7 +184,8 @@ struct __econet_packet_pipe {
 			unsigned char port;
 			unsigned char ctrl; // Internally, this will have high bit set. On the UDP packet it is stripped off
 			unsigned char padding;
-#ifdef u32
+//#ifdef u32
+#ifdef ECONETGPIO_KERNEL
 			u32 seq;
 #else
 			uint32_t seq;
@@ -212,6 +218,7 @@ struct __econet_packet_pipe {
 /* No function 13 - bad luck */
 #define ECONETGPIO_IOC_READGENTLE	_IO(ECONETGPIO_MAGIC, 14) /* Set module to read mode without a full cleardown */
 #define ECONETGPIO_IOC_RESILIENTACK	_IO(ECONETGPIO_MAGIC, 15) /* Send final ACK to client station on wire because we received an ACK from the distant station the client was sending a 4-way to - moves kernel module out of EA_PENDINGFINALACK */
+#define ECONETGPIO_IOC_RESILIENCEMODE	_IOW(ECONETGPIO_MAGIC, 16, uint8_t) /* Change in/out of resilient mode - 0 = off, 1 = on */
 
 /* The following are for debugging and testing only, and only with interrupts off */
 #define ECONETGPIO_IOC_SETA		_IOW(ECONETGPIO_MAGIC, 100, int) /* bit0 is A0, bit1 is A1 */

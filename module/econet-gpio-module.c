@@ -40,6 +40,7 @@
 
 #include <asm/uaccess.h>
 
+#define ECONETGPIO_KERNEL
 #include "../include/econet-gpio.h"
 
 /* 
@@ -1820,10 +1821,15 @@ unexpected_scout:
 							econet_pkt_tx.ptr = 0;
 							econet_pkt_tx.length = 4;
 
-							econet_set_aunstate(EA_R_WRITEFINALACK);
+							if (!(econet_data->resilience))
+							{
+								econet_set_aunstate(EA_R_WRITEFINALACK);
 
-							econet_set_chipstate(EM_WRITE);
-							econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2);
+								econet_set_chipstate(EM_WRITE);
+								econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2);
+							}
+							else // resilience - stay in flag fill and wait
+								econet_set_aunstate(EA_R_PENDINGFINALACK);
 						}
 						else // Soemthing went wrong - clear down
 						{
@@ -1835,6 +1841,11 @@ unexpected_scout:
 					}
 					break;
 	
+					case EA_R_PENDINGFINALACK: // Resilience mode - we shouldn't be getting IRQs in this mode!
+					{
+						printk (KERN_ERR "econet-gpio: econet_irq_read(): AUN: received IRQ in EA_R_PENDINGFINALACK! sr1=%02X, sr2=%02X\n", sr1, sr2);
+					} break;
+
 					case EA_I_READREPLY: // What we've received is a reply to an Immediate - dump to userspace
 					{
 
@@ -3456,6 +3467,40 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 				return version;
 			} break; // Not executed
 
+		/*
+		 * Send a 4-way final ACK when we're in
+		 * resilience mode, where we stick in flag fill
+		 * after receiving a 4-way data segment (part 3 of 4)
+		 * from a station on the wire, and wait for 
+		 * userspace to tell us to send the ACK (which it will
+		 * do when it gets an AUN ACK (or spoof of the same) from
+		 * the reciving station. The effect of this is to 
+		 * generate Net Error on the Econet client if the traffic
+		 * isn't confirmed as reaching its destination. If
+		 * userspace doesn't get an ACK in the relevant timeout,
+		 * it will put the ADLC back into read mode, which 
+		 * drops flag fill & causes Net Error. If it does get
+		 * an ACK in time, it'll use this ioctl() to send a
+		 * 4-way final ACK to the client and the client will
+		 * then accept that the data got there. The point of 
+		 * all this is more accurately to signal to an Econet
+		 * station (or one via an Econet bridge / another Pi
+		 * Bridge) whether the data it transmitted actually
+		 * got received by the end station.
+		 */
+
+		case ECONETGPIO_IOC_RESILIENTACK:
+			{
+				econet_set_aunstate(EA_R_WRITEFINALACK);
+				econet_set_chipstate(EM_WRITE);
+				econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2);
+
+			} break;
+
+		case ECONETGPIO_IOC_RESILIENCEMODE:
+			{
+				econet_data->resilience = (arg & 0x01); // Strip all but low bit
+			} break;
 		/*
 		 * And if we get here, then something
 		 * went wrong...

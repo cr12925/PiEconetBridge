@@ -1018,7 +1018,7 @@ struct __eb_device * eb_device_init (uint8_t net, uint16_t type, uint8_t config)
 
 		// Clear priority
 
-		p->p_seq = p->p_net = p->p_stn = 0;
+		p->p_seq = p->p_net = p->p_stn = p->p_isresilience = 0;
 
 		// Clear all exposures
 
@@ -1547,7 +1547,7 @@ static void * eb_wire_immediate_reset (void * ebic)
 		//eb_debug (0, 3, "WIREIMM", "Wire     %3d     Resetting ADLC to read mode when immediate didn't show up", values->wire_device->net);
 		ioctl (values->wire_device->wire.socket, ECONETGPIO_IOC_READGENTLE);
 
-		values->wire_device->p_net = values->wire_device->p_stn = values->wire_device->p_seq = 0; // Reset
+		values->wire_device->p_isresilience = values->wire_device->p_net = values->wire_device->p_stn = values->wire_device->p_seq = 0; // Reset
 	}
 
 	pthread_mutex_unlock (&(values->wire_device->priority_mutex));
@@ -3004,16 +3004,30 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 			dest->p_seq, packet->p.seq,
 			ECONET_AUN_INK, packet->p.aun_ttype);
 
-		if (dest->p_net == packet->p.srcnet && dest->p_stn == packet->p.srcstn && dest->p_seq == packet->p.seq && packet->p.aun_ttype == ECONET_AUN_INK)
+		// TODO: This is where to implement resilience - for this next bit just check we aren't waiting for a resilient ACK
+
+		if (dest->p_net == packet->p.srcnet && dest->p_stn == packet->p.srcstn && dest->p_seq == packet->p.seq && ((dest->p_isresilience && packet->p.aun_ttype == ECONET_AUN_NAK) || (dest->p_isresilience == 0 && packet->p.aun_ttype == ECONET_AUN_INK)))
 		{
 			// Remove priority markers
 	
-			dest->p_net = dest->p_stn = dest->p_seq = 0;
+			dest->p_isresilience = dest->p_net = dest->p_stn = dest->p_seq = 0;
 	
 			ioctl(dest->wire.socket, ECONETGPIO_IOC_READGENTLE);
 	
 			eb_debug (0, 3, "WIRE", "%-8s %3d    Dropping flag fill on failed immedaite", "", dest->net);
 		}
+
+		// TODO and if we are in resilience and it matches, do the magic "get on with it" ioctl()
+		
+		if (dest->p_isresilience && dest->p_net == packet->p.srcnet && dest->p_stn == packet->p.srcstn && dest->p_seq == packet->p.seq && packet->p.aun_ttype == ECONET_AUN_ACK)
+		{
+			eb_debug (0, 3, "WIRE", "%-8s %3d.%3d Sending closing 4-way ACK", "", dest->net, dest->p_stn);
+
+			dest->p_isresilience = dest->p_net = dest->p_stn = dest->p_seq = 0;
+	
+			ioctl(dest->wire.socket, ECONETGPIO_IOC_RESILIENTACK);
+		}
+
 	}
 
 	pthread_mutex_unlock (&(dest->priority_mutex));
@@ -6067,7 +6081,7 @@ static void * eb_device_despatcher (void * device)
 	
 						pthread_mutex_lock (&(d->priority_mutex));
 	
-						if (packet.p.aun_ttype == ECONET_AUN_IMM) // Prioritize the reply
+						if (packet.p.aun_ttype == ECONET_AUN_IMM || (d->wire.resilience && packet.p.aun_ttype == ECONET_AUN_DATA)) // Prioritize the reply
 						{
 							pthread_attr_t	attrs;
 							pthread_t	sleeper;
@@ -6094,7 +6108,7 @@ static void * eb_device_despatcher (void * device)
 							pthread_detach (sleeper);
 						}
 						else
-							d->p_net = d->p_stn = d->p_seq = 0; // If we've received something else on a wire, it doesn't matter if we unset this, because it means the flag fill that the ADLC has started must have ended which means it's a while since the immediate was received
+							d->p_isresilience = d->p_net = d->p_stn = d->p_seq = 0; // If we've received something else on a wire, it doesn't matter if we unset this, because it means the flag fill that the ADLC has started must have ended which means it's a while since the immediate was received
 			
 						pthread_mutex_unlock (&(d->priority_mutex));
 					}
@@ -8398,6 +8412,9 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 			eb_device_init_wire (net, (char *) json_object_get_string(jdiverts), fw_in, fw_out);
 		else
 			eb_debug (1, 0, "JSON", "Econet device in JSON config without a device name");
+
+		if (json_object_object_get_ex(o, "resilience", &jfw)) // jfw being used temporarily
+			networks[net]->wire.resilience = (json_object_get_boolean(jfw) ? 1 : 0);
 
 		if (json_object_object_get_ex(o, "net-clock", &jnetclock))
 		{
