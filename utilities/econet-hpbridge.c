@@ -5420,6 +5420,10 @@ static void * eb_device_despatcher (void * device)
 				eb_debug (0, 2, "DESPATCH", "%-8s %3d     Network clock configured %.2f period / %.2f mark us", "Wire", d->net, (float) d->wire.period / 4, (float) d->wire.mark / 4);
 			}
 
+			// Enable resilience mode if selected
+			
+			ioctl(d->wire.socket, ECONETGPIO_IOC_RESILIENCE, d->wire.resilience);
+
 			eb_debug (0, 2, "DESPATCH", "%-8s %3d     Econet device %s opened successfully (fd %d)", "Wire", d->net, (EB_CONFIG_LOCAL ? "/dev/null" : d->wire.device), d->wire.socket);	
 
 		} break;
