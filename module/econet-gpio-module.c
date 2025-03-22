@@ -3511,7 +3511,7 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 		case ECONETGPIO_IOC_RESILIENCEMODE:
 			{
 				econet_data->resilience = (arg & 0x01); // Strip all but low bit
-				printk (KERN_INFO "econet-gpio: Resilience mdoe %s\n", ((arg & 0x01) == 0) ? "OFF" : "ON");
+				printk (KERN_INFO "econet-gpio: Resilience mode %s\n", ((arg & 0x01) == 0) ? "OFF" : "ON");
 
 			} break;
 		/*
