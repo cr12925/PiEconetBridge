@@ -785,6 +785,7 @@ void econet_reset(void)
 	/* Take us out of AUN mode and set the chip to read */
 
 	econet_data->aun_mode = 0;
+	econet_data->resilience = 0;
 	econet_data->aun_last_tx = econet_data->aun_last_rx = 0;
 
 	econet_set_read_mode(); // Required in addition to the cleadown, because this sets the ADLC up to read, where as cleardown doesn't.
