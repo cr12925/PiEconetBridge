@@ -74,6 +74,10 @@ uint8_t	eb_device_init_wire (uint8_t net, char * device, struct __eb_fw_chain *f
 	p->wire.pool = NULL;
 	memset(&(p->wire.use_pool), 0, sizeof(p->wire.use_pool));
 
+	// Resilience mode - off at this stage
+	
+	p->wire.resilience = 0;
+
 	// Initialize bridge response timers
 
 	memset (&(p->wire.last_bridge_whatnet), 0, sizeof(p->wire.last_bridge_whatnet));

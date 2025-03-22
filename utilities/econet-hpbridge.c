@@ -6100,6 +6100,10 @@ static void * eb_device_despatcher (void * device)
 							d->p_net = packet.p.dstnet;
 							d->p_stn = packet.p.dststn;
 							d->p_seq = packet.p.seq;
+							d->p_isresilience = 0;
+
+							if (d->wire.resilience && packet.p.aun_ttype == ECONET_AUN_DATA)
+								d->p_isresilience = 1;
 
 							imm_sleeper = eb_malloc(__FILE__, __LINE__, "DESPATCH", "Create eb_imm_clear struct for immediate timer", sizeof(struct __eb_imm_clear));
 
