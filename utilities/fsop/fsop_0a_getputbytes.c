@@ -257,7 +257,17 @@ FSOP(0b)
 
 	// Set up a bulk transfer here.
 
-	if ((incoming_port = fsop_find_bulk_port(f->server)))
+	if (bytes == 0) // No data expected
+	{
+		//FS_LIST_SPLICEFREE(f->server->bulkports,bp,"FS","Freeing unused bulk port struct on a zero-byte transfer");
+		r.p.ctrl = FSOP_CTRL;
+		r.p.data[2] = FS_PERM_OWN_R | FS_PERM_OWN_W;
+		r.p.data[3] = day;
+		r.p.data[4] = monthyear;
+
+		fsop_aun_send (&r, 5, f);
+	}
+	else if ((incoming_port = fsop_find_bulk_port(f->server))) // Data expected - set up a bulk port
 	{
 		FS_LIST_MAKENEW(struct __fs_bulk_port,f->server->bulkports,1,bp,"FS","New FS bulk port for GetBytes()");
 		bp->handle = internal_handle;
@@ -285,16 +295,6 @@ FSOP(0b)
 	}
 	else    fsop_error(f, 0xFF, "No channels available");
 
-	if (bytes == 0) // No data expected
-	{
-		FS_LIST_SPLICEFREE(f->server->bulkports,bp,"FS","Freeing unused bulk port struct on a zero-byte transfer");
-		r.p.ctrl = FSOP_CTRL;
-		r.p.data[2] = FS_PERM_OWN_R | FS_PERM_OWN_W;
-		r.p.data[3] = day;
-		r.p.data[4] = monthyear;
-
-		fsop_aun_send (&r, 5, f);
-	}
 
 	return;
 
