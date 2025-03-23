@@ -151,7 +151,7 @@ struct __econet_packet_aun {
 			uint32_t seq;
 #endif
 
-			unsigned char data[ECONET_MAX_PACKET_SIZE-9];
+			unsigned char data[ECONET_MAX_PACKET_SIZE-12]; // 20250323 Was -9 (not sure why...)
 		} p;
 		unsigned char raw[ECONET_MAX_PACKET_SIZE];
 	};
@@ -166,7 +166,7 @@ struct __econet_packet_udp {
 			unsigned char ctrl;
 			unsigned char pad;
 			uint32_t seq;
-			unsigned char data[ECONET_MAX_PACKET_SIZE-4];
+			unsigned char data[ECONET_MAX_PACKET_SIZE-8]; // 20250323 Was -4 (not sure why)
 		} p;
 	};
 };
