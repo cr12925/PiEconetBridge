@@ -3020,6 +3020,10 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 				ioctl(dest->wire.socket, ECONETGPIO_IOC_READGENTLE); // Drop flag fill
 	
 				eb_debug (0, 3, "WIRE", "%-8s %3d    Dropping flag fill on failed immedaite / failed data transmission in resilience mode", "", dest->net);
+
+				// Clear down. Whatever it was, we found it.
+
+				dest->p_isresilience = dest->p_net = dest->p_stn = dest->p_seq = 0;
 			}
 			else if (dest->wire.resilience && dest->p_isresilience && packet->p.aun_ttype == ECONET_AUN_ACK)
 			{
@@ -3027,11 +3031,12 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 				eb_debug (0, 3, "WIRE", "%-8s %3d.%3d Sending closing 4-way ACK", "", dest->net, dest->p_stn);
 	
 				ioctl(dest->wire.socket, ECONETGPIO_IOC_RESILIENTACK);
+
+				// Clear down. Whatever it was, we found it.
+
+				dest->p_isresilience = dest->p_net = dest->p_stn = dest->p_seq = 0;
 			}
 
-			// Clear down. Whatever it was, we found it.
-
-			dest->p_isresilience = dest->p_net = dest->p_stn = dest->p_seq = 0;
 		}
 	}
 
@@ -6926,13 +6931,6 @@ static void * eb_device_despatcher (void * device)
 
 								gettimeofday(&start, 0);
 
-								// Disagnostic dump when we were getting lots of Not Listenings!
-								//if (ECONET_DEV_STATION(d->wire.stations, 5, 235))
-									//eb_debug (0, 2, "BRIDGE", "5.235 in station set");
-								//else	eb_debug (0, 2, "BRIDGE", "5.235 NOT IN STATION SET");
-								//eb_dump_packet (d, 0xff, &tx, p->length);
-								//eb_debug (0, 2, "BRIDGE", "Wire writing packet length %d", p->length + 12);
-			
 								led_write.flashtime = EB_CONFIG_FLASHTIME * (p->length > 4096 ? 2 : 1);
 
 								if (!EB_CONFIG_LEDS_OFF && !pthread_create(&flash_write_thread, NULL, eb_flash_led, &led_write))
@@ -8788,7 +8786,7 @@ int eb_parse_json_config(struct json_object *jc)
 	 *
 	 * Create firewall chains / policies (do these first so we can apply them to objects)
 	 * Create pools, but without static mappings (we leave statics until we've created the objects they might refer to!)
-	 * Create virtual networks and their 'diverted' servers (in case we've tried to create a virtual network which overlaps with an econet)
+	 * Create virtual networks and their 'diverted' servers (in case we've tried to create a virtual network which overlaps with an econet) - No, do this after econets because otherwise our station maps all screw up. Econets first!
 	 * Create the legacy 'dynamic' network - which ultimately will refer to a pool in due course
 	 * Create econets and their 'diverted' servers
 	 * Create AUN hosts (these are out on their own somewhere, but we'll find out here if we're createing an AUN host which already exists as a pool, virtual or econet device)
@@ -8964,15 +8962,6 @@ int eb_parse_json_config(struct json_object *jc)
 		}
 	}
 
-	/* Now create virtual networks & their diverted servers */
-
-	{
-		struct json_object	*jvirtuals;
-
-		if (json_object_object_get_ex(jc, "virtuals", &jvirtuals))
-			eb_create_json_virtuals_econets_loop(jvirtuals, 1);
-	}
-
 	/* Now create econet(s) */
 
 	{
@@ -8981,6 +8970,15 @@ int eb_parse_json_config(struct json_object *jc)
 
 		if (json_object_object_get_ex(jc, "econets", &jeconets))
 			eb_create_json_virtuals_econets_loop(jeconets, 2);
+	}
+
+	/* Now create virtual networks & their diverted servers */
+
+	{
+		struct json_object	*jvirtuals;
+
+		if (json_object_object_get_ex(jc, "virtuals", &jvirtuals))
+			eb_create_json_virtuals_econets_loop(jvirtuals, 1);
 	}
 
 	/* Now set up the legacy 'dynamic' network */
