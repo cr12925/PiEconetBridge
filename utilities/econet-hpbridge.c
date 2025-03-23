@@ -5287,7 +5287,7 @@ static void * eb_device_despatcher (void * device)
 	uint8_t				count;
 	struct pollfd			p;
 	struct __econet_packet_aun	packet;
-	int32_t				length; // Needs to be signed to catch errors on read
+	int32_t				length = -1; // Needs to be signed to catch errors on read
 	int				l_socket; // The socket our device listens on
 	uint8_t				aun_output_pending; // Flags when there may be aun retransmits on our output queue
 	uint8_t				wire_output_pending; // Flags when there is a wire packet to retransmit
