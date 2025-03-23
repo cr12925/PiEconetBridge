@@ -1509,10 +1509,11 @@ void eb_pool_unnat(uint8_t *net, uint8_t *stn, struct __eb_device **source)
 			h = h->next_net;
 		}
 		
+		pthread_mutex_unlock(&(p->updatemutex));
+
 		p = p->next;
 	}
 
-	pthread_mutex_unlock(&(p->updatemutex));
 
 	// If we get here, it wasn't found - set to 0 to show failed
 	//
