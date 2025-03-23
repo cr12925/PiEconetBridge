@@ -269,7 +269,7 @@ FSOP(60)
 				struct __fs_active *n;
 
 				n = a->next;
-
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
                                 if (    (arg2 == 2 && a->net == l_net && a->stn == l_stn)
                                 ||      (arg2 < 2 && a->userid == uid)
                                 )
@@ -277,7 +277,7 @@ FSOP(60)
                                         fsop_bye_internal(a, 0, 0);
                                         loggedoff++;
                                 }
-
+#pragma GCC diagnostic warning "-Wmaybe-uninitialized"
 				a = n;
 			}
 
