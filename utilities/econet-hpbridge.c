@@ -3007,30 +3007,31 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 			dest->p_isresilience ? "YES" : "NO"
 			 );
 
-		// TODO: This is where to implement resilience - for this next bit just check we aren't waiting for a resilient ACK
+		// Resilience mode implementation alongside the older INK implementation
 
-		if (dest->p_net == packet->p.srcnet && dest->p_stn == packet->p.srcstn && dest->p_seq == packet->p.seq && ((dest->p_isresilience && packet->p.aun_ttype == ECONET_AUN_NAK) || (dest->p_isresilience == 0 && packet->p.aun_ttype == ECONET_AUN_INK)))
+		if (dest->p_net == packet->p.srcnet && dest->p_stn == packet->p.srcstn && dest->p_seq == packet->p.seq)
 		{
-			// Remove priority markers
+			if (
+				(dest->p_isresilience && packet->p.aun_ttype == ECONET_AUN_NAK)  // resilience and we got a NAK back
+			|| 	(packet->p.aun_ttype == ECONET_AUN_INK) // priority and we got INK
+			)
+			{
+				ioctl(dest->wire.socket, ECONETGPIO_IOC_READGENTLE); // Drop flag fill
 	
+				eb_debug (0, 3, "WIRE", "%-8s %3d    Dropping flag fill on failed immedaite / failed data transmission in resilience mode", "", dest->net);
+			}
+			else if (dest->wire.resilience && dest->p_isresilience && packet->p.aun_ttype == ECONET_AUN_ACK)
+			{
+				// We've had an ACK back on a packet where we're holding flag fill prior to final 4-way ACK, so send the 4-way ACK. (If it never comes, another thread will drop flag fill.
+				eb_debug (0, 3, "WIRE", "%-8s %3d.%3d Sending closing 4-way ACK", "", dest->net, dest->p_stn);
+	
+				ioctl(dest->wire.socket, ECONETGPIO_IOC_RESILIENTACK);
+			}
+
+			// Clear down. Whatever it was, we found it.
+
 			dest->p_isresilience = dest->p_net = dest->p_stn = dest->p_seq = 0;
-	
-			ioctl(dest->wire.socket, ECONETGPIO_IOC_READGENTLE);
-	
-			eb_debug (0, 3, "WIRE", "%-8s %3d    Dropping flag fill on failed immedaite / failed data transmission in resilience mode", "", dest->net);
 		}
-
-		// TODO and if we are in resilience and it matches, do the magic "get on with it" ioctl()
-		
-		if (dest->p_isresilience && dest->p_net == packet->p.srcnet && dest->p_stn == packet->p.srcstn && dest->p_seq == packet->p.seq && packet->p.aun_ttype == ECONET_AUN_ACK)
-		{
-			eb_debug (0, 3, "WIRE", "%-8s %3d.%3d Sending closing 4-way ACK", "", dest->net, dest->p_stn);
-
-			dest->p_isresilience = dest->p_net = dest->p_stn = dest->p_seq = 0;
-	
-			ioctl(dest->wire.socket, ECONETGPIO_IOC_RESILIENTACK);
-		}
-
 	}
 
 	pthread_mutex_unlock (&(dest->priority_mutex));
@@ -6518,10 +6519,14 @@ static void * eb_device_despatcher (void * device)
 								// Move it and wake the in queue
 								
 								// Only dump ACK/NAK if not in resilience mode
+								//
+								// 20250323 Change of plan. The wire driver just never sends ACK/NAK/INK to the module, so send everything on...
 								
+								/*
 								if (o->destdevice->type == EB_DEF_WIRE && (o->destdevice->wire.resilience == 0) && (p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK))
 									eb_debug (0, 4, "DESPATCH", "%-8s %3d     Dropping packetqueue at %p because it is an ACK/NAK and input device %p is %s", eb_type_str(d->type), d->net, p, o->destdevice, eb_type_str(o->destdevice->type));
 								else
+								*/
 								{
 									eb_debug (0, 4, "DESPATCH", "%-8s %3d     Moving packetqueue at %p to destination input device %p (%s)", eb_type_str(d->type), d->net, p, o->destdevice, eb_type_str(o->destdevice->type));
 
@@ -7088,7 +7093,7 @@ static void * eb_device_despatcher (void * device)
 
 						if (p->p->p.aun_ttype == ECONET_AUN_DATA)
 						{
-							eb_debug (0, 4, "LOCAL", "%-8s %3d.%3d from %3d.%3d attempting to send ACK from local amulator, P: &%02X, C: &%02X, Seq: 0x%08X", "Local", ack.p.dstnet, ack.p.dststn, ack.p.srcnet, ack.p.srcstn, ack.p.port, ack.p.ctrl, ack.p.seq);
+							eb_debug (0, 4, "LOCAL", "%-8s %3d.%3d from %3d.%3d attempting to send ACK from local emulator, P: &%02X, C: &%02X, Seq: 0x%08X", "Local", ack.p.dstnet, ack.p.dststn, ack.p.srcnet, ack.p.srcstn, ack.p.port, ack.p.ctrl, ack.p.seq);
 							eb_enqueue_output (d, &ack, 0, NULL); // No data on this packet
 							new_output = 1;
 						}
