@@ -4059,6 +4059,7 @@ static void * eb_trunk_keepalive (void * device)
 
 		// Distant trunks ignore src/destination on trunk keepalives, so we don't need to worry about them
 
+#pragma GCC diagnostic ignored "-Warray-bounds"
 		p->p.srcstn = 0;
 		p->p.srcnet = eb_bridge_sender_net(d);
 		p->p.dststn = p->p.dstnet = 0xff;
@@ -4066,6 +4067,8 @@ static void * eb_trunk_keepalive (void * device)
 		p->p.seq = 0x00000000;
 		p->p.port = 0x9C; // Bridge traffic
 		p->p.ctrl = EB_CONFIG_TRUNK_KEEPALIVE_CTRL;
+
+#pragma GCC diagnostic warning "-Warray-bounds"
 
 		// Send packet on trunk
 
