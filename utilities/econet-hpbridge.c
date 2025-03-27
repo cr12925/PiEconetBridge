@@ -2996,7 +2996,8 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 
 	pthread_mutex_lock (&(dest->priority_mutex));
 
-	if (dest->type == EB_DEF_WIRE)
+	if (dest->type == EB_DEF_WIRE && (packet->p.aun_ttype == ECONET_AUN_NAK || packet->p.aun_ttype == ECONET_AUN_INK || packet->p.aun_ttype == ECONET_AUN_ACK)
+			)
 	{
 		eb_debug (0, 3, "WIRE", "%-8s %3d     Checking priority markers net (%3d = %3d), stn (%3d = %3d), seq (%08X = %08X), type (%02X = %02X), resilience mode %s, waiting for resilient ACK: %s",
 			"", dest->net, 
@@ -3096,7 +3097,9 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 		// Prioritize replies to our priority flags - this will include IMMREP packets.
 
 		// 20240606 Changed - looks like we have had the src/dst mapping wrong here for years! if (!dest->in || (dest->type == EB_DEF_WIRE && dest->p_net == packet->p.dstnet && dest->p_stn == packet->p.dststn && dest->p_seq == packet->p.seq))
-		if (!dest->in || (dest->type == EB_DEF_WIRE && dest->p_net == packet->p.srcnet && dest->p_stn == packet->p.srcstn && dest->p_seq == packet->p.seq))
+		// But don't prioritise data/broadcast/immediate *query* packets which happen to turn up with matching net.stn/sequence
+
+		if (!dest->in || (dest->type == EB_DEF_WIRE && dest->p_net == packet->p.srcnet && dest->p_stn == packet->p.srcstn && dest->p_seq == packet->p.seq && (packet->p.aun_ttype != ECONET_AUN_DATA && packet->p.aun_ttype != ECONET_AUN_BCAST && packet->p.aun_ttype != ECONET_AUN_IMM)))
 		{
 			q->n = dest->in;
 			dest->in = q;
