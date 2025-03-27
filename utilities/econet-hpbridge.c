@@ -3000,7 +3000,7 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 	{
 		eb_debug (0, 3, "WIRE", "%-8s %3d     Checking priority markers net (%3d = %3d), stn (%3d = %3d), seq (%08X = %08X), type (%02X = %02X), resilience mode %s, waiting for resilient ACK: %s",
 			"", dest->net, 
-			dest->p_net, packet->p.srcnet, 
+			dest->p_net ? dest->p_net : dest->net, packet->p.srcnet, 
 			dest->p_stn, packet->p.srcstn,
 			dest->p_seq, packet->p.seq,
 			ECONET_AUN_INK, packet->p.aun_ttype,
@@ -3010,7 +3010,7 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 
 		// Resilience mode implementation alongside the older INK implementation
 
-		if (dest->p_net == packet->p.srcnet && dest->p_stn == packet->p.srcstn && dest->p_seq == packet->p.seq)
+		if ((dest->p_net == packet->p.srcnet || (dest->p_net == 0 && dest->net == packet->p.srcnet)) && dest->p_stn == packet->p.srcstn && dest->p_seq == packet->p.seq)
 		{
 			if (
 				(dest->p_isresilience && packet->p.aun_ttype == ECONET_AUN_NAK)  // resilience and we got a NAK back
