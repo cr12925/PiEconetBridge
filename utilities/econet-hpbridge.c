@@ -3339,6 +3339,8 @@ uint8_t eb_firewall_inner (struct __eb_fw_chain *chain, struct __econet_packet_a
 
 	}
 
+	eb_debug (0, 3, "FW", "FW       %3d.%3d from %3d.%3d eb_firewall_inner processing chain %s returned %s: P:&%02X, C:&%02X, Seq:&%08X", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, chain->fw_chain_name, (result == EB_FW_ACCEPT ? "ACCEPT" : (result == EB_FW_REJECT ? "REJECT" : "NO MATCH")), p->p.port, p->p.ctrl, p->p.seq);
+
 	return result;
 
 }
@@ -3359,6 +3361,9 @@ uint8_t eb_firewall (struct __eb_fw_chain *chain, struct __econet_packet_aun *p)
 
 	if (result == EB_FW_NOMATCH)
 		result = chain->fw_default;
+
+	if (result == EB_FW_REJECT)
+		eb_debug (0, 2, "FW", "FW       %3d.%3d from %3d.%3d Firewall chain %s dropped traffic: P:&%02X, C:&%02X, Seq:&%08X (default = %02X)", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, chain->fw_chain_name, p->p.port, p->p.ctrl, p->p.seq, chain->fw_default);
 
 	return result;
 }
@@ -12169,12 +12174,17 @@ int main (int argc, char **argv)
 	
 				while (f)
 				{
-					fprintf (stderr, "  %7d %-6s %3d.%-3d <--> %3d.%-3d port &%02X\n", counter++,
-							(f->action == EB_FW_ACCEPT) ? "Accept" : "Drop",
+					fprintf (stderr, "  %7d %3d.%-3d --> %3d.%-3d port &%02X %s", counter++,
 							f->srcnet, f->srcstn,
-							f->dstnet, f->dststn, f->port
+							f->dstnet, f->dststn, f->port,
+							(f->action == EB_FW_ACCEPT) ? "Accept" : (f->action == EB_FW_REJECT ? "Drop" : "Pass to")
 						);
 	
+					if (f->action == EB_FW_CHAIN)
+						fprintf (stderr, " %s", f->fw_subchain->fw_chain_name);
+
+					fprintf (stderr, "\n");
+
 					f = f->next;
 				}
 	
