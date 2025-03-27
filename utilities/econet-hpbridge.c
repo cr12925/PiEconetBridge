@@ -2193,6 +2193,7 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 		//ioctl(source->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(source->wire.stations)); 
 	}
 
+#pragma GCC diagnostic ignored "-Warray-bounds"
 	reply->p.srcstn = 0;
 	reply->p.srcnet = farside;
 	reply->p.dststn = stn;
@@ -2203,6 +2204,8 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 	reply->p.seq = (bridgewide_seq += 4);
 	reply->p.data[0] = source->net;
 	reply->p.data[1] = query_net;
+
+#pragma GCC diagnostic warning "-Warray-bounds"
 
 	// Undo pool Nat here if need be
 	
@@ -6192,6 +6195,7 @@ static void * eb_device_despatcher (void * device)
 							if (!arp)
 								eb_debug (1, 0, "IPGW", "Unable to malloc() storage for outgoing ARP query to Econet");
 
+#pragma GCC diagnostic ignored "-Warray-bounds"
 							arp->p.srcnet = d->net;
 							arp->p.srcstn = d->local.stn;
 							arp->p.dstnet = 0xff;
@@ -6203,6 +6207,7 @@ static void * eb_device_despatcher (void * device)
 							*((uint32_t *)&(arp->p.data[4])) = incoming.destination;
 							*((uint32_t *)&(arp->p.data[0])) = htonl(d->local.ip.addresses->ip);
 
+#pragma GCC diagnostic warning "-Warray-bounds"
 							eb_enqueue_output (d, arp, 8, NULL);
 							new_output = 1;
 
