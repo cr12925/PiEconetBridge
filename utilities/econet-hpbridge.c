@@ -1729,6 +1729,7 @@ static void * eb_bridge_update_watcher (void *device)
 	
 			/* Make our update */
 	
+#pragma GCC diagnostic ignored "-Warray-bounds"
 			update->p.aun_ttype = ECONET_AUN_BCAST;
 			update->p.port = BRIDGE_PORT;
 			update->p.ctrl = BRIDGE_UPDATE; /* Resets done elsewhere */
@@ -1764,6 +1765,8 @@ static void * eb_bridge_update_watcher (void *device)
 					strcat (debug_string, netstr);
 				}
 			}
+
+#pragma GCC diagnostic warning "-Warray-bounds"
 
 			pthread_mutex_unlock (&networks_update);
 
@@ -1888,6 +1891,7 @@ static void * eb_bridge_reset_watcher (void *device)
 			if (!update)
 				eb_debug (1, 0, "BRIDGE", "Core         Malloc() failed creating bridge packet!");
 	
+#pragma GCC diagnostic ignored "-Warray-bounds"
 	
 			/* Make our update */
 	
@@ -1901,6 +1905,8 @@ static void * eb_bridge_reset_watcher (void *device)
 			update->p.dststn = 0xff;
 			
 			update->p.data[0] = sender_net;
+
+#pragma GCC diagnostic warning "-Warray-bounds"
 
 			/* Send the reset */
 
@@ -2205,7 +2211,6 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 	reply->p.data[0] = source->net;
 	reply->p.data[1] = query_net;
 
-#pragma GCC diagnostic warning "-Warray-bounds"
 
 	// Undo pool Nat here if need be
 	
@@ -2218,6 +2223,8 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 			reply->p.dststn = host->s_stn;
 		}
 	}
+
+#pragma GCC diagnostic warning "-Warray-bounds"
 
 	/*
 	 * On IsNet, only reply if:
