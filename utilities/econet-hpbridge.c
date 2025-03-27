@@ -5167,7 +5167,7 @@ static void * eb_device_aun_sender (void *device)
 						(
 						 !((o->destdevice->config & EB_DEV_CONF_AUTOACK) && (p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK))
 						) 
-					&& 	(p->p->p.aun_ttype != ECONET_AUN_INK)
+					&& 	(p->p->p.aun_ttype != ECONET_AUN_INK && p->p->p.aun_ttype != ECONET_AUN_IMMREP)
 					) 
 						eb_dump_packet (d, EB_PKT_DUMP_DUMPED, p->p, p->length);
 
@@ -5218,7 +5218,9 @@ static void * eb_device_aun_sender (void *device)
 
 						eb_add_stats(&(o->destdevice->statsmutex), &(o->destdevice->b_in), p->length);
 						if (eb_firewall(o->destdevice->fw_in, p->p) == EB_FW_REJECT)
+						{
 							eb_dump_packet (o->destdevice, EB_PKT_DUMP_DUMPED, p->p, p->length);
+						}
 						else
 						{
 							eb_dump_packet (o->destdevice, EB_PKT_DUMP_POST_O, p->p, p->length);
@@ -7117,9 +7119,37 @@ static void * eb_device_despatcher (void * device)
 
 						if (p->p->p.aun_ttype == ECONET_AUN_DATA)
 						{
+							struct __eb_device	*ackdevice;
+							struct __econet_packet_aun 	*ap;
+
+							if (ack.p.dstnet == 0)
+								ack.p.dstnet = d->net;
+
+							ap = eb_malloc(__FILE__, __LINE__, "ACK", "New ACK packet to return to sender", 12);
+							memcpy (ap, &ack, 12);
+
 							eb_debug (0, 4, "LOCAL", "%-8s %3d.%3d from %3d.%3d attempting to send ACK from local emulator, P: &%02X, C: &%02X, Seq: 0x%08X", "Local", ack.p.dstnet, ack.p.dststn, ack.p.srcnet, ack.p.srcstn, ack.p.port, ack.p.ctrl, ack.p.seq);
-							eb_enqueue_output (d, &ack, 0, NULL); // No data on this packet
-							new_output = 1;
+							/* 20250327 CHange this to enqueue_input and wake, because otherwise data from (e.g.) a fileserver goes on the destination queue before this ACK, and that screws up resilience mode. The ACK needs to get there first! */
+							//eb_enqueue_output (d, &ack, 0, NULL); // No data on this packet
+							//new_output = 1;
+
+							if ((ackdevice = eb_find_station(2, &ack)))
+							{
+								if (ackdevice->type == EB_DEF_AUN)
+								{
+									if (eb_aunpacket_to_aun_queue(d, ackdevice, ap, 12))
+										eb_add_stats(&(d->statsmutex), &(d->b_out), 12);
+									else
+										eb_free(__FILE__, __LINE__, "ACK", "Free ACK packet on failure to send to AUN", ap);
+								}
+								else
+								{
+									eb_enqueue_input (ackdevice, ap, 12);
+									pthread_cond_signal(&(ackdevice->qwake));
+									/* Don't free - despatcher does it on transmit */
+								}
+							}
+
 						}
 
 						if (p->p->p.aun_ttype == ECONET_AUN_DATA && p->p->p.port == 0x00 && p->p->p.ctrl == 0x85 && p->p->p.data[0] == 0x00)
@@ -7806,7 +7836,7 @@ static void * eb_device_despatcher (void * device)
 
 							if (EB_PORT_ISSET(d,ports,p->p->p.port))
 							{
-								eb_debug (0, 3, "BRIDGE", "%-8s %3d.%3d FOUND handler for port &%02X, traffic type %02X, length %04X", eb_type_str(d->type), d->net, d->local.stn,p->p->p.port, p->p->p.aun_ttype, p->length);
+								eb_debug (0, 3, "BRIDGE", "%-8s %3d.%3d Found handler for port &%02X, traffic type %02X, length %04X", eb_type_str(d->type), d->net, d->local.stn,p->p->p.port, p->p->p.aun_ttype, p->length);
 								eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
 								(d->local.port_funcs[p->p->p.port])(p->p, p->length + 12, d->local.port_param[p->p->p.port]);
 							}
