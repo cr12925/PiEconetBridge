@@ -2407,6 +2407,7 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 
 				eb_debug (0, 2, "TRACE", "%-8s %3d.%3d Received trace request for known net %d, hop %d - %s (%s)", eb_type_str(source->type), p->p.srcnet, p->p.srcstn, net, hop + 1, reply_diags, final ? "last hop" : "intermediate hop");
 
+#pragma GCC diagnostic ignored "-Warray-bounds"
 				reply->p.port = ECONET_TRACE_PORT;
 				reply->p.ctrl = 0x83;
 				reply->p.srcstn = 0;
@@ -2444,6 +2445,7 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 
 				}
 
+#pragma GCC diagnostic warning "-Warray-bounds"
 				
 				eb_enqueue_input (source, reply, strlen(reply_diags) + 4);
 	
