@@ -9289,8 +9289,9 @@ int eb_parse_json_config(struct json_object *jc)
 				char		* remote_host, *key, *name = NULL;
 				uint8_t		nat_local, nat_distant, found = 0;
 				uint16_t	nlength, ncount = 0;
+				uint32_t	retry_interval = 10000;
 				struct __eb_device	*trunk;
-				struct json_object	*jnat_local, *jnat_remote, *jfw, *jname, *jmt_parent, *jmt_type;
+				struct json_object	*jnat_local, *jnat_remote, *jfw, *jname, *jmt_parent, *jmt_type, *jmt_retry;
 				struct __eb_fw_chain	*fw_in = NULL, *fw_out = NULL;
 				struct __eb_device 	*mtp_device;
 				int		mt_type = 2; /* Server by default */
@@ -9307,6 +9308,7 @@ int eb_parse_json_config(struct json_object *jc)
 				json_object_object_get_ex(jtrunk, "name", &jname);
 				json_object_object_get_ex(jtrunk, "multitrunk-parent", &jmt_parent);
 				json_object_object_get_ex(jtrunk, "multitrunk-client", &jmt_type); // Boolean - true = client
+				json_object_object_get_ex(jtrunk, "multitrunk-retry-interval", &jmt_retry); // ms between connection attempts
 	
 				if (!jkey && (!jremotehost || !jremoteport)) 
 				{
@@ -9365,7 +9367,10 @@ int eb_parse_json_config(struct json_object *jc)
 				if (json_object_object_get_ex(jtrunk, "fw-out", &jfw))
 					fw_out = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
 
-				eb_device_init_singletrunk (remote_host, local_port, remote_port, key, fw_in, fw_out, name, mtp_device, mt_type);
+				if (jmt_retry)
+					retry_interval = json_object_get_int(jmt_retry);
+
+				eb_device_init_singletrunk (remote_host, local_port, remote_port, key, fw_in, fw_out, name, mtp_device, mt_type, retry_interval);
 
 				if (key)
 					eb_free (__FILE__, __LINE__, "JSON", "New trunk key", key); /* Free - the devinit routine copies it to a new malloced area */
@@ -10240,7 +10245,7 @@ int eb_readconfig(char *f, char *json)
 					eb_free (__FILE__, __LINE__, "CONFIG", "Free trunk key string - copied to JSON", psk);
 
 #else
-				eb_device_init_singletrunk (destination, local_port, remote_port, psk, NULL, NULL, NULL);
+				eb_device_init_singletrunk (destination, local_port, remote_port, psk, NULL, NULL, NULL, 10000);
 #endif
 				
 			}

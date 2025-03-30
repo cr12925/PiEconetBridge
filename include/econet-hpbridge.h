@@ -436,6 +436,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			struct mt_client	*mt_data;  // Pointer to mt_client struct in the handler to which we're attached via parent. If NULL then we aren't connected. If non-NULL, then we get our sockets etc. out of here.
 			char *		mt_name; // Name of this trunk child for debugging
 			uint8_t		mt_type; // The code assigns either MT_CLIENT or MT_SERVER to this, which are defined in mt_client struct above.
+			uint32_t	mt_retry; // Delay in ms between outbound multitrunk connection retries
 
 			// General parameters
 			int 		socket; // UDP trunks only; TCP Multitrunks are in the mt_client struct

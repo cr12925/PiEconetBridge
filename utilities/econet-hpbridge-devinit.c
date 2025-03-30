@@ -96,7 +96,7 @@ uint8_t	eb_device_init_wire (uint8_t net, char * device, struct __eb_fw_chain *f
  *
  */
 
-uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uint16_t remote_port, char * sharedkey, struct __eb_fw_chain *fw_in, struct __eb_fw_chain *fw_out, char *name, struct __eb_device *mt_parent, int mt_type)
+uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uint16_t remote_port, char * sharedkey, struct __eb_fw_chain *fw_in, struct __eb_fw_chain *fw_out, char *name, struct __eb_device *mt_parent, int mt_type, uint32_t retry_interval)
 {
 
 	struct __eb_device	* p;
@@ -120,6 +120,7 @@ uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uin
 	p->trunk.mt_data = NULL;
 	p->trunk.mt_name = name;
 	p->trunk.mt_type = mt_type;
+	p->trunk.mt_retry = retry_interval;
 
 	if (pthread_mutex_init(&(p->trunk.mt_mutex), NULL) == -1)
 		eb_debug (1, 0, "DEVINIT", "%-8s %5d   Cannot initialize multitrunk mutex this device.", "Trunk", p->trunk.local_port);

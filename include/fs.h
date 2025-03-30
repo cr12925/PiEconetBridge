@@ -119,6 +119,8 @@
 
 #define FS_MAX_BULK_SIZE 0x1000 // 4k - see RiscOS PRM
 
+#define FS_MAX_TAPE_DRIVES 4 // Max number of tape drives available, numbered 0 ... n-1. Not a good idea to put this beyond 10 given there's a call to receive mounted tape names.
+
 /* Reported version string */
 #define FS_VERSION_STRING "3 Pi Econet HP Bridge FS 2.20"
 
@@ -143,6 +145,7 @@ struct __fs_station {
         uint16_t 		total_users; // How many entries in users?
 	uint16_t		total_groups; // Number of entries in groups
 	uint32_t		seq;
+	uint8_t			tape_drive; // Currently selected tape drive number
         int 			total_discs;
 	struct __fs_config	*config; // Pointer to my config
 	struct __fs_disc	*discs; // Pointer to discs
@@ -154,7 +157,6 @@ struct __fs_station {
 	struct __fs_machine_peek_reg	*peeks; // List of pending machine peeks
 	uint8_t			bulkport_use[32]; // Bitmap - Need to move this to the local device in the bridge
 	uint8_t			enabled; // Whether server enabled
-	//struct load_queue	*fs_load_queue; // Per server load queue - now disused
 	struct __eb_device	*fs_device; // Pointer to device housing this server in the main bridge 
 	pthread_mutex_t		fs_mutex; // Lock when this FS is working
 	pthread_mutex_t		fs_mpeek_mutex; // Lock we sit on waiting for machine peeks
