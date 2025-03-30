@@ -361,7 +361,7 @@ uint8_t eb_mt_copy_to_cipherpacket (uint8_t **cipherpacket, uint32_t *cipherpack
 	}
 	else
 	{
-		*cipherpacket = realloc(cipherpacket, realloc_size);
+		*cipherpacket = realloc(*cipherpacket, realloc_size);
 	}
 
 	memcpy ((*cipherpacket + *cipherpacket_ptr), (buffer + copystart), copylength);
@@ -815,7 +815,7 @@ void * eb_multitrunk_handler_thread (void * input)
 			{
 				/* Expand buffer, up to maximum */
 
-				cipherpacket_size = (cipherpacket_size + len) < EB_MT_TCP_MAXSIZE ? (cipherpacket_size + len) : EB_MT_TCP_MAXSIZE;
+				cipherpacket_size = (cipherpacket_ptr + len) < EB_MT_TCP_MAXSIZE ? (cipherpacket_ptr + len) : EB_MT_TCP_MAXSIZE;
 				cipherpacket = realloc(cipherpacket, cipherpacket_size);
 			}
 
@@ -1109,7 +1109,7 @@ void * eb_multitrunk_client_device (void * device)
 		else
 		{
 			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d unable to connect to any resolved address. Re-trying.", me->trunk.mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
-			sleep (10); /* Wait ten seconds and try again from the start */
+			sleep (me->trunk.mt_retry); /* Wait ten seconds and try again from the start */
 		}
 	}
 

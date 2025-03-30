@@ -9289,7 +9289,7 @@ int eb_parse_json_config(struct json_object *jc)
 				char		* remote_host, *key, *name = NULL;
 				uint8_t		nat_local, nat_distant, found = 0;
 				uint16_t	nlength, ncount = 0;
-				uint32_t	retry_interval = 10000;
+				uint32_t	retry_interval = 10;
 				struct __eb_device	*trunk;
 				struct json_object	*jnat_local, *jnat_remote, *jfw, *jname, *jmt_parent, *jmt_type, *jmt_retry;
 				struct __eb_fw_chain	*fw_in = NULL, *fw_out = NULL;
