@@ -484,7 +484,9 @@ struct __fs_user {
         unsigned char priv;
         unsigned char bootopt;
         unsigned char home[80];
-        uint8_t         unused1[16];
+        uint8_t         unused1[8];
+	uint32_t	quota_total; // Kb?
+	uint32_t	quota_used;
         unsigned char lib[80];
         uint8_t         unused2[16];
         unsigned char home_disc;
@@ -552,8 +554,6 @@ struct __fs_active {
 	uint8_t manyhandles; /* 1 = 32 handles, 0 = 8 */
 
         uint8_t printer; // Index into this station's printer array which shows which printer has been selected - defaults to &ff to signal 'none'.
-
-	uint32_t	quota_total, quota_used; // In Kb?
 
 	struct __fs_user_fhandle fhandles[FS_MAX_OPEN_FILES];
 	//uint32_t	handle_map; /* New structure - 1 bit per handle if handle is in use / valid. To find a free handle, XOR with &FFFFFFFF and if 0 then no free handles (for 32 bit machines), if XOR = &FFFFFF00 then no free handles for 8 bit machines. To find first new handle, just keep looking at least significant bit - if 0, then you've found a handle, otherwise shift right one bit. */
