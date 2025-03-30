@@ -553,6 +553,8 @@ struct __fs_active {
 
         uint8_t printer; // Index into this station's printer array which shows which printer has been selected - defaults to &ff to signal 'none'.
 
+	uint32_t	quota_total, quota_used; // In Kb?
+
 	struct __fs_user_fhandle fhandles[FS_MAX_OPEN_FILES];
 	//uint32_t	handle_map; /* New structure - 1 bit per handle if handle is in use / valid. To find a free handle, XOR with &FFFFFFFF and if 0 then no free handles (for 32 bit machines), if XOR = &FFFFFF00 then no free handles for 8 bit machines. To find first new handle, just keep looking at least significant bit - if 0, then you've found a handle, otherwise shift right one bit. */
 	struct __fs_active_load_queue	*load_queue;
@@ -927,6 +929,22 @@ extern float timediffstart(void);
 	\
 	eb_free (__FILE__, __LINE__, module, descr, p); \
 }
+
+// Utility macros to write into reply data
+
+#define FS_PUT8(r,l,v) r[(l)] = (v) & 0xff
+
+#define FS_PUT16(r,l,v)\
+	r[(l) + 1] = ((v) & 0xff00) >> 8;\
+	FS_PUT8((r),(l),(v))
+
+#define FS_PUT24(r,l,v)\
+	r[(l) + 2] = ((v) & 0xff0000) >> 16;\
+	FS_PUT16((r),(l),(v))
+
+#define FS_PUT32(r,l,v)\
+	r[(l) + 3] = ((v) & 0xff000000) >> 24;\
+	FS_PUT24((r),(l),(v))
 
 /* List of externs for FSOP functions */
 
