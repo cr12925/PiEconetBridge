@@ -9775,6 +9775,7 @@ int eb_parse_json_config(struct json_object *jc)
 		EB_JSON_TUNABLE_INT("fs-stats-port", EB_CONFIG_FS_STATS_PORT);
 		EB_JSON_TUNABLE_BOOL("malloc-debug", EB_DEBUG_MALLOC);
 		EB_JSON_TUNABLE_BOOL("normalize-debug", normalize_debug);
+		strcpy (tar_path, "/usr/bin/tar");
 		EB_JSON_TUNABLE_STRING("tar-path", tar_path);
 
 		/* This one's a negative bool */
