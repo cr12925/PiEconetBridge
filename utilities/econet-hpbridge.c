@@ -37,6 +37,8 @@ extern short fs_sevenbitbodge;
 extern short normalize_debug;
 extern uint8_t fs_set_syst_bridgepriv;
 
+char	tar_path[PATH_MAX];
+
 // Some globals
 
 uint8_t	dumpconfig = 0;
@@ -9731,6 +9733,12 @@ int eb_parse_json_config(struct json_object *jc)
 					y = !!i;\
 				}
 
+#define EB_JSON_TUNABLE_STRING(x,y)	json_object_object_get_ex(jgen, x, &j); \
+				if (j) \
+				{\
+					strcpy(y,json_object_get_string(j));\
+				}
+
 		EB_JSON_TUNABLE_BOOL("disable-econet", EB_CONFIG_LOCAL);
 		EB_JSON_TUNABLE_INT("debug-level", EB_DEBUG_LEVEL);
 		if (!j) // No debug-level
@@ -9767,6 +9775,7 @@ int eb_parse_json_config(struct json_object *jc)
 		EB_JSON_TUNABLE_INT("fs-stats-port", EB_CONFIG_FS_STATS_PORT);
 		EB_JSON_TUNABLE_BOOL("malloc-debug", EB_DEBUG_MALLOC);
 		EB_JSON_TUNABLE_BOOL("normalize-debug", normalize_debug);
+		EB_JSON_TUNABLE_STRING("tar-path", tar_path);
 
 		/* This one's a negative bool */
 

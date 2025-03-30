@@ -43,7 +43,7 @@ void fsop_00_catalogue(struct fsop_data *f, struct oscli_params *p, uint8_t num,
 
 	fs_debug (0, 1, "%12sfrom %3d.%3d *CAT %s (path length %d)", "", f->net, f->stn, path, strlen(path));
 
-	strncpy(&(reply.p.data[2]), path, strlen(path));
+	strcpy(&(reply.p.data[2]), path);
 	reply.p.data[2+strlen(path)] = 0x0D; /* CR terminator */
 
 	fsop_aun_send (&reply, 3+strlen(path), f);

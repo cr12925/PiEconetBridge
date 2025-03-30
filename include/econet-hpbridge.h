@@ -851,6 +851,7 @@ extern struct __eb_pool		* pools;
 extern struct __eb_fw_chain	* fw_chains;
 
 extern uint8_t	dumpconfig;
+extern char tar_path[];
 
 /* externs within econet-hpbridge-devinit.c */
 

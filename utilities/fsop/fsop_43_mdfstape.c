@@ -50,6 +50,13 @@ FSOP(43)
 
 	uint8_t		arg;
 	unsigned char	tape[11]; // MDFS limits its tape names to 10 characters
+	unsigned char	tape_library_path[300];
+	unsigned char	tape_tar_path[320];
+	unsigned char 	tape_unpack_path[320];
+	unsigned char	tape_link_path[320];
+
+	// The initialization routine will have made sure this directory exists
+	sprintf (tape_library_path, "%s/Tapes/", f->server->directory);
 
 	arg = *(f->data + 5);
 

@@ -3045,6 +3045,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
 	FILE *passwd;
 	char passwordfile[280], passwordfilecopy[300];
+	char tapedir[280];
 	int length;
 	char regex[256];
 	
@@ -3061,6 +3062,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
         server->actives = NULL;
         server->users = NULL;
         server->enabled = 0;
+	server->tape_drive = 0;
         // server->fs_load_queue = NULL;
         server->fs_device = device;
         server->fs_workqueue = NULL;
@@ -3184,6 +3186,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 		// Load / Create password file
 
 		sprintf(passwordfile, "%s/Passwords", server->directory);
+		sprintf(tapedir, "%s/Tapes", server->directory);
 	
 		passwd = fopen(passwordfile, "r+");
 		
@@ -3448,6 +3451,23 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 	
 		}
 		
+		/* Tape library init */
+
+		if (FS_CONFIG(server,fs_sjfunc))
+		{
+			struct stat	statbuf;
+
+			if (!stat(tapedir, &statbuf))
+			{
+				if ((statbuf.st_mode & S_IFMT) != S_IFDIR)
+					fs_debug_full (1, 0, server, 0, 0, "Tape library path is not a directory!");
+			}
+			else // Doesn't exist
+			{
+				if (mkdir(tapedir, 0770) == -1)
+					fs_debug_full (1, 0, server, 0, 0, "Unable to create tape library directory at %s", tapedir);
+			}
+		}
 	}
 	
 	/* If told to, set bridge priv on SYST user */
