@@ -145,7 +145,8 @@ struct __fs_station {
         uint16_t 		total_users; // How many entries in users?
 	uint16_t		total_groups; // Number of entries in groups
 	uint32_t		seq;
-	uint8_t			tape_drive; // Currently selected tape drive number
+	uint8_t			tapedrive; // Currently selected tape drive number
+	unsigned char	 	tapedrives[FS_MAX_TAPE_DRIVES][11]; // One per drive, indicates which tape is mounted; tape name up to 10 characters, null terminated
         int 			total_discs;
 	struct __fs_config	*config; // Pointer to my config
 	struct __fs_disc	*discs; // Pointer to discs
@@ -562,6 +563,41 @@ struct __fs_active {
         uint8_t sequence; // Used to detect duplicate transmissions on putbyte - oscillates 0-1-0-1 - low bit of ctrl byte in packet. Gets re-set whenever there is an operation which is not a putbyte, so that successive putbytes get the tracker, but anything else in the way resets it
 
 	struct __fs_active	*next, *prev; /* Ready for full implementation of new structure */
+};
+
+/*
+ * Scheduled backup structure
+ *
+ */
+
+struct __fs_backup {
+	uint64_t	when; // Time scheduled for backup
+	uint8_t		print_output; // MDFS as 0 = off, 1 = parallel, 2 = serial. Not sure whether we'll bother with this.
+	unsigned char	tapename[11]; // 10 characters - tape name to back up to. Let's hope it's in the drive...
+	struct {
+			uint8_t	tape_partition; // Partition number to back up to
+			unsigned char disc_name[11]; // MDFS has max 10 character disc names
+	} jobs[8]; // MDFS seems to limit to 8 partitions
+	
+};
+
+struct __fs_tapeid_block {
+	unsigned char	identifier[11]; // Gets set to "SJ Research"
+	uint8_t		usage; // 0 = blank, 1 = used
+	unsigned char	tapename[10]; // No null on end. Termiante with 0x0D if shorter than 10 characters.
+	uint16_t	passes; // Number of tape passes
+	unsigned char	description[80]; // Terminated with 0x0D
+	uint8_t		fmt_dayyear, fmt_monthyear, fmt_hour, fmt_min; // looks like a 7-bit-bodge date/time when tape was formatted
+	uint8_t		reserved[20]; // For what?
+	struct {
+			uint8_t	flag; // Bottom two bits 00=Blank, 01=OK, 10=Corrupt
+			unsigned char	disc_name[10]; // Termianted 0x0D presumably if less than 10 characters
+			uint8_t		bkp_dayyear, bkp_monthyear, bkp_hour, bkp_min;
+			uint32_t	data_start_block;
+			uint32_t	length; // In kilobytes
+			unsigned char	error_info[8]; // Who knows what this might be.
+			uint8_t		reserved[33]; // For what?
+	} content[14]; // MDFS prescribes "Up to 14".
 };
 
 /*

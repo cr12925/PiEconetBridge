@@ -43,6 +43,91 @@ uint8_t fsop_43_copy_tapename(uint8_t *towhere, uint8_t *fromwhere, uint8_t maxl
 
 }
 
+/* Preserve the tapes mounted list */
+
+void fsop_43_store_tape_mounts(struct __fs_station *s)
+{
+	char	tapes_mounted_file[1024];
+	FILE *	tapes_mounted;
+
+	snprintf (tapes_mounted_file, 1022, "%s/Tapes-Mounted", s->directory);
+	tapes_mounted = fopen(tapes_mounted_file, "w");
+	if (tapes_mounted)
+	{
+		fwrite (s->tapedrives, 11, FS_MAX_TAPE_DRIVES, tapes_mounted);
+		fclose (tapes_mounted);
+	}
+
+}
+
+/* See if a given tape name is already mounted */
+
+uint8_t fsop_43_tape_is_mounted(struct __fs_station *s, char *tapename)
+{
+
+	uint8_t		tape;
+
+	for (tape = 0; tape < FS_MAX_TAPE_DRIVES; tape++)
+	{
+		if (!strcasecmp(s->tapedrives[tape], tapename))
+			return 1;
+	}
+
+	return 0xFF; // Not found
+
+}
+
+/* 
+ * fsop_43_discmount_tape
+ *
+ * Dismount tapename within server s.
+ *
+ * Causes a tar to be made (with xattrs) of the symlinked
+ * directory 'tapename' within serverroot/Tapes/TAPEn/tapename
+ *
+ * verifies it
+ *
+ * and then removes the directory
+ */
+
+uint8_t fsop_43_dismount_tape(struct __fs_station *s, char *tapename)
+{
+	uint8_t		tape;
+
+	tape = fsop_43_tape_is_mounted(s, tapename);
+
+	if (tape == 0xFF) // Rogue for not mounted
+		return 0;
+
+	/* Do the re-tar here */
+
+	/* Put the tape name in the right place */
+
+	strncpy (s->tapedrives[s->tapedrive], tapename, 10);
+
+	fsop_43_store_tape_mounts(s);
+
+	return 1;
+}
+
+/*
+ * fsop_43_mount_tape
+ *
+ * Checks to ensure nothing is already mounted in the drive,
+ * and the unpacks the tar. It operates on the currently
+ * selected tape drive.
+ *
+ */
+
+uint8_t fsop_43_mount_tape(struct __fs_station *s, char *tapename)
+{
+
+	if (fsop_43_tape_is_mounted(s, tapename))
+		return 0xFF; // Already mounted
+
+	return 1;
+}
+
 FSOP(43)
 {
 
@@ -107,7 +192,7 @@ FSOP(43)
 			} break;
 		case 18: // PiFS dismount current tape from drive - operates on currently selected drive number
 			{
-				fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Dismount tape in current drive (%d)", "", f->net, f->stn, arg, f->server->tape_drive); 
+				fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Dismount tape in current drive (%d)", "", f->net, f->stn, arg, f->server->tapedrive); 
 				// Tar up the directory (with xattrs), and remove the link to the virtual tape drive directory
 				fsop_error(f, 0xFF, "Not yet implemented");
 			} break;
@@ -118,7 +203,7 @@ FSOP(43)
 				if (tape_drive < FS_MAX_TAPE_DRIVES)
 				{
 					fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Select drive %02d", "", f->net, f->stn, arg, tape_drive); 
-					f->server->tape_drive = tape_drive;
+					f->server->tapedrive = tape_drive;
 					fsop_reply_ok(f);
 				}
 				else
@@ -126,8 +211,8 @@ FSOP(43)
 			} break;
 		case 20: // PiFS get tape drive number
 			{
-				fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Get tape drive number (%02d)", "", f->net, f->stn, arg, f->server->tape_drive); 
-				fsop_reply_ok_with_data(f, &(f->server->tape_drive), 1);
+				fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Get tape drive number (%02d)", "", f->net, f->stn, arg, f->server->tapedrive); 
+				fsop_reply_ok_with_data(f, &(f->server->tapedrive), 1);
 			} break;
 		case 21: // PiFS get tape names data+6 is start index; data+7 is max number of entries to return
 			// Reply is n x 10 character tape names, terminated by 0x0D if less than 10 characters long

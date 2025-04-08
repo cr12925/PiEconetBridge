@@ -1081,6 +1081,22 @@ void fsop_dump_handle_list(FILE *out, struct __fs_station *s)
 		disc = disc->next;
 	}
 
+	if (FS_CONFIG(s,fs_sjfunc))
+	{
+		uint8_t	tape;
+
+		fprintf (out, "\n Tape drives\n\n");
+
+		for (tape = 0; tape < FS_MAX_TAPE_DRIVES; tape++)
+		{
+			fprintf (out, "  %c %2d %s", (tape == s->tapedrive) ? '*' : ' ', tape+1, s->tapedrives[tape]);
+			if (s->tapedrives[tape][0] == 0x00)
+				fprintf (out, "(Empty)");
+			fprintf (out, "\n");
+		}
+
+	}
+
 	fprintf (out, "\n  Currently logged in users: ");
 
 	active = s->actives;
@@ -2381,7 +2397,7 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 
 	/* First build the unix path */
 
-	sprintf (result->unixpath, "%s/%1d%s", f->server->directory, result->disc, result->discname);
+	sprintf (result->unixpath, "%s/%1X%s", f->server->directory, result->disc, result->discname);
 
 	if ((a->server->users[a->userid].priv2 & FS_PRIV2_CHROOT) && (relative_to != -1) && (result->disc == a->server->users[a->userid].home_disc)) // CHROOT set for this user and we are not logging in / changing disc and we are on the home disc
 	{
@@ -3062,7 +3078,6 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
         server->actives = NULL;
         server->users = NULL;
         server->enabled = 0;
-	server->tape_drive = 0;
         // server->fs_load_queue = NULL;
         server->fs_device = device;
         server->fs_workqueue = NULL;
@@ -3456,6 +3471,9 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 		if (FS_CONFIG(server,fs_sjfunc))
 		{
 			struct stat	statbuf;
+			uint8_t		tape;
+			char		tape_mount_filename[1024];
+			FILE *		tape_mount;
 
 			if (!stat(tapedir, &statbuf))
 			{
@@ -3467,6 +3485,26 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 				if (mkdir(tapedir, 0770) == -1)
 					fs_debug_full (1, 0, server, 0, 0, "Unable to create tape library directory at %s", tapedir);
 			}
+
+			server->tapedrive = 0; // Init to drive 0
+
+			/* Empty all the tape drives */
+
+			for (tape = 0; tape < FS_MAX_TAPE_DRIVES; tape++)
+				server->tapedrives[tape][0] = 0x00; // Empty string
+
+			// Now restore what was mounted last time we ran
+			
+			snprintf (tape_mount_filename, 1022, "%s/Tapes-Mounted", server->directory);
+
+			tape_mount = fopen(tape_mount_filename, "r");
+
+			if (tape_mount)
+			{
+				fread(server->tapedrives, 11 * FS_MAX_TAPE_DRIVES, 1, tape_mount);
+				fclose(tape_mount);
+			}
+
 		}
 	}
 	
