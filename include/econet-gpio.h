@@ -72,13 +72,22 @@
 /* Function declarations */
 
 static int econet_probe(struct platform_device *);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,12,20)
+static void econet_remove(struct platform_device *);
+#else
 static int econet_remove(struct platform_device *);
+#endif
 int econet_open(struct inode *, struct file *);
 int econet_release(struct inode *, struct file *);
 long econet_ioctl (struct file *, unsigned int, unsigned long);
 unsigned int econet_poll (struct file *, poll_table *);
 ssize_t econet_readfd(struct file *, char *, size_t, loff_t *);
 ssize_t econet_writefd(struct file *, const char *, size_t, loff_t *);
+static inline void econet_process_rx(unsigned char);
+static inline void econet_aun_setidle_txstatus(int);
+static inline void econet_process_rx(unsigned char);
+
+
 
 /* Abstracted functions to read SR / write CR  & FIFO */
 unsigned char econet_read_sr(unsigned short);

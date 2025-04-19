@@ -4206,7 +4206,11 @@ static int econet_probe (struct platform_device *pdev)
  *
  */
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,12,20)
+static void econet_remove(struct platform_device *pdev)
+#else
 static int econet_remove(struct platform_device *pdev)
+#endif
 {
 
 	/* Turn off the read/write LEDs */
@@ -4288,12 +4292,11 @@ static int econet_remove(struct platform_device *pdev)
 
 	printk(KERN_INFO "econet-gpio: Unprobed.\n");
 
-	/*
-	 * Return success
-	 *
-	 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,12,20)
+	/* Return success */
 
 	return 0;
+#endif
 
 }
 
