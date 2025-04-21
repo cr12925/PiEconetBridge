@@ -25,6 +25,7 @@ install-utilities:	install-mkgroup build-utilities
 	[ -e /home/`whoami`/econetfs ] || (mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00 && mkdir -p /home/`whoami`/econetfs/1STORAGE)
 	-[ -e /home/`whoami`/econetfs/0PIBRIDGE-00 ] && mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM && cp FS/PIFSTOOL /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM/PIFSTOOL 
 	[ -e /etc/econet-gpio/pserv.sh ] || sudo cp config/pserv.sh /etc/econet-gpio
+	[ -e /etc/econet-gpio/tapes.sh ] || sudo cp config/tapes.sh /etc/econet-gpio
 	-sudo systemctl stop econet-hpbridge
 	sudo chgrp econet utilities/econet-hpbridge utilities/econet-imm utilities/econet-monitor utilities/econet-test utilities/econet-clock utilities/econet-ledtest
 	sudo chmod u=rx,g=rxs utilities/econet-hpbridge utilities/econet-imm utilities/econet-monitor utilities/econet-test utilities/econet-clock utilities/econet-ledtest
