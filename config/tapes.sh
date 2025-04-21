@@ -22,9 +22,10 @@ TARCREATEPARAMS="--xattrs -cf"
 TAREXTRACTPARAMS="--xattrs -xf"
 TARCREATECMD="${TAR} ${TARCREATEPARAMS}"
 TAREXTRACTCMD="${TAR} ${TAREXTRACTPARAMS}"
+MAXTAPEDRIVES=4 # If you change this, you'll need to change it in fs.h as well (FS_MAX_TAPE_DRIVES macro
 
 if [ "$#" -lt 3 ]; then
-	echo "Not enough parameters"
+	#echo "Not enough parameters"
 	exit 10
 fi
 
@@ -34,10 +35,17 @@ tapename=$3
 tapedrive=$4
 partition=$6
 discdirname=$5
+
 if [ $# -eq 6 ]; then
 	discname=${discdirname:1} 
 else
 	discname=""
+fi
+
+if [ "$cmd" != "format" ]; then
+	if [ "$tapedrive" -gt "$MAXTAPEDRIVES" ]; then
+		exit 17
+	fi
 fi
 
 numparams=$#
@@ -61,6 +69,7 @@ numparams=$#
 # 14 Drive empty
 # 15 Drive fault (can't make $mountdir or link to $tapedrivepath)
 # 16 Backup failed - tape will be corrupt
+# 17 Invalid tape drive number
 
 if [ "${fsdir:0:1}" != "/" ]; then exit 1; fi
 
@@ -132,7 +141,7 @@ fi
 		return 8
 	fi
 
-	echo $tapedrivepathrelative
+	#echo $tapedrivepathrelative
 
 	cd $tapedir
 
@@ -154,7 +163,7 @@ tape_umount () {
         #tapedrivepath=$4
 
 if [ "$numparams" -lt 4 ]; then
-	echo "Not enough parameters"
+	#echo "Not enough parameters"
 	exit 10
 fi
 
@@ -208,7 +217,7 @@ tape_format () {
 tape_backup () {
 
 if [ "$numparams" -lt 6 ]; then
-	echo "Not enough parameters"
+	#echo "Not enough parameters"
 	exit 10
 fi
 
@@ -277,14 +286,14 @@ case "$cmd" in
 		;;
 	"backup")
 		if [ "$#" -lt 5 ]; then
-			echo "Not enough parameters"
+			#echo "Not enough parameters"
 			exit 10
 		fi
 
 		tape_backup $tapedrivepath $tarname $partition $discname
 		;;
 	*)
-		echo "Unknown tape command $cmd" 
+		#echo "Unknown tape command $cmd" 
 		result=3 ;;
 esac
 
