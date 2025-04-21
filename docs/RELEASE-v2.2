@@ -69,6 +69,22 @@ RELEASE NOTES FOR V2.2
   to filter traffic with network / station numbers as received, i.e.
   before any NAT or pooling. Outbound filters are the reverse - the
   matching is done prior to the undoing of any NAT etc. 
+- MDFS tape interface implemented, with up to four drives by default
+  (MDFS had one only). 
+  Further tape management commands:
+  *TAPEINFO [<drive no.>] - Display tape ID block (see MDFS manual).
+     -- MDFS does not have the <drive no.> parameter, and it is
+        optional in Pi FS. If not specified, the currently selected
+        drive is used.
+  *TAPEMOUNT <tapename> [<drive no.>]
+  *TAPEDISMOUNT <drive no.>
+  *TAPESELECT <drive no.> -- Selects the drive to use if none specified,
+                          either on cmd line or when using MDFS calls
+  *TAPEFORMAT <tapename>
+  *TAPEBACKUP <discname> <partition> [<drive no.>] -- Back up 
+              FS disc "discname" onto partition nn of the tape in
+              either the currently selected drive, or the specified
+              drive.
 
 KNOWN ISSUES
 ------------

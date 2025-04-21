@@ -1791,6 +1791,35 @@ Privileged commands:
 *SETPASS <username> <password>
 	- Set password for another user
 
+(The following tape commands are only available if the FS has MDFS functionality
+ enabled.)
+
+*TAPEINFO [<drive no.>]
+	- Display tape ID block (see MDFS manual).
+	  MDFS does not have the <drive no.> parameter, and it is
+          optional in Pi FS. If not specified, the currently selected
+          drive is used.
+
+*TAPEMOUNT <tapename> [<drive no.>]
+	- Mount <tapename> in currently selected (or optionally
+ 	  specified) tape drive
+
+*TAPEDISMOUNT [<drive no.>]
+	- Dismount tape in currently selected (or optionally
+ 	  specified) tape drive
+
+*TAPESELECT <drive no.>
+	- Selects the drive to use if none specified, either on cmd line
+	  or when using MDFS calls
+
+*TAPEFORMAT <tapename>
+	- Formats <tapename> so as to be empty. Will create the tape if
+ 	  it does not exist.
+
+*TAPEBACKUP <discname> <partition> [<drive no.>]
+	- Back up FS disc "discname" onto specified partition nn of the tape
+	  in either the currently selected, or specified, drive.
+.
 *UNLINK <link>
 	- Removes a symlink created with *LINK
 
