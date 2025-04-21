@@ -3735,7 +3735,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
 	/* Start the backup thread */
 
-	if (pthread_create(&(server->fs_backup_thread), NULL, fsop_backup_thread, NULL) != 0)
+	if (pthread_create(&(server->fs_backup_thread), NULL, fsop_backup_thread, server) != 0)
 	{
 		eb_free(__FILE__, __LINE__, "FS","Destroy FS struct on failed backup thread creation", server);
                 return NULL;
