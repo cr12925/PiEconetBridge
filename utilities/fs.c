@@ -4120,7 +4120,7 @@ int16_t fsop_get_acorn_entries(struct fsop_data *f, unsigned char *unixpath)
 // Returns -3 for too many files, -1 for file didn't exist when it should or can't open, or internal handle for OK. This will also attempt to open the file 
 // -2 = interlock failure
 // The path is a unix path - we look it up in the tables of file handles
-struct __fs_file * fsop_open_interlock(struct fsop_data *f, unsigned char *path, uint8_t mode, int8_t *err, uint8_t dir)
+struct __fs_file * fsop_open_interlock(struct fsop_data *f, unsigned char *path, uint8_t mode, int8_t *err, uint8_t dir, uint8_t is_tape, uint8_t tape_drive)
 {
 
 	struct __fs_file	*file;
@@ -4128,6 +4128,12 @@ struct __fs_file * fsop_open_interlock(struct fsop_data *f, unsigned char *path,
 	*err = 0; /* initialize */
 
 	fs_debug_full (0, 2, f->server, f->net, f->stn, "Interlock attempting to open path %s, mode %d, userid %04X", path, mode, f->userid);
+
+	if (is_tape && mode >= 2) // Fail if we try to write to a tape
+	{
+		*err = -2;
+		return NULL;
+	}
 
 	file = f->server->files;
 
@@ -4173,6 +4179,9 @@ struct __fs_file * fsop_open_interlock(struct fsop_data *f, unsigned char *path,
 	strcpy(file->name, path);
 
 	file->readers = file->writers = 0;
+
+	file->is_tape = is_tape;
+	file->tape_drive = tape_drive;
 
 	if (mode == 1)	file->readers = 1;
 	else		file->writers = 1;

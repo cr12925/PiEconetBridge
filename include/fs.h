@@ -203,6 +203,7 @@ struct __fs_disc {
 struct __fs_file {
         unsigned char 	name[1024];
         FILE 		*handle;
+	uint8_t		is_tape, tape_drive;
         int 		readers, writers; // Used for locking; when readers = writers = 0 we close the file
 	struct __fs_file 	*next, *prev; /* Pointers for new structure */
 };
@@ -268,6 +269,7 @@ struct objattr {
 #define FS_PATH_ERR_NODISC 0x03 // Selected disc does not exist
 #define FS_PATH_ERR_TYPE 0x04 // What we found was neither file nor directory (even on following a symlink)
 #define FS_PATH_ERR_LENGTH 0x05 // Path provided was too long or too short
+#define FS_PATH_ERR_BAD_TAPE 0x06 // Bad tape drive identifier
 
 struct path {
         unsigned short error; // One of FS_PATH_ERR* - only valid if function returns 0
@@ -275,6 +277,8 @@ struct path {
         // If ftype == NOTFOUND, the rest of the fields are invalid
         unsigned char discname[30]; // Actually max 10 chars. This is just safety.
         short disc; // Disc number
+	uint8_t	is_tape; // Set if this is a tape drive (so read only to all users)
+	uint8_t	tape_drive; // Set to tape drive number, or 0xFF if not a tape
         unsigned char path[12][ECONET_ABS_MAX_FILENAME_LENGTH+1]; // Path elements in order, relative to root // Was 30, 11 - adjusted to 12 paths to keep within the typical 1024 byte path block in the code
         unsigned char acornname[ECONET_ABS_MAX_FILENAME_LENGTH+1]; // Acorn format filename - tail end - gets populated on not found for non-wildcard searches to enable *SAVE to return it
         short npath; // Number of entries in path[]. 1 means last entry is [0]
@@ -761,7 +765,7 @@ extern void fs_debug (uint8_t, uint8_t, char *, ...);
 extern void fs_debug_full (uint8_t, uint8_t, struct __fs_station *, uint8_t, uint8_t, char *, ...);
 
 /* Externs for internal file handling from fs.c */
-extern struct __fs_file * fsop_open_interlock(struct fsop_data *, unsigned char *, uint8_t, int8_t *, uint8_t);
+extern struct __fs_file * fsop_open_interlock(struct fsop_data *, unsigned char *, uint8_t, int8_t *, uint8_t, uint8_t, uint8_t);
 //extern struct __fs_dir * fsop_get_dir_handle(struct fsop_data *, unsigned char *);
 extern void fsop_close_interlock(struct __fs_station *, struct __fs_file *, uint8_t);
 //extern void fsop_close_dir_handle(struct __fs_station *, struct __fs_dir *);

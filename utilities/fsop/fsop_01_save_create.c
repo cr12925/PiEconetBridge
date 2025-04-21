@@ -87,7 +87,7 @@ void fsop_save_internal(struct fsop_data *f, uint8_t is_32bit)
 					// Can write to it one way or another
 
 					// Use interlock function here
-					internal_handle = fsop_open_interlock(f, p.unixpath, 3, &err, 0);
+					internal_handle = fsop_open_interlock(f, p.unixpath, 3, &err, 0, p.is_tape, p.tape_drive);
 					fsop_set_create_time_now(p.unixpath);
 
 					if (err == -3)

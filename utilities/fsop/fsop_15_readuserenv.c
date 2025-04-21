@@ -47,9 +47,14 @@ FSOP(15)
 
 	disclen = r.p.data[replylen++] = 16; // strlen(fs_discs[server][active[server][active_id].disc].name);
 
-	fsop_get_disc_name(f->server, a->current_disc, discname);
+	if (a->fhandles[a->current].handle->is_tape)
+		sprintf (&(r.p.data[replylen]), "%%TAPE%-11d", a->fhandles[a->current].handle->tape_drive);
+	else
+	{
+		fsop_get_disc_name(f->server, a->current_disc, discname);
 
-	sprintf (&(r.p.data[replylen]), "%-16s", discname);
+		sprintf (&(r.p.data[replylen]), "%-16s", discname);
+	}
 
 	replylen += disclen;
 

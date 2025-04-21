@@ -169,7 +169,7 @@ FSOP(06)
 			if (p.ftype == FS_FTYPE_NOTFOUND) // Opening non-existent file for write - add unix name to end of path
 				strcat(p.unixpath, unix_segment);
 
-			handle = fsop_open_interlock(f, p.unixpath, (readonly ? 1 : existingfile ? 2 : 3), &err, 0);
+			handle = fsop_open_interlock(f, p.unixpath, (readonly ? 1 : existingfile ? 2 : 3), &err, 0, p.is_tape, p.tape_drive);
 
 			if (mode == 3)
 				fsop_set_create_time_now(p.unixpath);

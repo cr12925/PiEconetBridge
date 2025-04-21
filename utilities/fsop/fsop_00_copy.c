@@ -126,7 +126,7 @@ FSOP_00(COPY)
 			continue;
 		}
 
-		in_handle = fsop_open_interlock(f, e->unixpath, 1, &err, 0);
+		in_handle = fsop_open_interlock(f, e->unixpath, 1, &err, 0, p_src.is_tape, p_src.tape_drive);
 
 		if (err == -3)
 		{
@@ -154,7 +154,7 @@ FSOP_00(COPY)
 		else
 			strcpy(destfile, p_dst.unixpath);
 
-		out_handle = fsop_open_interlock(f, destfile, 3, &err, 0);
+		out_handle = fsop_open_interlock(f, destfile, 3, &err, 0, p_dst.is_tape, p_dst.tape_drive);
 
 		if (err == -3)
 		{
