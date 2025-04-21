@@ -161,7 +161,6 @@ FSOP(43)
 	// NB, whilst PiFS can handle multiple virtual tape drives, MDFS did not. So there is a PiFS call to change drive number
 	// and the drive number is stored when a backup is scheduled, and when backup is queried, it queries the current
 	// drive number. Default drive number is 0.
-	
 
 	switch (arg)
 	{
@@ -180,6 +179,12 @@ FSOP(43)
 			} break;
 		case 2: // Read auto backup status
 			{
+				if (pthread_mutex_trylock(&(f->server->fs_backup_mutex))) // Can't get lock
+				{
+					fsop_error (f, 0xFF, "Tape subsystem busy");
+					return;
+				}
+
 				fs_debug_full (0, 1, f->server, f->net, f->stn, "MDFS Tape operation %02d - Read backup status", arg);
 				if (f->server->backup->when == 0) /* Nothing pending */
 				{
@@ -194,15 +199,15 @@ FSOP(43)
 				}
 				else
 				{
-					struct tm	*when;
+					struct tm	when;
 					uint8_t		acorn_d, acorn_my, hour, min, sec, tapenamelen, counter = 0;
 
-					when = gmtime(&(f->server->backup->when));
+					gmtime_r(&(f->server->backup->when), &when);
 					
-					fs_date_to_two_bytes(when->tm_mday, when->tm_mon, when->tm_year, &acorn_my, &acorn_d);
-					hour = when->tm_hour;
-					min = when->tm_min;
-					sec = when->tm_sec;
+					fs_date_to_two_bytes(when.tm_mday, when.tm_mon, when.tm_year, &acorn_my, &acorn_d);
+					hour = when.tm_hour;
+					min = when.tm_min;
+					sec = when.tm_sec;
 
 					FS_CPUT8(1); /* Backup pending apparently */
 					FS_CPUT8(acorn_d);
@@ -238,12 +243,18 @@ FSOP(43)
 				}
 
 				fsop_aun_send(&reply, __rcounter, f);
+				pthread_mutex_unlock(&(f->server->fs_backup_mutex));
 
 			} break;
 		case 3: // Write auto backup status
 			{
 				uint8_t		setup;
 
+				if (pthread_mutex_trylock(&(f->server->fs_backup_mutex))) // Can't get lock
+				{
+					fsop_error (f, 0xFF, "Tape subsystem busy");
+					return;
+				}
 
 				setup = *(f->data + 6);
 
@@ -292,8 +303,10 @@ FSOP(43)
 
 					fs_debug_full (0, 1, f->server, f->net, f->stn, "MDFS Tape operation %02d - Write backup status (set for %02d/%02d/%04d %02d:%02d:%02d)", arg, when.tm_mday, when.tm_mon, when.tm_year, when.tm_hour, when.tm_min, when.tm_sec);
 
-					// TODO - wake up the backup scheduler!
+					pthread_cond_signal(&(f->server->fs_backup_cond));
 				}
+
+				pthread_mutex_unlock(&(f->server->fs_backup_mutex));
 
 			} break;
 		case 4: // Read tape partition size
@@ -420,3 +433,134 @@ FSOP(43)
 
 }
 
+/* Code for the backup thread 
+ * This works out when the next backup is, and sleeps on its condition
+ * until it's time.
+ * It may be woken earlier, in which case it will re-scane the job
+ * to see if (i) it has been told to die pending a fileserver shutdown,
+ * or (ii) if the job has been cancelled (in which case it will do an
+ * indefinite sleep), or (iii) if the job time has changed (in which case
+ * change its sleep pattern), or (iv) if the job time has passed in 
+ * which case it's time to do a backup.
+ */
+
+void fsop_backup_thread (void * p)
+{
+	struct __fs_station *s;
+	time_t	next_event, now;
+
+	s = (struct __fs_station *) p;
+
+	pthread_mutex_lock(&(s->fs_backup_mutex));
+
+	next_event = s->backup->when;
+	now = time(NULL);
+
+	while (1)
+	{
+		if (next_event == 0) /* No job, indefinite sleep */
+		{
+			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler has no work - sleeping");
+			pthread_cond_wait(&(s->fs_backup_cond), &(s->fs_backup_mutex));
+		}
+		else if (next_event > now) /* Job, but it's in the future */
+		{
+			struct tm	until;
+			struct timespec	t;
+
+			localtime_r (&next_event, &until);
+			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler sleeping until %d/%02d/%04d %02d:%02d:%02d",
+					until.tm_mday, until.tm_mon, until.tm_year,
+					until.tm_hour, until.tm_min, until.tm_sec);
+
+			t.tv_sec += (next_event - now);
+
+			pthread_cond_timedwait(&(s->fs_backup_cond), &(s->fs_backup_mutex), &t);
+		}
+
+		next_event = s->backup->when;
+		now = time(NULL);
+
+		if (s->backup->die) /* FS is closing down - exit */
+		{
+			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler exiting - fileserver shutting down");
+			s->backup->i_have_died = 1;
+			pthread_mutex_unlock (&(s->fs_backup_mutex));
+			pthread_exit(NULL);
+		}
+
+		if (next_event != 0 && now > next_event)  /* Do a backup */
+		{
+			int count = 0; // Job list
+			uint8_t	drive; // Need to find drive number
+
+			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler starting backup to %s", s->backup->tapename);
+
+			// TODO - Indentify drive number that has this tape in it.
+
+			while (count < 8 && s->backup->jobs[count].partition != 0xff)
+			{
+				char cmd_string[128];
+				uint8_t 	discno; // Need to look that up for each disc
+				struct __fs_disc	*d;
+				uint8_t res;
+				
+				discno = 0xff;
+
+				d = s->discs;
+
+				while (d & (discno == 0xff))
+				{
+					if (!strcasecmp(d->name, s->backup->jobs[count].discname)) /* Found it */
+						discno = d->discno;
+					else
+						d = d->next;
+				}
+				
+				if (discno == 0xff)
+				{
+					fs_debug_full (0, 1, s, 0, 0, "Scheduled backup of %s to partition %d on tape %s FAILED (Unknown disc name) - ABORTING",
+							s->backup->jobs[count].discname,
+							s->backup->tapename,
+							s->backup->jobs[count].partition);
+					s->backup->when = 0;
+					s->backup->jobs[0].partition = 0xff;
+					break;
+				}
+
+				discno = fsop_get_discno
+				sprintf (cmd_string, "backup %s %d %d%s %d",
+						s->backup->tapename,
+						drive, 
+						discno, 
+						s->backup->jobs[count].discname,
+						s->backup->jobs[count].partition);
+
+				res = fsop_43_tape_handler(s, cmd_string);
+
+				if (res == 0)
+				{
+					fs_debug_full (0, 1, s, 0, 0, "Scheduled backup of %s to partition %d on tape %s successful",
+							s->backup->jobs[count].discname,
+							s->backup->tapename,
+							s->backup->jobs[count].partition);
+				}
+				else
+				{
+					fs_debug_full (0, 1, s, 0, 0, "Scheduled backup of %s to partition %d on tape %s FAILED (%s) - ABORTING",
+							s->backup->jobs[count].discname,
+							s->backup->tapename,
+							s->backup->jobs[count].partition,
+							fsop_43_tape_errstr(res));
+					s->backup->when = 0;
+					s->backup->jobs[0].partition = 0xff;
+					break;
+				}
+				count++;
+			}
+			
+		}
+	}
+
+
+}

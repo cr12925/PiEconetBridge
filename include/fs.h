@@ -159,6 +159,8 @@ struct __fs_station {
 	struct __fs_bulk_port	*bulkports; // Pointer to list of bulk ports
 	struct __fs_machine_peek_reg	*peeks; // List of pending machine peeks
 	struct __fs_backup	*backup; // Auto backup config
+	pthread_mutex_t		fs_backup_mutex; // Locks the backup jobs list
+	pthread_cond_t		fs_backup_cond; // Used by the backup scheduler to be woken up to check the jobs list
 	uint8_t			bulkport_use[32]; // Bitmap - Need to move this to the local device in the bridge
 	uint8_t			enabled; // Whether server enabled
 	struct __eb_device	*fs_device; // Pointer to device housing this server in the main bridge 
@@ -584,6 +586,7 @@ struct __fs_backup {
 			uint8_t	partition; // Partition number to back up to - 0xFF means end of list
 			unsigned char discname[11]; // MDFS has max 10 character disc names
 	} jobs[8]; // MDFS seems to limit to 8 partitions
+	uint8_t		die, i_have_died;
 	
 };
 
