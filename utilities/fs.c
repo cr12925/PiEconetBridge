@@ -764,6 +764,24 @@ uint8_t fsop_perm_from_acorn(struct __fs_station *s, uint8_t acorn_perm)
 
 }
 
+/* 
+ * Get current time in 5-byte format
+ */
+
+void fs_now_two_bytes(uint8_t *my, uint8_t *dy, uint8_t *hour, uint8_t *min, uint8_t *sec)
+{
+	time_t	now;
+	struct tm now_tm;
+
+	now = time(NULL);
+	gmtime_r (&now, &now_tm);
+
+	*hour = now_tm.tm_hour;
+	*min = now_tm.tm_min;
+	*sec = now_tm.tm_sec;
+	fs_date_to_two_bytes (now_tm.tm_mday, now_tm.tm_mon, now_tm.tm_year, my, dy);
+}
+
 // Convert d/m/y to Acorn 2-byte format
 void fs_date_to_two_bytes(unsigned short day, unsigned short month, unsigned short year, unsigned char *monthyear, unsigned char *dday)
 {

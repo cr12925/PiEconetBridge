@@ -20,6 +20,7 @@
 #  - Otherwise error 14
 
 TAR=/usr/bin/tar
+DATE=/usr/bin/date
 LN="/usr/bin/ln -s"
 TAREXTENSION=".tar"
 TARCREATEPARAMS="--xattrs -cf"
@@ -229,6 +230,7 @@ tape_format () {
 
 	mkdir -p ${tapedrivedir}/Blank
 	cd ${tapedrivedir}/Blank
+	${DATE} +'%s' > .format_time
 	$TARCREATECMD $tarname .
 
 	if [ "$?" -ne 0 ]; then
@@ -279,6 +281,8 @@ fi
 	fi
 
 	touch ${mountdir}/.busy
+
+	${DATE} '+%s' > $backupsource/.backup_time
 
 	(cd $backupsource ; $TARCREATECMD - . ) | (cd $backuppath ; $TAREXTRACTCMD - )
 

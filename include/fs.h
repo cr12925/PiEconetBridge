@@ -606,7 +606,7 @@ struct __fs_tapeid_block {
 			uint32_t	data_start_block;
 			uint32_t	length; // In kilobytes
 			unsigned char	error_info[8]; // Who knows what this might be.
-			uint8_t		reserved[33]; // For what?
+			uint8_t		reserved[33]; // To make it a 64-byte block
 	} content[14]; // MDFS prescribes "Up to 14".
 };
 
@@ -854,6 +854,7 @@ extern void fsop_set_create_time_now(unsigned char *);
 uint8_t fs_year_from_two_bytes(uint8_t, uint8_t);
 uint8_t fs_month_from_two_bytes(uint8_t, uint8_t);
 uint8_t fs_day_from_two_bytes(uint8_t, uint8_t);
+void fs_now_two_bytes(uint8_t *, uint8_t *, uint8_t *, uint8_t *, uint8_t *);
 
 /* Externs for cross-fertilised functions */
 
@@ -1115,6 +1116,7 @@ extern char * fsop_43_tape_errstr(uint8_t);
 extern uint8_t fsop_43_tape_handler (struct __fs_station *, char *);
 extern uint8_t fsop_43_exec_tape_handler_return (struct fsop_data *, char *);
 extern uint8_t fsop_tape_get_mounted_name (struct __fs_station *, uint8_t, char *);
+extern void * fsop_backup_thread (void *);
 
 #define FS_DIR_TAPEDRIVE	"TapeDrives"
 #define FS_DIR_TAPES		"Tapes"
