@@ -3687,6 +3687,8 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 		
 		fclose(backup);
 
+		server->backup->die = server->backup->i_have_died = 0;
+
 		fs_debug_full (0, 2, server, 0, 0, "Backup configuration file mapped");
 		
 	}
@@ -3703,22 +3705,39 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
         if (pthread_mutex_init(&server->fs_mutex, NULL) == -1)
         {
-                //FS_LIST_SPLICEFREE(fileservers, server, "FS", "Free fileserver control structure after failed mutex init");
 		eb_free(__FILE__, __LINE__, "FS","Destroy FS struct on failed mutex init", server);
                 return NULL;
         }
 
         if (pthread_mutex_init(&server->fs_mpeek_mutex, NULL) == -1)
         {
-                //FS_LIST_SPLICEFREE(fileservers, server, "FS", "Free fileserver control structure after failed mpeek mutex init");
 		eb_free(__FILE__, __LINE__, "FS","Destroy FS struct on failed mpeek mutex init", server);
                 return NULL;
         }
 
+	if (pthread_mutex_init(&server->fs_backup_mutex, NULL) == -1)
+	{
+		eb_free(__FILE__, __LINE__, "FS", "Destroy FS struct on failed backup mutex init", server);
+		return NULL;
+	}
+
         if (pthread_cond_init(&server->fs_condition, NULL) == -1)
         {
-                //FS_LIST_SPLICEFREE(fileservers, server, "FS", "Free fileserver control structure after failed cond init");
 		eb_free(__FILE__, __LINE__, "FS","Destroy FS struct on failed condition init", server);
+                return NULL;
+        }
+
+        if (pthread_cond_init(&server->fs_backup_cond, NULL) == -1)
+        {
+		eb_free(__FILE__, __LINE__, "FS","Destroy FS struct on failed backup condition init", server);
+                return NULL;
+        }
+
+	/* Start the backup thread */
+
+	if (pthread_create(&(server->fs_backup_thread), NULL, fsop_backup_thread, NULL) != 0)
+	{
+		eb_free(__FILE__, __LINE__, "FS","Destroy FS struct on failed backup thread creation", server);
                 return NULL;
         }
 
@@ -3825,6 +3844,39 @@ void fsop_shutdown (struct __fs_station *s)
 
 	if (s->groups)
 		munmap(s->groups, 10 * s->total_groups);
+
+	pthread_mutex_lock(&(s->fs_backup_mutex));
+	s->backup->die = 1; /* Tell the backup thread to die */
+	pthread_cond_signal(&(s->fs_backup_cond));
+	pthread_mutex_unlock(&(s->fs_backup_mutex));
+
+	fs_debug_full (0, 1, s, 0, 0, "FS", "Waiting for FS Backup thread to quit");
+
+	sleep (1);
+
+	{
+		uint8_t	count = 0;
+
+		while (count < 10)
+		{
+			uint8_t	dead;
+			pthread_mutex_lock(&(s->fs_backup_mutex));
+			dead = s->backup->i_have_died;
+			pthread_mutex_unlock(&(s->fs_backup_mutex));
+
+			if (dead)
+				break;
+			else
+				sleep(1);
+
+			count++;
+		}
+
+		if (count == 10)
+			fs_debug_full (0, 1, s, 0, 0, "FS", "FS Backup thread failed quit - freeing memory anyway (cross your fingers)");
+		else
+			fs_debug_full (0, 1, s, 0, 0, "FS", "FS Backup thread has quit - freeing memory");
+	}
 
 	if (s->backup)
 		munmap(s->backup, sizeof(struct __fs_backup));

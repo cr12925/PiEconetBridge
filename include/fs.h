@@ -161,6 +161,7 @@ struct __fs_station {
 	struct __fs_backup	*backup; // Auto backup config
 	pthread_mutex_t		fs_backup_mutex; // Locks the backup jobs list
 	pthread_cond_t		fs_backup_cond; // Used by the backup scheduler to be woken up to check the jobs list
+	pthread_t		fs_backup_thread; // the backup thread
 	uint8_t			bulkport_use[32]; // Bitmap - Need to move this to the local device in the bridge
 	uint8_t			enabled; // Whether server enabled
 	struct __eb_device	*fs_device; // Pointer to device housing this server in the main bridge 

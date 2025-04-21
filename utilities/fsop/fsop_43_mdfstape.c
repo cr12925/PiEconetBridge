@@ -444,7 +444,7 @@ FSOP(43)
  * which case it's time to do a backup.
  */
 
-void fsop_backup_thread (void * p)
+void * fsop_backup_thread (void * p)
 {
 	struct __fs_station *s;
 	time_t	next_event, now;
@@ -453,11 +453,11 @@ void fsop_backup_thread (void * p)
 
 	pthread_mutex_lock(&(s->fs_backup_mutex));
 
-	next_event = s->backup->when;
-	now = time(NULL);
-
 	while (1)
 	{
+		next_event = s->backup->when;
+		now = time(NULL);
+
 		if (next_event == 0) /* No job, indefinite sleep */
 		{
 			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler has no work - sleeping");
@@ -493,15 +493,57 @@ void fsop_backup_thread (void * p)
 		{
 			int count = 0; // Job list
 			uint8_t	drive; // Need to find drive number
+			unsigned char	tapedrivepath[300];
 
 			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler starting backup to %s", s->backup->tapename);
 
-			// TODO - Indentify drive number that has this tape in it.
+			for (; count < FS_MAX_TAPE_DRIVES; count++)
+			{
+				struct stat	sb;
+
+				sprintf(tapedrivepath, "%s/%s/%d", s->directory, FS_DIR_TAPEDRIVE, count);	
+				
+				if (stat(tapedrivepath, &sb) == 0) // Stat success
+				{
+					if ((sb.st_mode & S_IFMT) == S_IFLNK)
+					{
+						unsigned char linkdest[300];
+
+						if (readlink(tapedrivepath, linkdest, 290) != -1)
+						{
+							char * p;
+							/* Might be this one */
+
+							if (( p = strrchr(linkdest, '.')))
+							{
+								if (!strcasecmp(linkdest, s->backup->tapename))
+								{
+									drive = count;
+									break;
+								}
+							}
+						}
+					}
+				}
+			}
+
+			if (count == FS_MAX_TAPE_DRIVES) /* Tape not found */
+			{
+				fs_debug_full (0, 1, s, 0, 0, "Scheduled backup to tape %s FAILED (Tape not mounted) - ABORTING",
+						s->backup->tapename);
+				s->backup->when = 0;
+				s->backup->jobs[0].partition = 0xff;
+				continue;
+			}
+
+			fs_debug_full (0, 1, s, 0, 0, "Scheduled backup - tape %s found in drive %d", s->backup->tapename, drive);
+
+			count = 0; 
 
 			while (count < 8 && s->backup->jobs[count].partition != 0xff)
 			{
 				char cmd_string[128];
-				uint8_t 	discno; // Need to look that up for each disc
+				uint8_t discno; // Need to look that up for each disc
 				struct __fs_disc	*d;
 				uint8_t res;
 				
@@ -509,10 +551,10 @@ void fsop_backup_thread (void * p)
 
 				d = s->discs;
 
-				while (d & (discno == 0xff))
+				while (d && (discno == 0xff))
 				{
 					if (!strcasecmp(d->name, s->backup->jobs[count].discname)) /* Found it */
-						discno = d->discno;
+						discno = d->index;
 					else
 						d = d->next;
 				}
@@ -525,10 +567,9 @@ void fsop_backup_thread (void * p)
 							s->backup->jobs[count].partition);
 					s->backup->when = 0;
 					s->backup->jobs[0].partition = 0xff;
-					break;
+					continue;
 				}
 
-				discno = fsop_get_discno
 				sprintf (cmd_string, "backup %s %d %d%s %d",
 						s->backup->tapename,
 						drive, 
@@ -554,7 +595,7 @@ void fsop_backup_thread (void * p)
 							fsop_43_tape_errstr(res));
 					s->backup->when = 0;
 					s->backup->jobs[0].partition = 0xff;
-					break;
+					continue;
 				}
 				count++;
 			}
