@@ -70,6 +70,7 @@ eeprom-v1: eeprom-general
 
 eep: eeprom-general
 	@cat v2eeprom/warning.txt
+	@read a
 	[ -d pi-utils ] || git clone https://github.com/raspberrypi/utils/ pi-utils
 	cd pi-utils/ ; cmake .
 	cd pi-utils/eeptools ; make
@@ -79,5 +80,4 @@ eeprom-v2: eeprom-general eep
 	dd if=/dev/zero ibs=1k count=8 of=v2eeprom/blank.eep
 	sudo pi-utils/eeptools/eepflash.sh -w -f=v2eeprom/blank.eep -t=24c64
 	sudo pi-utils/eeptools/eepflash.sh -w -f=v2eeprom/econet-gpio-v2.eep -t=24c64
-	@echo +++ Now comment out the two lines you added to config.txt and reboot!
 
