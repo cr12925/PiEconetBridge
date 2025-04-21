@@ -117,7 +117,7 @@ void fs_debug_full (uint8_t death, uint8_t level, struct __fs_station *s, uint8_
 	if (net != 0)
 		sprintf (padstr, "FS       %3d.%3d from %3d.%3d %s", s->net, s->stn, net, stn, str);
 	else
-		sprintf (padstr, "FS       %3d.%3d              %s", s->net, s->stn, str);
+		sprintf (padstr, "FS       %3d.%3d %s", s->net, s->stn, str);
 
 	eb_debug_fmt (death, level, "FS", padstr);
 
@@ -2293,7 +2293,7 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 
 		/* And fixup the unixpath */
 
-		sprintf (result->unixpath, "%s/TapeDrives/%d", f->server->directory, result->tape_drive);
+		sprintf (result->unixpath, "%s/%s/%d", f->server->directory, FS_DIR_TAPEDRIVE, result->tape_drive);
 
 		/* Not sure this is needed - the regexp will catch it
 		if (strchr(path, ':') || strchr(path, '@') || strchr(path, '&') || (strlen (path) > 1 && strchr (path + 1, '%'))) // Can't select drive or root in a tape path
@@ -2584,7 +2584,7 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 	sprintf (result->unixpath, "%s/%1X%s", f->server->directory, result->disc, result->discname);
 
 	if (result->is_tape) // Overwrite it with the tape path
-		sprintf (result->unixpath, "%s/TapeDrives/%d", f->server->directory, result->tape_drive);
+		sprintf (result->unixpath, "%s/%s/%d", f->server->directory, FS_DIR_TAPEDRIVE, result->tape_drive);
 
 	if ((a->server->users[a->userid].priv2 & FS_PRIV2_CHROOT) && (relative_to != -1) && (result->disc == a->server->users[a->userid].home_disc)) // CHROOT set for this user and we are not logging in / changing disc and we are on the home disc
 	{
@@ -3246,8 +3246,9 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 	DIR *d;
 	struct dirent *entry;
 
-	FILE *passwd;
+	FILE *passwd, *backup;
 	char passwordfile[280], passwordfilecopy[300];
+	char backupfile[280];
 	char tapedir[280];
 	int length;
 	char regex[256];
@@ -3389,7 +3390,8 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 		// Load / Create password file
 
 		sprintf(passwordfile, "%s/Passwords", server->directory);
-		sprintf(tapedir, "%s/Tapes", server->directory);
+		sprintf(tapedir, "%s/%s", server->directory, FS_DIR_TAPES);
+		sprintf(backupfile, "%s/Backups", server->directory);
 	
 		passwd = fopen(passwordfile, "r+");
 		
@@ -3657,6 +3659,36 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 		/* Tape library init */
 
 		server->tapedrive = 0; // Init to drive 0
+
+		backup = fopen(backupfile, "r+");
+
+		if (!backup)
+		{
+			struct __fs_backup b;
+
+			memset (&b, 0, sizeof(b));
+
+			b.jobs[0].partition = 0xff;
+
+			backup = fopen(backupfile, "w+");
+
+			if (!backup)
+				fs_debug_full (1, 0, server, 0, 0, "Unable to initialize backup configuration file");
+				
+			fwrite (&b, sizeof(b), 1, backup);
+
+			rewind(backup);
+		}
+
+	 	server->backup = mmap(NULL, sizeof(struct __fs_backup), PROT_READ | PROT_WRITE, MAP_SHARED, fileno(backup), 0);
+
+		if (server->backup == MAP_FAILED)
+			fs_debug_full (1, 0, server, 0, 0, "Cannot mmap() FS backup configuration file %s (%s)", backupfile, strerror(errno));
+		
+		fclose(backup);
+
+		fs_debug_full (0, 2, server, 0, 0, "Backup configuration file mapped");
+		
 	}
 	
 	/* If told to, set bridge priv on SYST user */
@@ -3794,8 +3826,12 @@ void fsop_shutdown (struct __fs_station *s)
 	if (s->groups)
 		munmap(s->groups, 10 * s->total_groups);
 
+	if (s->backup)
+		munmap(s->backup, sizeof(struct __fs_backup));
+
 	s->users = NULL;
 	s->groups = NULL;
+	s->backup = NULL;
 
 	regfree(&(s->r_discname));
 	regfree(&(s->r_pathname));

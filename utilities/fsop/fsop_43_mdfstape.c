@@ -150,7 +150,8 @@ char * fsop_43_tape_errstr(uint8_t err)
 FSOP(43)
 {
 
-	//FS_REPLY_DATA(0x80);
+	FS_REPLY_DATA(0x80);
+	FS_REPLY_COUNTER();
 
 	uint8_t		arg;
 	unsigned char	tape[11]; // MDFS limits its tape names to 10 characters
@@ -161,14 +162,6 @@ FSOP(43)
 	// and the drive number is stored when a backup is scheduled, and when backup is queried, it queries the current
 	// drive number. Default drive number is 0.
 	
-	if (arg != 0 && (arg < 16 || arg > 22))
-		fs_debug (0, 1, "%12sfrom %3d.%3d MDFS Tape operation %02X, %s - Not yet implemented", "", f->net, f->stn, arg, 
-			arg == 1 ? "Read tape ID block" :
-			arg == 2 ? "Read current status of auto backup" :
-			arg == 3 ? "Write current status of auto backup" :
-			arg == 4 ? "Read tape partition size" : 
-			"Bad argument"
-			);
 
 	switch (arg)
 	{
@@ -176,8 +169,149 @@ FSOP(43)
 			{
 				char	cmd_string[20];
 
+				fs_debug_full (0, 1, f->server, f->net, f->stn, "MDFS Tape operation %02d - Check if backup possible", arg);
 				snprintf (cmd_string, 19, "drivestate x %d", f->server->tapedrive); // The parameter after drivestate is ignored on this cmd
 				fsop_43_exec_tape_handler_return (f, cmd_string);
+			} break;
+		case 1: // Read Tape ID block
+			{
+				fs_debug_full (0, 1, f->server, f->net, f->stn, "MDFS Tape operation %02d - Read tape ID block", arg);
+				fsop_error(f, 0xFF, "Not yet implemented");
+			} break;
+		case 2: // Read auto backup status
+			{
+				fs_debug_full (0, 1, f->server, f->net, f->stn, "MDFS Tape operation %02d - Read backup status", arg);
+				if (f->server->backup->when == 0) /* Nothing pending */
+				{
+					FS_CPUT8(0);
+					FS_CPUT32(0); /* 4 bytes of nul time */
+					FS_CPUT8(0); /* 5th byte of nul time */
+					FS_CPUT8(0); /* No printer output */
+					FS_CPUT8(0); /* No flag */
+					memset(&(reply.p.data[12]), 0, 10); /* Blank tape name */
+					__rcounter += 10;
+					FS_CPUT8(0xFF); /* Terminator - no partitions */
+				}
+				else
+				{
+					struct tm	*when;
+					uint8_t		acorn_d, acorn_my, hour, min, sec, tapenamelen, counter = 0;
+
+					when = gmtime(&(f->server->backup->when));
+					
+					fs_date_to_two_bytes(when->tm_mday, when->tm_mon, when->tm_year, &acorn_my, &acorn_d);
+					hour = when->tm_hour;
+					min = when->tm_min;
+					sec = when->tm_sec;
+
+					FS_CPUT8(1); /* Backup pending apparently */
+					FS_CPUT8(acorn_d);
+					FS_CPUT8(acorn_my);
+					FS_CPUT8(hour);
+					FS_CPUT8(min);
+					FS_CPUT8(sec);
+					FS_CPUT8(0); // No printer output
+					FS_CPUT8(1); // New tape format
+
+					tapenamelen = strlen(f->server->backup->tapename);
+					strcpy(&(reply.p.data[__rcounter]), f->server->backup->tapename);
+
+					if (tapenamelen < 10)
+						reply.p.data[__rcounter + tapenamelen] = 0x0d;
+
+					__rcounter += 10; // because we used memcpy rather than the macros
+
+					while (counter < 8 && f->server->backup->jobs[counter].partition != 0xff)
+					{
+						FS_CPUT8(f->server->backup->jobs[counter].partition);
+						tapenamelen = strlen(f->server->backup->jobs[counter].discname); // Re-use tapenamelen
+						strcpy (&(reply.p.data[__rcounter]), f->server->backup->jobs[counter].discname);
+						if (tapenamelen < 10)
+							reply.p.data[__rcounter + tapenamelen] = 0x0d;
+						__rcounter += 10;
+
+						counter++;
+					}
+
+					FS_CPUT8(0xff);
+
+				}
+
+				fsop_aun_send(&reply, __rcounter, f);
+
+			} break;
+		case 3: // Write auto backup status
+			{
+				uint8_t		setup;
+
+
+				setup = *(f->data + 6);
+
+				if (!setup) /* Cancel current backup */
+				{
+					memset (f->server->backup, 0, sizeof(struct __fs_backup));
+					f->server->backup->jobs[0].partition = 0xff; // Rogue
+					fs_debug_full (0, 1, f->server, f->net, f->stn, "MDFS Tape operation %02d - Write backup status (cancelled)", arg);
+				}
+				else
+				{
+					/* Set it up and get the tape backup thread to have a look */
+
+					uint8_t	acorn_dy, acorn_ym;
+					uint8_t	count;
+					struct tm	when;
+
+					acorn_dy = *(f->data + 7);
+					acorn_ym = *(f->data + 8);
+					when.tm_mday = fs_day_from_two_bytes(acorn_dy, acorn_ym);
+					when.tm_mon = fs_month_from_two_bytes(acorn_dy, acorn_ym);
+					when.tm_year = fs_year_from_two_bytes(acorn_dy, acorn_ym);
+					when.tm_hour = *(f->data + 9);
+					when.tm_min = *(f->data + 10);
+					when.tm_sec = *(f->data + 11);
+					when.tm_isdst = -1;
+
+					f->server->backup->when = mktime(&when);
+
+					/* Ignore printer output and the flag  - for now, we might make an optional thing on the handler to send to the pserv.sh script in future */
+
+					fs_copy_to_cr(f->server->backup->tapename, (f->data + 14), 10);
+
+					count = 0;
+
+					while (*(f->data + 24 + (11 * count)) != 0xFF && count < 8)
+					{
+						f->server->backup->jobs[count].partition = *(f->data + 24 + (11 * count));
+						fs_copy_to_cr(f->server->backup->jobs[count].discname, (f->data + 25 + (11 * count)), 10);
+						count++;
+					}
+
+
+					if (count != 8)
+						f->server->backup->jobs[count].partition = 0xff; // Put the rogue in
+
+					fs_debug_full (0, 1, f->server, f->net, f->stn, "MDFS Tape operation %02d - Write backup status (set for %02d/%02d/%04d %02d:%02d:%02d)", arg, when.tm_mday, when.tm_mon, when.tm_year, when.tm_hour, when.tm_min, when.tm_sec);
+
+					// TODO - wake up the backup scheduler!
+				}
+
+			} break;
+		case 4: // Read tape partition size
+			{
+				fs_debug_full (0, 1, f->server, f->net, f->stn, "MDFS Tape operation %02d - Read partition sizes", arg);
+
+				// Produces fudged data
+
+				uint8_t	count = 0;
+
+				for (; count < 8; count++)
+				{
+					FS_CPUT8(1); // Means streamer - size big enough for the amount given
+					FS_CPUT32(102400); // 100Mb
+				}
+
+				fsop_aun_send(&reply, __rcounter, f);
+
 			} break;
 		case 16: // PiFS format tape
 			{
@@ -194,13 +328,18 @@ FSOP(43)
 				{
 					fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Create tape - bad tape name", "", f->net, f->stn, arg); 
 					fsop_error(f, 0xFF, "Bad tape name");
+					return;
 				}
+
+				fs_debug_full (0, 1, f->server, f->net, f->stn, "PiFS Tape operation %02d - Format tape", arg);
 
 				snprintf (cmd_string, 39, "format %s", tape);
 				fsop_43_exec_tape_handler_return (f, cmd_string);
 			} break;
 		case 17: // PiFS mount tape - tape name at data+6; operates on currently selected drive number
 			{
+				char	cmd_string[40];
+
 				// Untar the relevant tape if we can find a tar. 
 				// If not, it's already mounted or doesn't exist
 				// Then make a symlink to the virtual tape drive directory
@@ -217,13 +356,27 @@ FSOP(43)
 
 				fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Mount tape %s", "", f->net, f->stn, arg, tape); 
 
-				fsop_error(f, 0xFF, "Not yet implemented");
+				snprintf (cmd_string, 39, "mount %s %d", tape, f->server->tapedrive);
+				fsop_43_exec_tape_handler_return (f, cmd_string);
 			} break;
 		case 18: // PiFS dismount current tape from drive - operates on currently selected drive number
 			{
-				fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Dismount tape in current drive (%d)", "", f->net, f->stn, arg, f->server->tapedrive); 
-				// Tar up the directory (with xattrs), and remove the link to the virtual tape drive directory
-				fsop_error(f, 0xFF, "Not yet implemented");
+				char	cmd_string[40];
+
+				fs_copy_to_cr(tape, f->data+6, 10);
+
+				fs_toupper(tape);
+
+				if (!fsop_43_check_tapename(tape))
+				{
+					fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Dismount tape - bad tape name", "", f->net, f->stn, arg); 
+					fsop_error(f, 0xFF, "Bad tape name");
+				}
+
+				fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Dismount tape %s", "", f->net, f->stn, arg, tape); 
+
+				snprintf (cmd_string, 39, "umount %s %d", tape, f->server->tapedrive);
+				fsop_43_exec_tape_handler_return (f, cmd_string);
 			} break;
 		case 19: // PiFS select tape drive number (at data+6)
 			{
@@ -257,6 +410,7 @@ FSOP(43)
 			} break;
 		default:
 			{
+				fs_debug_full (0, 1, f->server, f->net, f->stn, "Tape operation %02d - Unknown argument", arg);
 				fsop_error (f, 0xFF, "Bad argument");
 				break;
 			}

@@ -158,6 +158,7 @@ struct __fs_station {
 	struct __fs_group	*groups; // Pointer to mmaped group file
 	struct __fs_bulk_port	*bulkports; // Pointer to list of bulk ports
 	struct __fs_machine_peek_reg	*peeks; // List of pending machine peeks
+	struct __fs_backup	*backup; // Auto backup config
 	uint8_t			bulkport_use[32]; // Bitmap - Need to move this to the local device in the bridge
 	uint8_t			enabled; // Whether server enabled
 	struct __eb_device	*fs_device; // Pointer to device housing this server in the main bridge 
@@ -577,12 +578,11 @@ struct __fs_active {
  */
 
 struct __fs_backup {
-	uint64_t	when; // Time scheduled for backup
-	uint8_t		print_output; // MDFS as 0 = off, 1 = parallel, 2 = serial. Not sure whether we'll bother with this.
+	time_t		when; // Scheduled backup time (0 = nothing scheduled)
 	unsigned char	tapename[11]; // 10 characters - tape name to back up to. Let's hope it's in the drive...
 	struct {
-			uint8_t	tape_partition; // Partition number to back up to
-			unsigned char disc_name[11]; // MDFS has max 10 character disc names
+			uint8_t	partition; // Partition number to back up to - 0xFF means end of list
+			unsigned char discname[11]; // MDFS has max 10 character disc names
 	} jobs[8]; // MDFS seems to limit to 8 partitions
 	
 };
@@ -746,7 +746,7 @@ extern void fsop_00_oscli_extract(unsigned char *, struct oscli_params *, uint8_
 
 #define FS_REPLY_DATA(c)	struct __econet_packet_udp reply = { .p.port = FSOP_REPLY_PORT, .p.ctrl = c, .p.ptype = ECONET_AUN_DATA, .p.data[0] = 0, .p.data[1] = 0 };
 
-#define FS_REPLY_COUNTER()	uint16_t	__rcoutner = 0;
+#define FS_REPLY_COUNTER()	uint16_t	__rcounter = 0;
 
 /* We have a second version because sometimes we used 'r' in the main code so it's easier not to change it! */
 #define FS_R_DATA(c)	struct __econet_packet_udp r = { .p.port = FSOP_REPLY_PORT, .p.ctrl = c, .p.ptype = ECONET_AUN_DATA, .p.data[0] = 0, .p.data[1] = 0 };
@@ -994,19 +994,19 @@ extern float timediffstart(void);
 
 // Equivalents to use __rcounter and increment it.
 
-#define FS_CPUT8(v) reply.p.data[__rcounter++] = (v)
+#define FS_CPUT8(v) reply.p.data[__rcounter++] = (v & 0xff)
 
 #define FS_CPUT16(v) \
 	FS_CPUT8((v));\
-	FS_CPUTB((((v) & 0xff00) >> 8))
+	FS_CPUT8((((v) & 0xff00) >> 8))
 
-#define FS_CPUT24(v)i \
+#define FS_CPUT24(v) \
 	FS_CPUT16((v));\
-	FS_CPUTB((((v) & 0xff0000) >> 16))
+	FS_CPUT8((((v) & 0xff0000) >> 16))
 
-#define FS_CPUT32(r,l,v) `\
+#define FS_CPUT32(v) \
 	FS_CPUT24((v));\
-	FS_CPUTB((((v) & 0xff000000) >> 24))
+	FS_CPUT8((((v) & 0xff000000) >> 24))
 
 /* List of externs for FSOP functions */
 
