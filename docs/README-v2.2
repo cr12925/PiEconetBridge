@@ -1799,6 +1799,14 @@ Privileged commands:
 *TAPEMOUNT <tapename> [<drive no.>]
 	- Mount <tapename> in currently selected (or optionally
  	  specified) tape drive
+	- Tape drives are accessible by System users only
+	- They cannot even be seen by non-System users
+	- They appear in the following special directories:
+		%TAPE		Currently selected drive (see *TAPESELECT)
+		$TAPEn		Directly select Tape drive 'n'
+	- Any attemp to write to a tape directory will result in an
+	  interlock failure and the "Already open" error, which really
+	  means "Read only" in this context
 
 *TAPEDISMOUNT [<drive no.>]
 	- Dismount tape in currently selected (or optionally
