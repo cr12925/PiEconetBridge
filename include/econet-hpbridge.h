@@ -204,6 +204,7 @@ struct __eb_printer { // Struct used to hold printer definitions on local emulat
 
 struct __eb_fileserver { // Struct used to hold data defining a locally emulated fileserver
 	char 		*rootpath; // Full pathname to directory holding password file & directories for emulated disks
+	char		*tapehandler; // Full pathname to tape handler script
 	struct __fs_station	*server; // Pointer to __fs_station struct created on initialization - NULL if not initialized
 	pthread_t	fs_thread; // FS thread - attempt to stop core dumps when thread exits
 	pthread_mutex_t	statsmutex; // Lock on the stats values - they are written to and read by different threads
@@ -860,7 +861,7 @@ extern uint8_t	eb_device_init_virtual (uint8_t);
 extern uint8_t	eb_device_init_singletrunk (char *, uint16_t, uint16_t, char *, struct __eb_fw_chain *, struct __eb_fw_chain *, char *, struct __eb_device *mt_parent, int, uint32_t);
 extern uint8_t	eb_device_init_multitrunk (char *, char *, uint16_t, int, uint16_t);
 extern uint8_t 	eb_device_init_dynamic (uint8_t, uint8_t, struct __eb_fw_chain *, struct __eb_fw_chain *);
-extern uint8_t	eb_device_init_fs (uint8_t, uint8_t, char *);
+extern uint8_t	eb_device_init_fs (uint8_t, uint8_t, char *, char *);
 extern uint8_t	eb_device_init_ps (uint8_t, uint8_t, char *, char *, char *, uint8_t, uint8_t);
 extern uint8_t 	eb_device_init_ps_handler (uint8_t, uint8_t, char *, char *);
 extern uint8_t	eb_device_init_ip (uint8_t, uint8_t, char *, uint32_t, uint32_t);
@@ -897,3 +898,6 @@ extern pthread_mutex_t		threadcount_mutex; // Locks the thread counter
 
 #define eb_thread_started() { pthread_mutex_lock(&threadcount_mutex); threads_started++; pthread_mutex_unlock(&threadcount_mutex); }
 #define eb_thread_ready() { pthread_mutex_lock(&threadcount_mutex); threads_ready++; pthread_mutex_unlock(&threadcount_mutex); }
+
+/* Default tape handler - requires for FS device init */
+#define FS_DEFAULT_TAPE_HANDLER "/etc/econet-gpio/tapes.sh"

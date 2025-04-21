@@ -1095,3 +1095,4 @@ extern short fs_sevenbitbodge;
 extern short normalize_debug;
 extern uint8_t fs_set_syst_bridgepriv;
 
+extern char * fsop_43_tape_errstr(uint8_t);

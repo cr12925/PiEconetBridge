@@ -8634,7 +8634,14 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 			}
 
 			if (json_object_object_get_ex(jstation, "fileserver-path", &jfs))
-				eb_device_init_fs(net, stn, (char *) json_object_get_string(jfs));
+			{
+				struct json_object	*jtapehandler;
+
+				if (json_object_object_get_ex(jstation, "fileserver-tapehandler", &jtapehandler))
+					eb_device_init_fs(net, stn, (char *) json_object_get_string(jfs), (char *) json_object_get_string(jtapehandler));
+				else
+					eb_device_init_fs(net, stn, (char *) json_object_get_string(jfs), (char *) FS_DEFAULT_TAPE_HANDLER);
+			}
 
 			if (json_object_object_get_ex(jstation, "pipe-path", &jpipepath))
 			{
@@ -10304,7 +10311,7 @@ int eb_readconfig(char *f, char *json)
 
 				json_object_object_add(divert, "fileserver-path", json_object_new_string(eb_getstring(line, &matches[2])));
 #else
-				eb_device_init_fs (net, stn, eb_getstring(line, &matches[2]));
+				eb_device_init_fs (net, stn, eb_getstring(line, &matches[2]), FS_DEFAULT_TAPE_HANDLER);
 #endif
 
 			}
