@@ -737,9 +737,12 @@ extern void fsop_00_oscli_extract(unsigned char *, struct oscli_params *, uint8_
 
 /* Some bog standard reply packet stuff */
 
-#define FS_REPLY_DATA(c)	struct __econet_packet_udp reply = { .p.port = FSOP_REPLY_PORT, .p.ctrl = c, .p.ptype = ECONET_AUN_DATA, .p.data[0] = 0, .p.data[1] = 0 }
+#define FS_REPLY_DATA(c)	struct __econet_packet_udp reply = { .p.port = FSOP_REPLY_PORT, .p.ctrl = c, .p.ptype = ECONET_AUN_DATA, .p.data[0] = 0, .p.data[1] = 0 };
+
+#define FS_REPLY_COUNTER()	uint16_t	__rcoutner = 0;
+
 /* We have a second version because sometimes we used 'r' in the main code so it's easier not to change it! */
-#define FS_R_DATA(c)	struct __econet_packet_udp r = { .p.port = FSOP_REPLY_PORT, .p.ctrl = c, .p.ptype = ECONET_AUN_DATA, .p.data[0] = 0, .p.data[1] = 0 }
+#define FS_R_DATA(c)	struct __econet_packet_udp r = { .p.port = FSOP_REPLY_PORT, .p.ctrl = c, .p.ptype = ECONET_AUN_DATA, .p.data[0] = 0, .p.data[1] = 0 };
 
 /*
  * FSOP Function externs
@@ -981,6 +984,22 @@ extern float timediffstart(void);
 #define FS_PUT32(r,l,v)\
 	r[(l) + 3] = ((v) & 0xff000000) >> 24;\
 	FS_PUT24((r),(l),(v))
+
+// Equivalents to use __rcounter and increment it.
+
+#define FS_CPUT8(v) reply.p.data[__rcounter++] = (v)
+
+#define FS_CPUT16(v) \
+	FS_CPUT8((v));\
+	FS_CPUTB((((v) & 0xff00) >> 8))
+
+#define FS_CPUT24(v)i \
+	FS_CPUT16((v));\
+	FS_CPUTB((((v) & 0xff0000) >> 16))
+
+#define FS_CPUT32(r,l,v) `\
+	FS_CPUT24((v));\
+	FS_CPUTB((((v) & 0xff000000) >> 24))
 
 /* List of externs for FSOP functions */
 
