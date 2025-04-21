@@ -1807,6 +1807,10 @@ Privileged commands:
 	- Any attemp to write to a tape directory will result in an
 	  interlock failure and the "Already open" error, which really
 	  means "Read only" in this context
+	- Each tape has up to 14 "partitions". These appear as
+	  sub-directories of %TAPEn, named nnDISCNAME - which nn is the
+  	  partition number (0-13) and DISCNAME is the name of the last
+	  disc backed up to that partition.
 
 *TAPEDISMOUNT [<drive no.>]
 	- Dismount tape in currently selected (or optionally
