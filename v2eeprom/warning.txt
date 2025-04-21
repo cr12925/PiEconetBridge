@@ -2,16 +2,13 @@
 WARNING
 -------
 
+Please ensure you have installed cmake before proceeding:
+	sudo apt install cmake
+
 Do NOT proceed unless you have:
 
 (i) a version TWO (2) PiEconetBridge HAT installed and
 (ii) it has had its EEPROM write line enabled with a solder bridge
-(iii) included the following two lines in your config.txt:
-
-dtparam=i2c_arm=on
-dtparam=i2c_vc=on
-
-(iv) rebooted before running making this target.
 
 You can contact @KenLowe on the stardot forums for information on
 how to enable the write line.
