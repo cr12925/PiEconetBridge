@@ -43,105 +43,117 @@ uint8_t fsop_43_copy_tapename(uint8_t *towhere, uint8_t *fromwhere, uint8_t maxl
 
 }
 
-/* Preserve the tapes mounted list */
+/* Execute the tape handler */
 
-void fsop_43_store_tape_mounts(struct __fs_station *s)
+uint8_t	fsop_43_tape_handler(struct __fs_station *s, char * params)
 {
-	char	tapes_mounted_file[1024];
-	FILE *	tapes_mounted;
 
-	snprintf (tapes_mounted_file, 1022, "%s/Tapes-Mounted", s->directory);
-	tapes_mounted = fopen(tapes_mounted_file, "w");
-	if (tapes_mounted)
-	{
-		fwrite (s->tapedrives, 11, FS_MAX_TAPE_DRIVES, tapes_mounted);
-		fclose (tapes_mounted);
-	}
+	char *	cmd;
+	int 	res;
+
+	cmd = eb_malloc(__FILE__, __LINE__, "FS", "Tape handler command string", strlen(s->tapehandler) + strlen(s->directory) + strlen(params) + 3);
+
+	sprintf (cmd, "%s %s %s", s->tapehandler, s->directory, params);
+
+	res = system(cmd);
+
+	//fprintf (stderr, "\n\n* Executed: %s, result = %d\n\n", cmd, WEXITSTATUS(res));
+
+	eb_free(__FILE__, __LINE__, "FS", "Free tape handler command string", cmd);
+
+	if (res < 0)
+		return 255;
+	else 	return (uint8_t) WEXITSTATUS(res);
 
 }
 
-/* See if a given tape name is already mounted */
-
-uint8_t fsop_43_tape_is_mounted(struct __fs_station *s, char *tapename)
+uint8_t fsop_43_exec_tape_handler_return(struct fsop_data *f, char * params)
 {
 
-	uint8_t		tape;
+	/* Exec the tape handler, collect the result, and either return OK with nothing else if success,
+	 * or return 0xFF error code with error string termianted by 0x0D
+	 */
 
-	for (tape = 0; tape < FS_MAX_TAPE_DRIVES; tape++)
-	{
-		if (!strcasecmp(s->tapedrives[tape], tapename))
-			return 1;
-	}
+	uint8_t	res;
 
-	return 0xFF; // Not found
+	res = fsop_43_tape_handler (f->server, params);
 
+	if (res == 0) /* Success */
+		fsop_reply_ok(f);
+	else
+		fsop_error(f, 0xFF, fsop_43_tape_errstr(res));
+
+	return res;
 }
 
-/* 
- * fsop_43_discmount_tape
- *
- * Dismount tapename within server s.
- *
- * Causes a tar to be made (with xattrs) of the symlinked
- * directory 'tapename' within serverroot/Tapes/TAPEn/tapename
- *
- * verifies it
- *
- * and then removes the directory
- */
+/* Check the tape name for illegal/unwise characters */
 
-uint8_t fsop_43_dismount_tape(struct __fs_station *s, char *tapename)
+uint8_t fsop_43_check_tapename(char *name)
 {
-	uint8_t		tape;
+	uint8_t	count = 0;
 
-	tape = fsop_43_tape_is_mounted(s, tapename);
-
-	if (tape == 0xFF) // Rogue for not mounted
+	if (strlen(name) == 0 || strlen(name) > 10)
 		return 0;
 
-	/* Do the re-tar here */
-
-	/* Put the tape name in the right place */
-
-	strncpy (s->tapedrives[s->tapedrive], tapename, 10);
-
-	fsop_43_store_tape_mounts(s);
+	for (; count < strlen(name); count++)
+	{
+		if (name[count] < '0')
+			return 0;
+		if (name[count] > '9' &&
+			!(
+				(name[count] >= 'A' && name[count] <= 'Z')
+				||
+				(name[count] >= 'a' && name[count] <= 'z')
+			 )
+		   )
+			return 0;
+	}
 
 	return 1;
+
 }
 
-/*
- * fsop_43_mount_tape
- *
- * Checks to ensure nothing is already mounted in the drive,
- * and the unpacks the tar. It operates on the currently
- * selected tape drive.
- *
- */
+/* Return error string matching the error codes returned by the tapes.sh handler script */
 
-uint8_t fsop_43_mount_tape(struct __fs_station *s, char *tapename)
+char * fsop_43_tape_errstr(uint8_t err)
 {
 
-	if (fsop_43_tape_is_mounted(s, tapename))
-		return 0xFF; // Already mounted
+	switch (err)
+	{
+		case 0:	return "Success"; break;
+		case 1: return "Bad FS directory"; break;
+		case 2: return "Tape already mounted"; break;
+		case 3: return "Bad tape handler command"; break;
+		case 4: return "Tape not mounted"; break;
+		case 5: return "Tape unavailable"; break;
+		case 6: return "Drive in use / not responding"; break;
+		case 7: return "Tape unavailable (in use)"; break;
+		case 8: return "Tape unreadable"; break;
+		case 9: return "Drive not working"; break;
+		case 10: return "Internal tape error"; break;
+		case 11: return "Unable to unmount, internal error"; break;
+		case 12: return "Format unsuccessful"; break;
+		case 13: return "Bad tape partition"; break;
+		case 14: return "Drive empty"; break;
+		case 15: return "Drive fault"; break;
+		case 16: return "Backup failed"; break;
+		case 17: return "Bad drive number"; break;
+		case 18: return "Tape not found"; break;
+		case 255: return "Internal tape handler error"; break;
+		default: return "Unknown tape error"; break;
+	}
 
-	return 1;
+	return "Internal error";
+		
 }
 
 FSOP(43)
 {
 
-	FS_REPLY_DATA(0x80);
+	//FS_REPLY_DATA(0x80);
 
 	uint8_t		arg;
 	unsigned char	tape[11]; // MDFS limits its tape names to 10 characters
-	unsigned char	tape_library_path[300];
-	unsigned char	tape_tar_path[320];
-	unsigned char 	tape_unpack_path[320];
-	unsigned char	tape_link_path[320];
-
-	// The initialization routine will have made sure this directory exists
-	sprintf (tape_library_path, "%s/Tapes/", f->server->directory);
 
 	arg = *(f->data + 5);
 
@@ -149,11 +161,10 @@ FSOP(43)
 	// and the drive number is stored when a backup is scheduled, and when backup is queried, it queries the current
 	// drive number. Default drive number is 0.
 	
-	if (arg < 16 || arg > 18)
+	if (arg != 0 && (arg < 16 || arg > 22))
 		fs_debug (0, 1, "%12sfrom %3d.%3d MDFS Tape operation %02X, %s - Not yet implemented", "", f->net, f->stn, arg, 
-			arg == 0 ? "Determine whether backup possible" :
 			arg == 1 ? "Read tape ID block" :
-			arg == 2 ? "Read current status, auto backup" :
+			arg == 2 ? "Read current status of auto backup" :
 			arg == 3 ? "Write current status of auto backup" :
 			arg == 4 ? "Read tape partition size" : 
 			"Bad argument"
@@ -161,22 +172,32 @@ FSOP(43)
 
 	switch (arg)
 	{
-		case 16: // PiFS create tape
+		case 0: // Check if backup possible
 			{
+				char	cmd_string[20];
+
+				snprintf (cmd_string, 19, "drivestate x %d", f->server->tapedrive); // The parameter after drivestate is ignored on this cmd
+				fsop_43_exec_tape_handler_return (f, cmd_string);
+			} break;
+		case 16: // PiFS format tape
+			{
+				char	cmd_string[40];
+
 				// Tape name at data + 6, always terminated by 0x0D
 				// Copy up to max length of packet
 
 				fs_copy_to_cr(tape, f->data+6, 10);
-				if (strlen(tape) > 0)
-				{
-					// Sanity check tape name here. TODO.
-					fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Create tape %s", "", f->net, f->stn, arg, tape); 
-				}
-				else
+
+				fs_toupper(tape);
+
+				if (!fsop_43_check_tapename(tape))
 				{
 					fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Create tape - bad tape name", "", f->net, f->stn, arg); 
 					fsop_error(f, 0xFF, "Bad tape name");
 				}
+
+				snprintf (cmd_string, 39, "format %s", tape);
+				fsop_43_exec_tape_handler_return (f, cmd_string);
 			} break;
 		case 17: // PiFS mount tape - tape name at data+6; operates on currently selected drive number
 			{
@@ -185,7 +206,15 @@ FSOP(43)
 				// Then make a symlink to the virtual tape drive directory
 
 				fs_copy_to_cr(tape, f->data+6, 10);
-				// Sanity check tape name here. TODO.
+
+				fs_toupper(tape);
+
+				if (!fsop_43_check_tapename(tape))
+				{
+					fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Mount tape - bad tape name", "", f->net, f->stn, arg); 
+					fsop_error(f, 0xFF, "Bad tape name");
+				}
+
 				fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Mount tape %s", "", f->net, f->stn, arg, tape); 
 
 				fsop_error(f, 0xFF, "Not yet implemented");

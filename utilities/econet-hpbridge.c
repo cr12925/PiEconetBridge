@@ -4662,7 +4662,7 @@ fast_handler_reset:
 							fastprintf (d, "\r\n\n*** ERROR: Fileserver on %d.%d not active\r\n\n", d->net, d->local.stn);
 						else
 						{
-							d->local.fs.server = fsop_initialize (d, d->local.fs.rootpath);
+							d->local.fs.server = fsop_initialize (d, d->local.fs.rootpath, d->local.fs.tapehandler);
 							if (d->local.fs.server)
 							{
 								int r;
@@ -5471,7 +5471,7 @@ static void * eb_device_despatcher (void * device)
 
 			if (d->local.fs.rootpath) // Active FS
 			{
-				d->local.fs.server = fsop_initialize (d, d->local.fs.rootpath);
+				d->local.fs.server = fsop_initialize (d, d->local.fs.rootpath, d->local.fs.tapehandler);
 				if (d->local.fs.server && (fsop_run(d->local.fs.server) >= 1))
 					eb_debug (0, 2, "BRIDGE", "FS       %3d.%3d Fileserver initialized at %s", d->net, d->local.stn, d->local.fs.rootpath);
 				else

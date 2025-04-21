@@ -72,10 +72,7 @@ RELEASE NOTES FOR V2.2
 - MDFS tape interface implemented, with up to four drives by default
   (MDFS had one only). 
   Further tape management commands:
-  *TAPEINFO [<drive no.>] - Display tape ID block (see MDFS manual).
-     -- MDFS does not have the <drive no.> parameter, and it is
-        optional in Pi FS. If not specified, the currently selected
-        drive is used.
+  (MDFS *TAPEINFO should work on currently selected tape - see *TAPESELECT)
   *TAPEMOUNT <tapename> [<drive no.>]
   *TAPEDISMOUNT <drive no.>
   *TAPESELECT <drive no.> -- Selects the drive to use if none specified,

@@ -142,11 +142,13 @@ struct __fs_station {
         unsigned char 		net; // Network number of this server
         unsigned char 		stn; // Station number of this server
         unsigned char 		directory[256]; // Root directory
+	unsigned char		tapehandler[256]; // Path to tape handler script
+	uint8_t			tapedrive; // Currently selected tape drive number
         uint16_t 		total_users; // How many entries in users?
 	uint16_t		total_groups; // Number of entries in groups
 	uint32_t		seq;
-	uint8_t			tapedrive; // Currently selected tape drive number
-	unsigned char	 	tapedrives[FS_MAX_TAPE_DRIVES][11]; // One per drive, indicates which tape is mounted; tape name up to 10 characters, null terminated
+	//uint8_t			tapedrive; // Currently selected tape drive number
+	//unsigned char	 	tapedrives[FS_MAX_TAPE_DRIVES][11]; // One per drive, indicates which tape is mounted; tape name up to 10 characters, null terminated
         int 			total_discs;
 	struct __fs_config	*config; // Pointer to my config
 	struct __fs_disc	*discs; // Pointer to discs
@@ -707,6 +709,7 @@ struct fsop_00_cmd {
 #define FSOP_00_SYSTEM	0x02 /* Only if user is syst */
 #define FSOP_00_32BIT	0x04 /* Only if user is on a 32 bit client */
 #define FSOP_00_BRIDGE 0x08 /* Only if user has bridge privileges */
+#define FSOP_00_MDFS 0x10 /* Only if MDFS funcs enabled on server */
 
 /* Defines for switching discs */
 
@@ -863,7 +866,7 @@ extern void * fsop_register_machine (struct __fs_machine_peek_reg *);
 /* Externs for the HPB */
 void fsop_setup(void);
 uint8_t fsop_is_enabled (struct __fs_station *);
-struct __fs_station *fsop_initialize(struct __eb_device *, char *);
+struct __fs_station *fsop_initialize(struct __eb_device *, char *, char *);
 int8_t fsop_run(struct __fs_station *);
 
 /* Port allocator in the HPB */
@@ -1089,6 +1092,11 @@ FSOP_00_EXTERN(SETLIB);
 FSOP_00_EXTERN(SETOPT);
 FSOP_00_EXTERN(SETOWNER);
 FSOP_00_EXTERN(SETPASS);
+FSOP_00_EXTERN(TAPEMOUNT);
+FSOP_00_EXTERN(TAPEDISMOUNT);
+FSOP_00_EXTERN(TAPESELECT);
+FSOP_00_EXTERN(TAPEFORMAT);
+FSOP_00_EXTERN(TAPEBACKUP);
 FSOP_00_EXTERN(UNLINK);
 
 extern short fs_sevenbitbodge;
@@ -1096,3 +1104,10 @@ extern short normalize_debug;
 extern uint8_t fs_set_syst_bridgepriv;
 
 extern char * fsop_43_tape_errstr(uint8_t);
+extern uint8_t fsop_43_tape_handler (struct __fs_station *, char *);
+extern uint8_t fsop_43_exec_tape_handler_return (struct fsop_data *, char *);
+extern uint8_t fsop_tape_get_mounted_name (struct __fs_station *, uint8_t, char *);
+
+#define FS_DIR_TAPEDRIVE	"TapeDrives"
+#define FS_DIR_TAPES		"Tapes"
+

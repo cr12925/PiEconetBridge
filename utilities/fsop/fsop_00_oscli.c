@@ -341,6 +341,8 @@ FSOP(00)
 			fsop_error (f, 0xff, "Insufficient privilege");
 		else if ((cmd->flags & FSOP_00_BRIDGE) && !(f->user->priv2 & FS_PRIV2_BRIDGE))
 			fsop_error (f, 0xff, "No bridge privilege");
+		else if ((cmd->flags & FSOP_00_MDFS) && !(FS_CONFIG(f->server,fs_sjfunc)))
+			fsop_error (f, 0xff, "Bad command");
 		else if (cmd->p_min > num)
 			fsop_error (f, 0xff, "Not enough parameters");
 		else if (cmd->p_max < num)

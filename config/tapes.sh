@@ -14,6 +14,10 @@
 #   - Backs up the identified FS disc to partition <partition> on <tapename> in <tapedrivenumber>
 # tapes.sh <fsrootdir> umount <tapename> <tapedrivenumber> 
 #  - Tars the "tape"  back up and removes the link to TapeDrives/<tapedrivenumber>
+#
+# tapes.sh <fsrootdir> drivestate <ignored> <tapedrivenumber>
+#  - Returns success if there's a tape in the drive
+#  - Otherwise error 14
 
 TAR=/usr/bin/tar
 LN="/usr/bin/ln -s"
@@ -33,8 +37,8 @@ fsdir=$1
 cmd=$2
 tapename=$3
 tapedrive=$4
-partition=$6
 discdirname=$5
+partition=$6
 
 if [ $# -eq 6 ]; then
 	discname=${discdirname:1} 
@@ -70,10 +74,13 @@ numparams=$#
 # 15 Drive fault (can't make $mountdir or link to $tapedrivepath)
 # 16 Backup failed - tape will be corrupt
 # 17 Invalid tape drive number
+# 18 Tape not found
 
 if [ "${fsdir:0:1}" != "/" ]; then exit 1; fi
 
-if [ "${#fsdir}" -lt "10" ]; then exit 1; fi
+if [ "${#fsdir}" -lt "3" ]; then exit 1; fi
+
+# If you change Tapes or TapeDrives in these definitions, you'll have to update the definition of FS_DIR_TAPEDRIVES and FS_DIR_TAPES in fs.h
 
 tapedir="$fsdir/Tapes"
 
@@ -83,14 +90,19 @@ mountdir="$tapedir/${tapename}.mnt"
 tapedrivepath="$tapedrivedir/$tapedrive"
 tapedrivepathrelative="../TapeDrives/$tapedrive"
 
-#echo "FS Dir: $fsdir"
-#echo "Tape Dir: $tapedir"
-#echo "Tape Drives Dir: $tapedrivedir"
-#echo ".tar name: $tarname"
-#echo "Mount directory: $mountdir"
+echo "Command: $0 $*"
+echo "FS Dir: $fsdir"
+echo "Tape Dir: $tapedir"
+echo "Tape Drives Dir: $tapedrivedir"
+echo ".tar name: $tarname"
+echo "Mount directory: $mountdir"
 
 if [ ! -d $tapedrivedir ]; then
 	mkdir -p $tapedrivedir
+fi
+
+if [ ! -d $tapedir ]; then
+	mkdir -p $tapedir
 fi
 
 cd $tapedrivedir
@@ -103,6 +115,17 @@ check_mounted () {
 	
 	return 0
 
+}
+
+tape_drivestate () {
+
+	if [ -L "$tapedrivepath" ]; then
+		if [ -d "$tapedrivepath" ]; then
+			return 0
+		fi
+	fi
+
+	return 14
 }
 
 tape_mount () {
@@ -122,6 +145,8 @@ fi
 	if [ "$is_mounted" -eq 1 ]; then return 2; fi
 
 	if [ -e $tapedrivepath ]; then return 6; fi
+
+	if [ ! -e $tarname ]; then return 18; fi
 
 	if [ -e $mountdir ]; then return 7; fi
 
@@ -291,6 +316,15 @@ case "$cmd" in
 		fi
 
 		tape_backup $tapedrivepath $tarname $partition $discname
+		result=$?
+		;;
+	"drivestate")
+		if [ "$#" -lt 4 ]; then
+			exit 10
+		fi
+
+		tape_drivestate
+		result=$?
 		;;
 	*)
 		#echo "Unknown tape command $cmd" 

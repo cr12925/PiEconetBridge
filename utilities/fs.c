@@ -1044,6 +1044,57 @@ unsigned char * fsop_machine_type_str (uint16_t t)
 	return "Unknown machine";
 }
 
+/* Get mounted tape name. result parameter must have at least 11 characters (tape names are max 10 characters) */
+/* Returns 1 for success, 0 for drive empty */
+
+uint8_t fsop_tape_get_mounted_name (struct __fs_station *s, uint8_t drive, char *result)
+{
+
+	struct stat	tapestat;
+	unsigned char	path_tape[1024], linkedname[1024];
+	char 		*last_slash, *period;
+
+	/* See what if anything is mounted in this drive */
+
+	snprintf (path_tape, 1022, "%s/%s/%d", s->directory, FS_DIR_TAPEDRIVE, drive);
+
+	/* Stat here */
+
+	if (stat(path_tape, &tapestat) || ((tapestat.st_mode & S_IFMT) != S_IFDIR) || (readlink(path_tape, linkedname, 1023) < 0)) /* Either stat failed, or it didn't find a directory, or couldn't read link */
+	{
+		/* stat failed */
+		*result = 0;
+		return 0;
+	}
+
+	/* success */
+
+	last_slash = strrchr(linkedname, '/');
+	
+	if (!last_slash)
+	{
+		/* Should be a link to a different dir at least */
+		*result = 0;
+		return 0;
+	}
+
+	last_slash++; // Start of tape name
+	period = strrchr(last_slash, '.');
+
+	if (!period)
+	{
+		/* Should be ".mnt" on the end */
+		*result = 0;
+		return 0;
+	}
+
+	*period = 0;
+
+	strcpy (result, last_slash);
+
+	return 1;
+}
+
 /* Procedure to dump all FS currently open files & directories
  * to the file descriptor provided. 
  * *
@@ -1089,9 +1140,15 @@ void fsop_dump_handle_list(FILE *out, struct __fs_station *s)
 
 		for (tape = 0; tape < FS_MAX_TAPE_DRIVES; tape++)
 		{
-			fprintf (out, "  %c %2d %s", (tape == s->tapedrive) ? '*' : ' ', tape+1, s->tapedrives[tape]);
-			if (s->tapedrives[tape][0] == 0x00)
+
+			unsigned char	mounted_tape[11];
+
+			fprintf (out, "  %c %2d ", (tape == s->tapedrive) ? '*' : ' ', tape);
+			if (fsop_tape_get_mounted_name (s, tape, mounted_tape))
+				fprintf (out, "%s", mounted_tape);
+			else
 				fprintf (out, "(Empty)");
+
 			fprintf (out, "\n");
 		}
 
@@ -3053,7 +3110,7 @@ uint8_t fsop_is_enabled(struct __fs_station *s)
  *
  */
 
-struct __fs_station * fsop_initialize(struct __eb_device *device, char *directory)
+struct __fs_station * fsop_initialize(struct __eb_device *device, char *directory, char *tapehandler)
 {
 	
 	DIR *d;
@@ -3071,7 +3128,8 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 	//FS_LIST_MAKENEW(struct __fs_station, fileservers, 1, server, "FS", "Initialize new server struct");
         server->net = device->net;
         server->stn = device->local.stn;
-        strcpy (server->directory, directory);
+        strncpy (server->directory, directory, 254);
+	strncpy (server->tapehandler, tapehandler, 254);
         server->config = NULL;
         server->discs = NULL;
         server->files = NULL;
@@ -3468,44 +3526,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 		
 		/* Tape library init */
 
-		if (FS_CONFIG(server,fs_sjfunc))
-		{
-			struct stat	statbuf;
-			uint8_t		tape;
-			char		tape_mount_filename[1024];
-			FILE *		tape_mount;
-
-			if (!stat(tapedir, &statbuf))
-			{
-				if ((statbuf.st_mode & S_IFMT) != S_IFDIR)
-					fs_debug_full (1, 0, server, 0, 0, "Tape library path is not a directory!");
-			}
-			else // Doesn't exist
-			{
-				if (mkdir(tapedir, 0770) == -1)
-					fs_debug_full (1, 0, server, 0, 0, "Unable to create tape library directory at %s", tapedir);
-			}
-
-			server->tapedrive = 0; // Init to drive 0
-
-			/* Empty all the tape drives */
-
-			for (tape = 0; tape < FS_MAX_TAPE_DRIVES; tape++)
-				server->tapedrives[tape][0] = 0x00; // Empty string
-
-			// Now restore what was mounted last time we ran
-			
-			snprintf (tape_mount_filename, 1022, "%s/Tapes-Mounted", server->directory);
-
-			tape_mount = fopen(tape_mount_filename, "r");
-
-			if (tape_mount)
-			{
-				fread(server->tapedrives, 11 * FS_MAX_TAPE_DRIVES, 1, tape_mount);
-				fclose(tape_mount);
-			}
-
-		}
+		server->tapedrive = 0; // Init to drive 0
 	}
 	
 	/* If told to, set bridge priv on SYST user */
@@ -4950,6 +4971,11 @@ void fsop_setup(void)
 	FSOP_OSCLI(SETOPT,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 4);
 	FSOP_OSCLI(SETOWNER,(FSOP_00_ANON), 1, 2, 5);
 	FSOP_OSCLI(SETPASS,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 4);
+	FSOP_OSCLI(TAPEMOUNT, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 1, 2, 5); /* <tapename> [<drive no.>] */
+	FSOP_OSCLI(TAPEDISMOUNT, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 0, 1, 5); /* <drive no.> */
+	FSOP_OSCLI(TAPESELECT, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 1, 1, 5); /* <drive no.> */
+	FSOP_OSCLI(TAPEFORMAT, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 1, 1, 5); /* <tapename> */
+	FSOP_OSCLI(TAPEBACKUP, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 2, 3, 5); /* <discname> <partition> [<drive no.>] */
 	FSOP_OSCLI(UNLINK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 1, 1, 4);
 
 	fs_debug (0, 1, "Fileserver infrastructure set up");
