@@ -25,7 +25,6 @@ install-utilities:	install-mkgroup build-utilities
 	[ -e /home/`whoami`/econetfs ] || (mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00 && mkdir -p /home/`whoami`/econetfs/1STORAGE)
 	-[ -e /home/`whoami`/econetfs/0PIBRIDGE-00 ] && mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM && cp FS/PIFSTOOL /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM/PIFSTOOL 
 	[ -e /etc/econet-gpio/pserv.sh ] || sudo cp config/pserv.sh /etc/econet-gpio
-	[ -e /etc/econet-gpio/tapes.sh ] || sudo cp config/tapes.sh /etc/econet-gpio
 	-sudo systemctl stop econet-hpbridge
 	sudo chgrp econet utilities/econet-hpbridge utilities/econet-imm utilities/econet-monitor utilities/econet-test utilities/econet-clock utilities/econet-ledtest
 	sudo chmod u=rx,g=rxs utilities/econet-hpbridge utilities/econet-imm utilities/econet-monitor utilities/econet-test utilities/econet-clock utilities/econet-ledtest
@@ -73,13 +72,13 @@ eeprom-v1: eeprom-general
 eep: eeprom-general
 	@cat v2eeprom/warning.txt
 	@read a
-	[ -d hats ] || git clone https://github.com/raspberrypi/hats.git hats
-	cd hats/eepromutils ; make
-	hats/eepromutils/eepmake v2eeprom/econet_eeprom.txt v2eeprom/econet-gpio-v2.eep dts/econet-gpio-v2.dtb -c v2eeprom/Copyright.txt v2eeprom/ReadMe.txt
+	[ -d pi-utils ] || git clone https://github.com/raspberrypi/utils/ pi-utils
+	cd pi-utils/ ; cmake .
+	cd pi-utils/eeptools ; make
+	pi-utils/eeptools/eepmake -v1 v2eeprom/econet_eeprom.txt v2eeprom/econet-gpio-v2.eep dts/econet-gpio-v2.dtb -c v2eeprom/Copyright.txt v2eeprom/ReadMe.txt
 
 eeprom-v2: eeprom-general eep
 	dd if=/dev/zero ibs=1k count=8 of=v2eeprom/blank.eep
-	sudo hats/eepromutils/eepflash.sh -w -f=v2eeprom/blank.eep -t=24c64
-	sudo hats/eepromutils/eepflash.sh -w -f=v2eeprom/econet-gpio-v2.eep -t=24c64
-	@echo +++ Now comment out the two lines you added to config.txt and reboot!
+	sudo pi-utils/eeptools/eepflash.sh -w -f=v2eeprom/blank.eep -t=24c64
+	sudo pi-utils/eeptools/eepflash.sh -w -f=v2eeprom/econet-gpio-v2.eep -t=24c64
 
