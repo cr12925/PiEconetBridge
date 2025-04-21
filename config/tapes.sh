@@ -90,12 +90,12 @@ mountdir="$tapedir/${tapename}.mnt"
 tapedrivepath="$tapedrivedir/$tapedrive"
 tapedrivepathrelative="../TapeDrives/$tapedrive"
 
-echo "Command: $0 $*"
-echo "FS Dir: $fsdir"
-echo "Tape Dir: $tapedir"
-echo "Tape Drives Dir: $tapedrivedir"
-echo ".tar name: $tarname"
-echo "Mount directory: $mountdir"
+#echo "Command: $0 $*"
+#echo "FS Dir: $fsdir"
+#echo "Tape Dir: $tapedir"
+#echo "Tape Drives Dir: $tapedrivedir"
+#echo ".tar name: $tarname"
+#echo "Mount directory: $mountdir"
 
 if [ ! -d $tapedrivedir ]; then
 	mkdir -p $tapedrivedir
@@ -135,7 +135,7 @@ tape_mount () {
 	tapedrivepath=$4
 
 if [ "$numparams" -lt 4 ]; then
-	echo "Not enough parameters"
+	#echo "Not enough parameters"
 	exit 10
 fi
 
