@@ -2436,9 +2436,11 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 
 		if (p)
 		{
-			// There will be a $, possibly $.a.b.c here
+			// There may be a $, possibly $.a.b.c here
 
-			p = strchr(p+1, '.');
+			if (*(p+1) == '$')
+				p = strchr(p+1, '.');
+
 			if (p)
 				strcpy (adjusted, p+1); // If there's another period, go for whatever's after it.
 			else
