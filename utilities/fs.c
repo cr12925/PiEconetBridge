@@ -117,7 +117,7 @@ void fs_debug_full (uint8_t death, uint8_t level, struct __fs_station *s, uint8_
 	if (net != 0)
 		sprintf (padstr, "FS       %3d.%3d from %3d.%3d %s", s->net, s->stn, net, stn, str);
 	else
-		sprintf (padstr, "FS       %3d.%3d %s", s->net, s->stn, str);
+		sprintf (padstr, "FS       %3d.%3d              %s", s->net, s->stn, str);
 
 	eb_debug_fmt (death, level, "FS", padstr);
 
@@ -2031,6 +2031,7 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 	unsigned char path[1030];
 	uint8_t	special_path; // Set to 1 below if user is selecting a filename beginning %, @, &
 	struct __fs_active *a;
+	uint8_t tape_fname_start; // Position in received_path where the real start point of the acorn path is, i.e. after %TAPE, %TAPEn, %TAPEn.XXX
 
 	unsigned short homeof_found = 0; // Non-zero if we traverse a known home directory
 
@@ -2145,7 +2146,11 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 		// Otherwise fall through to the normal routine
 	}
 
+	// Implement tape directories - if system user, and sjfunc enabled
 	
+	result->is_tape = 0;
+	result->tape_drive = 0xff;
+
 	// Implement ANFS name bodge
 	
 	if ( 		a
@@ -2215,7 +2220,7 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 	// Cope with null path relative to dir on another disc
 	if (strlen(path) == 0 && relative_to != -1)
 		strcpy(path, a->fhandles[relative_to].acornfullpath);
-	else if (relative_to != -1 && (path[0] != ':' && path[0] != '$') /* && path[0] != '&' */)
+	else if (relative_to != -1 && (path[0] != ':' && path[0] != '$')  && strncasecmp(path, "%TAPE", 5)  /* && path[0] != '&' */)
 	{
 		unsigned char	temp_path[2096];
 
@@ -2237,7 +2242,92 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 		count++;
 	}
 
+	/* Implement tape */
+
+	if (
+			(a && a->server->users[a->userid].priv & FS_PRIV_SYSTEM)
+		&&	
+			(FS_CONFIG(f->server,fs_sjfunc))
+		&& 
+			!strncasecmp(path, "%TAPE", 5)
+	   )
+	{
+		uint8_t	drivechar;
+		
+		result->tape_drive = a->server->tapedrive; // Default to selected drive
+		result->is_tape = 1;
+
+		tape_fname_start = 5;
+
+		if (normalize_debug) fs_debug (0, 1, "Found special %TAPE specifier: %s", path);
+
+		if (strlen(path) > 5 && (drivechar = *(path + 5)) && isdigit(drivechar) ) // Might be a drive number, or something else
+		{
+			uint8_t drive = drivechar - '0';
+			
+			// Barf if next character is not '.' 
+
+			if (((strlen(path) > 6) && (*(path + 6) != '.')) || (drive > FS_MAX_TAPE_DRIVES))
+			{
+				if (normalize_debug) fs_debug (0, 1, "%TAPE specifier: %s has something other than . after drive number ", path);
+				result->error = FS_PATH_ERR_BAD_TAPE;
+				return 0;
+			}
+
+			result->tape_drive = drive;
+			tape_fname_start++;
+
+			if (normalize_debug) fs_debug (0, 1, "%TAPE specifier: %s - found drive number %d, tape_fname_start = %d", path, drive, tape_fname_start);
+		}
+
+		if ((strlen (path) > tape_fname_start) && (*(path + tape_fname_start) == '.') && (strlen(path) == tape_fname_start+1))
+		{
+			result->error = FS_PATH_ERR_FORMAT; // Cannot terminate in '.'
+			return 0;
+		}
+
+		// By here, is_tape will be 1, the tape drive will be correctly set, and *(received_path + tape_fname_start) will point to either end of string, or a '.' and some other stuff after it.
+
+		if (strlen(path) > tape_fname_start)
+			tape_fname_start++; // Move past the '.'
+
+		/* And fixup the unixpath */
+
+		sprintf (result->unixpath, "%s/TapeDrives/%d", f->server->directory, result->tape_drive);
+
+		/* Not sure this is needed - the regexp will catch it
+		if (strchr(path, ':') || strchr(path, '@') || strchr(path, '&') || (strlen (path) > 1 && strchr (path + 1, '%'))) // Can't select drive or root in a tape path
+		{
+			if (normalize_debug) fs_debug (0, 1, "%TAPE specifier: %s - illegal character in path", path);
+			result->error = FS_PATH_ERR_FORMAT;
+			return 0;
+		}
+		*/
+		
+	}
+	
 	memset(path_internal, 0, 1024);
+
+	/* Correct path if it's a tape path */
+	/*
+
+	if (result->is_tape)
+	{
+		unsigned char	tmp[1024];
+		unsigned char	*percent_tape, *period;
+
+		strcpy (tmp, path);
+
+		if ((percent_tape = strchr(tmp, '%')) && ((period = strchr(percent_tape, '.'))))
+		{
+			strcpy (path, "$");
+			strcat (path, period);
+		}
+		else
+			strcpy (path, "$");
+	}
+
+	*/
 
 	if (normalize_debug) fs_debug (0, 1, "Path after adjustment is '%s'", path);
 
@@ -2327,8 +2417,39 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 
 	// This probably now redundant given the relative adjustment at the head of this routine, but might be relevant if relative_path == -1;
 
+	if (result->is_tape) // Make sure something's mounted
+	{
+		unsigned char	mounted_tape[20];
+		char *		p;
 
-	if (path_internal[0] == '$') // Absolute path given
+		if (!fsop_tape_get_mounted_name (f->server, result->tape_drive, mounted_tape))
+		{
+			result->error = FS_PATH_ERR_NODIR;
+			return 0;
+		}
+
+		// Drop %TAPEn off the front of the adjusted path
+
+		p = strchr(path_internal, '.');
+		// Do that twice, to get rid of $. in adjusted
+		if (p) p = strchr(p, '.');
+
+		if (p)
+		{
+			// There will be a $, possibly $.a.b.c here
+
+			p = strchr(p+1, '.');
+			if (p)
+				strcpy (adjusted, p+1); // If there's another period, go for whatever's after it.
+			else
+				strcpy (adjusted, ""); // If there isn't, it will just have been .$, so empty string required
+		}
+		else
+			strcpy (adjusted, "");
+		
+		if (normalize_debug) fs_debug (0, 1, "Dropped %TAPE specified off adjusted - now %s (path_internal was %s)", adjusted, path_internal);
+	}
+	else if (path_internal[0] == '$') // Absolute path given
 	{
 		if (normalize_debug) fs_debug (0, 1, "Found $ specifier with %02x as next character", path_internal[1]);
 		switch (path_internal[1])
@@ -2381,8 +2502,12 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 
 	if (normalize_debug) fs_debug (0, 1, "Disc selected = %d, %s", result->disc, result->discname);
 	if (normalize_debug) fs_debug (0, 1, "path_internal = %s (len %d)", path_internal, (int) strlen(path_internal));
+	if (normalize_debug && result->is_tape) fs_debug (0, 1, "Is tape directory");
 
 	sprintf (result->acornfullpath, ":%s.$", result->discname);
+
+	if (result->is_tape) /* Overwrite acornfullpath */
+		sprintf (result->acornfullpath, "%%TAPE%d.$", result->tape_drive);
 
 	if (normalize_debug) fs_debug (0, 1, "Adjusted = %s / ptr = %d / path_internal = %s", adjusted, ptr, path_internal);
 
@@ -2455,6 +2580,9 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 	/* First build the unix path */
 
 	sprintf (result->unixpath, "%s/%1X%s", f->server->directory, result->disc, result->discname);
+
+	if (result->is_tape) // Overwrite it with the tape path
+		sprintf (result->unixpath, "%s/TapeDrives/%d", f->server->directory, result->tape_drive);
 
 	if ((a->server->users[a->userid].priv2 & FS_PRIV2_CHROOT) && (relative_to != -1) && (result->disc == a->server->users[a->userid].home_disc)) // CHROOT set for this user and we are not logging in / changing disc and we are on the home disc
 	{
