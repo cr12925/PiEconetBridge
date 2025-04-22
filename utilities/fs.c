@@ -779,13 +779,13 @@ void fs_now_two_bytes(uint8_t *my, uint8_t *dy, uint8_t *hour, uint8_t *min, uin
 	*hour = now_tm.tm_hour;
 	*min = now_tm.tm_min;
 	*sec = now_tm.tm_sec;
-	fs_date_to_two_bytes (now_tm.tm_mday, now_tm.tm_mon, now_tm.tm_year, my, dy);
+	fs_date_to_two_bytes (now_tm.tm_mday, now_tm.tm_mon + 1, now_tm.tm_year + 1900, my, dy);
 }
 
 // Convert d/m/y to Acorn 2-byte format
 void fs_date_to_two_bytes(unsigned short day, unsigned short month, unsigned short year, unsigned char *monthyear, unsigned char *dday)
 {
-	unsigned char year_internal;
+	uint16_t year_internal;
 
 	*dday = (unsigned char) (day & 0x1f);
 
@@ -795,7 +795,11 @@ void fs_date_to_two_bytes(unsigned short day, unsigned short month, unsigned sho
 
 	if (year_internal >= 1900) year_internal -=1900;
 
-	year_internal = year  - 81;
+	if (year_internal < 81)
+		year_internal = 81;
+
+	year_internal = year_internal  - 81;
+
 
 	//fprintf (stderr, "7 bit bodge is %s\n", (fs_sevenbitbodge ? "on" : "off"));
 	// fs_debug (0, 1, "7 bit bodge is %s", (fs_sevenbitbodge ? "on" : "off"));
@@ -1862,6 +1866,7 @@ int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, ch
 		if (	(strlen(namelist[counter]->d_name) <= ECONET_MAX_FILENAME_LENGTH) && 
 			(strcmp(namelist[counter]->d_name, ".")) && 
 			(strcmp(namelist[counter]->d_name, "..")) &&
+			(namelist[counter]->d_name[0] != '.') &&
 			fsop_scandir_regex(namelist[counter], f) // i.e. it's one we want
 		   )	// Exclude the special directories in case we have COLONMAP turned on
 		{
@@ -3488,7 +3493,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
 					snprintf (passwordfilecopy, 299, "%s.%04d%02d%02d:%02d%02d",
 						passwordfile,
-						t->tm_year, t->tm_mon, t->tm_mday,
+						t->tm_year+1900, t->tm_mon+1, t->tm_mday,
 						t->tm_hour, t->tm_min);
 
 					snprintf (sys_str, 599, "cp %s %s", passwordfile, passwordfilecopy);

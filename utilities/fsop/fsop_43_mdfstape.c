@@ -17,6 +17,238 @@
 
 #include "../../include/fs.h"
 
+/*
+ * fsop_43_store_timet
+ *
+ * Takes a time_t and stores it in the 4 bytes pointed to by *out,
+ * which are in the order
+ *
+ * acorn_dy, acorn_my, hour, min
+ */
+
+void fsop_43_store_timet (time_t in, uint8_t *out)
+{
+	struct tm	conv;
+
+	gmtime_r (&in, &conv);
+
+	fs_date_to_two_bytes(conv.tm_mday, conv.tm_mon + 1, conv.tm_year, (out+1), out);
+	*(out+2) = conv.tm_hour;
+	*(out+3) = conv.tm_min;
+
+}
+
+/* 
+ * fsop_43_drive_mounted
+ *
+ * Checks to see if a tape drive has a tape in it and
+ * gives us the name if it has.
+ *
+ * tapename must have at least 11 characters available and have
+ * been pre-allocated by the caller
+ */
+
+uint8_t fsop_43_drive_mounted (struct __fs_station *s, uint8_t drive, char *tapename)
+{
+	struct stat	sb;
+	unsigned char	tapedrivepath[1024];
+
+	sprintf(tapedrivepath, "%s/%s/%d", s->directory, FS_DIR_TAPEDRIVE, drive);	
+	
+	if (stat(tapedrivepath, &sb) == 0) // Stat success
+	{
+		if ((sb.st_mode & S_IFMT) == S_IFDIR)
+		{
+			unsigned char linkdest[300];
+
+			if (readlink(tapedrivepath, linkdest, 290) != -1)
+			{
+				char * p, *slash;
+
+				if ((p = strrchr(linkdest, '.')))
+				{
+					*p = 0; /* Drop the extension */
+					slash = strrchr(linkdest, '/');
+					if (!slash) slash = linkdest;
+					slash++;
+					strncpy (tapename, slash, 10);
+					return 1; /* Found */
+				}
+				else
+					fs_debug_full (0, 1, s, 0, 0, "MDFS check drive mounted - drive %d directory does not have required extension", drive);
+			}
+			else
+				fs_debug_full (0, 1, s, 0, 0, "MDFS check drive mounted - drive %d directory can't be read", drive);
+		}
+		else
+			fs_debug_full (0, 1, s, 0, 0, "MDFS check drive mounted - drive %d directory (%s) is not a directory", drive, tapedrivepath);
+	}
+	else
+		fs_debug_full (0, 1, s, 0, 0, "MDFS check drive mounted - cannot stat drive %d directory", drive);
+
+	return 0;
+}
+
+/* 
+ * fsop_43_read_int
+ *
+ * Reads a uint32_t from the given file and returns it, or 0 if the file doesn't exist
+ */
+
+uint32_t fsop_43_read_int(char *path)
+{
+	uint32_t	ttime;
+	FILE 	*tfile;
+
+	tfile = fopen(path, "r");
+
+	if (!tfile)
+		ttime = 0;
+	else
+	{
+		/* Read format time */
+		fscanf(tfile, "%d", &ttime);
+		fclose(tfile);
+	}
+
+	return ttime;
+}
+
+/* 
+ * fsop_43_get_tapeid_block
+ *
+ * Returns -1 for failure (e.g. drive not mounted) - the content of *result will not be valid
+ * Returns n >= 0 where there is valid data in *result, and will populate the tapeid block - n being the number of active partitions put into the tapeid structure
+ *
+ * result must be pre-allocated by the caller, and is a struct __fs_tapeid_block
+ *
+ */
+
+int8_t fsop_43_get_tapeid_block (struct __fs_station *s, uint8_t drive, 
+		struct __fs_tapeid_block *result)
+{
+	unsigned char	tapedrivepath[512];
+	unsigned char	otherpath[1024];
+	FILE		*descrfile;
+	time_t		ttime;
+	uint16_t	passes;
+	struct dirent	**namelist;
+	int		n;
+	uint8_t		partition = 0;
+	struct stat	sb;
+
+	strcpy (result->identifier, "SJ Research"); // Magic identifier
+
+	/* Is a tape mounted, and if so what's it called? */
+
+	if (!fsop_43_drive_mounted(s, drive, result->tapename))
+	{
+		fs_debug_full (0, 1, s, 0, 0, "MDFS read tape ID block on drive %d failed - drive not mounted", drive);
+		return -1; /* Nothing in drive */
+	}
+
+	/* termiante with 0x0d if less than 10 characters */
+
+	if (strlen(result->tapename) < 10)
+		result->tapename[strlen(result->tapename)] = 0x0D;
+
+	sprintf (tapedrivepath, "%s/%s/%d", s->directory, FS_DIR_TAPEDRIVE, drive);
+
+	if (stat(tapedrivepath, &sb))
+	{
+		fs_debug_full (0, 1, s, 0, 0, "MDFS read tape ID block on drive %d failed - cannot stat drive directory", drive);
+		return -1; /* Couldn't stat! */
+	}
+
+	if ((sb.st_mode & S_IFMT) != S_IFDIR) /* not a directory - barf */
+	{
+		fs_debug_full (0, 1, s, 0, 0, "MDFS read tape ID block on drive %d failed - drive location is not a directory", drive);
+		return -1;
+	}
+
+	sprintf (otherpath, "%s/.format_time", tapedrivepath);
+
+	ttime = (time_t) fsop_43_read_int (otherpath);
+
+	sprintf (otherpath, "%s/.passes", tapedrivepath);
+
+	passes = (uint16_t) fsop_43_read_int (otherpath);
+
+	if (passes == 0)
+		result->usage = 0;
+	else	result->usage = 1;	
+
+	*((uint8_t *) &(result->passes)) = passes & 0xff;
+	*((uint8_t *) &(result->passes) + 1) = (passes & 0xff00) >> 8;
+
+	sprintf (result->description, "PiFS Virtual Tape%c", 0x0D); // Dummy for now in case there isn't a description
+
+	sprintf (otherpath, "%s/.description", tapedrivepath);
+
+	if ((descrfile = fopen(otherpath, "r")))
+	{
+		fread (result->description, 80, 1, descrfile);
+		fclose (descrfile);
+	}
+
+	fsop_43_store_timet(ttime, &(result->fmt_dayyear)); 
+
+	memset (result->reserved, 0, 20); /* Blank off the reserved setion */
+
+	n = scandir(tapedrivepath, &namelist, NULL, NULL);
+
+	if (n == -1)
+		return 0;
+	
+	while (n-- && partition < 8 ) /* Yes, I know the spec says "up to 14 of these entries" but there seems to be a limit of 8 partitions... */
+	{
+	 	if (strlen(namelist[n]->d_name) >= 3 &&
+			(
+				(namelist[n]->d_name[0] == '0' && namelist[n]->d_name[1] >= '0' && namelist[n]->d_name[1] <= '9')
+			||	
+				(namelist[n]->d_name[1] == '0' && namelist[n]->d_name[1] >= '0' && namelist[n]->d_name[1] <= '3')
+			)
+		   )
+		{
+			uint8_t	len;
+
+			time_t backuptime;
+
+			/* This is one of ours */
+
+			strcpy (result->content[partition].disc_name, &(namelist[n]->d_name[2])); /* Drop the partition number off the front */
+			len = strlen(result->content[partition].disc_name);
+
+			if (len < 10)
+				result->content[partition].disc_name[len] = 0x0D; /* Termiante if less than 10 char disc name */
+
+			result->content[partition].flag = FS_TAPEID_OK;
+	
+			sprintf (otherpath, "%s/%s/.backup_time", tapedrivepath, namelist[n]->d_name);
+
+			backuptime = (time_t) fsop_43_read_int(otherpath);
+
+			fsop_43_store_timet(backuptime, &(result->content[partition].bkp_dayyear));
+
+			result->content[partition].data_start_block = 524288 * partition;
+			result->content[partition].length = 524288; // Fudge for now - 512Mb
+			memset (&(result->content[partition].error_info), 0, 8); // Blank off the error info
+			memset (&(result->content[partition].reserved), 0, 20); // Blank off the reserved info
+
+			partition++;
+
+		}
+	}
+
+	free (namelist);
+
+	if (partition < 14) result->content[partition].disc_name[0] = 0x0D; /* Flag an empty disc so we know not to send this */
+
+	return partition; /* Returns number of valid partitions */
+
+
+}
+
 /* 
  * Copy up to 10 character tape name, terminated by 0x0D if less than
  * 10 characters, from *fromwhere to *towhere with max length maxlen
@@ -174,8 +406,33 @@ FSOP(43)
 			} break;
 		case 1: // Read Tape ID block
 			{
-				fs_debug_full (0, 1, f->server, f->net, f->stn, "MDFS Tape operation %02d - Read tape ID block", arg);
-				fsop_error(f, 0xFF, "Not yet implemented");
+				int8_t partitions; // Needs to be signed to detect errors
+				uint8_t	drive;
+				struct __fs_tapeid_block	b;
+				uint32_t block_offset, bytestoreturn;
+				uint8_t	*bptr;
+
+				block_offset = *(f->data + 6) + (*(f->data + 7) * 256); 
+				bytestoreturn = *(f->data + 8) + (*(f->data + 9) * 256);
+
+				drive = f->server->tapedrive; // Operate on currently selected drive
+
+				fs_debug_full (0, 1, f->server, f->net, f->stn, "MDFS Tape operation %02d - Read tape ID block (from drive %d)", arg, drive);
+				partitions = fsop_43_get_tapeid_block (f->server, drive, &b);
+
+				if (partitions < 0) /* Failed */
+				{
+					fsop_error (f, 0xFF, "Drive failure");
+					return;
+				}
+
+				bptr = (uint8_t *) &b;
+				bptr += block_offset;
+
+				memcpy (&(reply.p.data[2]), (char *) bptr, bytestoreturn);
+
+				fsop_aun_send (&reply, 2 + bytestoreturn, f); 
+
 			} break;
 		case 2: // Read auto backup status
 			{
@@ -204,7 +461,7 @@ FSOP(43)
 
 					gmtime_r(&(f->server->backup->when), &when);
 					
-					fs_date_to_two_bytes(when.tm_mday, when.tm_mon, when.tm_year, &acorn_my, &acorn_d);
+					fs_date_to_two_bytes(when.tm_mday, when.tm_mon + 1 , when.tm_year, &acorn_my, &acorn_d);
 					hour = when.tm_hour;
 					min = when.tm_min;
 					sec = when.tm_sec;
@@ -275,12 +532,18 @@ FSOP(43)
 					acorn_dy = *(f->data + 7);
 					acorn_ym = *(f->data + 8);
 					when.tm_mday = fs_day_from_two_bytes(acorn_dy, acorn_ym);
-					when.tm_mon = fs_month_from_two_bytes(acorn_dy, acorn_ym);
+					when.tm_mon = fs_month_from_two_bytes(acorn_dy, acorn_ym) - 1;
 					when.tm_year = fs_year_from_two_bytes(acorn_dy, acorn_ym);
 					when.tm_hour = *(f->data + 9);
 					when.tm_min = *(f->data + 10);
 					when.tm_sec = *(f->data + 11);
 					when.tm_isdst = -1;
+
+					when.tm_year += 1900;
+					if (when.tm_year < 1981)
+						when.tm_year += 100;
+
+					//fprintf (stderr, "\n\n** Backup time attempted to set to %d/%02d/%04d %02d:%02d:%02d\n\n", when.tm_mday, when.tm_mon, when.tm_year, when.tm_hour, when.tm_min, when.tm_sec);
 
 					f->server->backup->when = mktime(&when);
 
@@ -483,6 +746,8 @@ void * fsop_backup_thread (void * p)
 		next_event = s->backup->when;
 		now = time(NULL);
 
+		if (next_event < 0) next_event = 0;
+		
 		if (s->backup->die) /* FS is closing down - exit */
 		{
 			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler exiting - fileserver shutting down");
@@ -495,37 +760,17 @@ void * fsop_backup_thread (void * p)
 		{
 			int count = 0; // Job list
 			uint8_t	drive; // Need to find drive number
-			unsigned char	tapedrivepath[300];
 
 			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler starting backup to %s", s->backup->tapename);
 
 			for (; count < FS_MAX_TAPE_DRIVES; count++)
 			{
-				struct stat	sb;
+				unsigned char	tapename[11];
 
-				sprintf(tapedrivepath, "%s/%s/%d", s->directory, FS_DIR_TAPEDRIVE, count);	
-				
-				if (stat(tapedrivepath, &sb) == 0) // Stat success
+				if (fsop_43_drive_mounted(s, count, tapename) && !strcasecmp(tapename, s->backup->tapename))
 				{
-					if ((sb.st_mode & S_IFMT) == S_IFLNK)
-					{
-						unsigned char linkdest[300];
-
-						if (readlink(tapedrivepath, linkdest, 290) != -1)
-						{
-							char * p;
-							/* Might be this one */
-
-							if (( p = strrchr(linkdest, '.')))
-							{
-								if (!strcasecmp(linkdest, s->backup->tapename))
-								{
-									drive = count;
-									break;
-								}
-							}
-						}
-					}
+					drive = count;
+					break;
 				}
 			}
 

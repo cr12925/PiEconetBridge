@@ -591,6 +591,10 @@ struct __fs_backup {
 	
 };
 
+#define FS_TAPEID_BLANK 0x00
+#define FS_TAPEID_CORRUPT 0x02 // (The spec gives bits 0-1 as 00=Blank, 01=OK, 10=Corrupt)
+#define FS_TAPEID_OK 0x01
+
 struct __fs_tapeid_block {
 	unsigned char	identifier[11]; // Gets set to "SJ Research"
 	uint8_t		usage; // 0 = blank, 1 = used
@@ -598,7 +602,7 @@ struct __fs_tapeid_block {
 	uint16_t	passes; // Number of tape passes
 	unsigned char	description[80]; // Terminated with 0x0D
 	uint8_t		fmt_dayyear, fmt_monthyear, fmt_hour, fmt_min; // looks like a 7-bit-bodge date/time when tape was formatted
-	uint8_t		reserved[20]; // For what?
+	uint8_t		reserved[20]; // For what? (To get to 128 bytes...) 
 	struct {
 			uint8_t	flag; // Bottom two bits 00=Blank, 01=OK, 10=Corrupt
 			unsigned char	disc_name[10]; // Termianted 0x0D presumably if less than 10 characters
