@@ -50,13 +50,15 @@ FSOP(1a)
 
 				// This is well dodgy and probably no use unless you put the filestore on a smaller filing system
 
-				if (fr > 0xffffff) fr = 0x7fffff;
+				//if (fr > 0xffffff) fr = 0x7fffff;
+				if (fr > 0x80000) fr = 0x80000; // Limit to 128Mb
 
 				reply.p.data[2] = (fr % 256) & 0xff;
 				reply.p.data[3] = ((fr >> 8) % 256) & 0xff;
 				reply.p.data[4] = ((fr >> 16) % 256) & 0xff;
 
-				if (e > 0xffffff) e = 0x7fffff;
+				//if (e > 0xffffff) e = 0x7fffff;
+				if (e > 0x80000) e = 0x80000; // Limit to 128Mb
 
 				reply.p.data[5] = ((e-fr) % 256) & 0xff;
 				reply.p.data[6] = (((e-fr) >> 8) % 256) & 0xff;

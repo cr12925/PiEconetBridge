@@ -285,7 +285,7 @@ uint8_t eb_device_init_virtual (uint8_t net)
  * Create an FS on net.stn with root path 'rootpath'
  */
 
-uint8_t eb_device_init_fs (uint8_t net, uint8_t stn, char *rootpath)
+uint8_t eb_device_init_fs (uint8_t net, uint8_t stn, char *rootpath, char *tapehandler)
 {
 	struct __eb_device 	* existing;
 
@@ -297,6 +297,7 @@ uint8_t eb_device_init_fs (uint8_t net, uint8_t stn, char *rootpath)
 		eb_debug (1, 0, "CONFIG", "Cannot create fileserver at %s - already a fileserver", rootpath);
 
 	existing->local.fs.rootpath = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create FS rootpath string", strlen(rootpath) + 1);
+	existing->local.fs.tapehandler = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create FS tapehandler string", strlen(tapehandler) + 1);
 
 	if (!(existing->local.fs.rootpath))
 		eb_debug (1, 0, "CONFIG", "Unable to malloc() fileserver path %s\n", rootpath);
@@ -311,6 +312,7 @@ uint8_t eb_device_init_fs (uint8_t net, uint8_t stn, char *rootpath)
 	eb_set_single_wire_host (net, stn);
 
 	strncpy(existing->local.fs.rootpath, rootpath, strlen(rootpath));
+	strncpy(existing->local.fs.tapehandler, tapehandler, strlen(tapehandler));
 
 	DEVINIT_DEBUG("Created fileserver on %d.%d with path %s", net, stn, rootpath);
 

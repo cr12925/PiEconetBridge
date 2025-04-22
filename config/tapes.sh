@@ -282,6 +282,16 @@ fi
 
 	touch ${mountdir}/.busy
 
+	if [ -f $mountdir/.passes ]; then
+		passes=`cat $mountdir/.passes`
+	else
+		passes=0
+	fi
+
+	passes=`expr $passes + 1`
+
+	echo $passes > $mountdir/.passes
+
 	${DATE} '+%s' > $backupsource/.backup_time
 
 	(cd $backupsource ; $TARCREATECMD - . ) | (cd $backuppath ; $TAREXTRACTCMD - )

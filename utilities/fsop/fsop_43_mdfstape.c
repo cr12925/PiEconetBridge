@@ -214,26 +214,45 @@ int8_t fsop_43_get_tapeid_block (struct __fs_station *s, uint8_t drive,
 
 			time_t backuptime;
 
+			//uint8_t	my_partition;
+
+			uint32_t data_start, data_length;
+
+
+			//my_partition = ((namelist[n]->d_name[0] - 48) * 10) + (namelist[n]->d_name[1] - 48);
+
+			data_start = 524288 * partition; /* total fudge - 512Mb partitions at 512Mb intervals */
+			data_length = 524288;
+
 			/* This is one of ours */
 
-			strcpy (result->content[partition].disc_name, &(namelist[n]->d_name[2])); /* Drop the partition number off the front */
-			len = strlen(result->content[partition].disc_name);
+			strcpy ((char *) &(result->content[(partition * 64) + 1]), &(namelist[n]->d_name[2])); /* Drop the partition number off the front */
+
+			len = strlen(namelist[n]->d_name) - 2; /* Drop first two characters */
 
 			if (len < 10)
-				result->content[partition].disc_name[len] = 0x0D; /* Termiante if less than 10 char disc name */
+				result->content[(64 * partition) + 1 + len] = 0x0D; /* Termiante if less than 10 char disc name */
 
-			result->content[partition].flag = FS_TAPEID_OK;
+			result->content[( 64 * partition)] = FS_TAPEID_OK;
 	
 			sprintf (otherpath, "%s/%s/.backup_time", tapedrivepath, namelist[n]->d_name);
 
 			backuptime = (time_t) fsop_43_read_int(otherpath);
 
-			fsop_43_store_timet(backuptime, &(result->content[partition].bkp_dayyear));
+			fsop_43_store_timet(backuptime, &(result->content[(64 * partition) + 11]));
 
-			result->content[partition].data_start_block = 524288 * partition;
-			result->content[partition].length = 524288; // Fudge for now - 512Mb
-			memset (&(result->content[partition].error_info), 0, 8); // Blank off the error info
-			memset (&(result->content[partition].reserved), 0, 20); // Blank off the reserved info
+			result->content[(64 * partition) + 15] = (data_start * partition) & 0xff;
+			result->content[(64 * partition) + 16] = ((data_start * partition) & 0xff00) >> 8;
+			result->content[(64 * partition) + 17] = ((data_start * partition) & 0xff0000) >> 16;
+			result->content[(64 * partition) + 18] = ((data_start * partition) & 0xff000000) >> 24;
+
+			result->content[(64 * partition) + 19] = (data_length & 0xff); // Fudge for now - 512Mb
+			result->content[(64 * partition) + 20] = (data_length & 0xff00) >> 8; // Fudge for now - 512Mb
+			result->content[(64 * partition) + 21] = (data_length & 0xff0000) >> 16; // Fudge for now - 512Mb
+			result->content[(64 * partition) + 22] = (data_length & 0xff000000) >> 24; // Fudge for now - 512Mb
+
+			memset (&(result->content[(64 * partition) + 23]), 0, 8); // Blank off the error info
+			memset (&(result->content[(64 * partition) + 31]), 0, 20); // Blank off the reserved info
 
 			partition++;
 
@@ -242,7 +261,7 @@ int8_t fsop_43_get_tapeid_block (struct __fs_station *s, uint8_t drive,
 
 	free (namelist);
 
-	if (partition < 14) result->content[partition].disc_name[0] = 0x0D; /* Flag an empty disc so we know not to send this */
+	if (partition < 14) result->content[(64 * partition) + 1] = 0x0D; /* Flag an empty disc so we know not to send this */
 
 	return partition; /* Returns number of valid partitions */
 
@@ -443,6 +462,8 @@ FSOP(43)
 				}
 
 				fs_debug_full (0, 1, f->server, f->net, f->stn, "MDFS Tape operation %02d - Read backup status", arg);
+				FS_CPUT16(0); // First two bytes - no error
+
 				if (f->server->backup->when == 0) /* Nothing pending */
 				{
 					FS_CPUT8(0);
@@ -539,7 +560,6 @@ FSOP(43)
 					when.tm_sec = *(f->data + 11);
 					when.tm_isdst = -1;
 
-					when.tm_year += 1900;
 					if (when.tm_year < 1981)
 						when.tm_year += 100;
 
@@ -564,12 +584,23 @@ FSOP(43)
 					if (count != 8)
 						f->server->backup->jobs[count].partition = 0xff; // Put the rogue in
 
+					if (count == 0) /* no discs in the backup - barf */
+					{
+						memset(f->server->backup, 0, sizeof(struct __fs_backup));
+						f->server->backup->jobs[0].partition = 0xFF;
+						fsop_error (f, 0xFF, "Invalid backup - no discs specified");
+						pthread_mutex_unlock(&(f->server->fs_backup_mutex));
+						return;
+					}
+
 					fs_debug_full (0, 1, f->server, f->net, f->stn, "MDFS Tape operation %02d - Write backup status (set for %02d/%02d/%04d %02d:%02d:%02d)", arg, when.tm_mday, when.tm_mon, when.tm_year, when.tm_hour, when.tm_min, when.tm_sec);
 
 					pthread_cond_signal(&(f->server->fs_backup_cond));
 				}
 
 				pthread_mutex_unlock(&(f->server->fs_backup_mutex));
+
+				fsop_reply_ok(f);
 
 			} break;
 		case 4: // Read tape partition size
@@ -583,7 +614,7 @@ FSOP(43)
 				for (; count < 8; count++)
 				{
 					FS_CPUT8(1); // Means streamer - size big enough for the amount given
-					FS_CPUT32(102400); // 100Mb
+					FS_CPUT32(524288); // 512Mb
 				}
 
 				fsop_aun_send(&reply, __rcounter, f);
@@ -733,10 +764,13 @@ void * fsop_backup_thread (void * p)
 			struct tm	until;
 			struct timespec	t;
 
-			localtime_r (&next_event, &until);
-			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler sleeping until %d/%02d/%04d %02d:%02d:%02d",
-					until.tm_mday, until.tm_mon, until.tm_year,
-					until.tm_hour, until.tm_min, until.tm_sec);
+			clock_gettime(CLOCK_REALTIME, &t);
+			gmtime_r (&next_event, &until);
+
+			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler sleeping until %d/%02d/%04d %02d:%02d:%02d (%d secs)",
+					until.tm_mday, until.tm_mon, until.tm_year+1900,
+					until.tm_hour, until.tm_min, until.tm_sec,
+					(next_event - now));
 
 			t.tv_sec += (next_event - now);
 
