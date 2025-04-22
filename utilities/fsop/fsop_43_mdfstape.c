@@ -30,7 +30,7 @@ void fsop_43_store_timet (time_t in, uint8_t *out)
 {
 	struct tm	conv;
 
-	gmtime_r (&in, &conv);
+	localtime_r (&in, &conv);
 
 	fs_date_to_two_bytes(conv.tm_mday, conv.tm_mon + 1, conv.tm_year, (out+1), out);
 	*(out+2) = conv.tm_hour;
@@ -480,7 +480,7 @@ FSOP(43)
 					struct tm	when;
 					uint8_t		acorn_d, acorn_my, hour, min, sec, tapenamelen, counter = 0;
 
-					gmtime_r(&(f->server->backup->when), &when);
+					localtime_r(&(f->server->backup->when), &when);
 					
 					fs_date_to_two_bytes(when.tm_mday, when.tm_mon + 1 , when.tm_year, &acorn_my, &acorn_d);
 					hour = when.tm_hour;
@@ -607,14 +607,18 @@ FSOP(43)
 			{
 				fs_debug_full (0, 1, f->server, f->net, f->stn, "MDFS Tape operation %02d - Read partition sizes", arg);
 
+				// OK header
+
+				FS_CPUT16(0); // 2 &00 
+
 				// Produces fudged data
 
 				uint8_t	count = 0;
 
 				for (; count < 8; count++)
 				{
-					FS_CPUT8(1); // Means streamer - size big enough for the amount given
-					FS_CPUT32(524288); // 512Mb
+					FS_CPUT8(0); // Means fixed
+					FS_CPUT32(512 * 1024); // 512Mb 
 				}
 
 				fsop_aun_send(&reply, __rcounter, f);
@@ -765,7 +769,7 @@ void * fsop_backup_thread (void * p)
 			struct timespec	t;
 
 			clock_gettime(CLOCK_REALTIME, &t);
-			gmtime_r (&next_event, &until);
+			localtime_r (&next_event, &until);
 
 			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler sleeping until %d/%02d/%04d %02d:%02d:%02d (%d secs)",
 					until.tm_mday, until.tm_mon, until.tm_year+1900,
@@ -864,15 +868,15 @@ void * fsop_backup_thread (void * p)
 				{
 					fs_debug_full (0, 1, s, 0, 0, "Scheduled backup of %s to partition %d on tape %s successful",
 							s->backup->jobs[count].discname,
-							s->backup->tapename,
-							s->backup->jobs[count].partition);
+							s->backup->jobs[count].partition,
+							s->backup->tapename);
 				}
 				else
 				{
 					fs_debug_full (0, 1, s, 0, 0, "Scheduled backup of %s to partition %d on tape %s FAILED (%s) - ABORTING",
 							s->backup->jobs[count].discname,
-							s->backup->tapename,
 							s->backup->jobs[count].partition,
+							s->backup->tapename,
 							fsop_43_tape_errstr(res));
 					s->backup->when = 0;
 					s->backup->jobs[0].partition = 0xff;

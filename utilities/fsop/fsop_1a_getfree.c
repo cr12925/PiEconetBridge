@@ -51,18 +51,22 @@ FSOP(1a)
 				// This is well dodgy and probably no use unless you put the filestore on a smaller filing system
 
 				//if (fr > 0xffffff) fr = 0x7fffff;
-				if (fr > 0x80000) fr = 0x80000; // Limit to 128Mb
+				//if (fr > 0x80000) fr = 0x80000; // Limit to 128Mb - otherwise the tape interface thinks the disc is so large it cannot be backed up! This is probably something in the tape partition response
+				if (fr > 0x200000) fr = 0x200000; // 512Mb
 
-				reply.p.data[2] = (fr % 256) & 0xff;
-				reply.p.data[3] = ((fr >> 8) % 256) & 0xff;
-				reply.p.data[4] = ((fr >> 16) % 256) & 0xff;
+				FS_PUT24(reply.p.data,2,fr);
+				//reply.p.data[2] = (fr % 256) & 0xff;
+				//reply.p.data[3] = ((fr >> 8) % 256) & 0xff;
+				//reply.p.data[4] = ((fr >> 16) % 256) & 0xff;
 
 				//if (e > 0xffffff) e = 0x7fffff;
-				if (e > 0x80000) e = 0x80000; // Limit to 128Mb
+				//if (e > 0x80000) e = 0x80000; // Limit to 128Mb
+				if (e > 0x200000) e = 0x200000;
 
-				reply.p.data[5] = ((e-fr) % 256) & 0xff;
-				reply.p.data[6] = (((e-fr) >> 8) % 256) & 0xff;
-				reply.p.data[7] = (((e-fr) >> 16) % 256) & 0xff;
+				FS_PUT24(reply.p.data,5,e);
+				//reply.p.data[5] = ((e-fr) % 256) & 0xff;
+				//reply.p.data[6] = (((e-fr) >> 8) % 256) & 0xff;
+				//reply.p.data[7] = (((e-fr) >> 16) % 256) & 0xff;
 
 				fsop_send(8);
 
