@@ -292,15 +292,17 @@ fi
 
 	echo $passes > $mountdir/.passes
 
-	${DATE} '+%s' > $backuppath/.backup_time
 
 	(cd $backupsource ; $TARCREATECMD - . ) | (cd $backuppath ; $TAREXTRACTCMD - )
 
 	if [ "$?" -ne "0" ]; then
 		rm ${mountdir}/.busy
+		touch ${backuppath}/.corrupt
 		return 16
 	fi
 
+	rm -f ${backuppath}/.corrupt
+	${DATE} '+%s' > $backuppath/.backup_time
 	rm ${mountdir}/.busy
 
 	return 0
