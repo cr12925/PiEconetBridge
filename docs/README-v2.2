@@ -1985,6 +1985,12 @@ At present, the Tape ID block subsystem fails to spot a blank
 partition on a tape and will report it as 'OK' rather than
 'BLANK' but I'll fix that.
 
+A mounted tape drive is accessible by the virtual directories
+%TAPEn (where n is 0..3), or %TAPE for the currently selected
+drive. Any files on the tape are read only and any attempt
+to write to them or the tape using conventional FS operations
+will fail with "No write access".
+
 There are some PiFS extensions to FS Op &43 (67), which are
 a work in progress.
 
