@@ -1941,6 +1941,52 @@ setuid root. In that regard:
 
   make setuid
 
+"Tape" Backups
+--------------
+
+V2.2 supports the MDFS tape extensions, and extends them further to support
+up to 4 virtual tape drives (0..3). These are stored as .tar files in
+the 'Tapes' subdirectory below the fileserver main directory. There is
+then a 'TapeDrives' directory which will be empty until a tape is 
+mounted on a drive, when a symlink ('0' .. '3') is created to an unpacked
+version of the relevant .tar. The unpacked tars are held in 'Tapes', and
+linked to from 'TapeDrives'. So, for example, if you were to mount
+a tape you have formatted with the name 'NEWTAPE' on drive 2:
+
+- NEWTAPE.tar will exist in 'Tapes'
+- NEWTAPE.mnt will be a directory in 'Tapes' containing the unpacked 'tape'
+- TapeDrives/2 will be a symlink to ../Tapes/NEWTAPE.mnt
+
+The backups, formatting, mounting and unmounting are handled by a helper
+script, tapes.sh, which is normally held in /etc/econet-gpio, but which
+you can either (i) edit in place, or (ii) provide a replacement for
+by a tuneable in the JSON version of the config 'fileserver-tapehandler'
+in the diverted station section of that config file.
+
+If you edit or replace the tape handler, make sure you maintain the 
+same parameter profile otherwise it will all go wrong.
+
+You can move the Tapes and TapeDrives directories - you will need to
+edit the defined variables in the tape handler script, and the
+#defines in fs.h - but everything else should fall into place.
+
+You can increase the number of tape drives by changing the
+FS_MAX_TAPE_DRIVES define in fs.h
+
+You can use the MDFS 'SETBACKUP' utilities to manage scheduled
+backups and see the contents of tapes, and the MDFS *TAPEINFO
+command to see the tape ID block. 
+
+In addition, Pi FS provides some internal commands for operating
+the tape drive(s): *TAPESELECT (choose drive number), *TAPEMOUNT,
+*TAPEDISMOUNT, *TAPEBACKUP. See elsewhere in this document.
+
+At present, the Tape ID block subsystem fails to spot a blank
+partition on a tape and will report it as 'OK' rather than
+'BLANK' but I'll fix that.
+
+There are some PiFS extensions to FS Op &43 (67), which are
+a work in progress.
 
 THE END 
 -------
