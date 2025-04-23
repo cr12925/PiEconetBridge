@@ -52,6 +52,12 @@ int fsop_delete_internal (struct fsop_data *f, unsigned char *path, uint8_t rela
 	if (!fsop_normalize_path_wildcard(f, path, relative_to, &p, 1) || !(p.paths))
 		return -2; /* Not found */
 
+	if (p.is_tape)
+	{
+		fs_free_wildcard_list(&p);
+		return -7; /* No write access to tape */
+	}
+
 	/* Deal with what we found */
 	e = p.paths;
 
@@ -146,6 +152,7 @@ void fsop_do_delete(struct fsop_data *f, unsigned char *path, uint8_t relative_t
 			case 4: fsop_error(f, 0xFF, "Dir not empty"); break;
 			case 5: fsop_error(f, 0xBD, "Insufficient access"); break;
 			case 6: fsop_error(f, 0xC2, "Already open"); break;
+			case 7: fsop_error(f, 0x4C, "No write access"); break;
 			default: fsop_error(f, 0xFF, "FS Error"); break;
 		}
 	}
