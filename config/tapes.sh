@@ -292,7 +292,7 @@ fi
 
 	echo $passes > $mountdir/.passes
 
-	${DATE} '+%s' > $backupsource/.backup_time
+	${DATE} '+%s' > $backuppath/.backup_time
 
 	(cd $backupsource ; $TARCREATECMD - . ) | (cd $backuppath ; $TAREXTRACTCMD - )
 
