@@ -93,7 +93,12 @@ void fsop_save_internal(struct fsop_data *f, uint8_t is_32bit)
 					if (err == -3)
 						fsop_error(f, 0xC0, "Too many open files");
 					else if (err == -2)
-						fsop_error(f, 0xc2, "Already open"); // Interlock failure
+					{
+						if (p.is_tape)
+							fsop_error (f, 0x4C, "No write access");
+						else
+							fsop_error(f, 0xc2, "Already open"); // Interlock failure
+					}
 					else if (err == -1)
 						fsop_error(f, 0xFF, "FS Error"); // File didn't open when it should
 					else

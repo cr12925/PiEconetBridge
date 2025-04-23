@@ -164,7 +164,10 @@ FSOP_00(COPY)
 		}
 		else if (err == -2) // Should never happen
 		{
-			fsop_error(f, 0xC2, "Already open");
+			if (p_dst.is_tape)
+				fsop_error (f, 0x4c, "No write access");
+			else
+				fsop_error(f, 0xC2, "Already open");
 			fs_free_wildcard_list(&p_src);
 			return;
 		}

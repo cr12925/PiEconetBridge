@@ -41,6 +41,12 @@ FSOP_00(RENAME)
                 return;
         }
 
+	if (p_from.is_tape) // Can't rename things on tapes...
+	{
+		fsop_error (f, 0x4C, "No write access");
+		return;
+	}
+
         if (p_from.perm & FS_PERM_L) // Source locked
         {
                 fsop_error(f, 0xC3, "Entry Locked");

@@ -183,7 +183,10 @@ FSOP(06)
 			}
 			else if (err == -2) // Interlock issue
 			{
-				fsop_error(f, 0xC2, "Already open");
+				if (p.is_tape)
+					fsop_error (f, 0x4C, "No write access");
+				else
+					fsop_error(f, 0xC2, "Already open");
 				fsop_deallocate_user_file_channel(f->active, userhandle);
 			}
 			else if (err == -3)

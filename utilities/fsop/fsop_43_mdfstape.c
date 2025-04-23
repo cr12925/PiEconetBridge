@@ -214,9 +214,11 @@ int8_t fsop_43_get_tapeid_block (struct __fs_station *s, uint8_t drive,
 
 			time_t backuptime;
 
-			//uint8_t	my_partition;
-
 			uint32_t data_start, data_length;
+
+			unsigned char	corruptfile[1024];
+
+			struct stat	corruptstat;
 
 
 			//my_partition = ((namelist[n]->d_name[0] - 48) * 10) + (namelist[n]->d_name[1] - 48);
@@ -233,10 +235,14 @@ int8_t fsop_43_get_tapeid_block (struct __fs_station *s, uint8_t drive,
 			if (len < 10)
 				result->content[(64 * partition) + 1 + len] = 0x0D; /* Termiante if less than 10 char disc name */
 
-			result->content[( 64 * partition)] = FS_TAPEID_OK;
-	
 			sprintf (otherpath, "%s/%s/.backup_time", tapedrivepath, namelist[n]->d_name);
+			sprintf (corruptfile, "%s/%s/.corrupt", tapedrivepath, namelist[n]->d_name);
 
+			if (stat(corruptfile, &corruptstat) == 0) // .corrupt exists
+				result->content[( 64 * partition)] = FS_TAPEID_CORRUPT;
+			else
+				result->content[( 64 * partition)] = FS_TAPEID_OK;
+	
 			backuptime = (time_t) fsop_43_read_int(otherpath);
 
 			fsop_43_store_timet(backuptime, &(result->content[(64 * partition) + 11]));
@@ -558,14 +564,14 @@ FSOP(43)
 					when.tm_hour = *(f->data + 9);
 					when.tm_min = *(f->data + 10);
 					when.tm_sec = *(f->data + 11);
-					when.tm_isdst = -1;
+					when.tm_isdst = -1; // Think mktime is getting this wrong - need to know DST adjustment
 
 					if (when.tm_year < 1981)
 						when.tm_year += 100;
 
 					//fprintf (stderr, "\n\n** Backup time attempted to set to %d/%02d/%04d %02d:%02d:%02d\n\n", when.tm_mday, when.tm_mon, when.tm_year, when.tm_hour, when.tm_min, when.tm_sec);
 
-					f->server->backup->when = mktime(&when);
+					f->server->backup->when = timelocal(&when); // This is a UTC figure - we put -1 in the tm_isdst field above so that timelocal would work it out.
 
 					/* Ignore printer output and the flag  - for now, we might make an optional thing on the handler to send to the pserv.sh script in future */
 
@@ -755,8 +761,8 @@ void * fsop_backup_thread (void * p)
 
 	while (1)
 	{
-		next_event = s->backup->when;
-		now = time(NULL);
+		next_event = s->backup->when; // We think this is a UTC figure
+		now = time(NULL); // And so should this be. 
 
 		if (next_event == 0) /* No job, indefinite sleep */
 		{
@@ -769,7 +775,7 @@ void * fsop_backup_thread (void * p)
 			struct timespec	t;
 
 			clock_gettime(CLOCK_REALTIME, &t);
-			localtime_r (&next_event, &until);
+			localtime_r (&next_event, &until); 
 
 			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler sleeping until %d/%02d/%04d %02d:%02d:%02d (%d secs)",
 					until.tm_mday, until.tm_mon, until.tm_year+1900,
@@ -825,6 +831,8 @@ void * fsop_backup_thread (void * p)
 
 			count = 0; 
 
+			s->backup->when = 0;
+
 			while (count < 8 && s->backup->jobs[count].partition != 0xff)
 			{
 				char cmd_string[128];
@@ -878,13 +886,12 @@ void * fsop_backup_thread (void * p)
 							s->backup->jobs[count].partition,
 							s->backup->tapename,
 							fsop_43_tape_errstr(res));
-					s->backup->when = 0;
-					s->backup->jobs[0].partition = 0xff;
 					continue;
 				}
 				count++;
 			}
 			
+			s->backup->jobs[0].partition = 0xff;
 		}
 	}
 
