@@ -1988,6 +1988,15 @@ partition on a tape and will report it as 'OK' rather than
 There are some PiFS extensions to FS Op &43 (67), which are
 a work in progress.
 
+Using this system you can schedule a backup which will appear
+as a .tar as above (and it copies the xattrs so you keep the 
+file ownership, permissions, etc.). You can then either copy 
+that file off manually or via cron. Alternatively, there is no
+reason why, if you have the inclination, you can't mount a 
+remote filesystem on the Tapes subdirectory from a system
+which you back up some other way, thus keeping econet backups
+with everything else you have.
+
 THE END 
 -------
 
