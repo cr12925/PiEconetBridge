@@ -32,7 +32,7 @@ FSOP(40)
 
 	uint32_t	space;
 
-	if (FSOP_ARG != 0)
+	if (FSOP_ARG != 2)
 	{
 		fsop_error(f, 0xFF, "Bad argument");
 		return;
