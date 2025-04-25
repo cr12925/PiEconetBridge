@@ -84,7 +84,7 @@ FSOP_00(RENAME)
         {
 		int8_t	err;
 
-                handle = fsop_open_interlock(f, p_from.unixpath, 2, &err, 0, p_from.is_tape, p_from.tape_drive);
+                handle = fsop_open_interlock(f, p_from.unixpath, 2, &err, 0, p_from.is_tape, p_from.tape_drive, p_from.disc, p_from.owner);
 
                 switch (err)
                 {

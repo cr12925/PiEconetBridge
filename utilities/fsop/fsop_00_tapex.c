@@ -49,6 +49,11 @@ FSOP_00(TAPEMOUNT)
 
 }
 
+FSOP_00(UNLOADTAPE)
+{
+	fsop_00_TAPEDISMOUNT (f, p, num, param_start);	
+}
+
 FSOP_00(TAPEDISMOUNT)
 {
         uint8_t         drive;

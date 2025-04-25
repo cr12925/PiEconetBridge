@@ -84,10 +84,46 @@ void fsop_save_internal(struct fsop_data *f, uint8_t is_32bit)
 					struct __fs_file	*internal_handle;
 					int8_t		  err;
 
+					uint32_t	user_free;
+					int32_t		needed;
+					struct __fs_disc	*d;
+
+					/* Check quota here */
+
+					d = fsop_get_disc(f->server, p.disc);
+
+					user_free = fsop_get_user_free (f->user);
+
+					if (d)
+					{
+						if (p.owner != f->userid)
+							needed = fsop_diff_blocksize (0, d, length);
+						else
+							needed = fsop_diff_blocksize (p.length, d, length);
+						
+						if ((needed > user_free) && (!FS_ACTIVE_SYST(f)))
+						{
+							fsop_error (f, 0xFF, "No space");
+							return;
+						}
+
+						if (p.owner != f->userid)
+							fsop_update_quota(&(f->server->users[p.owner]), (-1 * p.length));
+
+						fsop_update_quota(&(f->server->users[f->userid]), needed);
+
+					}
+					else
+					{
+						fsop_error (f, 0xFF, "Unknown disc");
+						return;
+					}
+
 					// Can write to it one way or another
 
 					// Use interlock function here
-					internal_handle = fsop_open_interlock(f, p.unixpath, 3, &err, 0, p.is_tape, p.tape_drive);
+					internal_handle = fsop_open_interlock(f, p.unixpath, 3, &err, 0, p.is_tape, p.tape_drive, p.disc, p.owner);
+				
 					fsop_set_create_time_now(p.unixpath);
 
 					if (err == -3)
@@ -105,6 +141,7 @@ void fsop_save_internal(struct fsop_data *f, uint8_t is_32bit)
 					{
 
 						uint16_t perm;
+
 
 						perm = FS_PERM_PRESERVE;
 

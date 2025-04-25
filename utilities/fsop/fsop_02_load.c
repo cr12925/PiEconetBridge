@@ -107,7 +107,7 @@ FSOP(02)
 		return;
 	}
 
-        internal_handle = fsop_open_interlock(f, p.unixpath, 1, &err, 0, p.is_tape, p.tape_drive);
+        internal_handle = fsop_open_interlock(f, p.unixpath, 1, &err, 0, p.is_tape, p.tape_drive, p.disc, p.owner);
 
         if (err < 0)
         {

@@ -65,6 +65,26 @@ FSOP_00(SETOWNER)
 		fsop_error(f, 0xC3, "Entry Locked");
 	else if (pn.parent_owner == userid || FS_ACTIVE_SYST(f->active))
 	{
+		struct __fs_file *file;
+
+		fsop_update_quota(&(f->server->users[pn.attr.owner]), (-1 * pn.length)); /* Credit the outgoing user*/
+		/* We don't deduct from the incoming user in case it bankrupts them */
+		
+		/* See if the file is open and update __fs_file */
+
+		file = f->server->files;
+
+		while (file)
+		{
+			if (!strcmp(pn.unixpath, file->name))
+			{
+				file->owner = userid;
+				break;
+			}
+			else
+				file = file->next;
+		}
+
 		pn.attr.owner = userid;
 		fsop_write_xattr(pn.unixpath, pn.attr.owner, pn.attr.perm, pn.attr.load, pn.attr.exec, pn.attr.homeof, f);
 		fsop_reply_success(f, 0, 0);

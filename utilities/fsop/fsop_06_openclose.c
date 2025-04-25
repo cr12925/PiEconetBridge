@@ -154,6 +154,11 @@ FSOP(06)
 
 		mode = (readonly ? 1 : existingfile ? 2 : 3);
 
+		/* Check quotas if overwriting */
+
+		if (mode == 3 && (p.ftype != FS_FTYPE_NOTFOUND)) /* OPENOUT - i.e. file will become 0 length */
+			fsop_update_quota (&(f->server->users[p.owner]), (-1 * p.length));
+
 		userhandle = fsop_allocate_user_file_channel(f->active);
 
 		if (userhandle)
@@ -169,7 +174,7 @@ FSOP(06)
 			if (p.ftype == FS_FTYPE_NOTFOUND) // Opening non-existent file for write - add unix name to end of path
 				strcat(p.unixpath, unix_segment);
 
-			handle = fsop_open_interlock(f, p.unixpath, (readonly ? 1 : existingfile ? 2 : 3), &err, 0, p.is_tape, p.tape_drive);
+			handle = fsop_open_interlock(f, p.unixpath, (readonly ? 1 : existingfile ? 2 : 3), &err, 0, p.is_tape, p.tape_drive, p.disc, p.owner);
 
 			if (mode == 3)
 				fsop_set_create_time_now(p.unixpath);

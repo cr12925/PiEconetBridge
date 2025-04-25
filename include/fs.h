@@ -198,6 +198,7 @@ struct __fs_config {
 struct __fs_disc {
 	unsigned char 		name[17];
 	uint8_t			index; /* Disc number - ready for new structure */
+	uint32_t		fs_blocksize; /* Used for quotas. bytes */
 	struct __fs_disc	*next, *prev;
 	struct __fs_station	*server; /* Upward reference */
 };
@@ -208,6 +209,9 @@ struct __fs_file {
         unsigned char 	name[1024];
         FILE 		*handle;
 	uint8_t		is_tape, tape_drive;
+	struct __fs_disc *disc; /* Disc number where this file is located  - not implemented 20240524. For quotas. */
+	uint16_t	owner; /* User ID of owner - not implemented 20240524. For quotas. */
+
         int 		readers, writers; // Used for locking; when readers = writers = 0 we close the file
 	struct __fs_file 	*next, *prev; /* Pointers for new structure */
 };
@@ -495,16 +499,15 @@ struct __fs_user {
         unsigned char priv;
         unsigned char bootopt;
         unsigned char home[80];
-        uint8_t         unused1[8];
-	uint32_t	quota_total; // Kb?
-	uint32_t	quota_used;
+	uint8_t		quota_free[4]; // LSB first, stored as Kb. 0xffffffff means unlimited. 0 will leave the user unable to write more data even if there is space in a filesystem block. Not enforced for System users.
+	uint8_t		unused[12]; 
         unsigned char lib[80];
         uint8_t         unused2[16];
         unsigned char home_disc;
         unsigned char year, month, day, hour, min, sec; // Last login time
         uint8_t         priv2;
         uint16_t        discmask; // 1 bit per disk number, if set the system will not show that disc to the user. discmask must never have the bit set which refers to the home drive. The FS_DISC_VIS macro deliberately will always return 1 for the home drive
-        char unused[6];
+        char unused3[6];
 };
 
 /* MDFS user structure, for generating MDFS pw file */
@@ -775,7 +778,7 @@ extern void fs_debug (uint8_t, uint8_t, char *, ...);
 extern void fs_debug_full (uint8_t, uint8_t, struct __fs_station *, uint8_t, uint8_t, char *, ...);
 
 /* Externs for internal file handling from fs.c */
-extern struct __fs_file * fsop_open_interlock(struct fsop_data *, unsigned char *, uint8_t, int8_t *, uint8_t, uint8_t, uint8_t);
+extern struct __fs_file * fsop_open_interlock(struct fsop_data *, unsigned char *, uint8_t, int8_t *, uint8_t, uint8_t, uint8_t, uint8_t, uint16_t);
 //extern struct __fs_dir * fsop_get_dir_handle(struct fsop_data *, unsigned char *);
 extern void fsop_close_interlock(struct __fs_station *, struct __fs_file *, uint8_t);
 //extern void fsop_close_dir_handle(struct __fs_station *, struct __fs_dir *);
@@ -810,6 +813,7 @@ extern void fsop_write_user(struct __fs_station *, int, unsigned char *);
 extern struct __fs_active * fsop_stn_logged_in(struct __fs_station *, uint8_t, uint8_t);
 extern struct __fs_active * fsop_stn_logged_in_lock(struct __fs_station *, uint8_t, uint8_t);
 extern int fsop_get_discno(struct fsop_data *, char *);
+extern struct __fs_disc * fsop_get_disc(struct __fs_station *, uint8_t);
 extern void fsop_get_disc_name(struct __fs_station *, uint8_t, unsigned char *);
 extern void fsop_set_disc_name(struct __fs_station *, uint8_t, unsigned char *);
 extern void fsop_get_username_lock(struct __fs_active *, char *);
@@ -1113,6 +1117,7 @@ FSOP_00_EXTERN(TAPESELECT);
 FSOP_00_EXTERN(TAPEFORMAT);
 FSOP_00_EXTERN(TAPEBACKUP);
 FSOP_00_EXTERN(UNLINK);
+FSOP_00_EXTERN(UNLOADTAPE); // Alias for TAPEDISMOUNT
 
 extern short fs_sevenbitbodge;
 extern short normalize_debug;
@@ -1126,4 +1131,11 @@ extern void * fsop_backup_thread (void *);
 
 #define FS_DIR_TAPEDRIVE	"TapeDrives"
 #define FS_DIR_TAPES		"Tapes"
+
+/* Quota function prototypes */
+
+uint32_t fsop_get_user_free (struct __fs_user *);
+uint8_t fsop_check_update_user_quota (struct __fs_user *, int32_t);
+int32_t fsop_diff_blocksize (uint32_t, struct __fs_disc *, int32_t bytes);
+void fsop_update_quota (struct __fs_user *, int32_t);
 

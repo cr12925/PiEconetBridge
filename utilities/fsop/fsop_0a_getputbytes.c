@@ -226,6 +226,24 @@ FSOP(0b)
 			(is_32bit ? "32" : ""),
 			bytes, offset, f->userid,  handle);
 
+	/* Quota check */
+
+	if ((offset + bytes) > length)
+	{
+		int32_t	needed;
+
+		needed = (offset + bytes) - length;
+
+		needed = fsop_diff_blocksize (length, internal_handle->disc, needed); 
+
+		if (!fsop_check_update_user_quota(&(f->server->users[internal_handle->owner]), needed))
+		{
+			fsop_error (f, 0xFF, "No space");
+			return;
+		}
+
+	}
+
 	if (offset > length) // Beyond EOF
 	{
 		off_t	count;

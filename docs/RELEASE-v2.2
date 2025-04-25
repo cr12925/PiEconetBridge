@@ -82,6 +82,13 @@ RELEASE NOTES FOR V2.2
               FS disc "discname" onto partition nn of the tape in
               either the currently selected drive, or the specified
               drive.
+- User quotas implemented. No quota is adjusted for System users.
+  If a user has an unexpected quota (which may default to nil!),
+  use the Acorn *SETFREE utility to set it to something else. THe
+  utility takes a username and a number of bytes free in hex. E.g.
+  *SETFREE CHRIS 1000 
+  sets CHRIS's free space to 65,536 bytes irrespective of what the
+  user presently has stored.
 
 KNOWN ISSUES
 ------------

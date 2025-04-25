@@ -26,11 +26,21 @@ FSOP(40)
 
 	unsigned char disc;
 
+	uint32_t	space;
+
 	start = *(f->data+8) + (*(f->data + 9) << 8);
 	count = *(f->data + 10) + (*(f->data + 11) << 8);
 	disc = *(f->data + 12);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d SJ Read Account information from %d for %d entries on disc no. %d - Not yet implemented", "", f->net, f->stn, start, count, disc);
+	fs_debug (0, 1, "%12sfrom %3d.%3d SJ Read Account information from %d for %d entries on disc no. %d", "", f->net, f->stn, start, count, disc);
+
+	space = f->user->quota_free[0] +
+		(f->user->quota_free[1] << 8) +
+		(f->user->quota_free[2] << 16) +
+		(f->user->quota_free[3] << 24);
+
+	space /= 1024; // Kilobytes
+	if (space > 65536) space=65536; /* Reply packet only has 2 bytes */
 
 	// For now, return a dummy entry
 
@@ -39,7 +49,8 @@ FSOP(40)
 	reply.p.data[5] = 0x00; // Number of accounts returned high byte
 	reply.p.data[6] = f->userid & 0xff;
 	reply.p.data[7] = (f->userid & 0xff00) >> 8;
-	reply.p.data[8] = reply.p.data[9] = 0xff; // Free space
+	reply.p.data[8] = (space & 0xff);
+	reply.p.data[9] = (space & 0xff00) >> 8;
 
 	fsop_send(10);
 	

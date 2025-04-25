@@ -88,7 +88,7 @@ uint8_t fsop_openmap_dir(struct fsop_data *f, unsigned char *input_path, struct 
 	}
 
 	//h = fsop_get_dir_handle(f, p.unixpath);
-	h = fsop_open_interlock(f, p.unixpath, 1, &err, 1, p.is_tape, p.tape_drive);
+	h = fsop_open_interlock(f, p.unixpath, 1, &err, 1, p.is_tape, p.tape_drive, p.disc, p.owner);
 
 	if (err < 0)
 	{

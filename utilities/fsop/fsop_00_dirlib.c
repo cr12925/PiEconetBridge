@@ -62,7 +62,7 @@ void	fsop_00_dirlib_internal(struct fsop_data *f, uint8_t *user_handle, unsigned
 
 		/* Open the new dir */
 
-		if (!(n = fsop_open_interlock(f, p.unixpath, 1, &err, 1, p.is_tape, p.tape_drive)))
+		if (!(n = fsop_open_interlock(f, p.unixpath, 1, &err, 1, p.is_tape, p.tape_drive, p.disc, p.owner)))
 			fsop_error(f, 0xC7, "Dir unreadable");
 		else if (!(handle = fsop_allocate_user_dir_channel(f->active, n)))
 		{

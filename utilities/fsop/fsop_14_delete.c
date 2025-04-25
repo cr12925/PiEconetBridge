@@ -67,7 +67,7 @@ int fsop_delete_internal (struct fsop_data *f, unsigned char *path, uint8_t rela
 	{
 		if (e->ftype == FS_FTYPE_FILE)
 		{
-			handle = fsop_open_interlock(f, e->unixpath, 2, &err, 0, p.is_tape, p.tape_drive); // the is_tape is only in the main return struct, but it's good enough here since everything underneath will be on the tape as well
+			handle = fsop_open_interlock(f, e->unixpath, 2, &err, 0, p.is_tape, p.tape_drive, p.disc, p.owner); // the is_tape is only in the main return struct, but it's good enough here since everything underneath will be on the tape as well
 
 			if (err < 0) // Interlock or other problem
 			{
@@ -111,6 +111,20 @@ int fsop_delete_internal (struct fsop_data *f, unsigned char *path, uint8_t rela
 			}
 			else
 			{
+				// Update user quota
+
+				if (e->ftype == FS_FTYPE_FILE)
+				{
+					int32_t		amount;
+
+					amount = fsop_diff_blocksize(0, fsop_get_disc(f->server, p.disc), e->length);
+
+					amount *= -1;
+
+					fsop_update_quota (&(f->server->users[e->owner]), amount);
+
+				}
+
 				// Silently delete the INF file if it exists
 				char *dotfile=pathname_to_dotfile(e->unixpath, FS_CONFIG(f->server,fs_infcolon));
 				count++;

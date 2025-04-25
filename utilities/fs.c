@@ -550,6 +550,26 @@ void fsop_make_mdfs_pw_file(struct __fs_station *s)
 
 }
 
+// Find the disc struct for a disc number
+
+struct __fs_disc * fsop_get_disc(struct __fs_station *s, uint8_t discno)
+{
+	struct __fs_disc	*d;
+
+	d = s->discs;
+
+	while (d)
+	{
+		if (d->index == discno)
+			return d;
+
+		d = d->next;
+	}
+
+	return NULL;
+
+}
+
 // Find a disc number by name
 
 int fsop_get_discno(struct fsop_data *f, char *discname)
@@ -3270,7 +3290,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 	struct dirent *entry;
 
 	FILE *passwd, *backup;
-	char passwordfile[280], passwordfilecopy[300];
+	char passwordfile[280], passwordfilecopy[320];
 	char backupfile[280];
 	char tapedir[280];
 	int length;
@@ -3485,18 +3505,18 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 					int u; // user count
 					struct tm *t; 
 					time_t	now;
-					char sys_str[600];
+					char sys_str[700];
 
 					now = time(NULL);
 
 					t = localtime(&now);
 
-					snprintf (passwordfilecopy, 299, "%s.%04d%02d%02d:%02d%02d",
+					snprintf (passwordfilecopy, 318, "%s.%04d%02d%02d:%02d%02d",
 						passwordfile,
 						t->tm_year+1900, t->tm_mon+1, t->tm_mday,
 						t->tm_hour, t->tm_min);
 
-					snprintf (sys_str, 599, "cp %s %s", passwordfile, passwordfilecopy);
+					snprintf (sys_str, 699, "cp %s %s", passwordfile, passwordfilecopy);
 
 					system(sys_str);
 					
@@ -3543,6 +3563,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 					{
 						uint8_t index, count;
 						struct __fs_disc	*d, *p;
+						struct statvfs 		sv;
 
 						// readdir() doesn't guarantee ordering, so we need to do it ourselves
 
@@ -3565,6 +3586,11 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
 						d->name[count] = 0;
 					
+						if (statvfs(fullname, &sv) == 0)
+							d->fs_blocksize = sv.f_bsize;
+						else
+							fs_debug_full (1, 0, server, 0, 0, "Unable to statvfs() for disc %s (%d) - %s", d->name, d->index, strerror(errno));
+
 						/* Put d into the list at the right place */
 
 						p = server->discs;
@@ -3621,7 +3647,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
 					while (d)
 					{
-						fs_debug_full (0, 2, server, 0, 0, "Initialized disc name %s (%d)", d->name, d->index);
+						fs_debug_full (0, 2, server, 0, 0, "Initialized disc name %s (%d, blocksize %d bytes)", d->name, d->index, d->fs_blocksize);
 						d = d->next;
 					}
 
@@ -4233,7 +4259,7 @@ int16_t fsop_get_acorn_entries(struct fsop_data *f, unsigned char *unixpath)
 // Returns -3 for too many files, -1 for file didn't exist when it should or can't open, or internal handle for OK. This will also attempt to open the file 
 // -2 = interlock failure
 // The path is a unix path - we look it up in the tables of file handles
-struct __fs_file * fsop_open_interlock(struct fsop_data *f, unsigned char *path, uint8_t mode, int8_t *err, uint8_t dir, uint8_t is_tape, uint8_t tape_drive)
+struct __fs_file * fsop_open_interlock(struct fsop_data *f, unsigned char *path, uint8_t mode, int8_t *err, uint8_t dir, uint8_t is_tape, uint8_t tape_drive, uint8_t disc, uint16_t owner)
 {
 
 	struct __fs_file	*file;
@@ -4295,6 +4321,8 @@ struct __fs_file * fsop_open_interlock(struct fsop_data *f, unsigned char *path,
 
 	file->is_tape = is_tape;
 	file->tape_drive = tape_drive;
+	file->disc = fsop_get_disc(f->server, disc);
+	file->owner = owner;
 
 	if (mode == 1)	file->readers = 1;
 	else		file->writers = 1;
@@ -5227,6 +5255,7 @@ void fsop_setup(void)
 	FSOP_OSCLI(TAPEFORMAT, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 1, 1, 5); /* <tapename> */
 	FSOP_OSCLI(TAPEBACKUP, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 2, 3, 5); /* <discname> <partition> [<drive no.>] */
 	FSOP_OSCLI(UNLINK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 1, 1, 4);
+	FSOP_OSCLI(UNLOADTAPE, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 0, 0, 5); /* Synonym for TAPEDISMOUNT but does not take the drive number parameter */
 
 	fs_debug (0, 1, "Fileserver infrastructure set up");
 
@@ -5543,5 +5572,112 @@ void * fsop_register_machine(struct __fs_machine_peek_reg *p)
 	eb_free (__FILE__, __LINE__, "FS", "Freeing machine peek structure we just registered", p);
 
 	return NULL;
+
+}
+
+/* FS Quota functions */
+
+/* fsop_get_user_free
+ *
+ * Return number of bytes free space available for user *u
+ */
+
+uint32_t fsop_get_user_free (struct __fs_user *u)
+{
+
+	uint32_t result = (
+				(u->quota_free[0])
+			+	(u->quota_free[1] << 8)
+			+	(u->quota_free[2] << 16)
+			+	(u->quota_free[3] << 24)
+			);
+
+	if (result > 0x05F5E0FF)
+		result = 0x5F5E0FF; /* Magic figure which doesn't upset DRDOS with Econet! */
+
+	return result;
+}
+
+/* fsop_check_user_quota
+ *
+ * Check a user's quota against their free space.
+ * Update it if they have space for bytes.
+ * If bytes < 0 (file is shrinking) then this will
+ * always succeed and update.
+ *
+ * It is necessary to gross up the change for the disc
+ * blocksize using fsop_diff_blocksize before
+ * calling this.
+ *
+ * Return 1 if they can store the amount requested.
+ */
+
+uint8_t fsop_check_update_user_quota (struct __fs_user *u, int32_t bytes)
+{
+	uint32_t	current_free;
+
+	if (u->priv & FS_PRIV_SYSTEM)
+		return 1;
+
+	current_free = fsop_get_user_free(u);
+
+	if (current_free >= bytes)
+	{
+		fsop_update_quota(u, bytes);
+		return 1;
+	}
+	else
+		return 0;
+}
+
+/* 
+ * Gross up a length+bytes combo to the next appropriate disc
+ * blocksize for disc d
+ *
+ * Works with negative bytes in case of files getting smaller.
+ */
+
+int32_t fsop_diff_blocksize (uint32_t len, struct __fs_disc *d, int32_t bytes)
+{
+	uint32_t	blocks_old, blocks_new;
+
+	blocks_old = (len / d->fs_blocksize)
+		+	((len % d->fs_blocksize) ? 1 : 0);
+
+	blocks_new = ((len+bytes) / d->fs_blocksize)
+		+	(((len+bytes) % d->fs_blocksize) ? 1 : 0);
+
+	return ((blocks_new - blocks_old) * d->fs_blocksize);
+
+}
+			
+/* 
+ * fsop_update_quota
+ *
+ * Update a user quota usage by +/- bytes - which is signed deliberately.
+ *
+ * Note this is a user id, not an active user, in case we are 
+ * adjusting quota on change of ownership when the current owner
+ * is not logged in.
+ */
+
+void fsop_update_quota (struct __fs_user *u, int32_t bytes)
+{
+
+	uint32_t current = fsop_get_user_free(u);
+
+	/* Don't update SYST */
+
+	if (u->priv & FS_PRIV_SYSTEM)
+		return;
+
+	current -= bytes; /* bytes is +ve if space is being used */
+
+	u->quota_free[0] = (current & 0xff);
+	u->quota_free[1] = (current & 0xff00) >> 8;
+	u->quota_free[2] = (current & 0xff0000) >> 16;
+	u->quota_free[3] = (current & 0xff000000) >> 24;
+
+	return;
 
 }

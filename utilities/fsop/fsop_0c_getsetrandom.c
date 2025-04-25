@@ -173,10 +173,19 @@ FSOP(0d)
 				unsigned long to_write, written;
 				unsigned int chunk;
 
+
 				memset (&buffer, 0, 4096);
 				fseek(h, 0, SEEK_END);
 
 				to_write = value - extent;
+
+				/* Check quota here */
+				
+				if (!fsop_check_update_user_quota(&(f->server->users[a->fhandles[handle].handle->owner]), fsop_diff_blocksize(extent, a->fhandles[handle].handle->disc, to_write)))
+				{
+					fsop_error (f, 0xFF, "No space");
+					return;
+				}
 
 				while (to_write > 0)
 				{
@@ -203,6 +212,8 @@ FSOP(0d)
 		break;
 		case 1: // Set file extent
 		{
+			long	adjustment;
+
 			fs_debug_full (0, 2, f->server, f->net, f->stn, "Set file extent%s on channel %02X to %06lX, current extent %06lX%s", (is_32bit ? " (32 bit)" : ""), handle, value, extent, (value > extent) ? " so adding bytes to end of file" : "");
 
 			if (a->fhandles[handle].mode == 1) // Read only - refuse!
@@ -214,6 +225,16 @@ FSOP(0d)
 			fflush(h);
 
 			fs_debug_full (0, 3, f->server, f->net, f->stn, "   - %s file accordingly", (is_32bit ? " (32 bit)" : ""), ((value < extent) ? "truncating" : "extending"));
+
+			/* Check quota here */
+			
+			adjustment = value - extent;
+
+			if (!fsop_check_update_user_quota(&(f->server->users[a->fhandles[handle].handle->owner]), fsop_diff_blocksize(extent, a->fhandles[handle].handle->disc, adjustment)))
+			{
+				fsop_error (f, 0xFF, "No space");
+				return;
+			}
 
 			if (ftruncate(fileno(h), value)) // Error if non-zero
 			{
