@@ -1023,6 +1023,8 @@ extern float timediffstart(void);
 	FS_CPUT24((v));\
 	FS_CPUT8((((v) & 0xff000000) >> 24))
 
+#define FS_CSEND() fsop_aun_send(&reply,__rcounter,f)
+
 /* List of externs for FSOP functions */
 
 FSOP_EXTERN(00);
@@ -1138,4 +1140,4 @@ uint32_t fsop_get_user_free (struct __fs_user *);
 uint8_t fsop_check_update_user_quota (struct __fs_user *, int32_t);
 int32_t fsop_diff_blocksize (uint32_t, struct __fs_disc *, int32_t bytes);
 void fsop_update_quota (struct __fs_user *, int32_t);
-
+#define FS_DEFAULT_NEW_USER_QUOTA 10000

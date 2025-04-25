@@ -1886,7 +1886,7 @@ int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, ch
 		if (	(strlen(namelist[counter]->d_name) <= ECONET_MAX_FILENAME_LENGTH) && 
 			(strcmp(namelist[counter]->d_name, ".")) && 
 			(strcmp(namelist[counter]->d_name, "..")) &&
-			(namelist[counter]->d_name[0] != '.') &&
+			//(namelist[counter]->d_name[0] != '.') && // No longer required after we changed the backup file special names to use #
 			fsop_scandir_regex(namelist[counter], f) // i.e. it's one we want
 		   )	// Exclude the special directories in case we have COLONMAP turned on
 		{

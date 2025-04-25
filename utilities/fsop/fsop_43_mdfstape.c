@@ -166,11 +166,11 @@ int8_t fsop_43_get_tapeid_block (struct __fs_station *s, uint8_t drive,
 		return -1;
 	}
 
-	sprintf (otherpath, "%s/.format_time", tapedrivepath);
+	sprintf (otherpath, "%s/#format_time", tapedrivepath);
 
 	ttime = (time_t) fsop_43_read_int (otherpath);
 
-	sprintf (otherpath, "%s/.passes", tapedrivepath);
+	sprintf (otherpath, "%s/#passes", tapedrivepath);
 
 	passes = (uint16_t) fsop_43_read_int (otherpath);
 
@@ -183,7 +183,7 @@ int8_t fsop_43_get_tapeid_block (struct __fs_station *s, uint8_t drive,
 
 	sprintf (result->description, "PiFS Virtual Tape%c", 0x0D); // Dummy for now in case there isn't a description
 
-	sprintf (otherpath, "%s/.description", tapedrivepath);
+	sprintf (otherpath, "%s/#description", tapedrivepath);
 
 	if ((descrfile = fopen(otherpath, "r")))
 	{
@@ -195,7 +195,7 @@ int8_t fsop_43_get_tapeid_block (struct __fs_station *s, uint8_t drive,
 
 	memset (result->reserved, 0, 20); /* Blank off the reserved setion */
 
-	n = scandir(tapedrivepath, &namelist, NULL, NULL);
+	n = scandir(tapedrivepath, &namelist, NULL, alphasort);
 
 	if (n == -1)
 		return 0;
@@ -235,8 +235,8 @@ int8_t fsop_43_get_tapeid_block (struct __fs_station *s, uint8_t drive,
 			if (len < 10)
 				result->content[(64 * partition) + 1 + len] = 0x0D; /* Termiante if less than 10 char disc name */
 
-			sprintf (otherpath, "%s/%s/.backup_time", tapedrivepath, namelist[n]->d_name);
-			sprintf (corruptfile, "%s/%s/.corrupt", tapedrivepath, namelist[n]->d_name);
+			sprintf (otherpath, "%s/%s/#backup_time", tapedrivepath, namelist[n]->d_name);
+			sprintf (corruptfile, "%s/%s/#corrupt", tapedrivepath, namelist[n]->d_name);
 
 			if (stat(corruptfile, &corruptstat) == 0) // .corrupt exists
 				result->content[( 64 * partition)] = FS_TAPEID_CORRUPT;

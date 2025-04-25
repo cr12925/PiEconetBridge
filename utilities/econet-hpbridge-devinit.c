@@ -285,7 +285,7 @@ uint8_t eb_device_init_virtual (uint8_t net)
  * Create an FS on net.stn with root path 'rootpath'
  */
 
-uint8_t eb_device_init_fs (uint8_t net, uint8_t stn, char *rootpath, char *tapehandler)
+uint8_t eb_device_init_fs (uint8_t net, uint8_t stn, char *rootpath, char *tapehandler, uint32_t fs_new_user_quota)
 {
 	struct __eb_device 	* existing;
 
@@ -313,8 +313,9 @@ uint8_t eb_device_init_fs (uint8_t net, uint8_t stn, char *rootpath, char *tapeh
 
 	strncpy(existing->local.fs.rootpath, rootpath, strlen(rootpath));
 	strncpy(existing->local.fs.tapehandler, tapehandler, strlen(tapehandler));
+	existing->local.fs.new_user_quota = fs_new_user_quota;
 
-	DEVINIT_DEBUG("Created fileserver on %d.%d with path %s", net, stn, rootpath);
+	DEVINIT_DEBUG("Created fileserver on %d.%d with path %s, new user quota %dK", net, stn, rootpath, fs_new_user_quota);
 
 	return 1;
 }

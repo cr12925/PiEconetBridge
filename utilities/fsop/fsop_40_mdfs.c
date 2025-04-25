@@ -21,38 +21,68 @@ FSOP(40)
 {
 
 	FS_REPLY_DATA(0x80);
+	FS_REPLY_COUNTER();
 
 	unsigned int start, count;
+
+	uint8_t	done;
+	uint32_t	nextaccount;
 
 	unsigned char disc;
 
 	uint32_t	space;
 
-	start = *(f->data+8) + (*(f->data + 9) << 8);
-	count = *(f->data + 10) + (*(f->data + 11) << 8);
-	disc = *(f->data + 12);
+	start = *(f->data+6) + (*(f->data + 7) << 8);
+	count = *(f->data + 8) + (*(f->data + 9) << 8);
+	disc = *(f->data + 10); /* We ignore this - quotas are global */
 
 	fs_debug (0, 1, "%12sfrom %3d.%3d SJ Read Account information from %d for %d entries on disc no. %d", "", f->net, f->stn, start, count, disc);
 
-	space = f->user->quota_free[0] +
-		(f->user->quota_free[1] << 8) +
-		(f->user->quota_free[2] << 16) +
-		(f->user->quota_free[3] << 24);
+	if (!FS_ACTIVE_SYST(f->active))
+	{
+		start = f->userid;
+		count = 1;
+	}
 
-	space /= 1024; // Kilobytes
-	if (space > 65536) space=65536; /* Reply packet only has 2 bytes */
+	done = 0;
+	nextaccount = start;
 
-	// For now, return a dummy entry
+	FS_CPUT16(0); // OK Reply
+	FS_CPUT16(0); // Next account to try - placeholder
+	FS_CPUT16(0); // Number of accounts returned - placeholder
 
-	reply.p.data[2] = reply.p.data[3] = 0xff; // Next account to try
-	reply.p.data[4] = 0x01; // 1 account returned
-	reply.p.data[5] = 0x00; // Number of accounts returned high byte
-	reply.p.data[6] = f->userid & 0xff;
-	reply.p.data[7] = (f->userid & 0xff00) >> 8;
-	reply.p.data[8] = (space & 0xff);
-	reply.p.data[9] = (space & 0xff00) >> 8;
+	while ((done < count) && (nextaccount <= 65535))
+	{
+		if (f->server->users[nextaccount].priv == 0) /* Not in use */
+		{
+			nextaccount++;
+			continue;
+		}
 
-	fsop_send(10);
+		space = f->server->users[nextaccount].quota_free[0] +
+			(f->server->users[nextaccount].quota_free[1] << 8) +
+			(f->server->users[nextaccount].quota_free[2] << 16) +
+			(f->server->users[nextaccount].quota_free[3] << 24);
+	
+		space /= 1024; // Kilobytes
+		if (space > 65536) space=65536; /* Reply packet only has 2 bytes */
+	
+		FS_CPUT16(nextaccount);
+		FS_CPUT16(space);
+
+		done++;
+		nextaccount++;
+	}
+	
+	while (nextaccount < 65535 && (f->server->users[nextaccount].priv == 0))
+		nextaccount++; // Find next used entry, or return 0xFFFF
+
+	reply.p.data[2] = (nextaccount & 0xff);
+	reply.p.data[3] = (nextaccount & 0xff00) >> 8; // Next account to try
+	reply.p.data[4] = (done & 0xff); // Accounts returned, low byte
+	reply.p.data[5] = (done & 0xff00) >> 8; // Number of accounts returned high byte
+
+	FS_CSEND();
 	
 	return;
 

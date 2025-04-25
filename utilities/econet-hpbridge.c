@@ -8636,11 +8636,17 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 			if (json_object_object_get_ex(jstation, "fileserver-path", &jfs))
 			{
 				struct json_object	*jtapehandler;
+				uint32_t		fs_new_user_quota;
+
+				if (json_object_object_get_ex(jstation, "fileserver-new-user-quota", &jtapehandler)) // Temp use of jtapehandler
+					fs_new_user_quota = json_object_get_int(jtapehandler);
+				else
+					fs_new_user_quota = FS_DEFAULT_NEW_USER_QUOTA; // 10Mb
 
 				if (json_object_object_get_ex(jstation, "fileserver-tapehandler", &jtapehandler))
-					eb_device_init_fs(net, stn, (char *) json_object_get_string(jfs), (char *) json_object_get_string(jtapehandler));
+					eb_device_init_fs(net, stn, (char *) json_object_get_string(jfs), (char *) json_object_get_string(jtapehandler), fs_new_user_quota);
 				else
-					eb_device_init_fs(net, stn, (char *) json_object_get_string(jfs), (char *) FS_DEFAULT_TAPE_HANDLER);
+					eb_device_init_fs(net, stn, (char *) json_object_get_string(jfs), (char *) FS_DEFAULT_TAPE_HANDLER, fs_new_user_quota);
 			}
 
 			if (json_object_object_get_ex(jstation, "pipe-path", &jpipepath))
@@ -10311,7 +10317,7 @@ int eb_readconfig(char *f, char *json)
 
 				json_object_object_add(divert, "fileserver-path", json_object_new_string(eb_getstring(line, &matches[2])));
 #else
-				eb_device_init_fs (net, stn, eb_getstring(line, &matches[2]), FS_DEFAULT_TAPE_HANDLER);
+				eb_device_init_fs (net, stn, eb_getstring(line, &matches[2]), FS_DEFAULT_TAPE_HANDLER, FS_DEFAULT_NEW_USER_QUOTA);
 #endif
 
 			}
