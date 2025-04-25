@@ -51,7 +51,7 @@ FSOP(41)
 			uint8_t printer;
 			int account = 0;
 			char pname[7], banner[24];
-			uint8_t control, status;
+			uint8_t control, status, printertype;
 			short user;
 
 			printer = *(data+6) - 1; // we zero base; the spec is 1-8
@@ -60,7 +60,7 @@ FSOP(41)
 
 			if (!get_printer_info(f->server->net, f->server->stn,
 				printer,
-				pname, banner, &control, &status, &user))
+				pname, banner, &control, &status, &user, &printertype))
 			{
 				fsop_error(f, 0xff, "Unknown printer");
 				return;
@@ -100,7 +100,7 @@ FSOP(41)
 			strncpy(banner, data+16, 23);
 
 			if (set_printer_info(f->server->net, f->server->stn,
-				printer, pname, banner, control, user))
+				printer, pname, banner, control, user, 0xFF))
 			{
 				reply.p.data[reply_length++] =  0;
 				reply.p.data[reply_length++] =  0;
@@ -178,7 +178,7 @@ FSOP(41)
 			uint8_t numret = 0; // Number returned
 
 			char pname[7], banner[24];
-			uint8_t status, control;
+			uint8_t status, control, printertype;
 			short account;
 
 			number = *(data+6); start = *(data+7);
@@ -189,7 +189,7 @@ FSOP(41)
 			for (count = start; count < (start + number); count++)
 			{
 				if (get_printer_info(f->server->net, f->server->stn,
-					count, pname, banner, &control, &status, &account))
+					count, pname, banner, &control, &status, &account, &printertype))
 				{
 
 					snprintf(&(reply.p.data[reply_length]), 7, "%-6.6s", pname);
@@ -211,7 +211,7 @@ FSOP(41)
 					reply.p.data[reply_length++] = (control & 0x04) >> 2; // Account required;
 					reply.p.data[reply_length++] = account & 0xff;
 					reply.p.data[reply_length++] = (account & 0xff00) >> 8;
-					reply.p.data[reply_length++] = 1; // Always say Parallel
+					reply.p.data[reply_length++] = printertype; 
 					reply.p.data[reply_length++] = 0; // 2nd auto number
 					reply.p.data[reply_length++] = 0; // reserved
 					reply.p.data[reply_length++] = 0; // reserved

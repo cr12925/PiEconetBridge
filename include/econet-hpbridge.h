@@ -184,9 +184,14 @@ struct __eb_printjob {
 /* Define a printer associated with a virtual station
 */
 
+#define EB_PRINTER_PARALLEL 0x01
+#define EB_PRINTER_SERIAL 0x02
+#define EB_PRINTER_OTHER 0x03
+
 struct __eb_printer { // Struct used to hold printer definitions on local emulation stations
 	uint8_t		priority; // SJ Printer priority
 	uint8_t		isdefault; // 1 if this a default printer pool member
+	uint8_t		printertype; // See #define above
 	char		acorn_name[7]; // Acorn printer name
 	char		unix_name[128]; // Unix printer name
 	char		handler[256]; // Print handler path
@@ -863,7 +868,7 @@ extern uint8_t	eb_device_init_singletrunk (char *, uint16_t, uint16_t, char *, s
 extern uint8_t	eb_device_init_multitrunk (char *, char *, uint16_t, int, uint16_t);
 extern uint8_t 	eb_device_init_dynamic (uint8_t, uint8_t, struct __eb_fw_chain *, struct __eb_fw_chain *);
 extern uint8_t	eb_device_init_fs (uint8_t, uint8_t, char *, char *, uint32_t);
-extern uint8_t	eb_device_init_ps (uint8_t, uint8_t, char *, char *, char *, uint8_t, uint8_t);
+extern uint8_t	eb_device_init_ps (uint8_t, uint8_t, char *, char *, char *, uint8_t, uint8_t, uint8_t);
 extern uint8_t 	eb_device_init_ps_handler (uint8_t, uint8_t, char *, char *);
 extern uint8_t	eb_device_init_ip (uint8_t, uint8_t, char *, uint32_t, uint32_t);
 extern uint8_t	eb_device_init_pipe (uint8_t, uint8_t, char *, uint8_t);

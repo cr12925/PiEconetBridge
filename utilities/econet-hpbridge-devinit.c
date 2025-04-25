@@ -326,7 +326,7 @@ uint8_t eb_device_init_fs (uint8_t net, uint8_t stn, char *rootpath, char *tapeh
  * Create a PS on net.stn for acorn printer 'acorn' and unix printer 'unix' and user (restriction) 'user'
  */
 
-uint8_t eb_device_init_ps (uint8_t net, uint8_t stn, char * acorn_printer, char * unix_printer, char * user, uint8_t priority, uint8_t is_default)
+uint8_t eb_device_init_ps (uint8_t net, uint8_t stn, char * acorn_printer, char * unix_printer, char * user, uint8_t priority, uint8_t is_default, uint8_t printertype)
 {
 
 	struct __eb_device 	* existing;
@@ -347,6 +347,7 @@ uint8_t eb_device_init_ps (uint8_t net, uint8_t stn, char * acorn_printer, char 
 	printer->status = PRN_IN_READY | PRN_OUT_READY;
 	printer->control = PRNCTRL_DEFAULT;
 	printer->printjobs = NULL;
+	printer->printertype = printertype;
 	strcpy (printer->handler, ""); // Null handler
 
 	strcpy (printer->user, user); // 'user' is zero-length string if not restricted, so we just copy it

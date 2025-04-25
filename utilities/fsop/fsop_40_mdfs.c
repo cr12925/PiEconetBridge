@@ -32,6 +32,12 @@ FSOP(40)
 
 	uint32_t	space;
 
+	if (FSOP_ARG != 0)
+	{
+		fsop_error(f, 0xFF, "Bad argument");
+		return;
+	}
+
 	start = *(f->data+6) + (*(f->data + 7) << 8);
 	count = *(f->data + 8) + (*(f->data + 9) << 8);
 	disc = *(f->data + 10); /* We ignore this - quotas are global */

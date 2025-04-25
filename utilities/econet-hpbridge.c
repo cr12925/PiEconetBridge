@@ -8544,8 +8544,8 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 				while (pcount < plength)
 				{
-					struct json_object	*jprinter, *jacorn, *junix, *jpriority, *jdefault, *jhandler, *jusers, *juser;
-					uint8_t		priority = 1, pdefault = 1;
+					struct json_object	*jprinter, *jacorn, *junix, *jpriority, *jdefault, *jhandler, *jusers, *juser, *jptype;
+					uint8_t		priority = 1, pdefault = 1, printertype = EB_PRINTER_OTHER;
 
 
 					jprinter = json_object_array_get_idx(jprinters, pcount);
@@ -8558,6 +8558,12 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 					if (json_object_object_get_ex(jprinter, "priority", &jpriority))
 						priority = json_object_get_int(jpriority);
+
+					if (json_object_object_get_ex(jprinter, "parallel", &jptype) && json_object_get_boolean(jptype))
+						printertype = EB_PRINTER_PARALLEL;
+					else if (json_object_object_get_ex(jprinter, "serial", &jptype) && json_object_get_boolean(jptype))
+						printertype = EB_PRINTER_SERIAL;
+
 
 					if (json_object_object_get_ex(jprinter, "default", &jdefault) && !json_object_get_boolean(jdefault))
 						pdefault = 0;
@@ -8577,7 +8583,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 					eb_device_init_ps (net, stn, (char *) json_object_get_string(jacorn),
 							(char *) json_object_get_string(junix),
 							juser ? (char *) json_object_get_string(juser) : "",
-							priority, pdefault);
+							priority, pdefault, printertype);
 						
 					if (json_object_object_get_ex(jprinter, "handler", &jhandler))
 						eb_device_init_ps_handler (net, stn, (char *) json_object_get_string(jacorn), (char *) json_object_get_string(jhandler));	
@@ -10363,7 +10369,7 @@ int eb_readconfig(char *f, char *json)
 #ifdef EB_JSONCONFIG
 				json_object_array_add(jps, jprinter);
 #else
-				eb_device_init_ps (net, stn, acorn_printer, unix_printer, user, 1, 1);
+				eb_device_init_ps (net, stn, acorn_printer, unix_printer, user, 1, 1, EB_PRINTER_OTHER);
 #endif
 
 			}
@@ -12581,7 +12587,7 @@ int8_t get_printer(unsigned char net, unsigned char stn, char *pname)
 }
 
 /* Get / Set Printer Info for the Fileserver */
-uint8_t get_printer_info(unsigned char net, unsigned char stn, uint8_t printer_id, char *pname, char *banner, uint8_t *control, uint8_t *status, short *user)
+uint8_t get_printer_info(unsigned char net, unsigned char stn, uint8_t printer_id, char *pname, char *banner, uint8_t *control, uint8_t *status, short *user, uint8_t *printertype)
 {
 
 	struct __eb_device	*p;
@@ -12612,11 +12618,12 @@ uint8_t get_printer_info(unsigned char net, unsigned char stn, uint8_t printer_i
 	*control = printer->control;
 	*status = printer->status;
 	*user = 0; // We need to convert the name to a userid somehow here.... ignore for now.
+	*printertype = printer->printertype;
 
 	return 1;
 }
 
-uint8_t set_printer_info(unsigned char net, unsigned char stn, uint8_t printer_id, char *pname, char *banner, uint8_t control, ushort user)
+uint8_t set_printer_info(unsigned char net, unsigned char stn, uint8_t printer_id, char *pname, char *banner, uint8_t control, ushort user, uint8_t printertype)
 {
 
         struct __eb_device      *p;
@@ -12644,6 +12651,7 @@ uint8_t set_printer_info(unsigned char net, unsigned char stn, uint8_t printer_i
 
 	snprintf (printer->acorn_name, 7, "%6.6s", pname);
 	printer->control = control;
+	if (printertype != 0xFF) printer->printertype = printertype; // 0xFF used to signal "don't update"
 
 	// Deal with user ID here...
 

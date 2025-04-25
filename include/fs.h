@@ -907,8 +907,8 @@ extern uint32_t eb_get_local_seq(struct __eb_device *);
 extern int8_t get_printer(unsigned char, unsigned char, char*);
 
 // printer information routines in econet-bridge.c
-extern uint8_t get_printer_info (unsigned char, unsigned char, uint8_t, char *, char *, uint8_t *, uint8_t *, short *);
-extern uint8_t set_printer_info (unsigned char, unsigned char, uint8_t, char *, char *, uint8_t, ushort);
+extern uint8_t get_printer_info (unsigned char, unsigned char, uint8_t, char *, char *, uint8_t *, uint8_t *, short *, uint8_t *);
+extern uint8_t set_printer_info (unsigned char, unsigned char, uint8_t, char *, char *, uint8_t, ushort, uint8_t);
 extern uint8_t get_printer_total (unsigned char, unsigned char);
 extern void send_printjob (char *, uint8_t, uint8_t, uint8_t, uint8_t, char *, char *, char *, char *);
 extern char * get_user_print_handler (uint8_t, uint8_t, uint8_t, char *, char *);
