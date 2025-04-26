@@ -13389,7 +13389,7 @@ void * eb_loopdetect_thread (void *data)
 			if (!
 				(
 					(last_root_id_seen > EB_CONFIG_TRUNK_LOOPDETECT_ID)
-				||	((time(NULL) - when_root_id_seen) > EB_CONFIG_TRUNK_LOOPDETECT_INTERVAL)
+				||	((time(NULL) - when_root_id_seen) > (EB_CONFIG_TRUNK_LOOPDETECT_INTERVAL+2))
 				)
 			) // Not root bridge
 			{
