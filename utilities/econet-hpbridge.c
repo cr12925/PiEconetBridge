@@ -2685,10 +2685,16 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 			&&	(hostdata = loopdetect_hostdata)
 			)
 			{
+				char	interface_string[25];
+
 				/* This is one of ours coming back! - We have a loop */
 				/* Disable the source */
 				source->loop_blocked = 1;
 				send_broadcast = 0; // Don't send onwards
+				snprintf (interface_string, 24, "%s %d",
+						((source->type == EB_DEF_WIRE) ? "Wire" : "Trunk"),
+					 	((source->type == EB_DEF_WIRE) ? source->net : source->trunk.local_port));
+				eb_debug (0, 1, "BRIDGE", "%8s %3d.%3d Loop detected. Blocking interface %s", interface_string);
 			}
 			else
 			{
@@ -13363,7 +13369,7 @@ void * eb_loopdetect_thread (void *data)
 
 	eb_thread_ready();
 
-	eb_debug (0, 1, "BRIDGE", "%8s %7s Bridge loop detect thread running", "", "");
+	eb_debug (0, 1, "BRIDGE", "%-8s %7s Bridge loop detect thread running", "Core", "");
 
 	if (!EB_CONFIG_TRUNK_LOOPDETECT_DISABLE)
 	{
@@ -13388,9 +13394,9 @@ void * eb_loopdetect_thread (void *data)
 			) // Not root bridge
 			{
 				if (is_root)
-					eb_debug (0, 1, "BRIDGE", "%8s %7s Not root bridge - root is %08X", "", "", last_root_id_seen);
+					eb_debug (0, 1, "BRIDGE", "%-8s %7s Not root bridge - root is %08X", "Core", "", last_root_id_seen);
 
-				eb_debug (0, 3, "BRIDGE", "%8s %7s Bridge loop detect - not root bridge - sleeping %dms - last_root_id_seen = %08X, mine = %08X, now-last_seen = %d", "", "", usleep_time / 1000, last_root_id_seen, EB_CONFIG_TRUNK_LOOPDETECT_ID, (time(NULL) - when_root_id_seen));
+				eb_debug (0, 3, "BRIDGE", "%-8s %7s Bridge loop detect - not root bridge - sleeping %dms - last_root_id_seen = %08X, mine = %08X, now-last_seen = %d", "Core", "", usleep_time / 1000, last_root_id_seen, EB_CONFIG_TRUNK_LOOPDETECT_ID, (time(NULL) - when_root_id_seen));
 
 				is_root = 0;
 				pthread_mutex_unlock (&loopdetect_mutex);
@@ -13400,11 +13406,11 @@ void * eb_loopdetect_thread (void *data)
 			else // We appear to be the root bridge
 			{
 				if (!is_root)
-					eb_debug (0, 1, "BRIDGE", "%8s %7s Elected root bridge", "", "");
+					eb_debug (0, 1, "BRIDGE", "%-8s %7s Elected root bridge", "Core", "");
 				
 				is_root = 1;
 
-				eb_debug (0, 3, "BRIDGE", "%8s %7s Bridge loop detect - root bridge sending probes", "", "");
+				eb_debug (0, 3, "BRIDGE", "%-8s %7s Bridge loop detect - root bridge sending probes", "Core", "");
 
 				while (d)
 				{
