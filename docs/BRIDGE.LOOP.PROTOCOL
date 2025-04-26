@@ -1,0 +1,91 @@
+This document describes the HPB's loop detection algorithm
+for trunks and Econet devices.
+
+On startup, the HPB will pick a randome 32-bit integer as
+its bridge ID. This can also be configured by its operator in
+case of need. The purpose is to enable the local bridge to
+identify its own probe packets, and also to determine whether
+there is a bridge with a lower bridge ID on the network.
+
+A lower bridge ID will mean that the HPB with that ID assumes
+the role of 'root bridge' - see below.
+
+Root bridge election and the Listen phase
+-----------------------------------------
+
+On startup, the bridge will wait [BRIGDE ID] ms and listen
+for incoming probes. If any of them has a lower bridge ID,
+then it will record that bridge ID and when it saw the 
+probe. This is called the "listen" phase. By waiting
+a time proportionate to the bridge ID, bridges will not
+flood the network with probes for bridge IDs which are
+unlikely to get elected to be the root bridge, because
+in theory they are likely to have received the (putative)
+root bridge's (lower) ID before they would have attempt to 
+send their own probes.
+
+Operational phase
+-----------------
+
+Once a bridge has determined that it has the lowest bridge
+ID (i.e. it has been elected the 'root' bridge), it will send
+out probes on each Econet and Trunk interface every 10s
+(by default). The probes contain:
+
+- The 32 bit root bridge ID (so that other bridges can see if they
+  have priority or not)
+- A 32 bit value which is related to the bridge's hostname
+  which is used to distinguish between two identical root
+  bridge IDs. Lower is more electable.
+- A 32 bit  interface number (which is calculated incrementally
+  when a bridge starts up).
+- A hop count, which starts at 0.
+
+The probes are broadcast traffic sent to port &CF.
+They are sent from the bridge's bridge source address
+on any given interface (same as, e.g., WhatNet responses).
+They are forwarded by all bridges including Acorn/SJ 
+devices.
+
+During this phase:
+
+- Where a bridge which is not the root bridge receives
+  a probe packet, it will be forwarded to all interfaces.
+- If the bridge is an HPB, it will also increment the hop
+  count for diagnostic purposes.
+- Each bridge will record the bridge ID received and when,
+  so as to determine whether in fact the current root bridge
+  has gone away and it has become the root (in which case
+  it will treat itself as elected).
+- If a root bridge receives a probe with its own ID and 
+  host data, then there's a loop. The root bridge will
+  disable the receiving interface, save for:
+    - Bridge resets (which cause a return to the listen phase)
+    - Non-bridged traffic on local Econets
+
+Pooled networks
+---------------
+
+Where all nets are pools on an interface, the HPB will
+not send probes, and will ignore any that are received.
+This creates a horizon between the pooled nets and the
+rest of the infrastructure. What happens down those 
+networks is a matter for someone else, because everything
+gets hidden behind local network numbers.
+
+This only applies if *all* networks on the trunk/Econet
+are pooled. In this way, also, a complex network which is
+ultimately all pooled at a central point does its own
+loop detection.
+
+Tuning
+------
+
+In networks where, for example, the loop may be distant
+from a machine which may get elected as the root bridge,
+it may be that it is wise to put a deliberate low bridge ID
+on some central bridge in order to get a more useful
+loop detection strategy going. Otherwise all that will happen
+is that the root bridge (which may be out on a limb) will
+turn off the limb...
+

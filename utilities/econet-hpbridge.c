@@ -39,7 +39,17 @@ extern uint8_t fs_set_syst_bridgepriv;
 
 char	tar_path[PATH_MAX];
 
+uint32_t	interface_index = 0x1000; // Used for loop detection
+uint32_t	last_root_id_seen = 0xFFFFFFFF; // See header
+time_t		when_root_id_seen = 0;
+uint32_t	loopdetect_hostdata; // See header
+pthread_t	loopdetect_thread;
+pthread_mutex_t	loopdetect_mutex;
+void *		eb_loopdetect_thread(void *);
+
 // Some globals
+
+char	hostname[255];
 
 uint8_t	dumpconfig = 0;
 
@@ -992,6 +1002,7 @@ struct __eb_device * eb_device_init (uint8_t net, uint16_t type, uint8_t config)
 	{
 		if (net) p->net = net;
 		p->type = type;
+		p->index = interface_index++;
 
 		if (pthread_mutex_init(&(p->qmutex_in), NULL) == -1)
 			eb_debug (1, 0, "CONFIG", "Cannot initialize queue mutex inbound for net %d", net);
@@ -2118,6 +2129,9 @@ void eb_bridge_reset (struct __eb_device *trigger)
 	{
 		if (dev->type == EB_DEF_WIRE)
 		{
+			/* Unlock it */
+			dev->loop_blocked = 0;
+
 			pthread_mutex_lock (&(dev->wire.stations_lock));
 
 			memcpy (&(dev->wire.stations), &(dev->wire.stations_initial), sizeof (dev->wire.stations));
@@ -2140,10 +2154,25 @@ void eb_bridge_reset (struct __eb_device *trigger)
 
 	}
 
+	/* Unlock the trunks */
+
+	dev = trunks;
+	while (dev)
+	{
+		dev->loop_blocked = 0;
+		dev = dev->next;
+	}
+
 	// Send bridge reset onwards to sources other than trigger - use eb_bridge_update with correct ctrl byte
 
 	eb_bridge_update (trigger, BRIDGE_RESET); // Reset
 
+	/* Reset the loop detector */
+
+	pthread_mutex_lock(&(loopdetect_mutex));
+	last_root_id_seen = 0xFFFFFFFF; /* Detected by the loop detector as meaning it needs to listen again */
+	when_root_id_seen = 0; /* Make sure the data is invalid */
+	pthread_mutex_unlock(&(loopdetect_mutex));
 }
 
 /* 
@@ -2371,7 +2400,7 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 			struct __econet_packet_aun 	*reply;
 			char				reply_diags[384];
 
-			char				hostname[256];
+			//char				hostname[256]; // Now global
 
 			// We know this network - we'll reply, increment the hop count & forward it unless the network is local to us.
 
@@ -2384,8 +2413,6 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 				else if (route->type == EB_DEF_NULL && route->null.divert[stn])	route = route->null.divert[stn];
 			}
 				
-			gethostname(hostname, 255);
-
 			switch (route->type)
 			{
 				case EB_DEF_WIRE:
@@ -2642,14 +2669,53 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 	
 		struct __eb_device		*d;
 
+		uint32_t	loop_id;
+		uint64_t	hostdata;
+		uint8_t		send_broadcast = 1;
+		struct __eb_loop_probe	*probe;
+
+		if (p->p.port == ECONET_BRIDGE_LOOP_PROBE)
+		{
+			probe = (struct __eb_loop_probe *) &(p->p.data);
+			loop_id = ntohl (probe->root);
+			hostdata = ntohl (probe->hostdata);
+
+			if (
+				(loop_id == EB_CONFIG_TRUNK_LOOPDETECT_ID) 
+			&&	(hostdata = loopdetect_hostdata)
+			)
+			{
+				/* This is one of ours coming back! - We have a loop */
+				/* Disable the source */
+				source->loop_blocked = 1;
+				send_broadcast = 0; // Don't send onwards
+			}
+			else
+			{
+				/* Update our loop detection records */
+
+				pthread_mutex_lock (&loopdetect_mutex);
+				if (	(time(NULL) - when_root_id_seen > EB_CONFIG_TRUNK_LOOPDETECT_INTERVAL) 
+				||	(loop_id <= last_root_id_seen && hostdata < loopdetect_hostdata)
+				)
+				{
+					when_root_id_seen = time(NULL);
+					last_root_id_seen = loop_id;
+				}
+				pthread_mutex_unlock (&loopdetect_mutex);
+
+				probe->hops++; /* Increment hop count */
+			}
+		}
+
 		d = devices; // We use this list because if we cycle through networks[], we may see the same network twice if it's had an inbound bridge advert that it accepted. This list has each device (WIRE, TRUNK, NULL) only once. Within WIRE & NULL, we need to look for diverts to send to as well.
 
-		while (d)
+		if (send_broadcast) while (d)
 		{
-			if (d->type == EB_DEF_WIRE)
+			if (d->type == EB_DEF_WIRE && (p->p.port != ECONET_BRIDGE_LOOP_PROBE || !d->all_nets_pooled)) /* Send all non-probe traffic, or if it's probe traffic don't send it if all nets are pooled because we don't care */
 				eb_send_broadcast(source, d, p, length);
 
-			if (d->type == EB_DEF_NULL || d->type == EB_DEF_WIRE)
+			if (p->p.port != ECONET_BRIDGE_LOOP_PROBE && (d->type == EB_DEF_NULL || d->type == EB_DEF_WIRE)) /* Don't send loop probes to diverts */
 				eb_send_broadcast_diverted(source, d, p, length);
 
 			d = d->next;
@@ -2661,7 +2727,8 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 
 		while (d)
 		{
-			eb_send_broadcast(source, d, p, length);
+			if (p->p.port != ECONET_BRIDGE_LOOP_PROBE || !d->all_nets_pooled)
+				eb_send_broadcast(source, d, p, length);
 			d = d->next;
 		}
 
@@ -6293,6 +6360,21 @@ static void * eb_device_despatcher (void * device)
 
 				eb_add_stats(&(d->statsmutex), &(d->b_out), length); // Traffic stats - local pipe producing traffic outbound to the bridge
 				
+				/* If this device is loop_blocked, then dump things we aren't interested in */
+
+				if (d->loop_blocked)
+				{
+					if (!
+						(
+							(d->type == EB_DEF_WIRE && packet.p.srcnet == 0)
+						||	(	(packet.p.port == BRIDGE_PORT)
+							&&	(packet.p.ctrl == BRIDGE_RESET)
+							)
+						)
+					   )
+						dump_traffic = 1;
+				}
+
 				/* Apply inbound firewall. Note that eb_firewall() returns an EB_FW_ACCEPT if the chain
 				 * it is given is NULL
 				 */
@@ -6790,6 +6872,20 @@ static void * eb_device_despatcher (void * device)
 				ack.p.seq = p->p->p.seq;
 				ack.p.port = p->p->p.port;
 				ack.p.ctrl = p->p->p.ctrl;
+
+				/* Dump traffic we don't want if this device is loop blocked */
+
+				if (d->loop_blocked)
+				{
+					if (!
+						(
+							(p->p->p.port == BRIDGE_PORT && p->p->p.ctrl == BRIDGE_RESET)
+						||	(d->type == EB_DEF_WIRE && p->p->p.dstnet == d->net)
+						)
+					)
+						remove = 1;
+
+				}
 
 				if (!remove && p->p->p.port == 0x99 && p->p->p.aun_ttype == ECONET_AUN_DATA) // Track fileservers
 					eb_mark_fileserver(p->p->p.dstnet, p->p->p.dststn);
@@ -9715,6 +9811,7 @@ int eb_parse_json_config(struct json_object *jc)
 
 	{
 		struct json_object	*j, *jgen;
+		uint8_t	hostcount, hostnamelen;
 
 		json_object_object_get_ex(jc, "general", &jgen);
 		if (!jgen)
@@ -9758,6 +9855,31 @@ int eb_parse_json_config(struct json_object *jc)
 					strcpy(y,json_object_get_string(j));\
 				}
 
+		srandom(time(NULL));
+		config.trunk_loopdetect_id = random();
+		config.trunk_loopdetect_disable = 0; /* Not disabled */
+		gethostname (hostname, 255);
+		loopdetect_hostdata = 0;
+		EB_CONFIG_TRUNK_LOOPDETECT_INTERVAL = 10;
+
+		/* Build our hostdata, to differentiate between accidentally identical loopdetect IDs */
+
+		hostcount = 0;
+		hostnamelen = strlen(hostname);
+
+		while (hostcount < 8)
+		{
+			loopdetect_hostdata = loopdetect_hostdata << 4;
+			loopdetect_hostdata |= ((hostcount >= hostnamelen) ? 0x0F : (hostname[hostcount] & 0x0F));
+			hostcount++;
+		}	
+		
+		if (pthread_mutex_init(&loopdetect_mutex, NULL) == -1)
+		{
+			fprintf (stderr, "Failed to initialize loop detect mutex.\n");
+			exit (EXIT_FAILURE);
+		}
+
 		EB_JSON_TUNABLE_BOOL("disable-econet", EB_CONFIG_LOCAL);
 		EB_JSON_TUNABLE_INT("debug-level", EB_DEBUG_LEVEL);
 		if (!j) // No debug-level
@@ -9787,6 +9909,9 @@ int eb_parse_json_config(struct json_object *jc)
 		EB_JSON_TUNABLE_INT("wire-update-qty", EB_CONFIG_WIRE_UPDATE_QTY);
 		EB_JSON_TUNABLE_INT("trunk-reset-qty", EB_CONFIG_TRUNK_RESET_QTY);
 		EB_JSON_TUNABLE_INT("trunk-update-qty", EB_CONFIG_TRUNK_UPDATE_QTY);
+		EB_JSON_TUNABLE_INT("trunk-loopdetect-id", EB_CONFIG_TRUNK_LOOPDETECT_ID);
+		EB_JSON_TUNABLE_BOOL("trunk-loopdetect-disable", EB_CONFIG_TRUNK_LOOPDETECT_DISABLE);
+		EB_JSON_TUNABLE_INT("trunk-loopdetect-interval", EB_CONFIG_TRUNK_LOOPDETECT_INTERVAL);
 		EB_JSON_TUNABLE_INT("bridge-query-interval", EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL);
 		EB_JSON_TUNABLE_BOOL("bridge-loop-detect", EB_CONFIG_BRIDGE_LOOP_DETECT);
 		EB_JSON_TUNABLE_BOOL("pool-reset", EB_CONFIG_POOL_RESET_FWD);
@@ -9794,8 +9919,6 @@ int eb_parse_json_config(struct json_object *jc)
 		EB_JSON_TUNABLE_INT("fs-stats-port", EB_CONFIG_FS_STATS_PORT);
 		EB_JSON_TUNABLE_BOOL("malloc-debug", EB_DEBUG_MALLOC);
 		EB_JSON_TUNABLE_BOOL("normalize-debug", normalize_debug);
-		strcpy (tar_path, "/usr/bin/tar");
-		EB_JSON_TUNABLE_STRING("tar-path", tar_path);
 
 		/* This one's a negative bool */
 
@@ -12427,6 +12550,17 @@ int main (int argc, char **argv)
 
 	}
 
+	/* Start the loopdetect thread */
+
+	{
+		int err;
+	
+		if ((err = pthread_create(&loopdetect_thread, NULL, eb_loopdetect_thread, NULL)))
+			eb_debug (1, 0, "MAIN", "Thread creation for loopdetect failed: %s", strerror(err));
+
+		eb_thread_started();
+		pthread_detach(loopdetect_thread);
+	}
 
 	/* See if all the threads are in the ready state */
 
@@ -12442,6 +12576,10 @@ int main (int argc, char **argv)
 	}
 
 	pthread_mutex_unlock (&threadcount_mutex);
+
+	if (!EB_CONFIG_TRUNK_LOOPDETECT_DISABLE)
+		eb_debug (0, 1, "BRIDGE", "%-8s         Bridge loop detection identifier 0x%08X", "Core", EB_CONFIG_TRUNK_LOOPDETECT_ID);
+	
 
 	eb_debug (0, 1, "MAIN", "%-8s         Engine room to bridge: %d engines at full chat. Wait for traffic.", "Core", threads_ready);
 
@@ -13158,4 +13296,138 @@ void eb_port_deallocate(struct __eb_device *d, uint8_t port)
 
 	eb_debug (0, 2, "BRIDGE", "%-8s %3d.%3d Port &%02X de-allocated", eb_type_str(d->type), d->net, d->local.stn, port);
 
+}
+
+/* Bridge loop detect routines */
+
+/*
+ * eb_loopdetect_send_probe
+ *
+ * Sends a loop detect probe on a given interface
+ */
+
+void eb_loopdetect_send_probe (struct __eb_device *d)
+{
+	struct __econet_packet_aun 	*p;
+	uint8_t	sender_net;
+	struct __eb_loop_probe		probe;
+
+	if (d->type != EB_DEF_WIRE && d->type != EB_DEF_TRUNK)
+		return;
+
+	if (d->all_nets_pooled)
+		return;
+
+	p = eb_malloc (__FILE__, __LINE__, "TRUNK", "Trunk loop probe packet", 12 + sizeof(struct __eb_loop_probe));
+
+	if (!p) return;
+
+	sender_net = eb_bridge_sender_net (d);
+
+	p->p.srcnet = sender_net;
+	p->p.srcstn = 0;
+	p->p.dstnet = p->p.dststn = 0xFF;
+	p->p.aun_ttype = ECONET_AUN_BCAST;
+	p->p.port = ECONET_BRIDGE_LOOP_PROBE;
+	p->p.ctrl = 0x80;
+	p->p.seq = 0x00;
+
+	probe.root = htonl(EB_CONFIG_TRUNK_LOOPDETECT_ID);
+	probe.hostdata = htonl(loopdetect_hostdata);
+	probe.src_int = htonl(d->index);
+	probe.hops = 0x00;
+
+	memcpy (&(p->p.data), &probe, 13);
+
+	eb_enqueue_input(d, p, 13);
+}
+
+/* 
+ * eb_loopdetect_thread
+ * 
+ *
+ * Waits (bridge id)ms so that the receiver threads can 
+ * receive probes in case they are lower than ours...
+ *
+ * If at that stage nobody has sent a probe with an ID
+ * less than ours, we send probes every 10 seconds until
+ * a lower probe turns up.
+ *
+ * If the bridge core signals it's had a bridge reset,
+ * we wait again.
+ *
+ */
+
+void * eb_loopdetect_thread (void *data)
+{
+
+	eb_thread_ready();
+
+	eb_debug (0, 1, "BRIDGE", "%8s %7s Bridge loop detect thread running", "", "");
+
+	if (!EB_CONFIG_TRUNK_LOOPDETECT_DISABLE)
+	{
+		struct __eb_device *d = devices;
+		uint8_t	is_root = 0;
+		uint32_t	usleep_time;
+
+		usleep_time = EB_CONFIG_TRUNK_LOOPDETECT_ID >> 6; /* Max is 0xffffffff >> 6 us, which is about 64,000,000us, or 64s */
+
+		while (1)
+		{
+			pthread_mutex_lock (&loopdetect_mutex);
+
+			if (last_root_id_seen == 0xFFFFFFFF && !is_root) /* Rogue - set when there's been a bridge reset, so we sleep */
+				usleep(usleep_time); /* Wait to see if anyone more eligible sends a probe */
+
+			if (!
+				(
+					(last_root_id_seen > EB_CONFIG_TRUNK_LOOPDETECT_ID)
+				||	((time(NULL) - when_root_id_seen) > EB_CONFIG_TRUNK_LOOPDETECT_INTERVAL)
+				)
+			) // Not root bridge
+			{
+				if (is_root)
+					eb_debug (0, 1, "BRIDGE", "%8s %7s Not root bridge - root is %08X", "", "", last_root_id_seen);
+
+				eb_debug (0, 3, "BRIDGE", "%8s %7s Bridge loop detect - not root bridge - sleeping %dms - last_root_id_seen = %08X, mine = %08X, now-last_seen = %d", "", "", usleep_time / 1000, last_root_id_seen, EB_CONFIG_TRUNK_LOOPDETECT_ID, (time(NULL) - when_root_id_seen));
+
+				is_root = 0;
+				pthread_mutex_unlock (&loopdetect_mutex);
+				if (last_root_id_seen != 0xFFFFFFFF)
+					usleep(usleep_time); /* Wait to see if anyone more eligible sends a probe */
+			}
+			else // We appear to be the root bridge
+			{
+				if (!is_root)
+					eb_debug (0, 1, "BRIDGE", "%8s %7s Elected root bridge", "", "");
+				
+				is_root = 1;
+
+				eb_debug (0, 3, "BRIDGE", "%8s %7s Bridge loop detect - root bridge sending probes", "", "");
+
+				while (d)
+				{
+					if (d->type == EB_DEF_WIRE)
+						eb_loopdetect_send_probe(d);
+					d = d->next;
+				}
+
+				d = trunks;
+
+				while (d)
+				{
+					eb_loopdetect_send_probe(d);
+					d = d->next;
+				}
+
+				pthread_mutex_unlock (&loopdetect_mutex);
+				sleep (EB_CONFIG_TRUNK_LOOPDETECT_INTERVAL);
+			}
+		}
+	}
+
+	eb_debug (0, 1, "BRIDGE", "%8s %7s Bridge loop detect thread ending - loop detection disabled", "", "");
+
+	return NULL;
 }

@@ -128,6 +128,28 @@
 #define ECONET_BRIDGE_KEEPALIVE_CTRL	0xD0	// Ctrl byte used for trunk keepalive packets
 #define ECONET_BRIDGE_LOOP_PROBE	0xCF	// Used to for loop probes to see if we need to shut a device down
 
+/* 
+ * struct containing the data elements of 
+ * a loop probe
+ *
+ * The contents are always in network bytes order
+ *
+ */
+
+struct __eb_loop_probe {
+	uint32_t	root; /* ID of root bridge - calculated as a random number unless set by operator. 2.1 and Acorn/SJ won't do this, but we'll still detect loops */
+	uint32_t	hostdata; /* First 16 characters of hostname, & 0x0f, glued into 8 bytes - used to differentiate betwen duplicate IDs - highest wins. */
+	uint32_t	src_int; /* ID of soruce interface on root bridge, so it can tell which probe has come back */
+	uint8_t		hops; /* Set to 0 and incremented by each bridge that forwards the packet, except Acorn/SJ bridges */
+};
+
+extern uint32_t	last_root_id_seen; // Stores the last root ID seen, if it was greater than the last and time hasn't expired
+extern uint64_t last_hostdata_seend; // Last hostdata seen in case we need to differentiate between identical root IDs
+extern time_t   when_root_id_seen; // Time we saw the root ID above. If this is within loopdetect interval and the ID is less than the last one, disregard it. Update the last one if it's greater. If the interval expires and our root ID is greater than the last one seen, send probes.
+extern uint64_t	loop_hostdata;
+extern pthread_t	loopdetect_thread;
+extern pthread_mutex_t	loopdetect_mutex;
+
 struct __eb_packetqueue {
 	struct __econet_packet_aun 	*p;
 	struct timeval 			last_tx; // Last transmission attempt on an input queue (i.e. sending to the destination driver); on an output queue this is when the packet got put on the queue - used to time it out and dump the rest of the queue if need be
@@ -381,6 +403,8 @@ struct __eb_device { // Structure holding information about a "physical" device 
 
 	uint8_t			net; // Network number of this device
 	uint16_t		type; // EB_DEF_TRUNK, WIRE, etc.
+	uint32_t		index; // Index number - all unique, used in bridge loop detection
+	uint8_t			loop_blocked; // Set to 1 if this interface should neither rx nor tx because there's a bridge loop on it. Will be set by the device despatcher for this device when it receives a looped probe from another interface on this bridge. Keepalives will still be sent, and probes will still be forwarded, but on a trunk no other traffic will pass until a bridge reset is received. (Probes are not forwarded if they originated at this bridge...). On a bridge reset, the bridge will wait a random time proportionate to (0xffffffff - bridge root id) & 0xffff0000 >> 16 to see whether some higher numbered bridge assumes the root role. That way, if there's a higher numbered root bridge out there, we'll see it during the "listen" phase. Suggested wait time is 1ms per unit, so the longest possible wait time will be 65 seconds, but in reality for the higher numbered (and thus more likely electable) bridges, the wait will be shorter, and for the less likely bridges, they'll wait longer and discovered their higher-numbered coutnerparts and not bother sending probes at all.
 	pthread_t		listen; // Reader thread - e.g. the one reading from /dev/econet-gpio, or from an AUN listener socket
 	pthread_t		me; // Main despatcher thread
 	pthread_mutex_t		qmutex_in, qmutex_out; // Mutex to local the queues on this device
@@ -646,6 +670,9 @@ struct __eb_config {
 	uint16_t	pool_dead_interval; // Seconds before a pool host will be treated as stale
 	uint8_t		trunk_reset_qty; // Number of Bridge reset copies to send on UDP trunks
 	uint8_t		trunk_update_qty; // Number of Bridge update copies to send on UDP trunks
+	uint32_t	trunk_loopdetect_id; // Random number identifier for this bridge to detect loops. The network will elect a bridge by selecting the highest number. If there is a clash, the probes contain the first 16 characters of the hostname, with the lowest four bits of each byte only taken, and mashed into 8 bytes in the packet. Bridges use the higher value of that to differentiate if there is a duplicate random number.
+	uint8_t		trunk_loopdetect_disable; // 1 = disabled
+	uint8_t		trunk_loopdetect_interval; // Default 10s. Ideally, all bridges in a network should be the same.
 	uint8_t		wire_reset_qty; // Number of bridge reset copies to send on Econet wires
 	uint8_t		wire_update_qty; // Number of bridge update copies to send on Econet wires
 	uint32_t		wire_bridge_query_interval; // Gap between successive IsNet or WhatNet responses to a given station on the wire (ms)
@@ -696,6 +723,9 @@ struct __eb_config {
 #define EB_CONFIG_TRUNK_KEEPALIVE_INTERVAL	(config.trunk_keepalive_interval)
 #define EB_CONFIG_TRUNK_DEAD_INTERVAL		(config.trunk_dead_interval)
 #define EB_CONFIG_TRUNK_KEEPALIVE_CTRL		(config.trunk_keepalive_ctrl)
+#define EB_CONFIG_TRUNK_LOOPDETECT_ID	(config.trunk_loopdetect_id)
+#define EB_CONFIG_TRUNK_LOOPDETECT_DISABLE (config.trunk_loopdetect_disable)
+#define EB_CONFIG_TRUNK_LOOPDETECT_INTERVAL (config.trunk_loopdetect_interval)
 #define EB_CONFIG_POOL_DEAD_INTERVAL	(config.pool_dead_interval)
 #define EB_CONFIG_TRUNK_RESET_QTY	(config.trunk_reset_qty)
 #define EB_CONFIG_TRUNK_UPDATE_QTY	(config.trunk_update_qty)
