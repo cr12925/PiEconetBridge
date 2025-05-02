@@ -804,6 +804,8 @@ void * fsop_backup_thread (void * p)
 		{
 			int count = 0; // Job list
 			uint8_t	drive; // Need to find drive number
+			char cmd_string[128];
+			uint8_t res;
 
 			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler starting backup to %s", s->backup->tapename);
 
@@ -835,10 +837,8 @@ void * fsop_backup_thread (void * p)
 
 			while (count < 8 && s->backup->jobs[count].partition != 0xff)
 			{
-				char cmd_string[128];
 				uint8_t discno; // Need to look that up for each disc
 				struct __fs_disc	*d;
-				uint8_t res;
 				
 				discno = 0xff;
 
@@ -892,6 +892,37 @@ void * fsop_backup_thread (void * p)
 			}
 			
 			s->backup->jobs[0].partition = 0xff;
+
+			/* Dismount the tape. Apparently MDFS does this. */
+
+			sprintf (cmd_string, "umount %s %d",
+				s->backup->tapename,
+				drive); 
+
+			res = fsop_43_tape_handler(s, cmd_string);
+
+			/* See if we have a completion handler */
+
+			if (s->tapecompletionhandler)
+			{
+				int	completion_result;
+				char	completion_cmd[1024];
+
+				snprintf (completion_cmd, 1024, "%s %d %d %s %s",
+						s->tapecompletionhandler,
+						s->net, 
+						s->stn, 
+						s->directory,
+						s->backup->tapename);
+
+				completion_result = system(completion_cmd);
+
+				fs_debug_full(0, 1, s, 0, 0, "Scheduled backup to tape %s ended; completion script attempted, return code %d", s->backup->tapename, completion_result);
+
+			}
+
+			fs_debug_full (0, 1, s, 0, 0, "Scheduled backup to tape %s ended; tape dismounted %ssuccessfully (%s)", s->backup->tapename, (res == 0) ? "" : "UN", fsop_43_tape_errstr(res));
+
 		}
 	}
 

@@ -285,7 +285,7 @@ uint8_t eb_device_init_virtual (uint8_t net)
  * Create an FS on net.stn with root path 'rootpath'
  */
 
-uint8_t eb_device_init_fs (uint8_t net, uint8_t stn, char *rootpath, char *tapehandler, uint32_t fs_new_user_quota)
+uint8_t eb_device_init_fs (uint8_t net, uint8_t stn, char *rootpath, char *tapehandler, uint32_t fs_new_user_quota, char *tapecompletionhandler)
 {
 	struct __eb_device 	* existing;
 
@@ -298,6 +298,16 @@ uint8_t eb_device_init_fs (uint8_t net, uint8_t stn, char *rootpath, char *tapeh
 
 	existing->local.fs.rootpath = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create FS rootpath string", strlen(rootpath) + 1);
 	existing->local.fs.tapehandler = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create FS tapehandler string", strlen(tapehandler) + 1);
+
+	if (tapecompletionhandler)
+	{
+		existing->local.fs.tapecompletionhandler = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create FS tape completion handler string", strlen(tapecompletionhandler) + 1);
+		if (!existing->local.fs.tapecompletionhandler)
+			eb_debug (1, 0, "CONFIG", "Unable to malloc() fileserver tape completion handler string %s", tapecompletionhandler);
+		strcpy (existing->local.fs.tapecompletionhandler, tapecompletionhandler);
+	}
+	else
+		existing->local.fs.tapecompletionhandler = NULL;
 
 	if (!(existing->local.fs.rootpath))
 		eb_debug (1, 0, "CONFIG", "Unable to malloc() fileserver path %s\n", rootpath);

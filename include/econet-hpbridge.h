@@ -232,6 +232,7 @@ struct __eb_printer { // Struct used to hold printer definitions on local emulat
 struct __eb_fileserver { // Struct used to hold data defining a locally emulated fileserver
 	char 		*rootpath; // Full pathname to directory holding password file & directories for emulated disks
 	char		*tapehandler; // Full pathname to tape handler script
+	char		*tapecompletionhandler; // Full path to tape completion handler script (can be set by user to copy backups off elsewhere)
 	uint32_t	new_user_quota; // In Kilobytes
 	struct __fs_station	*server; // Pointer to __fs_station struct created on initialization - NULL if not initialized
 	pthread_t	fs_thread; // FS thread - attempt to stop core dumps when thread exits
@@ -897,7 +898,7 @@ extern uint8_t	eb_device_init_virtual (uint8_t);
 extern uint8_t	eb_device_init_singletrunk (char *, uint16_t, uint16_t, char *, struct __eb_fw_chain *, struct __eb_fw_chain *, char *, struct __eb_device *mt_parent, int, uint32_t);
 extern uint8_t	eb_device_init_multitrunk (char *, char *, uint16_t, int, uint16_t);
 extern uint8_t 	eb_device_init_dynamic (uint8_t, uint8_t, struct __eb_fw_chain *, struct __eb_fw_chain *);
-extern uint8_t	eb_device_init_fs (uint8_t, uint8_t, char *, char *, uint32_t);
+extern uint8_t	eb_device_init_fs (uint8_t, uint8_t, char *, char *, uint32_t, char *);
 extern uint8_t	eb_device_init_ps (uint8_t, uint8_t, char *, char *, char *, uint8_t, uint8_t, uint8_t);
 extern uint8_t 	eb_device_init_ps_handler (uint8_t, uint8_t, char *, char *);
 extern uint8_t	eb_device_init_ip (uint8_t, uint8_t, char *, uint32_t, uint32_t);

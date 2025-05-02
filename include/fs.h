@@ -142,7 +142,9 @@ struct __fs_station {
         unsigned char 		net; // Network number of this server
         unsigned char 		stn; // Station number of this server
         unsigned char 		directory[256]; // Root directory
-	unsigned char		tapehandler[256]; // Path to tape handler script
+	//unsigned char		tapehandler[256]; // Path to tape handler script
+	//unsigned char		tapecompletionhandler[256]; // Path to user-supplied tape completion handler (e.g. to copy off backups)
+	unsigned char		*tapehandler, *tapecompletionhandler; // Paths to tape handler script and user-supplied tape completion handler
 	uint8_t			tapedrive; // Currently selected tape drive number
         uint16_t 		total_users; // How many entries in users?
 	uint16_t		total_groups; // Number of entries in groups
@@ -885,7 +887,7 @@ extern void * fsop_register_machine (struct __fs_machine_peek_reg *);
 /* Externs for the HPB */
 void fsop_setup(void);
 uint8_t fsop_is_enabled (struct __fs_station *);
-struct __fs_station *fsop_initialize(struct __eb_device *, char *, char *);
+struct __fs_station *fsop_initialize(struct __eb_device *, char *, char *, char *);
 int8_t fsop_run(struct __fs_station *);
 
 /* Port allocator in the HPB */

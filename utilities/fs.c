@@ -3283,7 +3283,7 @@ uint8_t fsop_is_enabled(struct __fs_station *s)
  *
  */
 
-struct __fs_station * fsop_initialize(struct __eb_device *device, char *directory, char *tapehandler)
+struct __fs_station * fsop_initialize(struct __eb_device *device, char *directory, char *tapehandler, char *tapecompletionhandler)
 {
 	
 	DIR *d;
@@ -3303,7 +3303,10 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
         server->net = device->net;
         server->stn = device->local.stn;
         strncpy (server->directory, directory, 254);
-	strncpy (server->tapehandler, tapehandler, 254);
+	//strncpy (server->tapehandler, tapehandler, 254);
+	//strncpy (server->tapecompletionhandler, tapecompletionhandler, 254);
+	server->tapehandler = tapehandler;
+	server->tapecompletionhandler = tapecompletionhandler;
         server->config = NULL;
         server->discs = NULL;
         server->files = NULL;
