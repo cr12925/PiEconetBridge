@@ -587,6 +587,7 @@ struct __fs_active {
 
 struct __fs_backup {
 	time_t		when; // Scheduled backup time (0 = nothing scheduled)
+	uint32_t	interval; // Repeat after n seconds. 0 disables repeat.
 	unsigned char	tapename[11]; // 10 characters - tape name to back up to. Let's hope it's in the drive...
 	struct {
 			uint8_t	partition; // Partition number to back up to - 0xFF means end of list
@@ -1122,6 +1123,7 @@ FSOP_00_EXTERN(TAPEDISMOUNT);
 FSOP_00_EXTERN(TAPESELECT);
 FSOP_00_EXTERN(TAPEFORMAT);
 FSOP_00_EXTERN(TAPEBACKUP);
+FSOP_00_EXTERN(TAPEREPEAT);
 FSOP_00_EXTERN(UNLINK);
 FSOP_00_EXTERN(UNLOADTAPE); // Alias for TAPEDISMOUNT
 

@@ -196,3 +196,49 @@ FSOP_00(TAPESELECT)
 	fsop_reply_ok(f);
 }
 
+FSOP_00(TAPEREPEAT)
+{
+	unsigned char	interval_string[20], timestring[20];
+	uint32_t	interval, secs;
+
+	fsop_00_oscli_extract(f->data, p, 0, interval_string, 19, param_start);
+	
+	interval = atoi(interval_string);
+
+	if (num == 2)
+		fsop_00_oscli_extract(f->data, p, 0, timestring, 19, param_start);
+
+	if (
+			(num == 1 && interval != 0)
+		||	(num == 2 && interval == 0)
+	   )
+	{
+		fsop_error (f, 0xFF, "Bad interval");
+		return;
+	}
+
+
+	if (num == 2) { switch (timestring[0])
+	{
+		case 'h':
+		case 'H':
+			secs = 60 * 60;
+			break;
+		case 'd':
+		case 'D':
+			secs = 60 * 60 * 24;
+			break;
+		default:
+			fsop_error (f, 0xff, "Bad time specifier");
+			return;
+	}
+	}
+	else
+		secs = 0;
+
+	f->server->backup->interval = atoi(interval_string) * secs;
+
+	fsop_reply_ok(f);
+}
+
+

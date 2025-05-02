@@ -572,6 +572,7 @@ FSOP(43)
 					//fprintf (stderr, "\n\n** Backup time attempted to set to %d/%02d/%04d %02d:%02d:%02d\n\n", when.tm_mday, when.tm_mon, when.tm_year, when.tm_hour, when.tm_min, when.tm_sec);
 
 					f->server->backup->when = timelocal(&when); // This is a UTC figure - we put -1 in the tm_isdst field above so that timelocal would work it out.
+					f->server->backup->interval = 0; /* No repeat when initially set */
 
 					/* Ignore printer output and the flag  - for now, we might make an optional thing on the handler to send to the pserv.sh script in future */
 
@@ -891,7 +892,10 @@ void * fsop_backup_thread (void * p)
 				count++;
 			}
 			
-			s->backup->jobs[0].partition = 0xff;
+			if (s->backup->interval == 0) /* No repeat */
+				s->backup->jobs[0].partition = 0xff;
+			else
+				s->backup->when += s->backup->interval; /* Repeat */
 
 			/* Dismount the tape. Apparently MDFS does this. */
 

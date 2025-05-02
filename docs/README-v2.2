@@ -1552,6 +1552,12 @@ Privileged commands:
 *BRIDGEVER
 	- Display GitHub repo version (as an error)
 
+*CREDIT <userid> <kilobytes>
+	- Add credit to user quota
+
+*DEBIT <userid> <kilobytes>
+	- Debit from user quota
+
 *DISCMASK <USERNAME> <ALL | NONE | xxxx>
 *DISKMASK <USERNAME> <ALL | NONE | xxxx>
 	- Hides disc availability on the server from a particular user.
@@ -1795,6 +1801,18 @@ Privileged commands:
 (The following tape commands are only available if the FS has MDFS functionality
  enabled.)
 
+*TAPEBACKUP <discname> <partition> [<drive no.>]
+	- Back up FS disc "discname" onto specified partition nn of the tape
+	  in either the currently selected, or specified, drive.
+.
+*TAPEDISMOUNT [<drive no.>]
+	- Dismount tape in currently selected (or optionally
+ 	  specified) tape drive
+
+*TAPEFORMAT <tapename>
+	- Formats <tapename> so as to be empty. Will create the tape if
+ 	  it does not exist.
+
 *TAPEINFO - see MDFS manual. Operates on currently selected tape drive
 
 *TAPEMOUNT <tapename> [<drive no.>]
@@ -1813,22 +1831,27 @@ Privileged commands:
   	  partition number (0-13) and DISCNAME is the name of the last
 	  disc backed up to that partition.
 
-*TAPEDISMOUNT [<drive no.>]
-	- Dismount tape in currently selected (or optionally
- 	  specified) tape drive
+*TAPEREPEAT <interval> <time-type>
+	- Where a backup has been set with MDFS "SETBACKUP", it will
+	  normally run once and then not run again.
+	- This command makes it a regular backup instead.
+	- <interval> is numeric.
+	- <time-type> is one of M or Months, D or Days, H or Hours
+	- e.g. *TAPEREPEAT 24 Hours
+	  will cause the backup to start again 24 hours later. It is the
+	  operator's responsibility to make sure the right tapename is
+	  mounted in a tape drive somewhere, because the backup system
+	  will still unmount the tape after each backup (and, if one
+	  is set, call the tape completion handelr.)
+	- To stop the repeat, use *TAPEREPEAT 0
+	- Any attempt to use <interval> = 0 with a time-type, or
+	  a non-zero <interval> without a time-type will generate an
+ 	  error
 
 *TAPESELECT <drive no.>
 	- Selects the drive to use if none specified, either on cmd line
 	  or when using MDFS calls
 
-*TAPEFORMAT <tapename>
-	- Formats <tapename> so as to be empty. Will create the tape if
- 	  it does not exist.
-
-*TAPEBACKUP <discname> <partition> [<drive no.>]
-	- Back up FS disc "discname" onto specified partition nn of the tape
-	  in either the currently selected, or specified, drive.
-.
 *UNLINK <link>
 	- Removes a symlink created with *LINK
 
@@ -1978,7 +2001,11 @@ FS_MAX_TAPE_DRIVES define in fs.h
 
 You can use the MDFS 'SETBACKUP' utilities to manage scheduled
 backups and see the contents of tapes, and the MDFS *TAPEINFO
-command to see the tape ID block. 
+command to see the tape ID block. The backup scheduler will 
+produce debug output at level 1 to tell you what it is doing,
+and after a successful backup it will attempt to dismount the
+virtual tape (i.e. create the tar). If an error occurs during
+that phase, there will be a log message.
 
 In addition, Pi FS provides some internal commands for operating
 the tape drive(s): *TAPESELECT (choose drive number), *TAPEMOUNT,
