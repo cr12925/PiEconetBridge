@@ -600,7 +600,7 @@ FSOP(43)
 						return;
 					}
 
-					fs_debug_full (0, 1, f->server, f->net, f->stn, "MDFS Tape operation %02d - Write backup status (set for %02d/%02d/%04d %02d:%02d:%02d)", arg, when.tm_mday, when.tm_mon, when.tm_year, when.tm_hour, when.tm_min, when.tm_sec);
+					fs_debug_full (0, 1, f->server, f->net, f->stn, "MDFS Tape operation %02d - Write backup status (set for %02d/%02d/%04d %02d:%02d:%02d)", arg, when.tm_mday, when.tm_mon, when.tm_year+1900, when.tm_hour, when.tm_min, when.tm_sec);
 
 					pthread_cond_signal(&(f->server->fs_backup_cond));
 				}
@@ -778,7 +778,7 @@ void * fsop_backup_thread (void * p)
 			clock_gettime(CLOCK_REALTIME, &t);
 			localtime_r (&next_event, &until); 
 
-			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler sleeping until %d/%02d/%04d %02d:%02d:%02d (%d secs)",
+			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler sleeping until %02d/%02d/%04d %02d:%02d:%02d (%d secs)",
 					until.tm_mday, until.tm_mon, until.tm_year+1900,
 					until.tm_hour, until.tm_min, until.tm_sec,
 					(next_event - now));
@@ -833,8 +833,6 @@ void * fsop_backup_thread (void * p)
 			fs_debug_full (0, 1, s, 0, 0, "Scheduled backup - tape %s found in drive %d", s->backup->tapename, drive);
 
 			count = 0; 
-
-			s->backup->when = 0;
 
 			while (count < 8 && s->backup->jobs[count].partition != 0xff)
 			{
@@ -892,19 +890,6 @@ void * fsop_backup_thread (void * p)
 				count++;
 			}
 			
-			if (s->backup->interval == 0) /* No repeat */
-				s->backup->jobs[0].partition = 0xff;
-			else
-				s->backup->when += s->backup->interval; /* Repeat */
-
-			/* Dismount the tape. Apparently MDFS does this. */
-
-			sprintf (cmd_string, "umount %s %d",
-				s->backup->tapename,
-				drive); 
-
-			res = fsop_43_tape_handler(s, cmd_string);
-
 			/* See if we have a completion handler */
 
 			if (s->tapecompletionhandler)
@@ -925,10 +910,27 @@ void * fsop_backup_thread (void * p)
 
 			}
 
-			fs_debug_full (0, 1, s, 0, 0, "Scheduled backup to tape %s ended; tape dismounted %ssuccessfully (%s)", s->backup->tapename, (res == 0) ? "" : "UN", fsop_43_tape_errstr(res));
+			if (s->backup->interval == 0) /* No repeat */
+			{
+				s->backup->jobs[0].partition = 0xff;
 
+				s->backup->when = 0;
+
+				/* Dismount the tape. Apparently MDFS does this. But don't do it if we need the tape again... */
+
+				sprintf (cmd_string, "umount %s %d",
+					s->backup->tapename,
+					drive); 
+
+				res = fsop_43_tape_handler(s, cmd_string);
+
+				fs_debug_full (0, 1, s, 0, 0, "Scheduled backup to tape %s ended and tape dismounted %ssuccessfully (%s)", s->backup->tapename, (res == 0) ? "" : "UN", fsop_43_tape_errstr(res));
+			}
+			else
+			{
+				s->backup->when += s->backup->interval; /* Repeat */
+				fs_debug_full (0, 1, s, 0, 0, "Scheduled backup to tape %s ended. Repeat due, tape not dismounted.", s->backup->tapename);
+			}
 		}
 	}
-
-
 }

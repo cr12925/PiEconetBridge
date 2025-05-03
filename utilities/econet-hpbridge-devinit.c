@@ -149,7 +149,10 @@ uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uin
 	{
 		p->trunk.sharedkey = eb_malloc(__FILE__, __LINE__, "CONFIG", "Create trunk key string", 32);
 		memset (p->trunk.sharedkey, 0, 32); /* Pad */
-		strncpy ((char *) p->trunk.sharedkey, sharedkey, strlen(sharedkey) > 31 ? 31 : strlen(sharedkey));
+		if (strlen(sharedkey) > 31)
+			sharedkey[31] = 0;
+		//strncpy ((char *) p->trunk.sharedkey, sharedkey, strlen(sharedkey) > 31 ? 31 : strlen(sharedkey));
+		strcpy ((char *) p->trunk.sharedkey, sharedkey);
 	}
 	else    p->trunk.sharedkey = NULL;
 
@@ -321,8 +324,8 @@ uint8_t eb_device_init_fs (uint8_t net, uint8_t stn, char *rootpath, char *tapeh
 
 	eb_set_single_wire_host (net, stn);
 
-	strncpy(existing->local.fs.rootpath, rootpath, strlen(rootpath));
-	strncpy(existing->local.fs.tapehandler, tapehandler, strlen(tapehandler));
+	strcpy(existing->local.fs.rootpath, rootpath);
+	strcpy(existing->local.fs.tapehandler, tapehandler);
 	existing->local.fs.new_user_quota = fs_new_user_quota;
 
 	DEVINIT_DEBUG("Created fileserver on %d.%d with path %s, new user quota %dK", net, stn, rootpath, fs_new_user_quota);

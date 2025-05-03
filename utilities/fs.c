@@ -5259,7 +5259,7 @@ void fsop_setup(void)
 	FSOP_OSCLI(TAPESELECT, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 1, 1, 5); /* <drive no.> */
 	FSOP_OSCLI(TAPEFORMAT, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 1, 1, 5); /* <tapename> */
 	FSOP_OSCLI(TAPEBACKUP, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 2, 3, 5); /* <discname> <partition> [<drive no.>] */
-	FSOP_OSCLI(TAPEREPEAT, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 2, 2, 5); /* <interval> <time-type> */
+	FSOP_OSCLI(TAPEREPEAT, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 1, 2, 5); /* <interval> <time-type> */
 	FSOP_OSCLI(UNLINK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 1, 1, 4);
 	FSOP_OSCLI(UNLOADTAPE, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 0, 0, 5); /* Synonym for TAPEDISMOUNT but does not take the drive number parameter */
 

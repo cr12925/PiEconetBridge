@@ -201,12 +201,22 @@ FSOP_00(TAPEREPEAT)
 	unsigned char	interval_string[20], timestring[20];
 	uint32_t	interval, secs;
 
+	if ((f->server->backup->jobs[0].partition == 0xFF) || (f->server->backup->when == 0))
+	{
+		fsop_error (f, 0xFF, "No backup pending");
+		return;
+	}
+
 	fsop_00_oscli_extract(f->data, p, 0, interval_string, 19, param_start);
 	
 	interval = atoi(interval_string);
 
 	if (num == 2)
-		fsop_00_oscli_extract(f->data, p, 0, timestring, 19, param_start);
+		fsop_00_oscli_extract(f->data, p, 1, timestring, 19, param_start);
+	else
+		strcpy(timestring, "");
+
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "*TAPEREPEAT %d %s", interval, timestring);
 
 	if (
 			(num == 1 && interval != 0)
@@ -227,6 +237,10 @@ FSOP_00(TAPEREPEAT)
 		case 'd':
 		case 'D':
 			secs = 60 * 60 * 24;
+			break;
+		case 'm':
+		case 'M':
+			secs = 60;
 			break;
 		default:
 			fsop_error (f, 0xff, "Bad time specifier");

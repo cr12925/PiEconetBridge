@@ -379,6 +379,35 @@ struct mt_client {
 /* Multitrunk Admin Command codes */
 #define EB_MT_CMD_VERS	0x01
 
+/* __eb_fast_client
+ *
+ * Struct used by local emulators to marshall *FAST and equivalent
+ * clients. The plan is to develop other clients (e.g. viewdata) which
+ * use the *FAST protocol to provide other services to machines on
+ * the Econet.
+ */
+
+struct __eb_fast_client {
+
+	uint8_t		net, stn;
+	FILE *		cmd_pipe; /* Pipe to executed command */
+	struct addrinfo	*dest_host; /* NULL if we are executing a script or using the internal handler, otherwise it's the set of addresses to connect to */
+	uint16_t	port; /* Only valid if dest_host != NULL. TCP port number to connect to. We then fdopen() it into cmd_pipe */
+	char *		command; /* Command to execute and connect the user to. NULL if not using a command - and if no dest_host and no command, it's the internal handler */
+	uint8_t		fastbit; // Oscillates 0, 1 on transmissions from the *FAST handler
+	uint8_t		fast_input_ctrl; // Ditto on receiption
+	pthread_t	fast_handler; // Thread that is operating the *FAST handler
+	pthread_t	fast_io_handler; // Thread that mediates IO between despatcher and the fast handler
+	pthread_mutex_t	fast_io_mutex; // Governs access to the input/output variables below
+	int		fast_to_despatch[2], fast_to_handler[2]; // Socketpairs
+	uint8_t		fast_thread_alive; // despatcher sets to 0; *FAST thread sets to 1 - so we can tell it's ready. If despatcher sets to 0 again, our threads need to die
+	uint8_t		fast_reset; // Set to 1 when we get a new connection
+	uint8_t		fast_client_ready; // Set to 1 when client indicates it will receive more output to display - happens when we get the USRPROC call. If there is output, we send it. If not, this will get set to 1 so that the fast handler knows it can send it instead
+	pthread_cond_t	fast_wake;
+	struct __eb_device	*parent; // Device the user is talking to
+	struct _eb_fast_client	*prev, *next; /* NULL if there isn't a prev or next in the queue */
+};
+
 /* __eb_device
 
    Holds common and per-driver information about devices on which we might send/receive packets.
@@ -572,9 +601,14 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			uint8_t			fast_reset; // Set to 1 when we get a new connection
 			uint8_t			fast_client_ready; // Set to 1 when client indicates it will receive more output to display - happens when we get the USRPROC call. If there is output, we send it. If not, this will get set to 1 so that the fast handler knows it can send it instead
 			pthread_cond_t		fast_wake;
+			struct __eb_fast_client	*fast_client_list;
 			struct __eb_notify	*notify; // List of stuff received via *notify to a local server
 			pthread_mutex_t		notify_mutex; // Mutex to lock the notify list
 			pthread_t		notify_thread; // Notify watcher thread for this device
+			// Future use
+			struct addrinfo 	*fast_dest_host; // Host to connect to on TCP (or NULL to try an executable)
+			uint16_t		fast_dest_port; // Port to connect to
+			char *			fast_script; // Executable to run and connect to user, and if fast_dest_host == NULL and so is this, then use the internal handler.
 		} local;
 
 		struct __eb_aun_remote *aun; // Address of struct in the list of remote AUN stations, kept in order of s_addr

@@ -1844,6 +1844,11 @@ Privileged commands:
 	  will still unmount the tape after each backup (and, if one
 	  is set, call the tape completion handelr.)
 	- To stop the repeat, use *TAPEREPEAT 0
+	- Note that since the backup scheduler re-schedules the backup
+	  when the repeat is *set*, setting it to 0 will not stop the
+	  *next* backup. You need to use the SETBACKUP utility to
+	  stop that. What this command does is stop it repeating
+	  *after the next one*.
 	- Any attempt to use <interval> = 0 with a time-type, or
 	  a non-zero <interval> without a time-type will generate an
  	  error

@@ -514,7 +514,7 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 					w_result = write (me->trunk_socket[1], buffer, decrypted_length);
 
 					if (w_result < 0)
-						eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Unable to write to child trunk (%s)", me->multitrunk_parent->multitrunk.port, strerror(errno));
+						eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Unable to write to child trunk (%s)", me->trunk->trunk.local_port, strerror(errno));
 
 					pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
 				}
