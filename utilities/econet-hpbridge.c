@@ -9384,7 +9384,13 @@ int eb_parse_json_config(struct json_object *jc)
 						ai_family = AF_INET6;
 					else
 						eb_debug (1, 0, "JSON", "Multi-Trunk index %d has unknown family parameter '%s'", json_object_get_string(jfamily));
-				}
+				}	
+				/*
+				else
+					fprintf (stderr, "\n\n** MULTITRUNK %s has no family\n\n", json_object_get_string(jtrunkname));
+
+				fprintf (stderr, "\n\n** MULTITRUNK %s has family %d\n\n", json_object_get_string(jtrunkname), ai_family);
+				*/
 
 				eb_device_init_multitrunk(
 						jhost ? (char *) json_object_get_string(jhost) : (char *) NULL,
@@ -9891,6 +9897,8 @@ int eb_parse_json_config(struct json_object *jc)
 			exit (EXIT_FAILURE);
 		}
 
+		config.trunk_pool_no_unmapped_fsver = 0;
+
 		EB_JSON_TUNABLE_BOOL("disable-econet", EB_CONFIG_LOCAL);
 		EB_JSON_TUNABLE_INT("debug-level", EB_DEBUG_LEVEL);
 		if (!j) // No debug-level
@@ -9923,6 +9931,7 @@ int eb_parse_json_config(struct json_object *jc)
 		EB_JSON_TUNABLE_INT("trunk-loopdetect-id", EB_CONFIG_TRUNK_LOOPDETECT_ID);
 		EB_JSON_TUNABLE_BOOL("trunk-loopdetect-disable", EB_CONFIG_TRUNK_LOOPDETECT_DISABLE);
 		EB_JSON_TUNABLE_INT("trunk-loopdetect-interval", EB_CONFIG_TRUNK_LOOPDETECT_INTERVAL);
+		EB_JSON_TUNABLE_BOOL("trunk-pool-no-unmapped-fsver", EB_CONFIG_TRUNK_POOL_NO_UNMAPPED_FSVER);
 		EB_JSON_TUNABLE_INT("bridge-query-interval", EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL);
 		EB_JSON_TUNABLE_BOOL("bridge-loop-detect", EB_CONFIG_BRIDGE_LOOP_DETECT);
 		EB_JSON_TUNABLE_BOOL("pool-reset", EB_CONFIG_POOL_RESET_FWD);
