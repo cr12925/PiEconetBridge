@@ -708,6 +708,7 @@ struct __eb_config {
 	uint32_t	trunk_loopdetect_id; // Random number identifier for this bridge to detect loops. The network will elect a bridge by selecting the highest number. If there is a clash, the probes contain the first 16 characters of the hostname, with the lowest four bits of each byte only taken, and mashed into 8 bytes in the packet. Bridges use the higher value of that to differentiate if there is a duplicate random number.
 	uint8_t		trunk_loopdetect_disable; // 1 = disabled
 	uint8_t		trunk_loopdetect_interval; // Default 10s. Ideally, all bridges in a network should be the same.
+	uint8_t		trunk_pool_no_unmapped_fsver; // Do not map a pool address just because of a FSVER reply (because the queries get broadcast)
 	uint8_t		wire_reset_qty; // Number of bridge reset copies to send on Econet wires
 	uint8_t		wire_update_qty; // Number of bridge update copies to send on Econet wires
 	uint32_t		wire_bridge_query_interval; // Gap between successive IsNet or WhatNet responses to a given station on the wire (ms)
@@ -761,6 +762,7 @@ struct __eb_config {
 #define EB_CONFIG_TRUNK_LOOPDETECT_ID	(config.trunk_loopdetect_id)
 #define EB_CONFIG_TRUNK_LOOPDETECT_DISABLE (config.trunk_loopdetect_disable)
 #define EB_CONFIG_TRUNK_LOOPDETECT_INTERVAL (config.trunk_loopdetect_interval)
+#define EB_CONFIG_TRUNK_POOL_NO_UNMAPPED_FSVER (config.trunk_pool_no_unmapped_fsver)
 #define EB_CONFIG_POOL_DEAD_INTERVAL	(config.pool_dead_interval)
 #define EB_CONFIG_TRUNK_RESET_QTY	(config.trunk_reset_qty)
 #define EB_CONFIG_TRUNK_UPDATE_QTY	(config.trunk_update_qty)
