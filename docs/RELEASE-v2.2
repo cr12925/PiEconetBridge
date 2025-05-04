@@ -98,6 +98,14 @@ the Fileserver Operations interface will crash the bridge. There
 appears to be some heap corruption somewhere I have not yet 
 tracked down.
 
+If you have RISC OS files in your fileserver which have filenames
+involving a hard space (character &A0) then they will need to be
+renamed on the linux command line. The old fileserver used
+the # character as a substiute for hard space, unnecessarily.
+Support for this was removed in 2.2 to facilitate the tape
+system believe it or not. I will try and come up with a way
+of doing this 'en masse' for users.
+
 Roadmap to v2.2
 ---------------
 

@@ -1679,8 +1679,10 @@ void fs_acorn_to_unix(char *string, uint8_t infcolon)
 	{
 		if (*(string+counter) == '/')
 			*(string+counter) = (infcolon ? '.' : ':');
+		/*
 		else if (*(string+counter) == 0xA0) // Hard space
 			*(string+counter) = '#';
+			*/
 		counter++;
 	}
 
@@ -1698,8 +1700,10 @@ void fs_unix_to_acorn(char *string)
 			*(string+counter) = '/';
 		else if (*(string+counter) == '.')
 			*(string+counter) = '/';
+		/*
 		else if (*(string+counter) == '#')
 			*(string+counter) = 0xA0; // Hard space
+			*/
 		counter++;
 	}
 
@@ -2287,9 +2291,11 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 
 	/* Implement tape */
 
-	if (
+	if ( /* Don't bar this for normal users - MDFS doens't.
+
 			(a && a->server->users[a->userid].priv & FS_PRIV_SYSTEM)
 		&&	
+		*/
 			(FS_CONFIG(f->server,fs_sjfunc))
 		&& 
 			!strncasecmp(path, "%TAPE", 5)
