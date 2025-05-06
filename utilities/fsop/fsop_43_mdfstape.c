@@ -404,6 +404,18 @@ char * fsop_43_tape_errstr(uint8_t err)
 		
 }
 
+int fsop_43_check_tarname (const struct dirent *d)
+{
+	int 	l;
+
+	l = strlen(d->d_name);
+
+	if (l < 4)
+		return 0;
+
+	return (!strcasecmp(&(d->d_name[l-4]), ".tar"));
+}
+
 FSOP(43)
 {
 
@@ -644,7 +656,7 @@ FSOP(43)
 
 				if (!fsop_43_check_tapename(tape))
 				{
-					fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Create tape - bad tape name", "", f->net, f->stn, arg); 
+					fs_debug_full (0, 1, f->server, f->net, f->stn, "PiFS Tape operation %02X, Create tape - bad tape name", f->stn, arg); 
 					fsop_error(f, 0xFF, "Bad tape name");
 					return;
 				}
@@ -668,11 +680,11 @@ FSOP(43)
 
 				if (!fsop_43_check_tapename(tape))
 				{
-					fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Mount tape - bad tape name", "", f->net, f->stn, arg); 
+					fs_debug_full (0, 1, f->server, f->net, f->stn, "PiFS Tape operation %02X, Mount tape - bad tape name", arg); 
 					fsop_error(f, 0xFF, "Bad tape name");
 				}
 
-				fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Mount tape %s", "", f->net, f->stn, arg, tape); 
+				fs_debug_full (0, 1, f->server, f->net, f->stn, "PiFS Tape operation %02X, Mount tape %s", arg, tape); 
 
 				snprintf (cmd_string, 39, "mount %s %d", tape, f->server->tapedrive);
 				fsop_43_exec_tape_handler_return (f, cmd_string);
@@ -681,20 +693,31 @@ FSOP(43)
 			{
 				char	cmd_string[40];
 
-				fs_copy_to_cr(tape, f->data+6, 10);
-
-				fs_toupper(tape);
-
-				if (!fsop_43_check_tapename(tape))
+				if (!fsop_43_drive_mounted(f->server, f->server->tapedrive, tape))
 				{
-					fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Dismount tape - bad tape name", "", f->net, f->stn, arg); 
-					fsop_error(f, 0xFF, "Bad tape name");
+					fs_debug_full (0, 1, f->server, f->net, f->stn, "PiFS Tape operation %02X, Dismount tape - drive empty", arg); 
+					fsop_error(f, 0xFF, "Drive empty");
 				}
+				else
+				{
+					
+					/* Old code 
+					fs_copy_to_cr(tape, f->data+6, 10);
 
-				fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Dismount tape %s", "", f->net, f->stn, arg, tape); 
+					fs_toupper(tape);
 
-				snprintf (cmd_string, 39, "umount %s %d", tape, f->server->tapedrive);
-				fsop_43_exec_tape_handler_return (f, cmd_string);
+					if (!fsop_43_check_tapename(tape))
+					{
+						fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Dismount tape - bad tape name", "", f->net, f->stn, arg); 
+						fsop_error(f, 0xFF, "Bad tape name");
+					}
+				*/
+
+					fs_debug_full (0, 1, f->server, f->net, f->stn, "PiFS Tape operation %02X, Dismount tape %s", arg, tape); 
+
+					snprintf (cmd_string, 39, "umount %s %d", tape, f->server->tapedrive);
+					fsop_43_exec_tape_handler_return (f, cmd_string);
+				}
 			} break;
 		case 19: // PiFS select tape drive number (at data+6)
 			{
@@ -702,7 +725,7 @@ FSOP(43)
 
 				if (tape_drive < FS_MAX_TAPE_DRIVES)
 				{
-					fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Select drive %02d", "", f->net, f->stn, arg, tape_drive); 
+					fs_debug_full (0, 1, f->server, f->net, f->stn, "PiFS Tape operation %02X, Select drive %02d", arg, tape_drive); 
 					f->server->tapedrive = tape_drive;
 					fsop_reply_ok(f);
 				}
@@ -711,21 +734,99 @@ FSOP(43)
 			} break;
 		case 20: // PiFS get tape drive number
 			{
-				fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Get tape drive number (%02d)", "", f->net, f->stn, arg, f->server->tapedrive); 
+				fs_debug_full (0, 1, f->server, f->net, f->stn, "PiFS Tape operation %02X, Get tape drive number (%02d)", arg, f->server->tapedrive); 
 				fsop_reply_ok_with_data(f, &(f->server->tapedrive), 1);
 			} break;
 		case 21: // PiFS get tape names data+6 is start index; data+7 is max number of entries to return
-			// Reply is n x 10 character tape names, terminated by 0x0D if less than 10 characters long
+			// Reply is :
+			// 0,1	Normal reply header
+			// 2	Number of entries returned
+			// 3	&00 for end of list reached, <>&00 otherwise
+			// 4	10 character tape name, terminated with &0D if less than 10 characters long.
+			// 14	10 character tape name...
 			{
-				fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Get tape names (index %02d + %02d)", "", f->net, f->stn, arg, *(f->data+6), *(f->data+7)); 
-				fsop_error (f, 0xFF, "Not yet implemented");
+				uint8_t		start, total;
+				char		tapedir[1024];
+				struct dirent	**namelist;
+				int		n;
+
+				start = *(f->data+6);
+				total = *(f->data+7);
+
+				fs_debug_full (0, 1, f->server, f->net, f->stn, "PiFS Tape operation %02X, Get tape names (index %02d + %02d)", arg, start, total); 
+
+				FS_CPUT32(0); // Placeholder - covers bytes 0-3
+
+				snprintf(tapedir,1023,"%s/%s",f->server->directory,FS_DIR_TAPES);
+
+				n = scandir(tapedir, &namelist, fsop_43_check_tarname, alphasort);
+
+				if (n == -1)
+					fsop_error (f, 0xFF, "Tape inventory failure");
+				else
+				{
+					uint8_t	real_start = start;
+					uint8_t last = real_start + total - 1;
+
+					n--; // 0-base
+
+					if (real_start > n)	
+						FS_CSEND(); /* Uses the macro */
+
+					if (last > n) /* Not enough */
+						last = n;
+
+					while (start <= last)
+					{
+						unsigned char	tapename[15];
+						int		l;
+
+						l = strlen(namelist[start]->d_name);
+
+						memcpy(tapename, namelist[start]->d_name,
+								(l > 14) ? 14 : l);
+
+						tapename[14] = 0; /* Terminate ealy if need be */
+
+						if (strrchr(tapename, '.'))
+							*(strrchr(tapename, '.')) = 0; /* Drop ".tar" */
+						else
+						{
+							/* Somehow this didn't have ".anything" on the end and it should! */
+							fsop_error(f, 0xFF, "Internal error"); 
+							while (n >= 0)
+								free(namelist[n--]);
+							free(namelist);
+							return;
+						}
+
+						l = strlen(tapename);
+
+						if (l < 10)
+							tapename[l] = 0x0D; /* Terminate with &0D if under 10 characters */
+
+						FS_CPUTD(tapename, 10); // Put it in the reply packet
+
+						start++;
+					}
+
+					//fprintf (stderr, "\n\n** real_start = %d, start = %d, last = %d, delivered = %d, n = %d\n\n", real_start, start, last, (last - real_start) + 1, n);
+					reply.p.data[2] = (last - real_start) + 1;
+					reply.p.data[3] = (last < n) ? 0xFF : 0x00; // 0xFF = more available
+			
+					FS_CSEND(); /* Send to user */
+
+					while (n >= 0)
+						free(namelist[n--]);
+
+					free(namelist);
+
+				}
+
 			} break;
+			/* Not implementing 22 - you can get it by selecting each drive in turn and requesting tape info block 
 		case 22: // Get currently mounted tape names
-			// Reply is n x 10 character tape names, terminated by 0x0D if less than 10 characters long, one for each tape drive number (so we shouldn't put MAX > about 10 really...)
-			{
-				fs_debug (0, 1, "%12sfrom %3d.%3d PiFS Tape operation %02X, Get mounted tape names", "", f->net, f->stn, arg); 
-				fsop_error (f, 0xFF, "Not yet implemented");
-			} break;
+		*/
 		default:
 			{
 				fs_debug_full (0, 1, f->server, f->net, f->stn, "Tape operation %02d - Unknown argument", arg);
