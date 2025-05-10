@@ -11355,7 +11355,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 				reply.p.data[2] = 0;
 				reply.p.data[3] = 0;
 				reply.p.data[4] = 0;
-				reply.p.data[5] = 0x20; // 512Mb
+				reply.p.data[5] = 0x10; // 512Mb is 0x20; this is 16Mb to help DosPlus out.
 				fs_aun_send (&reply, server, 6, net, stn);
 			}
 			break;
