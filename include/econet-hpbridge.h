@@ -483,7 +483,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 	struct __eb_fw_chain		*fw_in, *fw_out; /* 'in' is for traffic going TO the device (e.g. being sent to a fileserver, pipe, econet, or trunk - i.e. going away from the bridge), 'out' is stuff emanating out of the device (i.e. arriving on a pipe, from a fileserver, off an econet, arriving on a trunk) */
 
 	/* Interface group - applicable only to Econet wire & trunks */
-	struct __eb_interface_group	*ig; /* NULL means not in a group */
+	struct __eb_interface_member	*im; /* NULL means not in a group */
 
 	// Per device type information
 	union {
@@ -652,6 +652,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 struct __eb_interface_member {
 	struct __eb_device 	*device;
 	uint8_t			priority;
+	struct __eb_interface_group	*ig; /* Parent interface group */
 	struct __eb_interface_member	*next;
 };
 

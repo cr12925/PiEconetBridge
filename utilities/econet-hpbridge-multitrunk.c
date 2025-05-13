@@ -388,7 +388,7 @@ void eb_mt_send_proto_version (struct mt_client *me)
 	me->mt_local_version = EB_MT_PROTOCOL_VERSION;
 
 	eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Multitrunk protocol version %02d to %s:%d", 
-			me->multitrunk_parent->multitrunk.port,
+			me->trunk->trunk.local_port,
 			EB_MT_PROTOCOL_VERSION,
 			me->trunk->trunk.hostname,
 			me->trunk->trunk.remote_port);
@@ -405,10 +405,10 @@ void eb_mt_process_admin_packet (struct mt_client *me, uint8_t *cipherpacket, ch
 	{
 		case EB_MT_CMD_VERS:
 			me->mt_remote_version = *(cipherpacket + 2);
-			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Multitrunk protocol version %02d from %s:%d", me->multitrunk_parent->multitrunk.port, me->mt_remote_version, remotehost, remoteport);
+			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Multitrunk protocol version %02d from %s:%d", me->trunk->trunk.local_port, me->mt_remote_version, remotehost, remoteport);
 			break;
 		default:
-			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Unknown multitrunk admin command %02X from %s:%d", me->multitrunk_parent->multitrunk.port, *(cipherpacket), remotehost, remoteport);
+			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Unknown multitrunk admin command %02X from %s:%d", me->trunk->trunk.local_port, *(cipherpacket), remotehost, remoteport);
 			break;
 	}
 }
@@ -701,20 +701,20 @@ void * eb_multitrunk_handler_thread (void * input)
 	if (!(tcpproto = getprotobyname("tcp")))
 		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Cannot get tcp protocol number!", me->multitrunk_parent->multitrunk.port);
 
-	eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d New connection with remote at %s(%s):%d - sock fd %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteip, remoteport, me->socket);
+	eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d New connection with remote at %s(%s):%d - sock fd %d", me->trunk->trunk.local_port, remotehost, remoteip, remoteport, me->socket);
 
 	/* me->trunk won't be set at this point. */
 	//if (me->trunk->trunk.mt_type == MT_SERVER) /* Update endpoint address in trunk */
 		//eb_mt_set_endpoint (me->trunk, remotehost, remoteport);
 
 	if (pipe2(me->trunk_socket, (O_DIRECT | O_NONBLOCK | O_CLOEXEC)) < 0)
-		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to create pipe to underlying trunk (%s)", me->multitrunk_parent->multitrunk.port, strerror(errno));
+		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to create pipe to underlying trunk (%s)", me->trunk->trunk.local_port, strerror(errno));
 
 	timeout = me->multitrunk_parent->multitrunk.timeout;
 
 	/* This breaks read() */
 	if (timeout > 0 && (setsockopt(me->socket, tcpproto->p_proto, TCP_USER_TIMEOUT, &timeout, sizeof(timeout)) < 0))
-		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to set TCP_USER_TIMEOUT to %d (%s)", me->multitrunk_parent->multitrunk.port, me->multitrunk_parent->multitrunk.timeout, strerror(errno));
+		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Unable to set TCP_USER_TIMEOUT to %d (%s)", me->trunk->trunk.local_port, me->multitrunk_parent->multitrunk.timeout, strerror(errno));
 
 	/* Lock the underlying trunk and update its mt_data  - but only if it's a client, because me->trunk won't be set if it's a server, because we've not received any traffic yet */
 
@@ -770,13 +770,13 @@ void * eb_multitrunk_handler_thread (void * input)
 		p[0].events = POLLIN | POLLPRI | POLLRDBAND;
 		p[0].revents = 0;
 
-		eb_debug (0, 4, "M-TRUNK", "M-Trunk  %7d poll()ing sock fd %d", me->multitrunk_parent->multitrunk.port, me->socket);
+		eb_debug (0, 4, "M-TRUNK", "M-Trunk  %7d poll()ing sock fd %d", me->trunk->trunk.local_port, me->socket);
 
 		poll_result = poll(p, 1, 5000);
 
 		if (poll_result == -1)
 		{
-			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d poll() error reading TCP socket: %s", me->multitrunk_parent->multitrunk.port, strerror(errno));
+			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d poll() error reading TCP socket: %s", me->trunk->trunk.local_port, strerror(errno));
 			break;
 		}
 		else if (poll_result == 0)
@@ -809,7 +809,7 @@ void * eb_multitrunk_handler_thread (void * input)
 			if (len == -1) // Error - quit
 				break;
 
-			eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Data received from %s:%d length %d", me->multitrunk_parent->multitrunk.port, remotehost, remoteport, len);
+			eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Data received from %s:%d length %d", me->trunk->trunk.local_port, remotehost, remoteport, len);
 
 			if ((cipherpacket_size - cipherpacket_ptr) < len)
 			{
@@ -963,7 +963,7 @@ void * eb_multitrunk_client_device (void * device)
 	me = (struct __eb_device *) device;
 	mt_parent = me->trunk.mt_parent;
 
-	eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Client to %s:%d connection thread starting (family: %s)", mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port, (mt_parent->multitrunk.ai_family == AF_INET ? "IPV4" : me->multitrunk.ai_family == AF_INET6 ? "IPV6" : "IPV4 or IPV6"));
+	eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Client to %s:%d connection thread starting (family: %s)", me->trunk.local_port, me->trunk.hostname, me->trunk.remote_port, (mt_parent->multitrunk.ai_family == AF_INET ? "IPV4" : me->multitrunk.ai_family == AF_INET6 ? "IPV6" : "IPV4 or IPV6"));
 
 	if (!me->trunk.hostname)
 		eb_debug (1, 0, "M-TRUNK", "Attempt to start a multitrunk client with no hostname defined!");
@@ -1066,7 +1066,7 @@ void * eb_multitrunk_client_device (void * device)
 				connected = 1;
 				break; /* Connected. If not, try the next address */
 			}
-			else eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Client socket to %s(%s):%d failed to connect (%s)", mt_parent->multitrunk.port, me->trunk.hostname, hostname, me->trunk.remote_port, strerror(errno));
+			else eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Client socket to %s(%s):%d failed to connect (%s)", me->trunk.local_port, me->trunk.hostname, hostname, me->trunk.remote_port, strerror(errno));
 		}
 
 		if (connected)
@@ -1109,7 +1109,7 @@ void * eb_multitrunk_client_device (void * device)
 		}
 		else
 		{
-			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d unable to connect to any resolved address. Re-trying.", mt_parent->multitrunk.port, me->trunk.hostname, me->trunk.remote_port);
+			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Client socket to %s:%d unable to connect to any resolved address. Re-trying.", me->trunk.local_port, me->trunk.hostname, me->trunk.remote_port);
 			sleep (me->trunk.mt_retry); /* Wait ten seconds and try again from the start */
 		}
 	}

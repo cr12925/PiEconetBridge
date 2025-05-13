@@ -1004,7 +1004,7 @@ struct __eb_device * eb_device_init (uint8_t net, uint16_t type, uint8_t config)
 		if (net) p->net = net;
 		p->type = type;
 		p->index = interface_index++;
-		p->ig = NULL; /* No interface group by default */
+		p->im = NULL; /* No interface group by default */
 
 		if (pthread_mutex_init(&(p->qmutex_in), NULL) == -1)
 			eb_debug (1, 0, "CONFIG", "Cannot initialize queue mutex inbound for net %d", net);
@@ -3472,22 +3472,23 @@ uint8_t eb_firewall (struct __eb_fw_chain *chain, struct __econet_packet_aun *p)
 uint8_t	eb_device_usable (struct __eb_device *device)
 {
 	uint8_t		result = 1; /* Default usable */
-	struct __eb_interface_group	*ig;
+	struct __eb_interface_member	*im;
 
 	if (device->type == EB_DEF_PIPE && device->pipe.skt_write == -1) /* Pipe inactive */
 		result = 0;
 	else if (	(device->type == EB_DEF_TRUNK || device->type == EB_DEF_WIRE) /* Possible bridge connections */
-		&&	(ig = device->ig) /* Don't set inactive if not a member of an IG */
+		&&	(im = device->im) /* Don't set inactive if not a member of an IG */
 		)
 	{
 
-		struct __eb_interface_member	*im;
+		struct __eb_interface_member	*im_cursor;
+		struct __eb_interface_group	*ig = im->ig;
 
-		im = ig->first;
+		im_cursor = ig->first;
 
 		result = 0; /* Default now disabled, unless we find ourselves as the first active group member */
 
-		while (im)
+		while (im_cursor)
 		{
 
 			uint8_t	dead = 0;
@@ -3497,7 +3498,7 @@ uint8_t	eb_device_usable (struct __eb_device *device)
 
 			/* Econets are always active - i.e. not dead - so we only check trunks */
 
-			if (im->device->type == EB_DEF_TRUNK) /* Econets are always active */
+			if (im_cursor->device->type == EB_DEF_TRUNK) /* Econets are always active */
 			{
 				pthread_mutex_lock (&(device->statsmutex));
 				last_rx = device->last_rx;
@@ -3507,7 +3508,7 @@ uint8_t	eb_device_usable (struct __eb_device *device)
 					dead = 1;
 			}
 
-			if (im->device == device) /* We've found ourselves in the list */
+			if (im_cursor == im) /* We've found ourselves in the list */
 			{
 				result = !dead;
 				break;
@@ -3517,7 +3518,7 @@ uint8_t	eb_device_usable (struct __eb_device *device)
 
 			/* Find the next entry */
 
-			im = im->next;
+			im_cursor = im_cursor->next;
 		}
 
 	}
@@ -5776,7 +5777,7 @@ static void * eb_device_despatcher (void * device)
 
 				if (d->trunk.mt_type == MT_CLIENT) /* Multitrunk child and it's a client */
 				{
-					eb_debug (0, 1, "DESPATCH", "M-Trunk  %7d Starting multitrunk client handler to %s:%d", d->trunk.mt_parent->multitrunk.port, d->trunk.hostname, d->trunk.remote_port);
+					eb_debug (0, 1, "DESPATCH", "M-Trunk  %7d Starting multitrunk client handler to %s:%d", d->trunk.local_port, d->trunk.hostname, d->trunk.remote_port);
 
 					d->trunk.is_dynamic = 0; // All MT Clients have known remote endpoints
 
@@ -5785,7 +5786,7 @@ static void * eb_device_despatcher (void * device)
 					e = pthread_create(&(d->mt_client_thread), NULL, eb_multitrunk_client_device, d);
 			
 					if (e)
-						eb_debug (1, 0, "DESPATCH", "M-Trunk  %7d Thread creation for multitrunk client handler for %s:%d failed", d->trunk.mt_parent->multitrunk.port, d->trunk.hostname, d->trunk.remote_port);
+						eb_debug (1, 0, "DESPATCH", "M-Trunk  %7d Thread creation for multitrunk client handler for %s:%d failed", d->trunk.local_port, d->trunk.hostname, d->trunk.remote_port);
 
 					pthread_detach(d->mt_client_thread);
 
@@ -8657,6 +8658,83 @@ struct json_object *eb_json_aunnet_makenew(struct json_object *jauns, uint8_t ne
 
 }
 
+/* 
+ * Add a device to an interface group, with a given priority.
+ * Must be inserted in descending priority order.
+ * If the group doesn't exist, create it.
+ */
+
+void eb_ig_insert_member(unsigned char *group_name, struct __eb_device *device, uint8_t group_priority)
+{
+	struct __eb_interface_group 	*ig;
+	struct __eb_interface_member	*im, *im_cursor;
+
+	im = eb_malloc(__FILE__, __LINE__, "IGROUP", "New group member struct", sizeof(struct __eb_interface_member));
+
+	/* Set up content of the member struct */
+
+	im->device = device;
+	im->priority = group_priority;
+	im->next = NULL;
+
+	/* Next, see if the group exists. Callers to this routine must give us an upper case group name */
+
+	ig = interface_groups;
+
+	while (ig)
+	{
+		if (!strcmp((char *) ig->ig_name, (char *) group_name))
+			break;
+		else
+			ig = ig->next;
+	}
+
+	if (!ig)
+	{
+		/* Create new interface group */
+
+		ig = eb_malloc(__FILE__, __LINE__, "IGROUP", "New interface group", sizeof(struct __eb_interface_group));
+		strncpy ((char *) ig->ig_name, (char *) group_name, 20);
+		ig->first = im;
+		ig->next = interface_groups;
+	}
+	else
+	{
+		im_cursor = ig->first; /* Cycle through and see if this is where we are going to insert */
+
+		if (im_cursor && (im_cursor->priority < group_priority)) // See if first in list is lower priority than us
+		{
+			im->next = im_cursor;
+			ig->first = im;
+		}
+		else
+		{
+			/* Trawl the list */
+
+			while (im_cursor->next && (im_cursor->next->priority > group_priority))
+			{
+				im_cursor = im_cursor->next;
+			}
+
+			if (im_cursor->next) /* Next one exists, but has priority less than ours */
+				im->next = im_cursor->next;
+
+			/* We're splicing after the current entry come what may - the if() above is whether we need to join the rest of the queue on the end of our current entry */
+
+			im_cursor->next = im;
+		}
+	}
+
+	/* Set member parent group */
+
+	im->ig = ig;
+
+	/* Put the member struct into the device */
+
+	device->im = im;
+
+}
+
 /* Parse virtuals or econets object - they're similarly formatted */
 
 void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
@@ -8700,6 +8778,25 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 			eb_device_init_set_net_clock(networks[net], period, mark);
 
+		}
+
+		if (json_object_object_get_ex(o, "group-name", &jfw)) /* Re-use of jfw */
+		{
+			unsigned char	group_name[25];
+			uint8_t		group_priority;
+			uint8_t		counter;
+
+			strncpy((char *) group_name, json_object_get_string(jfw), 19);
+
+			if (!json_object_object_get_ex(o, "group-priority", &jfw))
+				eb_debug (1, 0, "JSON", "Group name set for econet network %d but group priority not set", net);
+
+			group_priority = json_object_get_int(jfw);
+
+			for (counter = 0; counter < strlen((char *) group_name); counter++)
+				group_name[counter] = toupper(group_name[counter]);
+
+			eb_ig_insert_member(group_name, networks[net], group_priority);
 		}
 	}
 	else
@@ -8882,6 +8979,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 	
 				if (json_object_object_get_ex(jstation, "fw-out", &jfw))
 					dvt->fw_out = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
+
 			}
 
 			jcount++;
@@ -9059,6 +9157,7 @@ int eb_parse_json_config(struct json_object *jc)
 	/* Order of play is this:
 	 *
 	 * Create firewall chains / policies (do these first so we can apply them to objects)
+	 * Create interface groups
 	 * Create pools, but without static mappings (we leave statics until we've created the objects they might refer to!)
 	 * Create virtual networks and their 'diverted' servers (in case we've tried to create a virtual network which overlaps with an econet) - No, do this after econets because otherwise our station maps all screw up. Econets first!
 	 * Create the legacy 'dynamic' network - which ultimately will refer to a pool in due course
@@ -9184,6 +9283,43 @@ int eb_parse_json_config(struct json_object *jc)
 			}
 		}	
 		
+	}
+
+	/* Next, create interface groups */
+	/* Not any more - they get created when interfaces get put in them */
+
+	if (0) {
+		struct json_object	*jig, *jig_name;
+		uint16_t		jlength, jcount;
+
+		jcount = 0;
+
+		if (json_object_object_get_ex(jc, "interface-groups", &jig))
+		{
+			jlength = json_object_array_length(jig);
+
+			while (jcount < jlength)
+			{
+				struct json_object	*jelement;
+
+				jelement = json_object_array_get_idx (jig, jcount);
+				if (!json_object_object_get_ex(jelement, "name", &jig_name))
+					eb_debug (1, 0, "JSON", "Cannot find Interface Group name in interface group list entry %d", jcount);
+				else
+				{
+					struct __eb_interface_group	*ig;
+
+					ig = eb_malloc(__FILE__, __LINE__, "JSON", "New firewall interface group structure", sizeof(struct __eb_interface_group));
+					ig->next = interface_groups;
+					strncpy((char *) ig->ig_name, (char *) json_object_get_string(jig_name), sizeof(ig->ig_name)-2);
+					interface_groups = ig;
+				}
+
+				jcount++;
+			}
+
+		}
+
 	}
 
 	/* Now create pools, but not static mappings - which are done when the other devices have been created */
@@ -9512,14 +9648,18 @@ int eb_parse_json_config(struct json_object *jc)
 			{
 				uint16_t	local_port, remote_port = 0;
 				char		* remote_host, *key, *name = NULL;
-				uint8_t		nat_local, nat_distant, found = 0;
+				uint8_t		nat_local, nat_distant;
 				uint16_t	nlength, ncount = 0;
 				uint32_t	retry_interval = 10;
+				unsigned char	group_name[21];
+				uint8_t		group_priority;
 				struct __eb_device	*trunk;
 				struct json_object	*jnat_local, *jnat_remote, *jfw, *jname, *jmt_parent, *jmt_type, *jmt_retry;
+				struct json_object	*jgroup_name, *jgroup_priority;
 				struct __eb_fw_chain	*fw_in = NULL, *fw_out = NULL;
 				struct __eb_device 	*mtp_device;
 				int		mt_type = 2; /* Server by default */
+				//struct __eb_interface_group	*ig;
 
 				remote_host = NULL; // Assume dynamic unless we have a host
 
@@ -9534,6 +9674,8 @@ int eb_parse_json_config(struct json_object *jc)
 				json_object_object_get_ex(jtrunk, "multitrunk-parent", &jmt_parent);
 				json_object_object_get_ex(jtrunk, "multitrunk-client", &jmt_type); // Boolean - true = client
 				json_object_object_get_ex(jtrunk, "multitrunk-retry-interval", &jmt_retry); // ms between connection attempts
+				json_object_object_get_ex(jtrunk, "group-name", &jgroup_name);
+				json_object_object_get_ex(jtrunk, "group-priority", &jgroup_priority);
 	
 				if (!jkey && (!jremotehost || !jremoteport)) 
 				{
@@ -9595,11 +9737,45 @@ int eb_parse_json_config(struct json_object *jc)
 				if (jmt_retry)
 					retry_interval = json_object_get_int(jmt_retry);
 
+				if (jgroup_name && !jgroup_priority)
+					eb_debug (1, 0, "JSON", "Trunk definition %d has group-name but no group-priority", tcount);
+
+				if (jgroup_name)
+				{
+					strncpy ((char *) group_name, json_object_get_string(jgroup_name), 20);
+					for (uint8_t counter = 0; counter < strlen((char *) group_name); counter++)
+						group_name[counter] = toupper(group_name[counter]);
+					group_priority = json_object_get_int(jgroup_priority);
+				}
+				else
+				{
+					group_name[0] = 0;
+					group_priority = 0;
+				}
+
 				eb_device_init_singletrunk (remote_host, local_port, remote_port, key, fw_in, fw_out, name, mtp_device, mt_type, retry_interval);
+
+				/* Insert any group data into the trunk */
+
+				trunk = trunks;
+				while (trunk)
+				{
+					if (trunk->trunk.local_port == local_port)
+						break;
+					else
+						trunk = trunk->next;
+				}
+
+				if (!trunk)
+					eb_debug (1, 0, "JSON", "Created trunk with local port %d but cannot find it in the trunks list!", local_port);
+
+				/* trunk reused below for nat */
+
+				if (group_name[0]) /* This trunk is in a group */
+					eb_ig_insert_member(group_name, trunk, group_priority);
 
 				if (key)
 					eb_free (__FILE__, __LINE__, "JSON", "New trunk key", key); /* Free - the devinit routine copies it to a new malloced area */
-
 				nlength = json_object_array_length(jnats);
 
 				while (ncount < nlength)
@@ -9615,18 +9791,7 @@ int eb_parse_json_config(struct json_object *jc)
 					nat_local = json_object_get_int(jnat_local);
 					nat_distant = json_object_get_int(jnat_remote);
 
-					trunk = trunks;
-
-					while (!found && trunk)
-					{
-						if (trunk->trunk.local_port == local_port)
-						{
-							found = 1;
-							eb_device_init_trunk_nat (trunk, nat_local, nat_distant);
-						}
-
-						trunk = trunk->next;
-					}
+					eb_device_init_trunk_nat (trunk, nat_local, nat_distant);
 
 					ncount++;
 				}
@@ -12428,11 +12593,18 @@ int main (int argc, char **argv)
 
 			while (t)
 			{
+				char	ig_data[50];
 
-				fprintf (stderr, "%5d        %-30s %5d\n", 
+				if (t->im)
+					snprintf (ig_data, 49, " (Group %s priority %d)", (char *) t->im->ig->ig_name, t->im->priority);
+				else	strcpy(ig_data, "");
+
+
+				fprintf (stderr, "%5d        %-30s %5d%s\n", 
 					t->trunk.local_port,
 					t->trunk.hostname ? t->trunk.hostname : "(Dynamic)",
-					t->trunk.hostname ? t->trunk.remote_port : 0
+					t->trunk.hostname ? t->trunk.remote_port : 0,
+					ig_data
 				);
 				
 				t = t->next;
@@ -13072,12 +13244,18 @@ static void * eb_statistics (void *nothing)
 		while (device)
 		{
 
+			char 	ig_data[50];
+
+			if (device->im) /* See if we're in an interface group */
+				snprintf (ig_data, 49, " (Intf. group %s priority %d)", device->im->ig->ig_name, device->im->priority);
+			else	strcpy(ig_data, "");
+
 			pthread_mutex_lock (&(device->statsmutex));
 
 			if (difftime(time(NULL), device->last_rx) > EB_CONFIG_TRUNK_DEAD_INTERVAL) // Trunk never used
-				fprintf (output, "999|000|Trunk|Local %d to %s:%d|%" PRIu64 "|%" PRIu64 "|Dead|\n",	(device->trunk.local_port), (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), (device->trunk.hostname ? device->trunk.remote_port : 0), device->b_in, device->b_out);
+				fprintf (output, "999|000|Trunk|Local %d to %s:%d%s|%" PRIu64 "|%" PRIu64 "|Dead|\n",	(device->trunk.local_port), (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), (device->trunk.hostname ? device->trunk.remote_port : 0), ig_data, device->b_in, device->b_out);
 			else
-				fprintf (output, "999|000|Trunk|Local %d to %s:%d|%" PRIu64 "|%" PRIu64 "|%.0f|\n",	(device->trunk.local_port), (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), (device->trunk.hostname ? device->trunk.remote_port : 0), device->b_in, device->b_out, difftime(time(NULL), device->last_rx));
+				fprintf (output, "999|000|Trunk|Local %d to %s:%d%s|%" PRIu64 "|%" PRIu64 "|%.0f|\n",	(device->trunk.local_port), (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), (device->trunk.hostname ? device->trunk.remote_port : 0), ig_data, device->b_in, device->b_out, difftime(time(NULL), device->last_rx));
 		
 			pthread_mutex_unlock (&(device->statsmutex));
 
@@ -13098,10 +13276,13 @@ static void * eb_statistics (void *nothing)
 		{
 
 			char 	trunkdest[256];
+			char	ig_data[50];
 
 			strcpy (trunkdest, "");
 
 			device = eb_get_network(net);
+
+			strcpy (ig_data, "");
 
 			if (!device) continue;
 
@@ -13114,6 +13295,8 @@ static void * eb_statistics (void *nothing)
 					break;
 				case EB_DEF_WIRE:
 					sprintf (trunkdest, "%s", device->wire.device);
+					if (device->im)
+						snprintf (ig_data, 49, " (Group %s priority %d)", device->im->ig->ig_name, device->im->priority);
 					break;
 				case EB_DEF_NULL:
 					sprintf (trunkdest, "Local null");
@@ -13125,8 +13308,8 @@ static void * eb_statistics (void *nothing)
 						
 			pthread_mutex_lock (&(device->statsmutex));
 
-			fprintf (output, "%03d|000|%s|%s|%" PRIu64 "|%" PRIu64 "||\n",	net, eb_type_str(device->type), 
-				trunkdest,
+			fprintf (output, "%03d|000|%s|%s%s|%" PRIu64 "|%" PRIu64 "||\n",	net, eb_type_str(device->type), 
+				trunkdest, ig_data,
 				device->b_in, device->b_out);
 		
 			pthread_mutex_unlock (&(device->statsmutex));
