@@ -77,6 +77,7 @@ struct __eb_device      *networks_initial[255]; // Used to rebuild networks[] on
 struct __eb_device      *devices; // All devices. Used to rebuild networks[] on a bridge re-set
 struct __eb_device      *trunks; // List of trunks.
 struct __eb_device	*multitrunks; // List of multitrunks.
+struct __eb_interface_group	*interface_groups; // List of interface groups or NULL
 struct __eb_pool	*pools; // List of pool definitions
 struct __eb_fw_chain	*fw_chains; // List of firewall chains
 
@@ -1003,6 +1004,7 @@ struct __eb_device * eb_device_init (uint8_t net, uint16_t type, uint8_t config)
 		if (net) p->net = net;
 		p->type = type;
 		p->index = interface_index++;
+		p->ig = NULL; /* No interface group by default */
 
 		if (pthread_mutex_init(&(p->qmutex_in), NULL) == -1)
 			eb_debug (1, 0, "CONFIG", "Cannot initialize queue mutex inbound for net %d", net);
@@ -3453,6 +3455,75 @@ uint8_t eb_firewall (struct __eb_fw_chain *chain, struct __econet_packet_aun *p)
 		eb_debug (0, 2, "FW", "FW       %3d.%3d from %3d.%3d Firewall chain %s dropped traffic: P:&%02X, C:&%02X, Seq:&%08X (default = %02X)", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, chain->fw_chain_name, p->p.port, p->p.ctrl, p->p.seq, chain->fw_default);
 
 	return result;
+}
+
+/* 
+ * Test to see whether a device should handle traffic.
+ *
+ * This is primarily to signal when a trunk or Econet device
+ * should refuse to handle traffic except bridge keepalives
+ * beacuse the interface is in an interface group. 
+ *
+ * However, it will also signal when a pipe interface
+ * has no client connected and nothing should be 
+ * sent to it.
+ */
+
+uint8_t	eb_device_usable (struct __eb_device *device)
+{
+	uint8_t		result = 1; /* Default usable */
+	struct __eb_interface_group	*ig;
+
+	if (device->type == EB_DEF_PIPE && device->pipe.skt_write == -1) /* Pipe inactive */
+		result = 0;
+	else if (	(device->type == EB_DEF_TRUNK || device->type == EB_DEF_WIRE) /* Possible bridge connections */
+		&&	(ig = device->ig) /* Don't set inactive if not a member of an IG */
+		)
+	{
+
+		struct __eb_interface_member	*im;
+
+		im = ig->first;
+
+		result = 0; /* Default now disabled, unless we find ourselves as the first active group member */
+
+		while (im)
+		{
+
+			uint8_t	dead = 0;
+			time_t	last_rx;
+
+			/* Whatever device we've found, let's see if it's active */
+
+			/* Econets are always active - i.e. not dead - so we only check trunks */
+
+			if (im->device->type == EB_DEF_TRUNK) /* Econets are always active */
+			{
+				pthread_mutex_lock (&(device->statsmutex));
+				last_rx = device->last_rx;
+				pthread_mutex_unlock (&(device->statsmutex));
+
+				if (difftime(time(NULL), last_rx) > EB_CONFIG_TRUNK_DEAD_INTERVAL)
+					dead = 1;
+			}
+
+			if (im->device == device) /* We've found ourselves in the list */
+			{
+				result = !dead;
+				break;
+			}
+			else if (!dead) /* Something - which must be higher priority - is not dead, so our interface is inactive */
+				break; /* Returns the default result = 0 */
+
+			/* Find the next entry */
+
+			im = im->next;
+		}
+
+	}
+
+	return result;
+
 }
 
 
@@ -6151,6 +6222,15 @@ static void * eb_device_despatcher (void * device)
 					if (length >= 12) { eb_update_lastrx(d); packetreceived = 1; }
 				}
 
+				/* See if this was received on an interface group and we need to ignore it */
+
+				if (d->type == EB_DEF_WIRE || d->type == EB_DEF_TRUNK) /* We won't invalidate PIPE traffic because receipt means the pipe is alive */
+				{
+					if (!eb_device_usable(d) && !(d->type == EB_DEF_WIRE && (packet.p.srcnet == 0 || packet.p.srcnet == d->net)) && !(packet.p.port == 0x9C && packet.p.ctrl == EB_CONFIG_TRUNK_KEEPALIVE_CTRL)) /* Either device not usable, and it's not wire from local network and it's not a trunk keepalive */
+						packetreceived = 0; /* Pretend we've gone deaf */
+
+				}
+
 				if (packetreceived && (length >= 12))
 				{
 					eb_add_stats (&(d->statsmutex), &(d->b_out), length-12); // Interface producing outbound traffic
@@ -6902,6 +6982,17 @@ static void * eb_device_despatcher (void * device)
 					    p->p->p.aun_ttype == ECONET_AUN_NAK ||
 					    p->p->p.aun_ttype == ECONET_AUN_INK)
 						remove = 1;
+
+					/* Apply interface group restriction */
+
+					if (!eb_device_usable(d) && (p->p->p.dstnet != d->net)) /* Device not usable and not local net */
+						remove = 1;
+				}
+
+				if (d->type == EB_DEF_TRUNK) /* Apply interface group restriction */
+				{
+					if (!eb_device_usable(d) && (p->p->p.port != 0x9C || p->p->p.ctrl != EB_CONFIG_TRUNK_KEEPALIVE_CTRL))
+						remove = 1; /* Remove if the trunk isn't usable and this isn't a trunk keepalive, which we'll always send. */
 				}
 
 				if (!remove) switch (d->type)
@@ -8006,7 +8097,7 @@ static void * eb_device_despatcher (void * device)
 
 							eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
 						}
-						else
+						else if (p->p->p.aun_ttype != ECONET_AUN_BCAST)
 							eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d Unexpected traffic to pipe whose writer socket is not open", "Pipe", d->net, d->pipe.stn);
 
 						
@@ -11829,6 +11920,8 @@ int main (int argc, char **argv)
 	aun_remotes = NULL;
 	bridge_fw = NULL;
 	trunks = NULL;
+	multitrunks = NULL;
+	interface_groups = NULL;
 	pools = NULL;
 	exposures = NULL;
 	port99_list = NULL;

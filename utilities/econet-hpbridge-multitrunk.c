@@ -848,7 +848,7 @@ void * eb_multitrunk_handler_thread (void * input)
 	
 								if ((ptr = eb_multitrunk_find_marker(buffer, ptr, len)) >= 0) /* Close marker found */
 								{
-									realdata_len = ptr - realdata_start;								 
+									realdata_len = ptr - realdata_start;
 	
 									eb_mt_copy_to_cipherpacket (&cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, realdata_start, realdata_len);
 

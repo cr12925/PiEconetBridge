@@ -482,6 +482,9 @@ struct __eb_device { // Structure holding information about a "physical" device 
 
 	struct __eb_fw_chain		*fw_in, *fw_out; /* 'in' is for traffic going TO the device (e.g. being sent to a fileserver, pipe, econet, or trunk - i.e. going away from the bridge), 'out' is stuff emanating out of the device (i.e. arriving on a pipe, from a fileserver, off an econet, arriving on a trunk) */
 
+	/* Interface group - applicable only to Econet wire & trunks */
+	struct __eb_interface_group	*ig; /* NULL means not in a group */
+
 	// Per device type information
 	union {
 
@@ -624,6 +627,38 @@ struct __eb_device { // Structure holding information about a "physical" device 
 	
 	struct __eb_device	*next; // Linked list. Used to maintain the chain in *devices, except trunks, where it's a pointer to the next trunk in 'trunks' because whilst a trunk will appear in networks[], it doesn't have a network number of its own.
 
+};
+
+/*
+ * Interface groups.
+ *
+ * Interface groups are designed to allow a looped network topology
+ * of a type which pure Acorn/SJ technology would not permit.
+ *
+ * Each group can consist of any mix of wire & trunk interfaces.
+ * Each interface must have a priority. The higher the priority, the
+ * more preferable the interface.
+ *
+ * An interface will only carry traffic if it is the highest priority
+ * active interface. The exception is that a wired Econet will always
+ * communicate with its local network stations.
+ *
+ * Where an interface does not carry traffic, it will ignore all
+ * traffic (including bridge updates/resets) with the exception 
+ * of bridge keepalives, which is how the bridge can tell if a 
+ * trunk is alive.
+ */
+
+struct __eb_interface_member {
+	struct __eb_device 	*device;
+	uint8_t			priority;
+	struct __eb_interface_member	*next;
+};
+
+struct __eb_interface_group {
+	unsigned char	ig_name[21];
+	struct __eb_interface_member *first;
+	struct __eb_interface_group *next;
 };
 
 #define EB_PORT_SET(device,list,port,func,param)	{ device->local.list[((port) / 32)] |= (1 << (port & 0x01f));  device->local.port_funcs[(port)]=func; device->local.port_param[(port)]=param; }

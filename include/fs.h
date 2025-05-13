@@ -1015,6 +1015,9 @@ extern float timediffstart(void);
 	r[(l) + 3] = ((v) & 0xff000000) >> 24;\
 	FS_PUT24((r),(l),(v))
 
+#define FS_PUTD(r,l,v,n) \
+	memcpy(&(r[(l)]),(v),(n)); 
+
 // Equivalents to use __rcounter and increment it.
 
 #define FS_CPUT8(v) reply.p.data[__rcounter++] = (v & 0xff)
@@ -1030,6 +1033,10 @@ extern float timediffstart(void);
 #define FS_CPUT32(v) \
 	FS_CPUT24((v));\
 	FS_CPUT8((((v) & 0xff000000) >> 24))
+
+#define FS_CPUTD(v,n) \
+	memcpy(&(reply.p.data[__rcounter]),(v),(n)); \
+	__rcounter += n
 
 #define FS_CSEND() fsop_aun_send(&reply,__rcounter,f)
 
