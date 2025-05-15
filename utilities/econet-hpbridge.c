@@ -8997,7 +8997,7 @@ int eb_readconfig(char *f)
 void eb_help(char *name)
 {
 
-	fprintf (stderr, "\n\
+	printf ("\n\
 Copyright (c) 2024 Chris Royle\n\
 This program comes with ABSOLUTELY NO WARRANTY; for details see\n\
 the GPL v3.0 licence at https://www.gnu.org/licences/ \n\
@@ -9235,7 +9235,7 @@ int main (int argc, char **argv)
 
 	/* Parse command line */
 
-	while ((opt = getopt_long(argc, argv, "hc:d:eln:p:sz", long_options, &optind)) != -1)	
+	while ((opt = getopt_long(argc, argv, "hc:d:eln:p:svz", long_options, &optind)) != -1)	
 	{
 		switch (opt)
 		{
@@ -9289,6 +9289,12 @@ int main (int argc, char **argv)
 				if (strchr(optarg, 'O'))	EB_CONFIG_PKT_DUMP_OPTS |= EB_PKT_DUMP_POST_O;
 			}; break;
 			case 's':	dumpconfig++; break;	
+			case 'v':	printf("econet-hpbridge: version %d.%d, GIT repository version "GIT_VERSION"\n", 
+						(EB_VERSION & 0xf0) >> 4,
+						(EB_VERSION & 0x0f)
+					       ); 
+					exit(0);
+					break;
 			case 'z':	EB_DEBUG_LEVEL++; break;
 		}
 	}
