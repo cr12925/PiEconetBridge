@@ -11863,8 +11863,8 @@ int eb_readconfig(char *f, char *json)
 void eb_help(char *name)
 {
 
-	fprintf (stderr, "\n\
-Copyright (c) 2024 Chris Royle\n\
+	printf ("\n\
+Copyright (c) 2025 Chris Royle\n\
 This program comes with ABSOLUTELY NO WARRANTY; for details see\n\
 the GPL v3.0 licence at https://www.gnu.org/licences/ \n\
 \n\
@@ -12145,7 +12145,7 @@ int main (int argc, char **argv)
 	 * wrong.
 	 */
 
-	while ((opt = getopt_long(argc, argv, "hc:d:eln:p:syz", long_options, &long_index)) != -1)	
+	while ((opt = getopt_long(argc, argv, "hc:d:eln:p:svyz", long_options, &long_index)) != -1)	
 	{
 		switch (opt)
 		{
@@ -12209,6 +12209,11 @@ int main (int argc, char **argv)
 			}; break;
 			*/
 			case 's':	dumpconfig++; break;	
+			case 'v':	printf("econet-hpbridge: v%d.%d, GIT repository "GIT_VERSION"\n",
+					(EB_VERSION & 0xf0) >> 4,
+					(EB_VERSION & 0x0f));
+					exit(0);
+					break;
 			case 'y':	EB_DEBUG_LEVEL++; break;
 			
 		}
