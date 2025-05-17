@@ -5500,7 +5500,7 @@ static void * eb_device_despatcher (void * device)
 	// Start our device listener
 
 	if (EB_CONFIG_LOCAL && d->type == EB_DEF_WIRE)
-		eb_debug (0, 1, "WIRE", "%-8s %3d     Econet device disabled", d->net);
+		eb_debug (0, 1, "WIRE", "%-8s %3d     Econet device disabled", "", d->net);
 
 	// Start divert devices if this is a WIRE or NULL / Virtual device
 
