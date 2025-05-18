@@ -273,12 +273,8 @@ class AUNClient:
                 elif (result_code == FSOP_RESULT_CAT):
                     print ("Server invites you to do a catalogue")
                 elif (result_code == FSOP_RESULT_INFO):
-                    
-                    #strip_match = re.search("^(.+)\r\x80$", self.packet[AUN_DATA+2])
-                    #if (strip_match):
-                        #print (strip_match.group(1))
-                    #else:
-                        print ("Server has decoded that request as a *INFO, but result not understood")
+                    info_string = self.packet[10:-2]
+                    print (f"{info_string.decode('ascii')}")
                 elif (result_code == FSOP_RESULT_IAM): # Logged in
                     urd_handle = self.packet[AUN_DATA+2]
                     cwd_handle = self.packet[AUN_DATA+3]
@@ -286,7 +282,7 @@ class AUNClient:
                     self.handles[(net, stn)] = (urd_handle, cwd_handle, lib_handle)
                     self.debug (f"Logged in to {net}.{stn} with URD = {urd_handle:02X}, CWD = {cwd_handle:02X}, LIB = {lib_handle:02X}")
                 elif (result_code == FSOP_RESULT_SDISC):
-                    print ("Server has decoded that request as a *SDISC")
+                    print ("Disc changed")
                 elif (result_code == FSOP_RESULT_DIR): # Dir handle change
                     current_handles = self.handles[(net, stn)]
                     self.handles[(net, stn)] = (current_handles[0], self.packet[AUN_DATA+2], current_handles[2])
