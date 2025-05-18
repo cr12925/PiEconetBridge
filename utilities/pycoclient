@@ -1,0 +1,103 @@
+#!/usr/bin/python3
+#   (c) 2025 Chris Royle
+#   This program is free software: you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation, either version 3 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+import sys
+import AUNProtocol
+import re
+import getopt
+import threading
+
+def user_thread(aun_client, server = "1.254", username = "", password = ""):
+
+    my_match = re.search("^\s*(\d{1,3})\.(\d{1,3})\s*$", server)
+
+    if (my_match != None):
+        my_net = int(my_match.group(1))
+        my_stn = int(my_match.group(2))
+    else:
+        return None
+
+    if password == "":
+        password = "\"\""
+
+    if username != "" and password != "":
+        reply_packet = aun_client.FSOp(my_net, my_stn, 0x00, bytearray(f'I AM {username} {password}', 'ascii'))
+        if reply_packet == None:
+            aun_client.debug("No reply")
+
+    cmd = ""
+
+    while (re.search("quit", cmd, re.I) == None):
+        print("> *", end="")
+        cmd = input()
+        fs_match = re.search("^FS\s+(\d{1,3})\.(\d{1,3})$", cmd, re.I)
+        if fs_match:
+            my_net = int(fs_match.group(1))
+            my_stn = int(fs_match.group(2))
+        elif re.search("quit", cmd, re.I) == None:
+            reply_packet = aun_client.FSOp(my_net, my_stn, 0x00, bytearray(cmd, "ascii"))
+            if reply_packet == None:
+                aun_client.debug("No reply")
+        else:
+            aun_client.debug("Exiting")
+
+argumentList = sys.argv[1:]
+long_options = ["help", "server=", "user=", "password=", "localport=", "bindaddr=", "timeout="]
+
+server = "1.254"
+username = ""
+password = ""
+local_port = 32768
+bind_addr = ''
+timeout = 1.5
+
+arguments, values = getopt.getopt(argumentList, "", long_options)
+for currentArgument, currentValue in arguments:
+    if currentArgument == "help":
+        print ("pycoclient:\n")
+        print ("  --server=net.stn    : Default to this station to send FS Operations to (default: 1.254)")
+        print ("  --user=username     : Set username for login command")
+        print ("  --password=password : Set password for login command")
+        print ("  --localport=<n>     : Set local AUN port number (default: 32768)")
+        print ("  --bindaddr=<ip>     : Set address to bind local UDP socket to")
+        print ("  --timeout=<s>       : Timeout for AUN replies in seconds (can be float)")
+        exit(0)
+    elif currentArgument == "--server":
+        server = currentValue
+    elif currentArgument == "--user":
+        username = currentValue
+    elif currentArgument == "--password":
+        password = currentValue
+    elif currentArgument == "--localport":
+        local_port = int(currentValue)
+    elif currentArgument == "--bindaddr":
+        bind_addr = currentValue
+    elif currentArgument == "--timeout":
+        timeout = float(currentValue)
+
+# Create an AUN client
+
+aun_client = AUNProtocol.AUNClient(local_port, bind_addr, timeout, True, True)
+
+if aun_client == None:
+	print ("Unable to create listener")
+	exit(0)
+
+# The AUNClient will have started a listener thread
+front_thread = threading.Thread(target=user_thread, args=(aun_client, server, username, password))
+
+front_thread.start()
+front_thread.join()
+
