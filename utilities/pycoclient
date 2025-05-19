@@ -19,24 +19,75 @@ import re
 import getopt
 import threading
 
-def user_thread(aun_client, server = "1.254", username = "", password = ""):
-
+def select_server (server):
     my_match = re.search("^\s*(\d{1,3})\.(\d{1,3})\s*$", server)
 
     if (my_match != None):
         my_net = int(my_match.group(1))
         my_stn = int(my_match.group(2))
     else:
-        return None
+        return None, None
 
-    if password == "":
-        password = "\"\""
+    return my_net, my_stn
 
-    if username != "" and password != "":
-        reply_packet = aun_client.FSOp(my_net, my_stn, 0x00, bytearray(f'I AM {username} {password}', 'ascii'))
+def login (my_net, my_stn, username, password):
+
+    if username != "":
+        login_string = f'I AM {username} {password}'
+
+        result, error, reply_packet = aun_client.FSOp(my_net, my_stn, 0x00, bytearray(login_string, 'ascii'))
+        
         if reply_packet == None:
             aun_client.debug("No reply")
+            return False
+        elif error != 0:
+            print (aun_client.report_FSOp_result(aun_client, result, error, reply_packet))
+            return False
+        else:
+            return True
 
+    return True
+
+def execute_script(aun_client, script, server = "1.254", username = "", password = ""):
+
+    my_net, my_stn = select_server(server)
+
+    if my_net == None:
+        return None 
+
+    if login(my_net, my_stn, username, password) == False:
+        return None
+
+    with open(script, "r") as h:
+        for rline in h:
+            line = rline.strip("\n")
+            fs_match = re.search("^FS\s+(\d{1,3})\.(\d{1,3})$", line, re.I)
+            if fs_match:
+                my_net = int(fs_match.group(1))
+                my_stn = int(fs_match.group(2))
+            elif re.search("quit", line, re.I) == None:
+                fsop_result, fsop_error, reply_packet = aun_client.FSOp(my_net, my_stn, 0x00, bytearray(line, "ascii"))
+                error_string = aun_client.report_FSOp_result(aun_client, fsop_result, fsop_error, reply_packet)
+                if fsop_error != 0:
+                    return fsop_error, line, error_string
+        else:
+            aun_client.debug("Exiting")
+
+    return 0, 0, None
+
+def dummy_callback(net, stn, port, ctrl, ptype, seq, content):
+    print (f'Callback: Traffic to port {port:02X}, ctrl {ctrl:02X}, seq {seq:08X} from {net}.{stn}, {content}')
+
+def user_thread(aun_client, server = "1.254", username = "", password = ""):
+
+    my_net, my_stn = select_server(server)
+
+    if my_net == None:
+        return None 
+
+    if login(my_net, my_stn, username, password) == False:
+        return None
+    
     cmd = ""
 
     while (re.search("quit", cmd, re.I) == None):
@@ -47,14 +98,16 @@ def user_thread(aun_client, server = "1.254", username = "", password = ""):
             my_net = int(fs_match.group(1))
             my_stn = int(fs_match.group(2))
         elif re.search("quit", cmd, re.I) == None:
-            reply_packet = aun_client.FSOp(my_net, my_stn, 0x00, bytearray(cmd, "ascii"))
-            if reply_packet == None:
-                aun_client.debug("No reply")
+            fsop_result, fsop_error, reply_packet = aun_client.FSOp(my_net, my_stn, 0x00, bytearray(cmd, "ascii"))
+            if fsop_error != 0:
+                error_string = aun_client.report_FSOp_result(aun_client, fsop_result, fsop_error, reply_packet)
+                print (f"Error &{fsop_error:02X} - {error_string}")
+
         else:
-            aun_client.debug("Exiting")
+            print("Exiting")
 
 argumentList = sys.argv[1:]
-long_options = ["help", "server=", "user=", "password=", "localport=", "bindaddr=", "timeout="]
+long_options = ["help", "server=", "user=", "password=", "localport=", "bindaddr=", "timeout=", "script=", "debug", "traffic-debug"]
 
 server = "1.254"
 username = ""
@@ -62,42 +115,62 @@ password = ""
 local_port = 32768
 bind_addr = ''
 timeout = 1.5
+script = None
+debug = False
+traffic_debug = False
 
 arguments, values = getopt.getopt(argumentList, "", long_options)
 for currentArgument, currentValue in arguments:
     if currentArgument == "help":
         print ("pycoclient:\n")
-        print ("  --server=net.stn    : Default to this station to send FS Operations to (default: 1.254)")
-        print ("  --user=username     : Set username for login command")
-        print ("  --password=password : Set password for login command")
-        print ("  --localport=<n>     : Set local AUN port number (default: 32768)")
         print ("  --bindaddr=<ip>     : Set address to bind local UDP socket to")
+        print ("  --debug             : Enable non-traffic debug")
+        print ("  --localport=<n>     : Set local AUN port number (default: 32768)")
+        print ("  --password=password : Set password for login command")
+        print ("  --script=<file>     : Execute *-commands from <file> and then quit")
+        print ("  --server=net.stn    : Default to this station to send FS Operations to (default: 1.254)")
         print ("  --timeout=<s>       : Timeout for AUN replies in seconds (can be float)")
+        print ("  --traffic-debug     : Enable traffic debug")
+        print ("  --user=username     : Set username for login command")
         exit(0)
-    elif currentArgument == "--server":
-        server = currentValue
-    elif currentArgument == "--user":
-        username = currentValue
-    elif currentArgument == "--password":
-        password = currentValue
-    elif currentArgument == "--localport":
-        local_port = int(currentValue)
     elif currentArgument == "--bindaddr":
         bind_addr = currentValue
+    elif currentArgument == "--debug":
+        debug = True
+    elif currentArgument == "--localport":
+        local_port = int(currentValue)
+    elif currentArgument == "--password":
+        password = currentValue
+    elif currentArgument == "--script":
+        script = currentValue
+    elif currentArgument == "--server":
+        server = currentValue
     elif currentArgument == "--timeout":
         timeout = float(currentValue)
+    elif currentArgument == "--traffic-debug":
+        traffic_debug = True
+    elif currentArgument == "--user":
+        username = currentValue
 
 # Create an AUN client
 
-aun_client = AUNProtocol.AUNClient(local_port, bind_addr, timeout, True, True)
+aun_client = AUNProtocol.AUNClient(local_port, bind_addr, timeout, debug, traffic_debug)
 
 if aun_client == None:
 	print ("Unable to create listener")
 	exit(0)
 
-# The AUNClient will have started a listener thread
-front_thread = threading.Thread(target=user_thread, args=(aun_client, server, username, password))
+if script:
+    result, line, error = execute_script(aun_client, script)
 
-front_thread.start()
-front_thread.join()
+    if result != 0:
+        print (f"Error &{result:02X} at {line} - {error}")
+        exit(result)
+    else:
+        exit(0)
 
+else:
+    # The AUNClient will have started a listener thread
+    front_thread = threading.Thread(target=user_thread, args=(aun_client, server, username, password))
+    front_thread.start()
+    front_thread.join()
