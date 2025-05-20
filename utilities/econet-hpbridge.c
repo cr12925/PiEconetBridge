@@ -3479,6 +3479,8 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 
 		if (length < 0)
 			eb_debug (0, 2, "LISTEN", "%-8s %3d.%3d Error %d reading on exposure socket %d (%s)", "AUN", e->net, e->stn, errno, e->socket, strerror(errno));
+		else if (length < 8)
+			eb_debug (0, 2, "LISTEN", "%-8s %3d.%3d Error: runt packet received on exposure socket %d", "AUN", e->net, e->stn, e->socket);
 		else if (eb_is_exposure_active(e)) // Dump packet if exposure inactive
 		{
 			in_addr_t		source_address;
@@ -7809,7 +7811,7 @@ int eb_readconfig(char *f)
 				p->trunk.head = NULL;
 				p->trunk.tail = NULL;
 				memset (&(p->trunk.xlate_in), 0, 256);
-				memset (&(p->trunk.xlate_in), 0, 256);
+				memset (&(p->trunk.xlate_out), 0, 256);
 				memset (&(p->trunk.filter_in), 0, 256);
 				memset (&(p->trunk.filter_out), 0, 256);
 
