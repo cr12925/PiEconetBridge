@@ -3766,6 +3766,8 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 
 		if (length < 0)
 			eb_debug (0, 2, "LISTEN", "%-8s %3d.%3d Error %d reading on exposure socket %d (%s)", "AUN", e->net, e->stn, errno, e->socket, strerror(errno));
+		if (length < 8)
+			eb_debug (0, 2, "LISTEN", "%-8s %3d.%3d Error reading on exposure socket %d (Runt packet < 8 bytes received)", "AUN", e->net, e->stn, errno, e->socket);
 		else if (eb_is_exposure_active(e)) // Dump packet if exposure inactive
 		{
 			in_addr_t		source_address;
