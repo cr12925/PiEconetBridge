@@ -109,7 +109,7 @@ uint8_t eb_device_init_singletrunk (char * destination, uint16_t local_port, uin
 	p->fw_in = fw_in;
 	p->fw_out = fw_out;
 	memset (&(p->trunk.xlate_in), 0, 256);
-	memset (&(p->trunk.xlate_in), 0, 256);
+	memset (&(p->trunk.xlate_out), 0, 256);
 	memset (&(p->trunk.filter_in), 0, 256);
 	memset (&(p->trunk.filter_out), 0, 256);
 
