@@ -2109,9 +2109,21 @@ void eb_bridge_reset (struct __eb_device *trigger)
 	while (dev)
 	{
 
-		if ((dev->type == EB_DEF_PIPE) && (dev->pipe.skt_write != -1)) // Active pipe
+		if (dev->type == EB_DEF_WIRE || dev->type == EB_DEF_NULL)
 		{
-			ECONET_SET_STATION(pipe_stations, dev->net, dev->pipe.stn);
+			uint8_t	divert;
+
+			for (divert = 1; divert < 255; divert++)
+			{
+				if (dev->type == EB_DEF_WIRE && dev->wire.divert[divert] != NULL && dev->wire.divert[divert]->type == EB_DEF_PIPE && dev->wire.divert[divert]->pipe.skt_write != -1)
+				{
+					ECONET_SET_STATION(pipe_stations, dev->net, dev->pipe.stn);
+				}
+				else if (dev->type == EB_DEF_NULL && dev->null.divert[divert] != NULL && dev->null.divert[divert]->type == EB_DEF_PIPE && dev->null.divert[divert]->pipe.skt_write != -1)
+				{
+					ECONET_SET_STATION(pipe_stations, dev->net, dev->pipe.stn);
+				}
+			}
 		}
 
 		dev = dev->next;
