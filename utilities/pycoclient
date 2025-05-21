@@ -106,7 +106,8 @@ def user_thread(aun_client, server = "1.254", username = "", password = ""):
                 print (f"Error &{fsop_error:02X} - {error_string}")
             else:
                 fsop_string = aun_client.report_FSOp_result(aun_client, fsop_result, fsop_error, reply_packet)
-                print (f"{fsop_string}")
+                if (fsop_result != AUNProtocol.FSOP_RESULT_INFO) and (fsop_result != AUNProtocol.FSOP_RESULT_CAT) and (fsop_result != AUNProtocol.FSOP_RESULT_OK) and (fsop_result != AUNProtocol.FSOP_RESULT_IAM):
+                    print (f"{fsop_string}")
 
 
         else:
