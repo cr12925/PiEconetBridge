@@ -113,7 +113,7 @@ def user_thread(aun_client, server = "1.254", username = "", password = ""):
             print("Exiting")
 
 argumentList = sys.argv[1:]
-long_options = ["help", "server=", "user=", "password=", "localport=", "bindaddr=", "timeout=", "script-params=", "script=", "debug", "traffic-debug"]
+long_options = ["help", "server=", "user=", "password=", "localport=", "bindaddr=", "pipebase=", "timeout=", "script-params=", "script=", "debug", "traffic-debug", "aunmap=", "hostmap="]
 
 server = "1.254"
 username = ""
@@ -125,15 +125,21 @@ script = None
 debug = False
 traffic_debug = False
 script_params = [ ] 
+pipebase = None
+aunmap = None
+hostmap = None
 
 arguments, values = getopt.getopt(argumentList, "", long_options)
 for currentArgument, currentValue in arguments:
     if currentArgument == "help":
         print ("pycoclient:\n")
+        print ("  --aunmap=/path      : Path to aunmap file. Defaults to ~/.aunmap")
         print ("  --bindaddr=<ip>     : Set address to bind local UDP socket to")
         print ("  --debug             : Enable non-traffic debug")
+        print ("  --hostmap=/path    : Path to hosts map file. Defaults to ~/.hostsmap")
         print ("  --localport=<n>     : Set local AUN port number (default: 32768)")
         print ("  --password=password : Set password for login command")
+        print ("  --pipebase=/path    : Use Econet HPB pipe connector not AUN over IP, base pipe path as specified")
         print ("  --script=<file>     : Execute *-commands from <file> and then quit")
         print ("  --script-params=\"x,x,x,x\": Parameters to substitute for %n in scripts")
         print ("  --server=net.stn    : Default to this station to send FS Operations to (default: 1.254)")
@@ -141,14 +147,20 @@ for currentArgument, currentValue in arguments:
         print ("  --traffic-debug     : Enable traffic debug")
         print ("  --user=username     : Set username for login command")
         exit(0)
+    elif currentArgument == "--aunmap":
+        aunmap = currentValue
     elif currentArgument == "--bindaddr":
         bind_addr = currentValue
     elif currentArgument == "--debug":
         debug = True
+    elif currentArgument == "--hostmap":
+        hostmap = currentValue
     elif currentArgument == "--localport":
         local_port = int(currentValue)
     elif currentArgument == "--password":
         password = currentValue
+    elif currentArgument == "--pipebase":
+        pipebase = currentValue
     elif currentArgument == "--script":
         script = currentValue
     elif currentArgument == "--script-params":
@@ -164,7 +176,7 @@ for currentArgument, currentValue in arguments:
 
 # Create an AUN client
 
-aun_client = AUNProtocol.AUNClient(local_port, bind_addr, timeout, debug, traffic_debug)
+aun_client = AUNProtocol.AUNClient(localport = local_port, bind_addr = bind_addr, timeout = timeout, debug_on = debug, traffic_debug_on = traffic_debug, pipebase = pipebase, aunmap_file = aunmap, hostmap_file = hostmap)
 
 if aun_client == None:
 	print ("Unable to create listener")

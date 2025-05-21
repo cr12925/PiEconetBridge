@@ -2117,11 +2117,11 @@ void eb_bridge_reset (struct __eb_device *trigger)
 			{
 				if (dev->type == EB_DEF_WIRE && dev->wire.divert[divert] != NULL && dev->wire.divert[divert]->type == EB_DEF_PIPE && dev->wire.divert[divert]->pipe.skt_write != -1)
 				{
-					ECONET_SET_STATION(pipe_stations, dev->net, dev->pipe.stn);
+					ECONET_SET_STATION(pipe_stations, dev->net, divert);
 				}
 				else if (dev->type == EB_DEF_NULL && dev->null.divert[divert] != NULL && dev->null.divert[divert]->type == EB_DEF_PIPE && dev->null.divert[divert]->pipe.skt_write != -1)
 				{
-					ECONET_SET_STATION(pipe_stations, dev->net, dev->pipe.stn);
+					ECONET_SET_STATION(pipe_stations, dev->net, divert);
 				}
 			}
 		}
@@ -7354,7 +7354,7 @@ static void * eb_device_despatcher (void * device)
 								}
 								else
 								{
-									eb_enqueue_input (ackdevice, ap, 12);
+									eb_enqueue_input (ackdevice, ap, 0);
 									pthread_cond_signal(&(ackdevice->qwake));
 									/* Don't free - despatcher does it on transmit */
 								}
@@ -8094,19 +8094,23 @@ static void * eb_device_despatcher (void * device)
 						if (p->p->p.srcnet == d->net)	p->p->p.srcnet = 0;
 						if (p->p->p.dstnet == d->net)	p->p->p.dstnet = 0;
 
+						/* Given this is dealt with below the next if(), I think this is a duplicate!
 						if (p->p->p.aun_ttype == ECONET_AUN_DATA)
 							eb_enqueue_output (d, &ack, 0, NULL);
+							*/
 
 						if (d->pipe.skt_write != -1) // Live writer
 						{
 							struct __econet_packet_pipe delivery;
+							int l;
 							
 							delivery.length_low = ((p->length + 12) & 0xff);
 							delivery.length_high = (((p->length + 12) >> 8) & 0xff);
 							
 							memcpy (&(delivery.dststn), p->p, p->length + 12);
 
-							write(d->pipe.skt_write, &delivery, p->length + 14); // Includes the extra two bytes
+							if ((l = write(d->pipe.skt_write, &delivery, p->length + 14)) < p->length + 14) // Includes the extra two bytes
+								eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d Short write to pipe: %d bytes written out of %d", "Pipe", d->net, d->pipe.stn, l, p->length+14);
 								
 							eb_add_stats(&(d->statsmutex), &(d->b_in), p->length);
 

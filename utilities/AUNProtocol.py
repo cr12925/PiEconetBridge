@@ -22,7 +22,7 @@ import os
 
 # machinePeek reply data
 PEEK_HW=0xEEE0
-PEEK_VERS=0x0100
+PEEK_VERS=0x0001
 
 # Byte positions in AUN traffic
 AUN_PTYPE=0
@@ -76,21 +76,7 @@ AUN_TX_RESULT_UNKNOWN=-255
 
 class AUNClient:
 
-    def __init__(self, localport = 32768, bind_addr = '', timeout = 1.5, debug_on = False, traffic_debug_on = False, aunmap_file = None, hostmap_file = None, pipemode = False, pipebase = None):
-        self.pipemode = pipemode
-        self.pipebase = pipebase
-        self.local_port = localport
-        self.handles = { }
-        self.aun_timeout = timeout
-        self.seq = 0x4000
-        self.traffic_debug_enabled = traffic_debug_on
-        self.debug_enabled = debug_on
-        if pipemode == False:
-            self.local_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.local_socket.bind((bind_addr, self.local_port))
-        else:
-            print ("Pipe mode")
-            # Open pipes here
+    def __init__(self, localport = 32768, bind_addr = '', timeout = 1.5, debug_on = False, traffic_debug_on = False, aunmap_file = None, hostmap_file = None, pipebase = None):
         self.last_port = 0
         self.ports_mutex = threading.Lock()
         self.ports = { }
@@ -103,12 +89,39 @@ class AUNClient:
         self.acknak_condition = threading.Condition()
         self.broadcast = { } # Dictionary of broadcasts
         self.broadcast_condition = threading.Condition()
+        self.pipebase = pipebase
+        self.pipemode = False
+        if (pipebase != None):
+            self.pipemode = True
+        self.local_port = localport
+        self.handles = { }
+        self.aun_timeout = timeout
+        self.seq = 0x4000
+        self.traffic_debug_enabled = traffic_debug_on
+        self.debug_enabled = debug_on
+        if self.pipemode == False:
+            self.local_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.local_socket.bind((bind_addr, self.local_port))
+        else:
+            self.pipe_write = open(f"{self.pipebase}.tobridge", "wb")
+            if self.pipe_write == False:
+                print ("Failed to open pipe to bridge. Quitting.")
+                exit(1)
+            # Send a bridge query to wake the bridge up
+            bridge_string = "BRIDGE"
+            bridge_broadcast = bytearray ([ 0x14, 0x00 ]) + bytearray([ 0xff, 0xff, 0, 0 ]) + self.AUNPacket(AUN_PT_BCAST, 0x9C, 0x82, 0x3ffc, bytearray(bridge_string.encode('ascii')) + bytearray([ 0x9C, 0x00 ]))
+            self.pipe_write.write(bridge_broadcast)
+            self.pipe_write.flush()
+            self.pipe_read = open (f"{self.pipebase}.frombridge", "rb")
+            if (self.pipe_write == None or self.pipe_read == None):
+                print ("Failed to open pipe from bridge. Quitting.")
+                exit(0)
 
         # Find home
 
         user_home = os.path.expanduser("~")
 
-        if pipemode == False:
+        if self.pipemode == False:
             if (aunmap_file == None):
                 aunmap_file = f"{user_home}/.aunmap"
 
@@ -141,7 +154,7 @@ class AUNClient:
                         my_match = re.search("(\d{1,3}) (\d{1,3}) (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}) (\d{3,5})", l, re.I)
                         if my_match != None:
                             self.hostmap[(match.group(1), match.group(2))] = (match.group(3), match.group(4))
-    
+
             self.hostmap_inverse = { v:k for k, v in self.hostmap.items() }
             self.aunmap_inverse = { v:k for k, v in self.aunmap.items() }
 
@@ -162,7 +175,7 @@ class AUNClient:
             if len(self.acknak) > 0:
                 for count in range(len(self.acknak)-1, 0):
                     entry = self.acknak[count]
-                    if (time.monotonic() - entry[1]) > 2:
+                    if (time.monotonic() - entry[1]) > 10:
                         self.acknak.pop(count)
             self.acknak_condition.release()
 
@@ -176,18 +189,34 @@ class AUNClient:
 
     def listener_code(self):
         while True:
-            data, addr = self.local_socket.recvfrom(32768)
-            source_address = addr[0]
-            source_port = addr[1]
-            #self.debug(f"Received traffic from {source_address}:{source_port} - {data}")
+            if self.pipemode:
+                pipelength = self.pipe_read.read(2)
+                packetlength = pipelength[0] + (pipelength[1] << 8)
+                pipedata = self.pipe_read.read(packetlength)
+                net = pipedata[3]
+                stn = pipedata[2]
+                data = pipedata[4:]
+            else:
+                data, addr = self.local_socket.recvfrom(32768)
+                source_address = addr[0]
+                source_port = addr[1]
+                (net, stn) = self.AUNUnMapAddress(addr)
+    
             seq = (data[AUN_SEQ1]) + (data[AUN_SEQ2] << 8) + (data[AUN_SEQ3] << 16) + (data[AUN_SEQ4] << 24)
             packet = bytearray(data)
-            packet[AUN_CTRL] |= 0x80
-            (net, stn) = self.AUNUnMapAddress(addr)
-            if (net == 0): # Dump packet
-                traffic = f"--> {self.aun_typestr(packet[AUN_PTYPE]):>5} {packet[AUN_PORT]:02X}:{packet[AUN_CTRL]:02X} Seq {seq:08X}: {packet[8:]} from Unknown Source! ({addr})"
+
+            if self.pipemode:
+                addr_string = ""
             else:
-                traffic = f"--> {self.aun_typestr(packet[AUN_PTYPE]):>5} {packet[AUN_PORT]:02X}:{packet[AUN_CTRL]:02X} Seq {seq:08X}: {packet[8:]} from {net}.{stn} ({addr})"
+                addr_string = f" ({addr})"
+
+            packet[AUN_CTRL] |= 0x80
+
+            if (net == 0): # Dump packet
+                traffic = f"--> {self.aun_typestr(packet[AUN_PTYPE]):>5} {packet[AUN_PORT]:02X}:{packet[AUN_CTRL]:02X} Seq {seq:08X}: {packet[8:]} from Unknown Source!{addr_string}"
+            else:
+                traffic = f"--> {self.aun_typestr(packet[AUN_PTYPE]):>5} {packet[AUN_PORT]:02X}:{packet[AUN_CTRL]:02X} Seq {seq:08X}: {packet[8:]} from {net}.{stn}{addr_string}"
+
             self.traffic_debug(traffic)
 
             packet_type = packet[AUN_PTYPE]
@@ -195,28 +224,30 @@ class AUNClient:
             packet_port = packet[AUN_PORT]
             packet_ctrl = packet[AUN_CTRL]
 
-            if (packet[AUN_PTYPE] == AUN_PT_ACK or packet[AUN_PTYPE] == AUN_PT_NAK or packet[AUN_PTYPE] == AUN_PT_IMMREP):
+            if (packet_type == AUN_PT_ACK or packet_type == AUN_PT_NAK or packet_type == AUN_PT_IMMREP):
                 self.acknak_condition.acquire()
                 self.acknak[(net, stn, seq)] = (packet, time.monotonic())
                 self.acknak_condition.notify()
                 self.acknak_condition.release()
+
             if (packet[AUN_PTYPE] == AUN_PT_BCAST):
                 self.broadcast_condition.acquire()
                 self.broadcast[(net, stn, seq)] = (packet, time.monotonic())
                 self.broadcast_condition.notify_all()
                 self.broadcast_condition.release()
-            elif (packet[AUN_PTYPE] == AUN_PT_IMM):
+
+            if (packet[AUN_PTYPE] == AUN_PT_IMM):
                 if (packet[AUN_CTRL] == 0x88): # Machinepeek
-                    mp_reply = bytearray([(PEEK_HW & 0xff00) >> 8, ((PEEK_HW & 0xff)), (PEEK_VERS & 0xff00) >> 8, (PEEK_VERS & 0xff)])
+                    mp_reply = bytearray([(PEEK_HW & 0xff), ((PEEK_HW & 0xff00) >> 8), (PEEK_VERS & 0xff), (PEEK_VERS & 0xff00) >> 8])
                     mp_reply_aun = self.AUNPacket(AUN_PT_IMMREP, 0x00, 0x88, seq, mp_reply)
                     self.AUNTransmit(net, stn, mp_reply_aun)
 
-            elif (packet[AUN_PTYPE] == AUN_PT_DATA): # Data - send ACK - we'll be more particular later!
+            if (packet[AUN_PTYPE] == AUN_PT_DATA): # Data - send ACK - we'll be more particular later!
 
-                if self.port_conditions[packet_port]:
+                if self.port_conditions.get(packet_port):
                     self.port_conditions[packet_port].acquire()
 
-                if self.ports.get(packet_port) == None and self.ports_callback.get(packet_port) == None:
+                if self.ports.get(packet_port) == None and self.port_callbacks.get(packet_port) == None:
 
                     # Port not listening
                     nak = self.AUNPacket(AUN_PT_NAK, packet_port, packet_ctrl, seq, bytearray([]))
@@ -235,9 +266,9 @@ class AUNClient:
 
 
                     if self.port_callbacks.get(packet_port) != None:
-                        self.port_callbackis.get(packet_port) (net, stn, packet_port, packet_ctrl, packet_type, packet_seq, packet[8:])
+                        self.port_callbacks.get(packet_port) (net, stn, packet_port, packet_ctrl, packet_type, packet_seq, packet[8:])
 
-                if self.port_conditions[packet_port]:
+                if self.port_conditions.get(packet_port):
                     self.port_conditions[packet_port].release()
 
     def AUNPacket(self, ptype, port, ctrl, seq, data):
@@ -246,14 +277,18 @@ class AUNClient:
         return packet
         
     def AUNTransmit(self, net, stn, packet):
-        netaddress, netport = self.AUNMapAddress(net, stn)
+        if (self.pipemode == False):
+            netaddress, netport = self.AUNMapAddress(net, stn)
 
-        if netaddress == None or netport == None:
-            return AUN_TX_RESULT_NO_ADDRESS, None
+            if netaddress == None or netport == None:
+                return AUN_TX_RESULT_NO_ADDRESS, None
 
         self.sent_time = time.time()
         seq = packet[AUN_SEQ1] + (packet[AUN_SEQ2] << 8) + (packet[AUN_SEQ3] << 16) + (packet[AUN_SEQ4] << 24)
-        output = f"<-- {self.aun_typestr(packet[AUN_PTYPE]):>5} {packet[AUN_PORT]:02X}:{packet[AUN_CTRL]:02X} Seq {seq:08X}: {packet[8:]} to {net}.{stn} ({netaddress}:{netport})"
+        if self.pipemode:
+            output = f"<-- {self.aun_typestr(packet[AUN_PTYPE]):>5} {packet[AUN_PORT]:02X}:{packet[AUN_CTRL]:02X} Seq {seq:08X}: {packet[8:]} to {net}.{stn}"
+        else:
+            output = f"<-- {self.aun_typestr(packet[AUN_PTYPE]):>5} {packet[AUN_PORT]:02X}:{packet[AUN_CTRL]:02X} Seq {seq:08X}: {packet[8:]} to {net}.{stn} ({netaddress}:{netport})"
         self.traffic_debug(output)
         packet[AUN_CTRL] &= 0x7f # Strip high bit
 
@@ -265,7 +300,16 @@ class AUNClient:
 
         while result != AUN_TX_RESULT_OK and tx_count < 6:
             tx_count = tx_count + 1
-            self.local_socket.sendto(packet, 0, (netaddress, netport))
+
+            if self.pipemode:
+                # Add four header bytes
+                pipe_length = len(packet) + 4
+                pipepacket = bytearray([ pipe_length & 0xff, (pipe_length & 0xff00) >> 8 ]) + bytearray([ stn, net, 0, 0]) + packet
+                self.pipe_write.write(pipepacket)
+                self.pipe_write.flush()
+            else:
+                self.local_socket.sendto(packet, 0, (netaddress, netport))
+
             if (packet[AUN_PTYPE] == AUN_PT_BCAST or packet[AUN_PTYPE] == AUN_PT_IMMREP or packet[AUN_PTYPE] == AUN_PT_ACK or packet[AUN_PTYPE] == AUN_PT_NAK): # Don't look for a response
                 result = AUN_TX_RESULT_OK
                 ack_packet = bytearray()
