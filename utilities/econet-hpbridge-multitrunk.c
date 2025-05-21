@@ -138,9 +138,9 @@ int32_t	eb_trunk_decrypt(uint16_t port, uint8_t *cipherpacket, uint32_t length, 
 	//fprintf (stderr, "eb_trunk_decrypt - dec_data = %p\n", dec_data);
 
 	if (!(ctx_dec = EVP_CIPHER_CTX_new()))
-		eb_debug (1, 0, "(M)TRUNK", "(M)Trunk %7d Failed to establish decrypt cipher control!", port);
+		eb_debug (1, 0, "M-TRUNK", "M-Trunk %7d Failed to establish decrypt cipher control!", port);
 
-	 eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encrypted trunk packet received - type %d, IV bytes %02x %02x %02x ...", port, cipherpacket[TRUNK_CIPHER_ALG], cipherpacket[TRUNK_CIPHER_IV], cipherpacket[TRUNK_CIPHER_IV+1], cipherpacket[TRUNK_CIPHER_IV+2]);
+	 eb_debug (0, 4, "M-TRUNK", "M-Trunk %7d Encrypted trunk packet received - type %d, IV bytes %02x %02x %02x ...", port, cipherpacket[TRUNK_CIPHER_ALG], cipherpacket[TRUNK_CIPHER_IV], cipherpacket[TRUNK_CIPHER_IV+1], cipherpacket[TRUNK_CIPHER_IV+2]);
 
 	 //fprintf (stderr, "\n\nCipher packet being decrypted, length %d\n", length);
 	 //for (int mycount = 0; mycount < length; mycount++)
@@ -153,7 +153,7 @@ int32_t	eb_trunk_decrypt(uint16_t port, uint8_t *cipherpacket, uint32_t length, 
 			EVP_DecryptInit_ex(ctx_dec, EVP_aes_256_cbc(), NULL, sharedkey, &(cipherpacket[TRUNK_CIPHER_IV]));
 			break;
 		default:
-			eb_debug (0, 2, "(M)TRUNK", "(M)Trunk %7d Encryption type %02x in encrypted unknown - discarded", port, cipherpacket[TRUNK_CIPHER_ALG]);
+			eb_debug (0, 2, "M-TRUNK", "M-Trunk %7d Encryption type %02x in encrypted unknown - discarded", port, cipherpacket[TRUNK_CIPHER_ALG]);
 			break;
 	}
 
@@ -162,15 +162,15 @@ int32_t	eb_trunk_decrypt(uint16_t port, uint8_t *cipherpacket, uint32_t length, 
 
 		int     tmp_len;
 
-		eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encryption type in encrypted is valid - %02x; encrypted data length %04x", port, cipherpacket[TRUNK_CIPHER_ALG], (length - TRUNK_CIPHER_DATA));
+		eb_debug (0, 4, "M-TRUNK", "M-Trunk %7d Encryption type in encrypted is valid - %02x; encrypted data length %04x", port, cipherpacket[TRUNK_CIPHER_ALG], (length - TRUNK_CIPHER_DATA));
 
 		if ((!EVP_DecryptUpdate(ctx_dec, temp_packet, &(encrypted_length), (unsigned char *) &(cipherpacket[TRUNK_CIPHER_DATA]), length - TRUNK_CIPHER_DATA)))
-			eb_debug (0, 2, "(M)TRUNK", "(M)Trunk %7d DecryptUpdate of trunk packet failed", port);
+			eb_debug (0, 2, "M-TRUNK", "M-Trunk %7d DecryptUpdate of trunk packet failed", port);
 		else if (EVP_DecryptFinal_ex(ctx_dec, (unsigned char *) &(temp_packet[encrypted_length]), &tmp_len))
 		{
 			encrypted_length += tmp_len;
 
-			eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Trunk packet length %04x", port, encrypted_length);
+			eb_debug (0, 4, "M-TRUNK", "M-Trunk %7d Trunk packet length %04x", port, encrypted_length);
 
 			datalength = (temp_packet[0] * 256) + temp_packet[1];
 
@@ -179,21 +179,21 @@ int32_t	eb_trunk_decrypt(uint16_t port, uint8_t *cipherpacket, uint32_t length, 
 			if (datalength >= 12) // Valid packet size received
 			{
 			*/
-				eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encrypted trunk packet validly received - specified length %04x, decrypted length %04x, marking receipt at %d seconds", port, datalength, encrypted_length, time(NULL));
+				eb_debug (0, 4, "M-TRUNK", "M-Trunk %7d Encrypted trunk packet validly received - specified length %04x, decrypted length %04x, marking receipt at %d seconds", port, datalength, encrypted_length, time(NULL));
 
 				// Buffer is pre-allocated by caller
-				//dec_data = eb_malloc(__FILE__, __LINE__, "(M)TRUNK", "Allocate memory for decrypted packet received on trunk", datalength);
+				//dec_data = eb_malloc(__FILE__, __LINE__, "M-TRUNK", "Allocate memory for decrypted packet received on trunk", datalength);
 
 				memcpy(dec_data, &(temp_packet[2]), datalength);
 				dec_datalen = datalength;
 			/*
 			}
 			else
-				eb_debug (0, 2, "(M)TRUNK", "(M)Trunk %7d Decrypted trunk packet too small (data length = %04x) - discarded", port, datalength);
+				eb_debug (0, 2, "M-TRUNK", "M-Trunk %7d Decrypted trunk packet too small (data length = %04x) - discarded", port, datalength);
 			*/
 		}
 		else
-			eb_debug (0, 2, "(M)TRUNK", "(M)Trunk %7d DecryptFinal of trunk packet failed - decrypted length before call was %04x", port, encrypted_length);
+			eb_debug (0, 2, "M-TRUNK", "M-Trunk %7d DecryptFinal of trunk packet failed - decrypted length before call was %04x", port, encrypted_length);
 	}
 
 	EVP_CIPHER_CTX_free(ctx_dec);
@@ -250,7 +250,7 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 	memcpy (&(temp_packet[2]), packet, length);
 
 	if (!(ctx_enc = EVP_CIPHER_CTX_new()))
-		eb_debug (1, 0, "(M)TRUNK", "(M)Trunk %7d Unable to set up encryption control", port);
+		eb_debug (1, 0, "M-TRUNK", "M-Trunk %7d Unable to set up encryption control", port);
 
 	//fprintf (stderr, "Encrypting with shared key %s\n", d->trunk.sharedkey);
 
@@ -267,19 +267,19 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 
 	if ((!EVP_EncryptUpdate(ctx_enc, (unsigned char *) &(cipherpacket[TRUNK_CIPHER_DATA]), &encrypted_length, temp_packet, length + 2))) // +2 for the length bytes inserted above
 	{
-		eb_debug (0, 2, "(M)TRUNK", "(M)Trunk %7d EncryptUpdate of (m)trunk packet failed", port);
+		eb_debug (0, 2, "M-TRUNK", "M-Trunk %7d EncryptUpdate of (m)trunk packet failed", port);
 		encrypted_length = 0;
 	}
 	else if ((!EVP_EncryptFinal(ctx_enc, (unsigned char *) &(cipherpacket[TRUNK_CIPHER_DATA + encrypted_length]), &tmp_len)))
 	{
-		eb_debug (0, 2, "(M)TRUNK", "(M)Trunk %7d EncryptFinal of (m)trunk packet failed", port);
+		eb_debug (0, 2, "M-TRUNK", "M-Trunk %7d EncryptFinal of (m)trunk packet failed", port);
 		encrypted_length = 0;
 	}
 	else
 	{
-		eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encrypted length from EVP_EncryptUpdate = %04X", port, encrypted_length);
+		eb_debug (0, 4, "M-TRUNK", "M-Trunk %7d Encrypted length from EVP_EncryptUpdate = %04X", port, encrypted_length);
 		encrypted_length += tmp_len;
-		eb_debug (0, 4, "(M)TRUNK", "(M)Trunk %7d Encryption succeeded: cleartext length %04X, encrypted length %04X", port, length + 2, encrypted_length);
+		eb_debug (0, 4, "M-TRUNK", "M-Trunk %7d Encryption succeeded: cleartext length %04X, encrypted length %04X", port, length + 2, encrypted_length);
 	}
 
 	EVP_CIPHER_CTX_free(ctx_enc);
@@ -287,7 +287,7 @@ int32_t	eb_trunk_encrypt (uint8_t *packet, uint16_t length, uint16_t port, struc
 	if (encrypted_length > 0)
 	{
 		encrypted_length += TRUNK_CIPHER_DATA;
-		*encrypted = eb_malloc(__FILE__, __LINE__, "(M)TRUNK", "New encrypted packet", encrypted_length);
+		*encrypted = eb_malloc(__FILE__, __LINE__, "M-TRUNK", "New encrypted packet", encrypted_length);
 		memcpy (*encrypted, &cipherpacket, encrypted_length);
 		/*
 		printf (stderr, "\n\nEncrypted data, length %d:\n", encrypted_length);

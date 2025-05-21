@@ -57,6 +57,17 @@ FSOP_RESULT_NOT_LISTENING=-1
 FSOP_RESULT_ERROR=-2
 FSOP_RESULT_NO_REPLY=-3
 
+fsop_result_codes = { FSOP_RESULT_OK : "OK",
+        FSOP_RESULT_SAVE: "Save",
+        FSOP_RESULT_LOAD: "Load",
+        FSOP_RESULT_CAT: "Catalogue",
+        FSOP_RESULT_INFO: "Info",
+        FSOP_RESULT_IAM: "Login",
+        FSOP_RESULT_SDISC: "Disc select",
+        FSOP_RESULT_DIR: "Directory",
+        FSOP_RESULT_UNKNOWN_COMMAND: "Unknown command"
+        }
+
 # Transmission failures/results
 AUN_TX_RESULT_OK=0
 AUN_TX_RESULT_NOT_LISTENING=-1
@@ -65,15 +76,21 @@ AUN_TX_RESULT_UNKNOWN=-255
 
 class AUNClient:
 
-    def __init__(self, localport = 32768, bind_addr = '', timeout = 1.5, debug_on = False, traffic_debug_on = False, aunmap_file = None, hostmap_file = None):
+    def __init__(self, localport = 32768, bind_addr = '', timeout = 1.5, debug_on = False, traffic_debug_on = False, aunmap_file = None, hostmap_file = None, pipemode = False, pipebase = None):
+        self.pipemode = pipemode
+        self.pipebase = pipebase
         self.local_port = localport
         self.handles = { }
         self.aun_timeout = timeout
         self.seq = 0x4000
         self.traffic_debug_enabled = traffic_debug_on
         self.debug_enabled = debug_on
-        self.local_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.local_socket.bind((bind_addr, self.local_port))
+        if pipemode == False:
+            self.local_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.local_socket.bind((bind_addr, self.local_port))
+        else:
+            print ("Pipe mode")
+            # Open pipes here
         self.last_port = 0
         self.ports_mutex = threading.Lock()
         self.ports = { }
@@ -91,41 +108,42 @@ class AUNClient:
 
         user_home = os.path.expanduser("~")
 
-        if (aunmap_file == None):
-            aunmap_file = f"{user_home}/.aunmap"
+        if pipemode == False:
+            if (aunmap_file == None):
+                aunmap_file = f"{user_home}/.aunmap"
 
-        if (hostmap_file == None):
-            hostmap_file = f"{user_home}/.hostmap"
-
-        # Load aunmap
-        
-        if os.path.isfile(aunmap_file):
-
-            with open(aunmap_file, "r") as h:
-                for l in h:
-
-                    my_match = re.search("^\s*ADDMap\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+(\d{1,3})\s*$", l)
-
-                    if my_match != None:
-                        self.aunmap[match.group(2)] = match.group(1)
-                    else: 
-                        my_match = re.search("^\s*ADDMap\s+(\d{1,3})\.(\d{1,3})\.N\.(\d{1,3})\s+(\d{1,3})\-(\d{1,3})\s*$", l, re.I)
-                        if my_match != None:
-                            for net in range(int(my_match.group(4)), int(my_match.group(5))):
-                                self.aunmap[net] = f"{my_match.group(1)}.{my_match.group(2)}.{net}.{my_match.group(3)}"
+            if (hostmap_file == None):
+                hostmap_file = f"{user_home}/.hostmap"
     
-        # Load AUN hosts
-
-        if os.path.isfile(hostmap_file):
-
-            with open(hostmap_file, "r") as h:
-                for l in h:
-                    my_match = re.search("(\d{1,3}) (\d{1,3}) (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}) (\d{3,5})", l, re.I)
-                    if my_match != None:
-                        self.hostmap[(match.group(1), match.group(2))] = (match.group(3), match.group(4))
-
-        self.hostmap_inverse = { v:k for k, v in self.hostmap.items() }
-        self.aunmap_inverse = { v:k for k, v in self.aunmap.items() }
+            # Load aunmap
+         
+            if os.path.isfile(aunmap_file):
+    
+                with open(aunmap_file, "r") as h:
+                    for l in h:
+    
+                        my_match = re.search("^\s*ADDMap\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+(\d{1,3})\s*$", l)
+    
+                        if my_match != None:
+                            self.aunmap[match.group(2)] = match.group(1)
+                        else: 
+                            my_match = re.search("^\s*ADDMap\s+(\d{1,3})\.(\d{1,3})\.N\.(\d{1,3})\s+(\d{1,3})\-(\d{1,3})\s*$", l, re.I)
+                            if my_match != None:
+                                for net in range(int(my_match.group(4)), int(my_match.group(5))):
+                                    self.aunmap[net] = f"{my_match.group(1)}.{my_match.group(2)}.{net}.{my_match.group(3)}"
+     
+            # Load AUN hosts
+    
+            if os.path.isfile(hostmap_file):
+    
+                with open(hostmap_file, "r") as h:
+                    for l in h:
+                        my_match = re.search("(\d{1,3}) (\d{1,3}) (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}) (\d{3,5})", l, re.I)
+                        if my_match != None:
+                            self.hostmap[(match.group(1), match.group(2))] = (match.group(3), match.group(4))
+    
+            self.hostmap_inverse = { v:k for k, v in self.hostmap.items() }
+            self.aunmap_inverse = { v:k for k, v in self.aunmap.items() }
 
         self.listener_thread = threading.Thread(target=self.listener_code, args=())
         self.listener_thread.daemon = True
@@ -177,7 +195,7 @@ class AUNClient:
             packet_port = packet[AUN_PORT]
             packet_ctrl = packet[AUN_CTRL]
 
-            if (packet[AUN_PTYPE] == AUN_PT_ACK) or (packet[AUN_PTYPE] == AUN_PT_NAK or packet[AUN_PTYPE] == AUN_PT_IMMREP):
+            if (packet[AUN_PTYPE] == AUN_PT_ACK or packet[AUN_PTYPE] == AUN_PT_NAK or packet[AUN_PTYPE] == AUN_PT_IMMREP):
                 self.acknak_condition.acquire()
                 self.acknak[(net, stn, seq)] = (packet, time.monotonic())
                 self.acknak_condition.notify()
@@ -185,7 +203,7 @@ class AUNClient:
             if (packet[AUN_PTYPE] == AUN_PT_BCAST):
                 self.broadcast_condition.acquire()
                 self.broadcast[(net, stn, seq)] = (packet, time.monotonic())
-                self.broadcast_condition.notify()
+                self.broadcast_condition.notify_all()
                 self.broadcast_condition.release()
             elif (packet[AUN_PTYPE] == AUN_PT_IMM):
                 if (packet[AUN_CTRL] == 0x88): # Machinepeek
@@ -195,7 +213,7 @@ class AUNClient:
 
             elif (packet[AUN_PTYPE] == AUN_PT_DATA): # Data - send ACK - we'll be more particular later!
 
-                if self.port_conditions[packet_port] != None:
+                if self.port_conditions[packet_port]:
                     self.port_conditions[packet_port].acquire()
 
                 if self.ports.get(packet_port) == None and self.ports_callback.get(packet_port) == None:
@@ -211,6 +229,7 @@ class AUNClient:
 
                     if self.port_doqueue.get(packet_port) and self.ports.get(packet_port) != None: # Queue exists and we've been asked to put traffic on the queue
                         self.ports[packet_port].append(packet)
+
                         if self.port_conditions[packet_port] != None:
                             self.port_conditions[packet_port].notify()
 
@@ -218,7 +237,7 @@ class AUNClient:
                     if self.port_callbacks.get(packet_port) != None:
                         self.port_callbackis.get(packet_port) (net, stn, packet_port, packet_ctrl, packet_type, packet_seq, packet[8:])
 
-                if self.port_conditions[packet_port] != None:
+                if self.port_conditions[packet_port]:
                     self.port_conditions[packet_port].release()
 
     def AUNPacket(self, ptype, port, ctrl, seq, data):
@@ -335,7 +354,6 @@ class AUNClient:
 
         self.op_data = bytearray([self.ReplyPort, OpNumber, handle_urd, handle_cwd, handle_lib]) + data
     
-        self.port_conditions[self.ReplyPort].acquire()
 
         packet = self.AUNPacket(AUN_PT_DATA, 0x99, 0x80, self.seq, self.op_data)
         result, ack = self.AUNTransmit(net, stn, packet)
@@ -350,6 +368,7 @@ class AUNClient:
         result_code = FSOP_RESULT_NO_REPLY
         error_code = 0xff
 
+        self.port_conditions[self.ReplyPort].acquire()
         if self.port_conditions[self.ReplyPort].wait(1.5): # Returns True if no timeout
 
             if (len(self.ports[self.ReplyPort]) > 0):
@@ -407,8 +426,8 @@ class AUNClient:
         else:
             if fsop_error != 0:
                 return f"{packet[10:].decode('ascii')}"
-            elif fsop_result == FSOP_RESULT_OK:
-                return "Success"
+            else:
+                return fsop_result_codes[fsop_result]
 
     def GetPort(self, callback, enqueue = True):
     
