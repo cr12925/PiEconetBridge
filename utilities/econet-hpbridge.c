@@ -3413,6 +3413,8 @@ uint8_t eb_firewall_inner (struct __eb_fw_chain *chain, struct __econet_packet_a
 			&&	(f->dststn == 0x00 || f->dststn == p->p.dststn)
 			&&	(f->dstnet == 0x00 || f->dstnet == p->p.dstnet)
 			&&	(f->port   == 0x00 || f->port   == p->p.port || (f->port == 0xFF && p->p.port == 0)) /* if you configure port 0xff in the FW entry, it will match port 0 in the packet */
+			&&	(f->imm_ctrl == 0x00 || (p->p.port == 0x00 && p->p.ctrl == f->imm_ctrl))
+			&&	(f->osproc == 0x00 || (p->p.port == 0x00 && p->p.ctrl == EB_FW_IMM_OSPROC && ((f->osproc == 0xFE /* Rogue for 0 */ && p->p.data[0] == 0x00) || (p->p.data[0] == f->osproc))))
 			)
 		)
 		{
@@ -9268,6 +9270,52 @@ int eb_parse_json_config(struct json_object *jc)
 						if (json_object_object_get_ex(jentry, "port", &jint))
 							fw_entry->port = json_object_get_int(jint);
 						
+						if (json_object_object_get_ex(jentry, "immediate", &jint))
+						{
+							char *op;
+							op = json_object_get_string(jint);
+
+							if (!strcasecmp(op, "PEEK"))
+								fw_entry->imm_ctrl = EB_FW_IMM_PEEK;
+							else if (!strcasecmp(op, "POKE"))
+								fw_entry->imm_ctrl = EB_FW_IMM_POKE;
+							else if (!strcasecmp(op, "JSR"))
+								fw_entry->imm_ctrl = EB_FW_IMM_JSR;
+							else if (!strcasecmp(op, "USERPROC"))
+								fw_entry->imm_ctrl = EB_FW_IMM_USERPROC;
+							else if (!strcasecmp(op, "OSPROC"))
+								fw_entry->imm_ctrl = EB_FW_IMM_OSPROC;
+							else if (!strcasecmp(op, "HALT"))
+								fw_entry->imm_ctrl = EB_FW_IMM_HALT;
+							else if (!strcasecmp(op, "CONTINUE"))
+								fw_entry->imm_ctrl = EB_FW_IMM_CONTINUE;
+							else if (!strcasecmp(op, "MACHINEPEEK"))
+								fw_entry->imm_ctrl = EB_FW_IMM_MACHINEPEEK;
+							else if (!strcasecmp(op, "GETREGISTERS"))
+								fw_entry->imm_ctrl = EB_FW_IMM_GETREGISTERS;
+							else 
+								eb_debug (1, 0, "JSON", "Incorrect parameter for 'immediate': %s", op);
+						}
+
+						if (json_object_object_get_ex(jentry, "osproc", &jint))
+						{
+							char *op;
+							op = json_object_get_string(jint);
+
+							if (!strcasecmp(op, "NOTIFY"))
+								fw_entry->osproc = EB_FW_OSPROC_NOTIFY;
+							else if (!strcasecmp(op, "REMOTE"))
+								fw_entry->osproc = EB_FW_OSPROC_REMOTE;
+							else if (!strcasecmp(op, "VIEW"))
+								fw_entry->osproc = EB_FW_OSPROC_VIEW;
+							else if (!strcasecmp(op, "FATAL"))
+								fw_entry->osproc = EB_FW_OSPROC_FATAL;
+							else if (!strcasecmp(op, "REMOTECHAR"))
+								fw_entry->osproc = EB_FW_OSPROC_RCHAR;
+							else 
+								eb_debug (1, 0, "JSON", "Incorrect parameter for 'osproc': %s", op);
+						}
+
 						fw_entry->fw_subchain = NULL;
 
 						if ((json_object_object_get_ex(jentry, "accept", &jpolicy)))

@@ -173,11 +173,30 @@ struct __eb_outq { // Definition of outbound queue from device (i.e. going from 
 #define EB_FW_REJECT 0x02
 #define EB_FW_CHAIN  0x04 /* Pass to another chain */
 
+#define EB_FW_IMM_PEEK	0x81
+#define EB_FW_IMM_POKE  0x82
+#define EB_FW_IMM_JSR	0x83
+#define EB_FW_IMM_USERPROC	0x84
+#define EB_FW_IMM_OSPROC	0x85
+#define EB_FW_IMM_HALT		0x86
+#define EB_FW_IMM_CONTINUE	0x87
+#define EB_FW_IMM_MACHINEPEEK	0x88
+#define EB_FW_IMM_GETREGISTERS	0x89
+
+/* OSPROC numbers - first data byte in an immediate 0x85 packet */
+#define EB_FW_OSPROC_NOTIFY	0xFE /* It's really 0 but 0 is the rogue in this context, so if we have 0xFE in the firewall chain, look for 0x00 in the packet */
+#define EB_FW_OSPROC_REMOTE	0x01
+#define EB_FW_OSPROC_VIEW	0x02
+#define EB_FW_OSPROC_FATAL	0x03  /* "Cause fatal error" */
+#define EB_FW_OSPROC_RCHAR	0x04  /* Character from remote - not sure we'll bother with this: if you block remote, this'll do not a lot! */
+
 /* Firewall entry. */
 struct __eb_fw { // Firewall entry - any value which is &FF is the wildcard
 	uint8_t srcnet, srcstn, dstnet, dststn;
 	uint8_t port;
 	uint8_t action;
+	uint8_t imm_ctrl; /* Immediate ctrl value to filter */
+	uint8_t osproc; /* Immediate OSPROC number to filter */
 	struct __eb_fw_chain 	*fw_subchain;
 	struct __eb_fw *next;
 };
