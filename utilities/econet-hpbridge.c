@@ -12908,6 +12908,7 @@ int main (int argc, char **argv)
 
 	/* Start the loopdetect thread */
 
+	if (0) // Disabled at the moment
 	{
 		int err;
 	
