@@ -1382,6 +1382,13 @@ struct __eb_device * eb_find_station_internal (uint8_t net, uint8_t stn)
 		else if (result->type == EB_DEF_WIRE && result->wire.divert[stn]) // Only if there's actually a divert on a wire
 			result = result->wire.divert[stn];
 
+		if (result->type == EB_DEF_AUN && result->aun->is_dynamic == 1 && result->aun->port == -1) /* Inactive dynamic AUN */
+		{
+			eb_debug (0, 5, "BRIDGE", "%-8s %3d.%3d Inactive dyanmic AUN station - returning not found on station search", "", net, stn);
+			result = NULL;
+			return result;
+		}
+
 	}
 	else	eb_debug (0, 5, "BRIDGE", "%-8s %3d.%3d eb_get_network() result->net returned NULL - network unknown", "", net, stn);
 
@@ -2883,33 +2890,30 @@ uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_au
 			
 			if (!outq->destdevice) // Can't work out where we are going!
 			{
-				eb_debug (0, 2, "QUEUE", "%-8s %3d.%3d from %3d.%3d Seq 0x%08X Attempting to queue traffic when destination device cannot be found", eb_type_str(source->type), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, p->p.seq);
+				eb_debug (0, 2, "QUEUE", "%-8s %3d.%3d from %3d.%3d Seq 0x%08X Attempting to queue traffic when destination device cannot be found or is inactive dynamic AUN", eb_type_str(source->type), p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, p->p.seq);
 
 				/* Send INK back to source here if it was an immediate and the host doesn't exist */
 
-				/* Commented out - may well be causing problems 
-				if ((source->type == EB_DEF_TRUNK || source->type == EB_DEF_POOL) && p->p.aun_ttype == ECONET_AUN_IMM) // An unroutable immediate - send an INK back to source
+				/* Commented out - may well be causing problems  */
+				/* Uncommected 20250524 - we probably need to do this */
+				if ((source->type == EB_DEF_TRUNK || source->type == EB_DEF_POOL)) // An unroutable immediate - send an INK back to source
 				{
-					struct __econet_packet_aun 	*ack;
+					struct __econet_packet_aun ack;
 
-					if ((ack = eb_malloc(__FILE__, __LINE__, "Q-OUT", "Trunk Immediate NAK packet", 12)))
-					{
-						ack->p.aun_ttype = ECONET_AUN_INK;
-						ack->p.seq = p->p.seq;
-						ack->p.dststn = p->p.srcstn;
-						ack->p.dstnet = p->p.srcnet;
-						ack->p.srcstn = p->p.dststn;
-						ack->p.srcnet = p->p.dstnet;
+					if (p->p.port == 0x00) /* Send INK */
+						ack.p.aun_ttype = ECONET_AUN_INK;
+					else if (p->p.aun_ttype == ECONET_AUN_DATA) /* Send NAK */
+						ack.p.aun_ttype = ECONET_AUN_NAK;
 
-						// How to inject this reply?
-						// I *think* we can safely put it on our own input queue
+					ack.p.seq = p->p.seq;
+					ack.p.dststn = p->p.srcstn;
+					ack.p.dstnet = p->p.srcnet;
+					ack.p.srcstn = p->p.dststn;
+					ack.p.srcnet = p->p.dstnet;
 
-						eb_enqueue_input(source, ack, 0); // Data len 0
-					}
-
+					if (p->p.port == 0x00 || p->p.aun_ttype == ECONET_AUN_DATA)
+						eb_enqueue_output(source, &ack, 0, NULL);
 				}
-
-				*/
 
 				eb_free (__FILE__, __LINE__, "Q-OUT", "Free packet after dest device unknown", p);
 				eb_free (__FILE__, __LINE__, "Q-OUT", "Free packetq after dest device unknown", packetq);
