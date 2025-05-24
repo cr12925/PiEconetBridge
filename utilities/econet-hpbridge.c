@@ -5620,7 +5620,8 @@ static void * eb_device_despatcher (void * device)
 
 			// Enable resilience mode if selected
 			
-			ioctl(d->wire.socket, ECONETGPIO_IOC_RESILIENCEMODE, d->wire.resilience);
+			// No, don't - it's not working yet
+			//ioctl(d->wire.socket, ECONETGPIO_IOC_RESILIENCEMODE, d->wire.resilience);
 
 			eb_debug (0, 2, "DESPATCH", "%-8s %3d     Econet device %s opened successfully (fd %d)", "Wire", d->net, (EB_CONFIG_LOCAL ? "/dev/null" : d->wire.device), d->wire.socket);	
 
