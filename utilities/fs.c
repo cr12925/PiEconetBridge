@@ -671,7 +671,7 @@ int16_t fsop_get_uid(struct __fs_station *s, char *username)
 
 	counter = 0;
 
-	while (counter < ECONET_MAX_FS_USERS && (strncasecmp(padded_username, s->users[counter].username, 10) != 0 && s->users[counter].priv != 0))
+	while (counter < ECONET_MAX_FS_USERS && ((strncasecmp(padded_username, s->users[counter].username, 10) != 0 || s->users[counter].priv == 0)))
 		counter++;
 
 	return ((counter < ECONET_MAX_FS_USERS) ? counter : -1);
