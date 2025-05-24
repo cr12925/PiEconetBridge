@@ -671,7 +671,7 @@ int16_t fsop_get_uid(struct __fs_station *s, char *username)
 
 	counter = 0;
 
-	while (counter < ECONET_MAX_FS_USERS && (strncasecmp(padded_username, s->users[counter].username, 10) != 0))
+	while (counter < ECONET_MAX_FS_USERS && (strncasecmp(padded_username, s->users[counter].username, 10) != 0 && s->users[counter].priv != 0))
 		counter++;
 
 	return ((counter < ECONET_MAX_FS_USERS) ? counter : -1);
@@ -1071,7 +1071,8 @@ unsigned char * fsop_machine_type_str (uint16_t t)
 		case 0x1040: return "JGH Spectrum"; break;
 		case 0x1041: return "JGH Amstrad CPC"; break;
 		case 0x5050: return "PB Internet Gateway"; break;
-		case 0xEEEE: return "Raspbery Pi Econet Bridge"; break;
+		case 0xEEE0: return "Pycoclient"; break;
+		case 0xEEEE: return "Raspberry Pi Econet Bridge"; break;
 		case 0xFFF8: return "SJ GP Server"; break;
 		case 0xFFF9: return "SJ 80386 Unix"; break;
 		case 0xFFFA: return "SCSI Interface"; break;
