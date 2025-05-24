@@ -782,6 +782,7 @@ struct __eb_config {
 #define EB_PKT_DUMP_INPUT_MASK	0x03
 #define EB_PKT_DUMP_OUTPUT_MASK	0x0C
 #define EB_PKT_DUMP_DUMPED	0x10
+#define EB_PKT_DUMP_FIREWALLED	0x20
 
 #define	EB_CONFIG_AUN_RETX	(config.aun_retx_interval)
 #define EB_CONFIG_AUN_RETRIES	(config.aun_max_retries)

@@ -324,7 +324,9 @@ FSOP(00)
 	{
 		//fs_debug (0, 2, "FS Parser found %s", cmd->cmd);
 
-		num = fsop_00_oscli_parse(f->data, &p[0], param_start);
+		if (param_start < f->datalen)
+			num = fsop_00_oscli_parse(f->data, &p[0], param_start);
+		else	num = 0;
 
 		//fs_debug (0, 2, "FS Parser found %s with %d parameters", cmd->cmd, num);
 		

@@ -882,7 +882,8 @@ void eb_dump_packet (struct __eb_device *source, char dir, struct __econet_packe
 		(dir == EB_PKT_DUMP_POST_I ? 'I' :
 		(dir == EB_PKT_DUMP_PRE_O ? 'o' :
 		(dir == EB_PKT_DUMP_POST_O ? 'O' : 
-		(dir == EB_PKT_DUMP_DUMPED ? 'D' : 'X'))))),
+		(dir == EB_PKT_DUMP_DUMPED ? 'D' : 
+		(dir == EB_PKT_DUMP_FIREWALLED ? 'F' : 'X')))))),
 		(p->p.aun_ttype == ECONET_AUN_BCAST ? "BRD" : 
 			(p->p.aun_ttype == ECONET_AUN_DATA ? "DAT" :
 			(p->p.aun_ttype == ECONET_AUN_IMMREP ? "IRP" :
@@ -3920,7 +3921,7 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 
 				if ((fw_result = eb_firewall(source_device->fw_out, &incoming)) == EB_FW_REJECT) // fw_out because this is traffic coming *from* the AUN device. fw_in is for traffic going *to* it.
 				{
-					eb_dump_packet (e->parent, EB_PKT_DUMP_DUMPED, &incoming, length - 8); // (Drop the header length)
+					eb_dump_packet (e->parent, EB_PKT_DUMP_FIREWALLED, &incoming, length - 8); // (Drop the header length)
 				}
 				else
 				{
@@ -5386,7 +5387,7 @@ static void * eb_device_aun_sender (void *device)
 						eb_add_stats(&(o->destdevice->statsmutex), &(o->destdevice->b_in), p->length);
 						if (eb_firewall(o->destdevice->fw_in, p->p) == EB_FW_REJECT)
 						{
-							eb_dump_packet (o->destdevice, EB_PKT_DUMP_DUMPED, p->p, p->length);
+							eb_dump_packet (o->destdevice, EB_PKT_DUMP_FIREWALLED, p->p, p->length);
 						}
 						else
 						{
@@ -5979,6 +5980,8 @@ static void * eb_device_despatcher (void * device)
 	
 				if (d->type == EB_DEF_PIPE || d->type == EB_DEF_LOCAL)
 					eb_debug (0, 4, "DESPATCH", "%-8s %3d.%3d Despatcher thread timed condwait %d ms", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE ? d->pipe.stn : d->local.stn), delay);
+				else if (d->type == EB_DEF_TRUNK)
+					eb_debug (0, 4, "DESPATCH", "%-8s %7d Despatcher thread timed condwait", eb_type_str(d->type), d->trunk.local_port);
 				else
 					eb_debug (0, 4, "DESPATCH", "%-8s %3d     Despatcher thread timed condwait %d ms", eb_type_str(d->type), d->net, delay);
 				
@@ -5989,7 +5992,7 @@ static void * eb_device_despatcher (void * device)
 				if (d->type == EB_DEF_PIPE || d->type == EB_DEF_LOCAL)
 					eb_debug (0, 4, "DESPATCH", "%-8s %3d.%3d Despatcher thread infinite condwait", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE ? d->pipe.stn : d->local.stn));
 				else if (d->type == EB_DEF_TRUNK)
-					eb_debug (0, 4, "DESPATCH", "%-8s         Despatcher thread infinite condwait", eb_type_str(d->type));
+					eb_debug (0, 4, "DESPATCH", "%-8s %7d Despatcher thread infinite condwait", eb_type_str(d->type), d->trunk.local_port);
 				else
 					eb_debug (0, 4, "DESPATCH", "%-8s %3d     Despatcher thread infinite condwait", eb_type_str(d->type), d->net);
 
@@ -6000,6 +6003,8 @@ static void * eb_device_despatcher (void * device)
 	
 			if (d->type == EB_DEF_PIPE || d->type == EB_DEF_LOCAL)
 				eb_debug (0, 4, "DESPATCH", "%-8s %3d.%3d Despatcher thread awoken", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE ? d->pipe.stn : d->local.stn));
+			if (d->type == EB_DEF_TRUNK)
+				eb_debug (0, 4, "DESPATCH", "%-8s %7d Despatcher thread awoken", eb_type_str(d->type), d->trunk.local_port);
 			else
 				eb_debug (0, 4, "DESPATCH", "%-8s %3d     Despatcher thread awoken", eb_type_str(d->type), d->net);
 
@@ -6489,7 +6494,7 @@ static void * eb_device_despatcher (void * device)
 
 				if (eb_firewall (d->fw_out, &packet) == EB_FW_REJECT) // fw_out - this has come from the device itself
 				{
-					eb_dump_packet (d, EB_PKT_DUMP_DUMPED, &packet, length);
+					eb_dump_packet (d, EB_PKT_DUMP_FIREWALLED, &packet, length);
 					dump_traffic = 1;
 				}
 
@@ -6611,6 +6616,8 @@ static void * eb_device_despatcher (void * device)
 
 						if (d->type == EB_DEF_PIPE || d->type == EB_DEF_LOCAL)
 							eb_debug (0, 4, "DESPATCH", "%-8s %3d.%3d Despatcher thread freeing packet data at %p in packetqueue %p", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE ? d->pipe.stn : d->local.stn), p->p, p);
+						else if (d->type == EB_DEF_TRUNK)
+							eb_debug (0, 4, "DESPATCH", "%-8s %7d Despatcher thread freeing packet data at %p in packetqueue %p", eb_type_str(d->type), d->trunk.local_port, p->p, p);
 						else
 							eb_debug (0, 4, "DESPATCH", "%-8s %3d     Despatcher thread freeing packet data at %p in packetqueue %p", eb_type_str(d->type), d->net, p->p, p);
 
@@ -6618,6 +6625,8 @@ static void * eb_device_despatcher (void * device)
 
 						if (d->type == EB_DEF_PIPE || d->type == EB_DEF_LOCAL)
 							eb_debug (0, 4, "DESPATCH", "%-8s %3d.%3d Despatcher thread freeing packetqueue %p", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE ? d->pipe.stn : d->local.stn), p);
+						else if (d->type == EB_DEF_TRUNK)
+							eb_debug (0, 4, "DESPATCH", "%-8s %7d Despatcher thread freeing packetqueue %p", eb_type_str(d->type), d->trunk.local_port, (d->type == EB_DEF_PIPE ? d->pipe.stn : d->local.stn), p);
 						else
 							eb_debug (0, 4, "DESPATCH", "%-8s %3d     Despatcher thread freeing packetqueue %p", eb_type_str(d->type), d->net, p);
 
@@ -6968,7 +6977,7 @@ static void * eb_device_despatcher (void * device)
 
 				if ((eb_firewall(d->fw_in, p->p) == EB_FW_REJECT))
 				{
-					eb_dump_packet (d, EB_PKT_DUMP_DUMPED, p->p, p->length);
+					eb_dump_packet (d, EB_PKT_DUMP_FIREWALLED, p->p, p->length);
 					remove = 1;
 				}
 
