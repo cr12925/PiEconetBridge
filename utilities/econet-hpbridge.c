@@ -1353,22 +1353,21 @@ struct __eb_aun_exposure * eb_is_exposed (uint8_t net, uint8_t stn, uint8_t is_a
 struct __eb_device * eb_find_station_internal (uint8_t net, uint8_t stn)
 {
 
-	struct __eb_device 	*result;
+	struct __eb_device 	*result, *old_result;
 
 	result = NULL;
 
 	eb_debug (0, 4, "BRIDGE", "%-8s %3d.%3d Looking for station struct... eb_get_network() returns %p", "", net, stn, (result = eb_get_network(net)));
 
-
 	if ((net != 255) && (stn != 255) && result) // Good start, this network looks like it might exist, and we aren't looking for a broadcast
 	{
 	
-		eb_debug (0, 5, "BRIDGE", "%-8s %3d.%3d eb_get_network() result->net is %d", "", net, stn, result->net);
+		eb_debug (0, 4, "BRIDGE", "%-8s %3d.%3d eb_get_network() result->net is %d", "", net, stn, result->net);
 
 		if (stn == 0) // Bridge internal - don't look for diversions
 			return result;
 
-		eb_debug (0, 5, "BRIDGE", "%-8s %3d.%3d eb_get_network() Checking diverts", "", net, stn);
+		eb_debug (0, 4, "BRIDGE", "%-8s %3d.%3d eb_get_network() Checking diverts", "", net, stn);
 
 		if (result->net != net) // This is a secondary network on the same device - don't look for diverts
 		{
@@ -1378,20 +1377,25 @@ struct __eb_device * eb_find_station_internal (uint8_t net, uint8_t stn)
 
 		// Now see if this is a diversion
 
+		old_result = result;
+
 		if (result->type == EB_DEF_NULL)
 			result = result->null.divert[stn]; // Which will be NULL if the station doesn't exist
 		else if (result->type == EB_DEF_WIRE && result->wire.divert[stn]) // Only if there's actually a divert on a wire
 			result = result->wire.divert[stn];
 
+		if (result != old_result)
+			eb_debug (0, 4, "BRIDGE", "%-8s %3d.%3d eb_find_station() found this station was a divert and followed it", "", net, stn);
+
 		if (result->type == EB_DEF_AUN && result->aun->is_dynamic == 1 && result->aun->port == -1) /* Inactive dynamic AUN */
 		{
-			eb_debug (0, 5, "BRIDGE", "%-8s %3d.%3d Inactive dyanmic AUN station - returning not found on station search", "", net, stn);
+			eb_debug (0, 4, "BRIDGE", "%-8s %3d.%3d Inactive dyanmic AUN station - returning not found on station search", "", net, stn);
 			result = NULL;
 			return result;
 		}
 
 	}
-	else	eb_debug (0, 5, "BRIDGE", "%-8s %3d.%3d eb_get_network() result->net returned NULL - network unknown", "", net, stn);
+	else	eb_debug (0, 4, "BRIDGE", "%-8s %3d.%3d eb_get_network() result->net returned NULL - network unknown", "", net, stn);
 
 	eb_debug (0, 4, "BRIDGE", "%-8s %3d.%3d eb_find_station() returning %p", "", net, stn, result);
 
@@ -5395,6 +5399,7 @@ static void * eb_device_aun_sender (void *device)
 
 							if ((r = sendto (exp->socket, &(p->p->p.aun_ttype), p->length + 8, MSG_DONTWAIT, (struct sockaddr *) &dest, sizeof(dest))) < 0)
 								eb_debug (0, 1, "AUNSEND", "%16s Packet at %p AUN transmission failed: %s", devstring, p->p, strerror(errno));
+							else	eb_debug (0, 4, "AUNSEND", "%8s %3d.%3d Packet at %p successful AUN tx seq = %08X", "", p->p->p.dstnet, p->p->p.dststn, p->p, p->p->p.seq);
 
 
 						}
