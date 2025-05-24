@@ -8148,6 +8148,18 @@ static void * eb_device_despatcher (void * device)
 						{
 							eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d Unable to find source pool host for pool address - traffic dropped",
 									"Pool", dstnet, dststn);
+							/* Send an INK if this was immediate, or a NAK if it was a Data packet, to speed things up when people run *STATIONS, !Machines, etc. */
+
+							if (p->p->p.port == 0x00) /* Immediate */
+								ack.p.aun_ttype = ECONET_AUN_INK;
+							else if (p->p->p.aun_ttype == ECONET_AUN_DATA)
+								ack.p.aun_ttype = ECONET_AUN_NAK;
+
+							if ((p->p->p.port == 0x00) || (p->p->p.aun_ttype == ECONET_AUN_DATA))
+							{
+								eb_enqueue_output(d, &ack, 0, NULL);
+								new_output = 1;
+							}
 
 						}
 						else
