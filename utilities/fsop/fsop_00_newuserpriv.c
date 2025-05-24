@@ -268,7 +268,9 @@ FSOP_00(REMUSER)
 		fsop_error(f, 0xFF, "Unknown user");
 	else
 	{
-		fsop_set_priv_byte(&(f->server->users[userid]), 0, 0); 
+		f->server->users[userid].priv = 0;
+		f->server->users[userid].priv2 = 0;
+		//fsop_set_priv_byte(&(f->server->users[userid]), 0, 0); 
 		fsop_reply_ok(f);
 	}
 }
