@@ -24,16 +24,64 @@
 FSOP(21)
 {
 
-	//FS_REPLY_DATA(0x80);
+	FS_REPLY_DATA(0x80);
+	FS_REPLY_COUNTER();
+
 	uint8_t		start, number;
+	uint16_t	count;
+	struct __fs_active	*a;
 
 	start = *(f->data + 5);
 	number = *(f->data + 6);
 
-	fs_debug_full(0, 1, f->server, f->net, f->stn, "Read logged on users (extended) start:%3d, end:%3d - not yet implemented", start, number);
+	fs_debug_full(0, 1, f->server, f->net, f->stn, "Read logged on users (extended) start:%d, end:%d - not yet implemented", start, number);
 
-	fsop_error(f, 0xFF, "Not yet implemented");
+	if (number == 0 || number > 15)
+		number = 15; /* Max packet size if a Beeb calls this, which it probably won't, but ... */
 
+	count = 0;
+	a = f->server->actives;
+
+	while (count < start && a)
+	{
+		a = a->next;
+		if (a) count++;
+	}
+
+	if (!a)
+	{
+		FS_PUTR8(2, 0); /* Zero entries returned */
+		FS_TXR(3);
+	}
+
+	/* By here, a points to the first logged on user we're interested in */
+
+	__rcounter = 3;
+
+	count = 1;
+
+	while (count <= number && a)
+	{
+		unsigned char	username[11];
+		uint8_t		un_len;
+
+		memcpy(username, f->server->users[a->userid].username, 10);
+		for (uint8_t un_ptr = 0; un_ptr < 10; un_ptr++)
+			if (username[un_ptr] == 0x20)
+				username[un_ptr] = 0x00;
+		username[10] = 0x00;
+		un_len = strlen(username);
+		username[un_len] = 0x0D; // Acorn termination
+
+		FS_CPUT8(a->stn);
+		FS_CPUT8(a->net);
+		FS_CPUT8(1); /* Task number again... */
+		FS_CPUTD(username, un_len+1);
+	}
+
+	FS_PUTR8(2, count);
+
+	FS_CSEND();
 }
 
 /*
@@ -43,14 +91,60 @@ FSOP(21)
 FSOP(22)
 {
 
-	//FS_REPLY_DATA(0x80);
+	FS_REPLY_DATA(0x80);
 	unsigned char	username[11];
+	int16_t		uid;
+	struct __fs_active	*a;
 
 	fs_copy_to_cr(username, f->data + 5, 10);
 
 	fs_debug_full(0, 1, f->server, f->net, f->stn, "Read user information (extended): user %s  - not yet implemented", username);
 
-	fsop_error(f, 0xFF, "Not yet implemented");
+	uid = fsop_get_uid(f->server, username);
+
+	if (uid < 0)
+	{
+		fsop_error (f, 0xBC, "User not known");
+		return;
+	}
+
+	a = f->server->actives;
+
+	while (a)
+	{
+		if (a->userid == uid)
+			break;
+		a = a->next;
+	}
+
+	if (!a)
+	{
+		fsop_error (f, 0xFF, "Not logged on");
+		return;
+	}
+
+	switch (FS_UINFOU(uid).priv)
+	{
+		case FS_PRIV_LOCKED:
+			FS_PUTR8(2, 0x00);
+			break;
+		case FS_PRIV_NOPASSWORDCHANGE:
+			FS_PUTR8(2, 0x40);
+			break;
+		case FS_PRIV_USER:
+			FS_PUTR8(2, 0x80);
+			break;
+		case FS_PRIV_SYSTEM:
+			FS_PUTR8(2, 0xFF);
+			break;
+	}
+
+	FS_PUTR8(3, a->stn);
+	FS_PUTR8(4, a->net);
+	FS_PUTR8(5, 1); /* What IS a task number? */
+
+	FS_TXR(6);
+
 }
 
 uint16_t fsop_24_acorn_active_to_uid (struct fsop_data *f, uint16_t a)
