@@ -8466,7 +8466,9 @@ void eb_clr_single_wire_host (uint8_t net, uint8_t stn)
 void eb_reset_tables (void)
 {
 
-	struct __eb_device *d;
+	struct __eb_device *dev;
+	uint8_t	pipe_stations[8192]; // Flag currently active pipes and reactivate them on the station reset
+	uint16_t	pipe_counter;
 
 	pthread_mutex_lock (&networks_update);
 
@@ -8475,23 +8477,67 @@ void eb_reset_tables (void)
 
 	memcpy (&networks, &networks_initial, sizeof(networks));
 
+
+	/* Find active pipe devices
+	 * so that we can re-activate them after we re-set the
+	 * station map to the startup value, below
+	 *
+	 * ** Known potential issue: the skt_write value on
+	 * a pipe might be changing while we look at it here.
+	 * It probably needs a lock.
+	 *
+	 */
+
+	memset (pipe_stations, 0, sizeof(pipe_stations));
+
+	dev = devices;
+
+	while (dev)
+	{
+
+		if (dev->type == EB_DEF_WIRE || dev->type == EB_DEF_NULL)
+		{
+			uint8_t	divert;
+
+			for (divert = 1; divert < 255; divert++)
+			{
+				if (dev->type == EB_DEF_WIRE && dev->wire.divert[divert] != NULL && dev->wire.divert[divert]->type == EB_DEF_PIPE && dev->wire.divert[divert]->pipe.skt_write != -1)
+				{
+					ECONET_SET_STATION(pipe_stations, dev->net, divert);
+				}
+				else if (dev->type == EB_DEF_NULL && dev->null.divert[divert] != NULL && dev->null.divert[divert]->type == EB_DEF_PIPE && dev->null.divert[divert]->pipe.skt_write != -1)
+				{
+					ECONET_SET_STATION(pipe_stations, dev->net, divert);
+				}
+			}
+		}
+
+		dev = dev->next;
+	}
+
 	pthread_mutex_unlock (&networks_update);
 
-	d = devices;
+	dev = devices;
 	
-	while (d)
+	while (dev)
 	{
-		if (d->type == EB_DEF_WIRE)
+		if (dev->type == EB_DEF_WIRE)
 		{
-			pthread_mutex_lock (&(d->wire.stations_lock));
-			memcpy (&(d->wire.stations), &(d->wire.stations_initial), sizeof (d->wire.stations));
-			d->wire.stations_update_rq = 1;
-			pthread_mutex_unlock (&(d->wire.stations_lock));
-			pthread_cond_signal (&(d->qwake));
+			pthread_mutex_lock (&(dev->wire.stations_lock));
+			memcpy (&(dev->wire.stations), &(dev->wire.stations_initial), sizeof (dev->wire.stations));
+
+			/* Copy active pipe stations into the MAP */
+
+			for (pipe_counter = 0; pipe_counter < sizeof(pipe_stations); pipe_counter++)
+				dev->wire.stations[pipe_counter] |= pipe_stations[pipe_counter];
+
+			dev->wire.stations_update_rq = 1;
+			pthread_mutex_unlock (&(dev->wire.stations_lock));
+			pthread_cond_signal (&(dev->qwake));
 			//ioctl(d->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(d->wire.stations));
 		}
 		
-		d = d->next;
+		dev = dev->next;
 	}
 
 }
