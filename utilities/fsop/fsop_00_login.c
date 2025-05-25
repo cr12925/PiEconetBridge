@@ -476,6 +476,7 @@ FSOP_00(LOGIN)
 			a->manyhandles = 0;
 			if (	(machine == 0x07 || machine == 0x0F ) // Archimedes or RISC PC
 			||	(ver >= 4 && (machine == 0x05 || machine == 0x0A || machine == 0x0C)) // M128, Master ET, Master Compact & ANFS or greater
+			||	(machine == 0xEE) // Pycoclient, generally
 			)
 			{
 				a->manyhandles = 1;

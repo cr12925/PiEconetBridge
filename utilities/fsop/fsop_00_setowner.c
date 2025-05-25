@@ -42,7 +42,7 @@ FSOP_00(SETOWNER)
 		fsop_00_oscli_extract(f->data, p, 1, username, 10, param_start);
 		if ((userid = fsop_get_uid(f->server, username)) == -1)
 		{
-			fsop_error(f, 0xFF, "Unknown user");
+			fsop_error(f, 0xBC, "User not known");
 			return;
 		}
 		if ((userid != f->userid) && (!FS_ACTIVE_SYST(f->active)))

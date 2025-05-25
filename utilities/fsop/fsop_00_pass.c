@@ -108,7 +108,7 @@ FSOP_00(SETPASS)
 	if (userid < 0)
 	{
 		fs_debug (0, 1, "%12sfrom %3d.%3d *SETPASS %s %s (user UNKNOWN)", "", f->net, f->stn, username, password);
-		fsop_error (f, 0xfF, "Unknown user");
+		fsop_error (f, 0xBC, "User not known");
 		return;
 	}
 

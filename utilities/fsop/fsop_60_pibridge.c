@@ -109,7 +109,7 @@ FSOP(60)
 
                         fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 16 - Get UID and priv bits for %s", "", f->net, f->stn, username);
                         if (uid < 0) /* Not found */
-                                fsop_error(f, 0xFF, "Unknown user");
+                                fsop_error(f, 0xBC, "User not known");
                         else
                         {
                                 /* UID, low byte first */
@@ -215,7 +215,7 @@ FSOP(60)
                                         fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 20 - Force log off by username: %s (ID 0x%04X)", "", FSOP_NET, FSOP_STN, username, uid);
                                         if (uid < 0) /* Not known */
                                         {
-                                                fsop_error(f, 0xFF, "Unknown user");
+                                                fsop_error(f, 0xBC, "User not known");
                                                 return;
                                         }
                                 }; /* uid now has valid user number */ break;
@@ -232,7 +232,7 @@ FSOP(60)
 
                                         if (FSOP_UINFO(uid)->priv == 0) /* Deleted user */
                                         {
-                                                fsop_error(f, 0xFF, "Unknown user");
+                                                fsop_error(f, 0xBC, "User not known");
                                                 return;
                                         }
 

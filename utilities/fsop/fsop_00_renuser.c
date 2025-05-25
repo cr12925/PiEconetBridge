@@ -34,7 +34,7 @@ FSOP_00(RENUSER)
 	uid = fsop_get_uid(f->server, username);
 
 	if (uid < 0)
-		fsop_error(f, 0xbc, "Unknown user");
+		fsop_error(f, 0xbc, "User not known");
 	else
 	{
 		if (uid == f->active->userid)

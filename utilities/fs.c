@@ -5041,7 +5041,7 @@ void fsop_handle_traffic (struct __econet_packet_aun *p, uint16_t length, void *
 
 	pthread_mutex_lock(&(server->fs_mutex));
 
-	fs_debug_full (0, 3, server, p->p.srcnet, p->p.srcstn,"FS processing traffic at %p lenght %d", p, length);
+	fs_debug_full (0, 3, server, p->p.srcnet, p->p.srcstn,"FS processing traffic at %p length %d", p, length);
 
 	q = server->fs_workqueue;
 
@@ -5198,6 +5198,9 @@ void fsop_setup(void)
 	 * Functions &21, &22, &24 are manager functions - not implemented (yet)
 	 */
 
+	FSOP_SET (21, (FSOP_F_LOGGEDIN)); /* Read current users' information (extended) */
+	FSOP_SET (22, (FSOP_F_LOGGEDIN)); /* Read single user's information (extended) */
+	FSOP_SET (24, (FSOP_F_LOGGEDIN | FSOP_F_SYST)); /* Manager interface */
 	FSOP_SET (26, (FSOP_F_LOGGEDIN)); /* 32 bit save */
 	FSOP_SET (27, (FSOP_F_LOGGEDIN)); /* 32 bit create */
 	FSOP_SET (28, (FSOP_F_LOGGEDIN)); /* 32 bit load */

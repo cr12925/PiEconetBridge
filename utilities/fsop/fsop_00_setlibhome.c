@@ -132,7 +132,7 @@ FSOP_00(SETLIB)
 	}
 
 	if (userid < 0)
-		fsop_error(f, 0xFF, "Unknown user");
+		fsop_error(f, 0xBC, "User not known");
 	else
 		fsop_setlibhome(f, userid, path, 1);
 }
@@ -160,7 +160,7 @@ FSOP_00(SETHOME)
 	}
 
 	if (userid < 0)
-		fsop_error (f, 0xFF, "Unknown user");
+		fsop_error (f, 0xBC, "User not known");
 	else
 		fsop_setlibhome(f, userid, path, 0);
 

@@ -228,7 +228,7 @@ FSOP_00(PRIV)
 	userid = fsop_get_uid(f->server, username);
 
 	if (userid < 0)
-		fsop_error(f, 0xFF, "Unknown user");
+		fsop_error(f, 0xBC, "User not known");
 	else
 	{
 		priv = f->server->users[userid].priv;
@@ -265,12 +265,12 @@ FSOP_00(REMUSER)
 	userid = fsop_get_uid(f->server, username);
 
 	if (userid < 0)
-		fsop_error(f, 0xFF, "Unknown user");
+		fsop_error(f, 0xBC, "User not known");
 	else
 	{
-		f->server->users[userid].priv = 0;
-		f->server->users[userid].priv2 = 0;
-		//fsop_set_priv_byte(&(f->server->users[userid]), 0, 0); 
+		//f->server->users[userid].priv = 0;
+		//f->server->users[userid].priv2 = 0;
+		fsop_set_priv_byte(&(f->server->users[userid]), 0, 0); 
 		fsop_reply_ok(f);
 	}
 }
@@ -286,7 +286,7 @@ FSOP_00(BRIDGEUSER)
 	userid = fsop_get_uid(f->server, username);
 
 	if (userid < 0)
-		fsop_error(f, 0xFF, "Unknown user");
+		fsop_error(f, 0xBC, "User not known");
 	else
 	{
 		fsop_set_priv_byte(&(f->server->users[userid]), f->server->users[userid].priv, (f->server->users[userid].priv2 | FS_PRIV2_BRIDGE)); 

@@ -76,7 +76,7 @@ FSOP_00(LOGOFF)
 
 		if (userid < 0)
 		{
-			fsop_error(f, 0xFF, "Unknown user");
+			fsop_error(f, 0xBC, "User not known");
 			return;
 		}
 

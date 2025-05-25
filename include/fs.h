@@ -121,8 +121,8 @@
 
 #define FS_MAX_TAPE_DRIVES 4 // Max number of tape drives available, numbered 0 ... n-1. Not a good idea to put this beyond 10 given there's a call to receive mounted tape names.
 
-/* Reported version string */
-#define FS_VERSION_STRING "3 Pi Econet HP Bridge FS 2.20"
+/* Reported version string - Now reports Level 4*/
+#define FS_VERSION_STRING "4 Pi Econet HP Bridge FS 2.20"
 
 /* Various important struct definitions */
 
@@ -431,8 +431,9 @@ struct path {
 // Macro to identify if we have bridge privileges
 #define FS_ACTIVE_BRIDGE(a) (a->server->users[a->userid].priv2 & FS_PRIV2_BRIDGE)
 
-// Macro to get us at the user config from an fs_active
+// Macro to get us at the user config from an fs_active - First must be active, and takes a pointer to the user's '__fs_active' structure, the second is any user, and just needs a user id.
 #define FS_UINFO(a)	a->server->users[a->userid]
+#define FS_UINFOU(u)	f->server->users[(u)]
 
 // Macro to get us serverconfig from fsop_data
 #define FS_CONFIG(s,n)	(s->config->n)
@@ -1018,6 +1019,15 @@ extern float timediffstart(void);
 #define FS_PUTD(r,l,v,n) \
 	memcpy(&(r[(l)]),(v),(n)); 
 
+/* And equivalents which use reply.p.data */
+
+#define FS_PUTR8(l,v)	FS_PUT8(reply.p.data,(l),(v));
+#define FS_PUTR16(l,v)	FS_PUT16(reply.p.data,(l),(v));
+#define FS_PUTR24(l,v)	FS_PUT24(reply.p.data,(l),(v));
+#define FS_PUTR32(l,v)	FS_PUT32(reply.p.data,(l),(v));
+#define FS_PUTRD(l,v,n)	FS_PUTD(reply.p.data,(l),(v),(n));
+#define FS_TXR(l) fsop_aun_send(&reply, (l), f);
+
 // Equivalents to use __rcounter and increment it.
 
 #define FS_CPUT8(v) reply.p.data[__rcounter++] = (v & 0xff)
@@ -1075,6 +1085,9 @@ FSOP_EXTERN(1d);
 FSOP_EXTERN(1e);
 FSOP_EXTERN(1f);
 FSOP_EXTERN(20);
+FSOP_EXTERN(21);
+FSOP_EXTERN(22);
+FSOP_EXTERN(24);
 FSOP_EXTERN(26);
 FSOP_EXTERN(27);
 FSOP_EXTERN(28);

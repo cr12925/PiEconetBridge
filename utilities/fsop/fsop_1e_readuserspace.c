@@ -41,12 +41,12 @@ FSOP(1e)
 
 	if (!FS_ACTIVE_SYST(f) && uid != f->userid)
 	{
-		fsop_error (f, 0xFF, "Insufficient privilege");
+		fsop_error (f, 0xBA, "Insufficient privilege");
 		return;
 	}
 
 	if (uid < 0)
-		fsop_error (f, 0xFF, "Unknown user");
+		fsop_error (f, 0xBC, "User not known");
 	else
 	{
 		space = fsop_get_user_free (&(f->server->users[uid]));
@@ -71,7 +71,7 @@ FSOP(1f)
 
 	if (!FS_ACTIVE_SYST(f))
 	{
-		fsop_error (f, 0xFF, "Insufficient privilege");
+		fsop_error (f, 0xBA, "Insufficient privilege");
 		return;
 	}
 
@@ -83,7 +83,7 @@ FSOP(1f)
 		uid = fsop_get_uid(f->server, user);
 
 	if (uid < 0)
-		fsop_error (f, 0xFF, "Unknown user");
+		fsop_error (f, 0xBC, "User not known");
 	else
 	{
 		f->server->users[uid].quota_free[0] = *(f->data + 5);
