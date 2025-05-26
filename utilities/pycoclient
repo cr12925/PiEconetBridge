@@ -80,6 +80,56 @@ def execute_script(aun_client, script, server = "1.254", username = "", password
 def dummy_callback(net, stn, port, ctrl, ptype, seq, content):
     print (f'Callback: Traffic to port {port:02X}, ctrl {ctrl:02X}, seq {seq:08X} from {net}.{stn}, {content}')
 
+def fsop_12_getobjectinfo(aun_client, net, stn, path, arg):
+    return aun_client.FSOp(net, stn, 0x12, bytearray([ arg ]) + bytearray(path, "ascii") + bytearray([ 0x0d ]))
+
+def fsop_cat(aun_client, net, stn, path):
+    fsop_result, fsop_error, reply_packet = fsop_12_getobjectinfo(aun_client, net, stn, path, 0x06)
+    if fsop_error != 0:
+        error_string = aun_client.report_FSOp_result(aun_client, fsop_result, fsop_error, reply_packet)
+        print (f"Error &{fsop_error:02X} - {error_string}")
+    else:
+        dirnamelen = reply_packet[12]
+        dirname = reply_packet[13:(13+dirnamelen)].decode('ascii')
+        entries = reply_packet[(13+dirnamelen+1)]
+        print (f"{dirname} ({entries:03d})")
+
+        fsop_result, fsop_error, reply_packet = aun_client.FSOp(net, stn, 0x15, bytearray([ ]))
+        if fsop_error != 0:
+            error_string = aun_client.report.FSOp_result(aun_client, fsop_result, fsop_error, reply_packet)
+            print ("Error &{fsop_error:02X} - {error_string}")
+        else:
+            discnamelen = reply_packet[10];
+            discname = reply_packet[11:(11+discnamelen)].decode('ascii')
+            cwd = reply_packet[(11+discnamelen):(21+discnamelen)].decode('ascii')
+            lib = reply_packet[(21+discnamelen):(31+discnamelen)].decode('ascii')
+
+            print (f"{discname}")
+            print (f"Dir. {cwd}      Lib. {lib}")
+            print ("")
+
+            index = 0
+            finished = 0
+
+            while finished == 0:
+                fsop_result, fsop_error, reply_packet = aun_client.FSOp(net, stn, 0x03, bytearray([ 3, index, 4 ]) + bytearray(path, 'ascii') + bytearray([ 0x0D]))
+                if fsop_error != 0:
+                    error_string = aun_client.report.FSOp_result(aun_client, fsop_result, fsop_error, reply_packet)
+                    print ("Error &{fsop_error:02X} - {error_string}")
+                else:
+                    entries_returned = reply_packet[10]
+                    for index in range(0, entries_returned):
+                        fdata = reply_packet[(12+(19*index)):(12+(19*index)+18)].decode('ascii')
+                        print (fdata, end="")
+                        print ("   ", end="")
+                        if index % 4 == 3:
+                            print ("")
+                    print (f"Index: {index} ; Entries returned: {entries_returned}")
+                    index = index + entries_returned
+                    if (entries_returned < 4):
+                        finished = 1
+
+
 def user_thread(aun_client, server = "1.254", username = "", password = ""):
 
     my_net, my_stn = select_server(server)
@@ -99,7 +149,21 @@ def user_thread(aun_client, server = "1.254", username = "", password = ""):
         if fs_match:
             my_net = int(fs_match.group(1))
             my_stn = int(fs_match.group(2))
-        elif re.search("quit", cmd, re.I) == None:
+        elif re.search("quit", cmd, re.I):
+            continue
+        elif re.search("^\.\s*(\S*)\s*$", cmd, re.I):
+            try:
+                path = fs_match.group(1)
+            except:
+                path = ""
+            fsop_cat(aun_client, my_net, my_stn, path)
+        elif re.search("^cat\s*(\S*)\s*$", cmd, re.I):
+            try:
+                path = fs_match.group(1)
+            except:
+                path = ""
+            fsop_cat(aun_client, my_net, my_stn, path)
+        else:
             fsop_result, fsop_error, reply_packet = aun_client.FSOp(my_net, my_stn, 0x00, bytearray(cmd, "ascii"))
             if fsop_error != 0:
                 error_string = aun_client.report_FSOp_result(aun_client, fsop_result, fsop_error, reply_packet)
@@ -108,10 +172,7 @@ def user_thread(aun_client, server = "1.254", username = "", password = ""):
                 fsop_string = aun_client.report_FSOp_result(aun_client, fsop_result, fsop_error, reply_packet)
                 if (fsop_result != AUNProtocol.FSOP_RESULT_INFO) and (fsop_result != AUNProtocol.FSOP_RESULT_CAT) and (fsop_result != AUNProtocol.FSOP_RESULT_OK) and (fsop_result != AUNProtocol.FSOP_RESULT_IAM):
                     print (f"{fsop_string}")
-
-
-        else:
-            print("Exiting")
+    print("Exiting")
 
 argumentList = sys.argv[1:]
 long_options = ["help", "server=", "user=", "password=", "localport=", "bindaddr=", "pipebase=", "timeout=", "script-params=", "script=", "debug", "traffic-debug", "aunmap=", "hostmap="]
@@ -132,7 +193,7 @@ hostmap = None
 
 arguments, values = getopt.getopt(argumentList, "", long_options)
 for currentArgument, currentValue in arguments:
-    if currentArgument == "help":
+    if currentArgument == "--help":
         print ("pycoclient:\n")
         print ("  --aunmap=/path      : Path to aunmap file. Defaults to ~/.aunmap")
         print ("  --bindaddr=<ip>     : Set address to bind local UDP socket to")
