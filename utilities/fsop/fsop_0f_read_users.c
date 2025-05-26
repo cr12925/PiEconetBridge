@@ -36,7 +36,11 @@ FSOP(0f)
 	start = FSOP_ARG;
 	number = *(f->data + 6);
 
+	if (number == 0)
+		number = 254; /* All of them, but let's not go too far... */
+
 	r.p.data[2] = 0; // 0 users found unless we alter it later
+	r.p.data[0] = 11; /* User information returned */
 
 	ptr = 3;
 
