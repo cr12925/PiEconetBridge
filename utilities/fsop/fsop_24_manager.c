@@ -36,8 +36,9 @@ FSOP(21)
 
 	fs_debug_full(0, 1, f->server, f->net, f->stn, "Read logged on users (extended) start:%d, end:%d - not yet implemented", start, number);
 
-	if (number == 0 || number > 15)
-		number = 15; /* Max packet size if a Beeb calls this, which it probably won't, but ... */
+	/* Don't do this. If someone's daft enough to ask, give them what they want. */
+	//if (number == 0 || number > 15)
+		//number = 15; /* Max packet size if a Beeb calls this, which it probably won't, but ... */
 
 	count = 0;
 	a = f->server->actives;

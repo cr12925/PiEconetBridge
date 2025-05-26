@@ -230,7 +230,7 @@ tape_format () {
 
 	mkdir -p ${tapedrivedir}/Blank
 	cd ${tapedrivedir}/Blank
-	${DATE} +'%s' > .format_time
+	${DATE} +'%s' > \#format_time
 	$TARCREATECMD $tarname .
 
 	if [ "$?" -ne 0 ]; then
@@ -280,30 +280,36 @@ fi
 		return 15
 	fi
 
-	touch ${mountdir}/.busy
+	touch ${mountdir}/\#busy
 
-	if [ -f $mountdir/.passes ]; then
-		passes=`cat $mountdir/.passes`
+	if [ -f $mountdir/\#passes ]; then
+		passes=`cat $mountdir/\#passes`
 	else
 		passes=0
 	fi
 
 	passes=`expr $passes + 1`
 
-	echo $passes > $mountdir/.passes
+	echo $passes > $mountdir/\#passes
 
+	# Copy Passwords & stuff in, but hidden from users
+
+	for a in Passwords Configuration Groups
+	do
+		cp $fsdir/${a} ${backupsource}/\#${a}
+	done
 
 	(cd $backupsource ; $TARCREATECMD - . ) | (cd $backuppath ; $TAREXTRACTCMD - )
 
 	if [ "$?" -ne "0" ]; then
-		rm ${mountdir}/.busy
-		touch ${backuppath}/.corrupt
+		rm ${mountdir}/\#busy
+		touch ${backuppath}/\#corrupt
 		return 16
 	fi
 
-	rm -f ${backuppath}/.corrupt
-	${DATE} '+%s' > $backuppath/.backup_time
-	rm ${mountdir}/.busy
+	rm -f ${backuppath}/\#corrupt
+	${DATE} '+%s' > $backuppath/\#backup_time
+	rm ${mountdir}/\#busy
 
 	return 0
 
