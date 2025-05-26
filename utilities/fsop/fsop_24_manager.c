@@ -40,6 +40,9 @@ FSOP(21)
 	//if (number == 0 || number > 15)
 		//number = 15; /* Max packet size if a Beeb calls this, which it probably won't, but ... */
 
+	if (number == 0)
+		number = 254; /* As many as poss */
+
 	count = 0;
 	a = f->server->actives;
 
