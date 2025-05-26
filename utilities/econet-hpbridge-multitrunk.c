@@ -755,8 +755,14 @@ void * eb_multitrunk_handler_thread (void * input)
 
 	if (me->trunk)
 	{
-		pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
-		pthread_cond_signal(&(me->trunk->bridge_reset_cond)); // Do a bridge reset
+		pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher - the HPB equivalent of a seargent major with a baking try and a ladle. 
+
+		/* This probably ought to be a whole network reset unless this trunk is all pooled? */
+
+		if (me->trunk->all_nets_pooled)
+			pthread_cond_signal(&(me->trunk->bridge_reset_cond)); // Do a bridge reset just to this device
+		else
+			eb_bridge_reset(me->trunk); /* Simulate a reset coming from this trunk */
 	}
 
 	/* Wait for data */
