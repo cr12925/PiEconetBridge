@@ -32,6 +32,9 @@ FSOP(0e)
 
 	fs_debug_full (0, 2, f->server, f->net, f->stn, "Read Discs from %d (up to %d)", start, number);
 
+	if (number == 0)
+		number = 254; /* Cope with "send me all of them" */
+
 	disc = f->server->discs;
 
 	/* Now copy discs to the reply, if there are any */
