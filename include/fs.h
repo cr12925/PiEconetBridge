@@ -122,7 +122,7 @@
 #define FS_MAX_TAPE_DRIVES 4 // Max number of tape drives available, numbered 0 ... n-1. Not a good idea to put this beyond 10 given there's a call to receive mounted tape names.
 
 /* Reported version string - Now reports Level 4*/
-#define FS_VERSION_STRING "4 Pi Econet HP Bridge FS 2.20"
+#define FS_VERSION_STRING "4 HPB FS  2.20"
 
 /* Various important struct definitions */
 
