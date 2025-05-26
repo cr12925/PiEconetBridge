@@ -4844,11 +4844,12 @@ fast_handler_reset:
 							fastprintf (d, "\r\n\n*** ERROR: Fileserver on %d.%d already startedr\n\n", d->net, d->local.stn);
 						else
 						{
+							fastprintf (d, "\r\n\n*** Shutting down fileserver");
 							pthread_mutex_lock(&(d->local.fs.server->fs_mutex));
 							d->local.fs.server->enabled = 0;
 							pthread_mutex_unlock(&(d->local.fs.server->fs_mutex));
 							pthread_cond_signal(&(d->local.fs.server->fs_condition));
-							fastprintf (d, "\r\n\n*** Fileserver on %d.%d has shut down\r\n\n", d->net, d->local.stn);
+
 						}
 					}	
 					else
@@ -4857,6 +4858,9 @@ fast_handler_reset:
 							fastprintf (d, "\r\n\n*** ERROR: Fileserver on %d.%d not active\r\n\n", d->net, d->local.stn);
 						else
 						{
+							/* I think this is wrong. The struct will be there, and we just need to do fsop_run() again */
+
+							/*
 							d->local.fs.server = fsop_initialize (d, d->local.fs.rootpath, d->local.fs.tapehandler, d->local.fs.tapecompletionhandler);
 							if (d->local.fs.server)
 							{
@@ -4883,6 +4887,12 @@ fast_handler_reset:
 										} break;
 								}
 							}
+							else
+								fastprintf (d, "\r\n\n*** ERROR: Fileserver on %d.%d BOOT FAILED\r\n\n", d->net, d->local.stn);
+								*/
+
+							if (fsop_run(d->local.fs.server))
+								fastprintf (d, "\r\n\n*** Fileserver on %d.%d booted\r\n\n", d->net, d->local.stn);
 							else
 								fastprintf (d, "\r\n\n*** ERROR: Fileserver on %d.%d BOOT FAILED\r\n\n", d->net, d->local.stn);
 

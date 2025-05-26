@@ -182,7 +182,6 @@ FSOP(60)
                         fs_debug_full (0, 2, f->server, f->net, f->stn, "FS PiBridge call arg = 19 - Shut down fileserver");
                         fsop_reply_ok_with_data(f, (unsigned char *) shutdown_msg, strlen(shutdown_msg));
 			f->server->enabled = 0; /* The fsop_thread() routine does the actual shutdown */
-                        //fsop_shutdown(f->server);
 
                 } break;
 

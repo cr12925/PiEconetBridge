@@ -3305,22 +3305,25 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 	
 	struct __fs_station *server;
 
-	server = eb_malloc(__FILE__,__LINE__,"FS","New fileserver struct", sizeof(struct __fs_station));
-	//FS_LIST_MAKENEW(struct __fs_station, fileservers, 1, server, "FS", "Initialize new server struct");
+	if (device->local.fs.server) /* Already exists */
+	{
+		eb_debug (0, 1, "FS", "%8s %3d.%3d Attempt to initialize fileserver failed - fileserver already exists", "", device->net, device->local.stn);
+		return NULL;
+	}
+	else
+		server = eb_malloc (__FILE__, __LINE__, "FS", "New fileserver station struction", sizeof (struct __fs_station));
+
         server->net = device->net;
         server->stn = device->local.stn;
         strncpy (server->directory, directory, 254);
-	//strncpy (server->tapehandler, tapehandler, 254);
-	//strncpy (server->tapecompletionhandler, tapecompletionhandler, 254);
 	server->tapehandler = tapehandler;
-	server->tapecompletionhandler = tapecompletionhandler;
+	server->tapecompletionhandler = tapecompletionhandler; /* TODO - We don't think this is used! */
         server->config = NULL;
         server->discs = NULL;
         server->files = NULL;
         server->actives = NULL;
         server->users = NULL;
         server->enabled = 0;
-        // server->fs_load_queue = NULL;
         server->fs_device = device;
         server->fs_workqueue = NULL;
 	server->peeks = NULL;
@@ -3333,7 +3336,6 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 	// Ensure serverparam begins with /
 	if (*directory != '/')
 	{
-		//FS_LIST_SPLICEFREE(fileservers,server,"FS","Destroy FS struct on failed init");
 		eb_free(__FILE__, __LINE__, "FS","Destroy FS struct on failed init", server);
 
 		fs_debug (0, 1, "Bad directory name %s", directory);
@@ -3367,9 +3369,6 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 		FILE * cfgfile;
 		uint8_t	setconfigdefaults = 0;
 		uint16_t configlen;
-
-		//server->config = eb_malloc(__FILE__, __LINE__, "FS", "Allocate FS config struct", sizeof(struct __fs_config));
-		//memset(server->config, 0, sizeof(struct __fs_config));
 
 		sprintf(passwordfile, "%s/Configuration", server->directory);
 		cfgfile = fopen(passwordfile, "r+");
@@ -3543,17 +3542,8 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 
 					server->config->fs_pwtenchar = 1;
 
-					/* No longer required - now mmap()ed 
-					rewind(cfgfile);
-					fwrite (server->config, 256, 1, cfgfile);
-					rewind(cfgfile);
-					*/
-
 					fs_debug_full (0, 1, server, 0, 0, "Updated password file for 10 character passwords, and backed up password file to %s", passwordfilecopy);
 				}
-
-				/* Closed above */
-				//fclose (cfgfile);
 
 				// Make MDFS password file
 
@@ -3834,9 +3824,7 @@ void fsop_shutdown (struct __fs_station *s)
 {
 	struct __fs_active	*a, *n;
 	struct __fs_disc 	*disc;
-	//struct load_queue	*l;
 	struct __fs_bulk_port	*bulk;
-	//struct __eb_packetqueue *pq;
 
 	// Flag server inactive
 	
@@ -5414,9 +5402,9 @@ void *fsop_thread(void *p)
 			
 			fsop_shutdown(s);
 
-			s->fs_device->local.fs.server = NULL;
+			//s->fs_device->local.fs.server = NULL; /* Don't do this - once initialized, it's used to start the server up again */
 
-			fs_debug (0, 1, "     %3d.%3d Shut down completed", net, stn);
+			eb_debug (0, 1, "FS", "%-8s %3d.%3d Shut down completed", "FS", net, stn);
 
 			// pthread_mutex_unlock(&(s->fs_mutex));
 
