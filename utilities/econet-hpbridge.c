@@ -1696,6 +1696,14 @@ static void * eb_bridge_update_watcher (void *device)
 
 		wait_timeout.tv_sec += update_delay;
 
+		/* TODO
+		 *
+		 * I must have done this periodic announcement thing for a reason, but it shouldn't
+		 * be necessary. I think it came about with the advent of pooled trunks. Maybe I don't 
+		 * detect when they come alive (which should result in a reset & update being sent to them)
+		 * properly?
+		 */
+
 		if (me->type == EB_DEF_TRUNK) // Send period announcements all the time
 			result = pthread_cond_timedwait(&(me->bridge_update_cond), &(me->bridge_update_lock), &wait_timeout);
 		else
@@ -1703,19 +1711,26 @@ static void * eb_bridge_update_watcher (void *device)
 
 		dead = 0; /* Assume alive */
 
-		if (me->type == EB_DEF_TRUNK && !me->trunk.hostname) // Unconnected trunk
-			dead = 1;
+		/* Previous ordering of this code may have been causing trunks which
+		 * were *alive* multitrunks to miss out on resets beacuse trunk.hostname
+		 * was not set? Re-ordered to make sure. */
 
 		/* See if we are an unconnected multitrunk child, and continue if so */
 
-		if (me->type == EB_DEF_TRUNK && me->trunk.mt_parent)
+		if (me->type == EB_DEF_TRUNK)
 		{
-
-			pthread_mutex_lock(&(me->trunk.mt_mutex));
-			if (!(me->trunk.mt_data))
-				dead = 1; // We're not alive
-			pthread_mutex_unlock(&(me->trunk.mt_mutex));
-
+			if (me->trunk.mt_parent) /* Multitrunk child */
+			{
+				pthread_mutex_lock(&(me->trunk.mt_mutex));
+				if (!me->trunk.mt_data) /* Dead multitrunk child */
+					dead = 1;
+				pthread_mutex_unlock(&(me->trunk.mt_mutex));
+			}
+			else /* Normal trunk */
+			{
+				if (!(me->trunk.hostname)) /* Dead */
+					dead = 1;
+			}
 		}
 
 		if (dead)
@@ -1873,19 +1888,26 @@ static void * eb_bridge_reset_watcher (void *device)
 
 		dead = 0; /* Assume alive */
 
-		if (me->type == EB_DEF_TRUNK && !me->trunk.hostname) // Unconnected trunk
-			dead = 1;
+		/* Previous ordering of this code may have been causing trunks which
+		 * were *alive* multitrunks to miss out on resets beacuse trunk.hostname
+		 * was not set? Re-ordered to make sure. */
 
 		/* See if we are an unconnected multitrunk child, and continue if so */
 
-		if (me->type == EB_DEF_TRUNK && me->trunk.mt_parent)
+		if (me->type == EB_DEF_TRUNK)
 		{
-
-			pthread_mutex_lock(&(me->trunk.mt_mutex));
-			if (!(me->trunk.mt_data))
-				dead = 1; // We're not alive
-			pthread_mutex_unlock(&(me->trunk.mt_mutex));
-
+			if (me->trunk.mt_parent) /* Multitrunk child */
+			{
+				pthread_mutex_lock(&(me->trunk.mt_mutex));
+				if (!me->trunk.mt_data) /* Dead multitrunk child */
+					dead = 1;
+				pthread_mutex_unlock(&(me->trunk.mt_mutex));
+			}
+			else /* Normal trunk */
+			{
+				if (!(me->trunk.hostname)) /* Dead */
+					dead = 1;
+			}
 		}
 
 		if (dead)
@@ -1999,6 +2021,9 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 	// - When we get an update, we don't forward it because nothing will change elsewhere either. Pooling happens independently of net announcements.
 	// - But resets & updates received *from* somewhere other than a network which is all pooled *are* forwarded so that the pooled trunk/wire
 	//   knows what is where.
+	//
+	//   Ie. if we get a reset from an all-pooled trunk, then we'll send it some updates. But we don't forward the reset because
+	//   everything is pooled from this source trunk so our netlist will never change.
 	
 	if (trigger && trigger->all_nets_pooled && !EB_CONFIG_POOL_RESET_FWD)
 	{

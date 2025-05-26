@@ -427,6 +427,130 @@ struct __eb_fast_client {
 	struct _eb_fast_client	*prev, *next; /* NULL if there isn't a prev or next in the queue */
 };
 
+/* V2.2 Updated *FAST handling stuff */
+
+#define EB_FAST_MENU_TCP	0x01
+#define EB_FAST_MENU_SERIAL	0x02
+#define EB_FAST_MENU_SCRIPT	0x03
+#define EB_FAST_MENU_SYSTEM	0x04 /* System *FAST menu */
+#define EB_FAST_MENU_HEADING	0x05 /* Puts a blank line either side and can't be selected */
+#define EB_FAST_BIN_LOGIN	0x06 /* Pipe to bin login on local host */
+#define EB_FAST_MENU_SUBMENU	0x07 /* Jump to another menu */
+
+/*
+ * __eb_fast_menu_item
+ *
+ * Item to display within a menu. They are displayed in the order
+ * stored, which will be the order they appear in the JSON.
+ *
+ * Each menu item has a 'function' code - see defines above, and then
+ * there is a union in which the parameters are stored for each
+ * (mutually exclusive) function type.
+ *
+ */
+
+struct __eb_fast_menu_item	{
+	unsigned char 		*fm_description;
+	uint16_t		fm_timeout; /* Inactivity timeout in seconds, 0 if none - but that's a bit dangerous... */
+	uint8_t			fm_type; /* One of the defines above, except heading */
+	uint8_t			priv_mask; /* E.g. FS_PRIV_SYSTEM is 0x80. If set to that, unless the user's FS prive has that bit set, this option will not be displayed. */
+	uint8_t			priv2_mask; /* Ditto for priv2 - most common use will be to require bridge privilege, but could potentially also filter on, say, FS_PRIV2_HIDEOTHERS if the menu item might reveal who else is logged in. */
+	union	{
+
+		struct {
+			unsigned char	*fm_host;
+			struct addrinfo	*fm_address; /* NULL until resolved; resolve on each connection attempt not startup */
+			uint16_t	fm_port; /* Host byte order */
+		} fm_tcp;
+
+		struct {
+			unsigned char	*fm_device;
+			speed_t		fm_speed; /* See termios.h */
+			struct termios	*fm_termios; /* Ditto */
+		} fm_serial;
+
+		struct {
+			unsigned char	*fm_script;
+		} fm_script;
+
+		struct {
+			unsigned char	*fm_submenu_name; /* During config read, we won't have them all defined, so we resolve this on first call and put the address of the menu struct */
+			struct __eb_fast_menu	*fm_submenu; /* INitialize as NULL  - Or, I suppose, having read all the config, we could go back and populate these. */
+		} fm_submenu;
+
+		/* No struct for system - it's built in. */
+
+	};
+
+	struct __eb_fast_menu_item	*next; /* Link to next option in this menu */
+
+}; 
+
+/* Defines a menu to display when someone is using *FAST.
+ * The local struct defines the first one, but the options can 
+ * be configured to go to a (sub) menu. */
+
+struct __eb_fast_menu {
+	unsigned char			*menu_name; /* Uppercase; used to enable us to assign a starting menu to a given local *FAST handler in JSON */
+	struct	__eb_fast_menu_item 	*item;
+	uint8_t				keypress; /* 0 if heading */
+	struct __eb_fast_menu		*next;
+};
+
+/* __eb_fast_station
+ *
+ * Defines a client that's connected to the *FAST handler
+ * e.g. whether ready, when its last activity was (for garbage collection),
+ * input/output buffers (to hold data going to or coming from the pipe to the
+ * relevant destination connection 
+ *
+ * Once initialized, this struct is passed to the handler thread.
+ *
+ * If a client initializes a new connection when there appears to be one 
+ * extant (and not marked for death - see below), then die.bridge should be
+ * set to 1 so that the matching server thread cleans up. Then a new station
+ * struct is established for the new connection.
+ *
+ */
+
+struct __eb_fast_station
+{
+	uint8_t			net, stn; /* Where the client is */
+	uint8_t			fastbit; /* Oscillates 0, 1 apparently */
+	uint8_t			fast_input_ctrl; /* Same for reception? */
+	pthread_t		handler, io_handler; /* Might not need both */
+	pthread_mutex_t		io_mutex; /* Locks the to_client, to_server, die & client_ready variables */
+	pthread_cond_t		wake; /* Wakes up the handler thread when more data has arrived or when the client is ready. Note sure we need this: if client signals ready, the bridge can send data if we have any; if the server sends data and the client is ready, then we can send 32 bytes, and if the client sends us data, we will automatically tell the client we can take some more, and we write it to the server. We write to the server in a non-blocking way so that if it's gummed up, we don't freeze the despatch handler - but something somewhere will need periodically to check for more data and send it to the server if there is some, just in case we have an EWOULDBLOCK on a write to the server. */
+	struct {
+		uint8_t		server;
+		uint8_t		bridge;
+	} die; /* Server sets server.die to 1 when it wants to die and vice versa. If server.die gets set to 1, then the server is expected to have cleaned everything up, and the GC will come along and get rid of the transient structs, thus the connection ends. If the bridge sets bridge.die to 1, then the server is expected to clean up and set server.die to 1 when it's finished. And then the GC will clean up the list. No traffic should be accepted to/from a server thread when either of these is set to 1. */
+	uint8_t			client_ready; /* Gets set to 1 when the client indicates it is ready for more data. We are always ready for more data, and we notify on every reception, so we don't have one for our end. */
+	struct __eb_fast_menu	*current_menu; /* Current menu. Initialized by the bridge before handing this struct over to the handler. */
+
+	struct	{
+		int	to_server;
+		int	to_bridge;
+		FILE *	fast; /* created by the handler by fdopen()ing the to_bridge descriptor, so that the handler can more easily do formatted output. That means that to close the to_bridge descriptor, you fclose(conn.to_bridge) and fclose will close the underlying pipe */
+	} conn;
+
+	uint8_t			*to_client, *to_server; /* Buffers of data going in one direction or another; NULL if empty. */
+	struct __eb_fast_station	*next, *prev;
+};
+
+/* __eb_fast_nets
+ *
+ * Contains list of __eb_fast_stations, one per net number, to
+ * make finding a given client easier.
+ */
+
+struct __eb_fast_net
+{
+	uint8_t			net; /* The fast_station struct has the net number in as well, but that's for ease of reference by the handler. */
+	struct __eb_fast_station	*stns; 
+	struct __eb_fast_net	*next, *prev;
+};
+
 /* __eb_device
 
    Holds common and per-driver information about devices on which we might send/receive packets.
@@ -627,10 +751,12 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			struct __eb_notify	*notify; // List of stuff received via *notify to a local server
 			pthread_mutex_t		notify_mutex; // Mutex to lock the notify list
 			pthread_t		notify_thread; // Notify watcher thread for this device
-			// Future use
-			struct addrinfo 	*fast_dest_host; // Host to connect to on TCP (or NULL to try an executable)
-			uint16_t		fast_dest_port; // Port to connect to
-			char *			fast_script; // Executable to run and connect to user, and if fast_dest_host == NULL and so is this, then use the internal handler.
+
+			/* V2.2 New *FAST handling stuff */
+
+			struct __eb_fast_net		*fast_nets; /* List of nets which have clients in them. Better to search net first. */
+			struct __eb_fast_menu		*fast_menu; /* Starting menu name */
+
 		} local;
 
 		struct __eb_aun_remote *aun; // Address of struct in the list of remote AUN stations, kept in order of s_addr
