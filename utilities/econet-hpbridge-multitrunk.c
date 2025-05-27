@@ -880,6 +880,10 @@ void * eb_multitrunk_handler_thread (void * input)
 									copylen = len - realdata_start; 
 
 									eb_mt_copy_to_cipherpacket (&cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, realdata_start, copylen);
+
+									// 20250527 I think we need to update me->mt_state here?
+
+									me->mt_state = MT_START; /* Start marker found; data in cipherpacket, but end marker not yet received */
 								}
 							}
 						}
