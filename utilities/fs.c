@@ -2926,8 +2926,8 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 		{
 			if (result->path[count][r_counter] == '/')
 				path_segment[r_counter] = (FS_CONFIG(f->server,fs_infcolon) ? '.' : ':');
-			else if (result->path[count][r_counter] == 0xA0)
-				path_segment[r_counter] = '#'; // Hard space equivalent
+			/*else if (result->path[count][r_counter] == 0xA0)
+				path_segment[r_counter] = '#'; // Hard space equivalent */
 			else	path_segment[r_counter] = result->path[count][r_counter];
 			r_counter++;
 		}
@@ -2998,8 +2998,8 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 					{
 						if (result->path[count][r_counter] == '/')
 							unix_segment[r_counter] = (FS_CONFIG(f->server,fs_infcolon) ? '.' : ':');
-						else if (result->path[count][r_counter] == 0xA0) // Hard space
-							unix_segment[r_counter] = '#';
+						/*else if (result->path[count][r_counter] == 0xA0) // Hard space
+							unix_segment[r_counter] = '#'; */
 						else	unix_segment[r_counter] = result->path[count][r_counter];
 						r_counter++;
 					}
