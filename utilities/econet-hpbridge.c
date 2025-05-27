@@ -6093,7 +6093,7 @@ static void * eb_device_despatcher (void * device)
 
 					uint16_t		datalength; // Stores length as set out in received encrypted packet
 
-					unsigned char		temp_packet[ECONET_MAX_PACKET_SIZE+6];
+					unsigned char		temp_packet[ECONET_MAX_PACKET_SIZE+12];
 
 					struct sockaddr_in	src_addr;
 					socklen_t		addr_len;
@@ -6123,7 +6123,29 @@ static void * eb_device_despatcher (void * device)
 					pthread_mutex_lock(&(d->trunk.mt_mutex));
 
 					if (d->trunk.mt_parent && d->trunk.mt_data) // Part of multitrunk and the connection is live
-						length = read (d->trunk.mt_data->trunk_socket[0], &(d->trunk.cipherpacket), TRUNK_CIPHER_TOTAL);
+					{
+						uint8_t	lbuf[2];
+						uint32_t	datalen, already_read;
+
+						length = read (d->trunk.mt_data->trunk_socket[0], &(lbuf), 2);
+
+						if (length < 0)
+						{
+							eb_debug (0, 2, "DESPATCH", "%-8s %7d Failed to read data length on multitrunk child - fatal", eb_type_str(d->type), d->trunk.local_port); 
+							exit(1);
+						}
+
+						datalen = (lbuf[0] * 256) + lbuf[1];
+						already_read = 0;
+
+						while (already_read < datalen)
+						{
+							length = read (d->trunk.mt_data->trunk_socket[0], &(temp_packet[already_read]), datalen - already_read);
+							already_read += length;
+						}
+
+						eb_debug (0, 3, "DESPATCH", "%-8s %7d Multitrunk packet received by child trunk - received length %04x, marking receipt at %d seconds", eb_type_str(d->type), d->trunk.local_port, length, time(NULL));
+					}
 					else
 						length = recvfrom (l_socket, &(d->trunk.cipherpacket), TRUNK_CIPHER_TOTAL, 0, (struct sockaddr *) &src_addr, &addr_len);
 
@@ -6135,11 +6157,12 @@ static void * eb_device_despatcher (void * device)
 							eb_debug (0, 2, "DESPATCH", "%-8s %7d Packet received for trunk which was dead (first packet since startup)", eb_type_str(d->type), d->trunk.local_port);
 						else
 							eb_debug (0, 2, "DESPATCH", "%-8s %7d Packet received for trunk which was dead (previous packet was %d ago)", eb_type_str(d->type), d->trunk.local_port, dead_diff);
+						eb_bridge_reset(NULL); // Trigger a reset when a trunk comes alive
 					}
 
-					if (d->trunk.sharedkey && (length < (TRUNK_CIPHER_DATA + AES_BLOCK_SIZE)) && !d->trunk.mt_parent)
+					if (!d->trunk.mt_parent && d->trunk.sharedkey && (length < (TRUNK_CIPHER_DATA + AES_BLOCK_SIZE)))
 						eb_debug (0, 2, "DESPATCH", "%-8s %3d     Encrypted runt packet received - discarded", eb_type_str(d->type), d->net);
-					else if (d->trunk.sharedkey && !d->trunk.mt_parent) // Encrypted trunk and not part of multitrunk (which delivers cleartext traffic to us)
+					else if (!d->trunk.mt_parent && d->trunk.sharedkey) // Encrypted trunk and not part of multitrunk (which delivers cleartext traffic to us)
 					{
 						if (!(d->trunk.ctx_dec = EVP_CIPHER_CTX_new()))
 							eb_debug (1, 0, "DESPATCH", "%-8s %7d Unable to set up decryption control", "Trunk", d->trunk.local_port);
@@ -6254,7 +6277,7 @@ static void * eb_device_despatcher (void * device)
 					{
 
 						eb_debug (0, 3, "DESPATCH", "%-8s %7d Plaintext trunk packet received - specified length %04x, marking receipt at %d seconds", eb_type_str(d->type), d->trunk.local_port, length, time(NULL));
-						memcpy (&packet, &d->trunk.cipherpacket, length);
+						memcpy (&packet, &temp_packet, length);
 
 						if (length >= 12)
 						{

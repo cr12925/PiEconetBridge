@@ -510,15 +510,26 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 				else /* Write to underlying trunk */
 				{
 					int w_result;
+					uint8_t	lbuf[2];
 
-					w_result = write (me->trunk_socket[1], buffer, decrypted_length);
+					/* Turns out read() in the child trunk tops out at 4k - probably a memory page, so send expected length first */
 
-					if (w_result < 0)
-						eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Unable to write to child trunk (%s)", me->trunk->trunk.local_port, strerror(errno));
-					else if (w_result != decrypted_length)
-						eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Failed to write whole packet to child trunk (%s)", me->trunk->trunk.local_port, strerror(errno));
+					lbuf[0] = (decrypted_length & 0xff00) >> 8;
+					lbuf[1] = (decrypted_length & 0xff);
 
-					pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
+					if (write(me->trunk_socket[1], lbuf, 2) != 2)
+						eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Failed to write packet length to child trunk", me->trunk->trunk.local_port);
+					else
+					{
+						w_result = write (me->trunk_socket[1], buffer, decrypted_length);
+	
+						if (w_result < 0)
+							eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Unable to write to child trunk (%s)", me->trunk->trunk.local_port, strerror(errno));
+						else if (w_result != decrypted_length)
+							eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Failed to write whole packet to child trunk (%s)", me->trunk->trunk.local_port, strerror(errno));
+
+						pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
+					}
 				}
 
 				me->marker = 0;
