@@ -4428,7 +4428,7 @@ void fsop_bulk_dequeue (struct __fs_station *s, uint8_t net, uint8_t stn, uint32
 		if (alq->queue_type == FS_ENQUEUE_LOAD)
 		{
 			fsop_close_interlock(s, alq->internal_handle, alq->mode);
-			usleep (500000); /* For RISC OS */
+			usleep (1000000); /* For RISC OS */
 			raw_fsop_aun_send(reply, 2, s, a->net, a->stn);
 		}
 		else
@@ -4440,7 +4440,7 @@ void fsop_bulk_dequeue (struct __fs_station *s, uint8_t net, uint8_t stn, uint32
 			if (alq->is_32bit)
 				reply->p.data[6] = (alq->valid_bytes & 0xFF000000) >> 24;
 
-			usleep (500000); /* For RISC OS */
+			usleep (1000000); /* For RISC OS */
 			raw_fsop_aun_send(reply, 6 + (alq->is_32bit ? 1 : 0), s, a->net, a->stn);
 		}
 
