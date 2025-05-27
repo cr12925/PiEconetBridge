@@ -4844,12 +4844,11 @@ fast_handler_reset:
 							fastprintf (d, "\r\n\n*** ERROR: Fileserver on %d.%d already startedr\n\n", d->net, d->local.stn);
 						else
 						{
-							fastprintf (d, "\r\n\n*** Shutting down fileserver");
 							pthread_mutex_lock(&(d->local.fs.server->fs_mutex));
 							d->local.fs.server->enabled = 0;
 							pthread_mutex_unlock(&(d->local.fs.server->fs_mutex));
 							pthread_cond_signal(&(d->local.fs.server->fs_condition));
-
+							fastprintf (d, "\r\n\n*** Fileserver on %d.%d has shut down\r\n\n", d->net, d->local.stn);
 						}
 					}	
 					else
@@ -4858,9 +4857,6 @@ fast_handler_reset:
 							fastprintf (d, "\r\n\n*** ERROR: Fileserver on %d.%d not active\r\n\n", d->net, d->local.stn);
 						else
 						{
-							/* I think this is wrong. The struct will be there, and we just need to do fsop_run() again */
-
-							/*
 							d->local.fs.server = fsop_initialize (d, d->local.fs.rootpath, d->local.fs.tapehandler, d->local.fs.tapecompletionhandler);
 							if (d->local.fs.server)
 							{
@@ -4887,12 +4883,6 @@ fast_handler_reset:
 										} break;
 								}
 							}
-							else
-								fastprintf (d, "\r\n\n*** ERROR: Fileserver on %d.%d BOOT FAILED\r\n\n", d->net, d->local.stn);
-								*/
-
-							if (fsop_run(d->local.fs.server))
-								fastprintf (d, "\r\n\n*** Fileserver on %d.%d booted\r\n\n", d->net, d->local.stn);
 							else
 								fastprintf (d, "\r\n\n*** ERROR: Fileserver on %d.%d BOOT FAILED\r\n\n", d->net, d->local.stn);
 
@@ -6532,7 +6522,7 @@ static void * eb_device_despatcher (void * device)
 				 * it is given is NULL
 				 */
 
-				if (eb_firewall (d->fw_out, &packet) == EB_FW_REJECT) // fw_out - this has come from the device itself
+				if (eb_firewall (d->fw_in, &packet) == EB_FW_REJECT) 
 				{
 					eb_dump_packet (d, EB_PKT_DUMP_FIREWALLED, &packet, length);
 					dump_traffic = 1;
@@ -7015,7 +7005,7 @@ static void * eb_device_despatcher (void * device)
 	
 				/* Apply inbound firewall - this is traffic going to the device */
 
-				if ((eb_firewall(d->fw_in, p->p) == EB_FW_REJECT))
+				if ((eb_firewall(d->fw_out, p->p) == EB_FW_REJECT))
 				{
 					eb_dump_packet (d, EB_PKT_DUMP_FIREWALLED, p->p, p->length);
 					remove = 1;
@@ -9370,21 +9360,25 @@ int eb_parse_json_config(struct json_object *jc)
 						if (json_object_object_get_ex(jentry, "source-net", &jint))
 							fw_entry->srcnet = json_object_get_int(jint);
 						
-						if (json_object_object_get_ex(jentry, "source-station", &jint))
+						if (json_object_object_get_ex(jentry, "source-stn", &jint))
 							fw_entry->srcstn = json_object_get_int(jint);
 						
 						if (json_object_object_get_ex(jentry, "destination-net", &jint))
 							fw_entry->dstnet = json_object_get_int(jint);
 						
-						if (json_object_object_get_ex(jentry, "destination-station", &jint))
+						if (json_object_object_get_ex(jentry, "destination-stn", &jint))
 							fw_entry->dststn = json_object_get_int(jint);
 						
 						if (json_object_object_get_ex(jentry, "port", &jint))
+						{
 							fw_entry->port = json_object_get_int(jint);
+							if (fw_entry->port == 0)
+								fw_entry->port = 0xff;
+						}
 						
 						if (json_object_object_get_ex(jentry, "immediate", &jint))
 						{
-							char *op;
+							const char *op;
 							op = json_object_get_string(jint);
 
 							if (!strcasecmp(op, "PEEK"))
@@ -9411,7 +9405,7 @@ int eb_parse_json_config(struct json_object *jc)
 
 						if (json_object_object_get_ex(jentry, "osproc", &jint))
 						{
-							char *op;
+							const char *op;
 							op = json_object_get_string(jint);
 
 							if (!strcasecmp(op, "NOTIFY"))
@@ -9443,8 +9437,6 @@ int eb_parse_json_config(struct json_object *jc)
 								eb_debug (1, 0, "JSON", "Cannot find firewall sub-chain named %s in chain name %s entry index %d", json_object_get_string(jpolicy), fw_chain->fw_chain_name, ecount);
 						}
 
-						//fprintf (stderr, "Adding firewall entry to chain %s: %d.%d -> %d.%d port %d %s\n", fw_chain->fw_chain_name, fw_entry->srcnet, fw_entry->srcstn, fw_entry->dstnet, fw_entry->dststn, fw_entry->port, fw_entry->action == EB_FW_ACCEPT ? "Accept" : "Reject");
-
 						if (fw_entry_last)
 							fw_entry_last->next = fw_entry;
 						else
@@ -9452,6 +9444,16 @@ int eb_parse_json_config(struct json_object *jc)
 
 						fw_entry_last = fw_entry;
 
+						/*
+						fprintf (stderr, "FW ENTRY CREATED: %d.%d to %d.%d port %d imm %d osproc %d\n",
+								fw_entry->srcnet,
+								fw_entry->srcstn,
+								fw_entry->dstnet,
+								fw_entry->dststn,
+								fw_entry->port,
+								fw_entry->imm_ctrl,
+								fw_entry->osproc);
+								*/
 						ecount++;
 					}
 
@@ -12846,10 +12848,76 @@ int main (int argc, char **argv)
 	
 				while (f)
 				{
-					fprintf (stderr, "  %7d %3d.%-3d --> %3d.%-3d port &%02X %s", counter++,
+					char	immstr[128];
+
+					if (f->imm_ctrl != 0)
+					{
+						switch (f->imm_ctrl)
+						{
+							case EB_FW_IMM_PEEK:
+								strcpy(immstr, " (Immediate Peek)");
+								break;	
+							case EB_FW_IMM_POKE:
+								strcpy(immstr, " (Immediate Poke)");
+								break;	
+							case EB_FW_IMM_JSR:
+								strcpy(immstr, " (Immediate JSR)");
+								break;	
+							case EB_FW_IMM_USERPROC:
+								strcpy(immstr, " (Immediate User Procedure Call)");
+								break;	
+							case EB_FW_IMM_OSPROC:
+								strcpy(immstr, " (Immediate OS Procedure Call)");
+								break;	
+							case EB_FW_IMM_HALT:
+								strcpy(immstr, " (Immediate Halt)");
+								break;	
+							case EB_FW_IMM_CONTINUE:
+								strcpy(immstr, " (Immediate Continue)");
+								break;	
+							case EB_FW_IMM_MACHINEPEEK:
+								strcpy(immstr, " (Immediate MachinePeek)");
+								break;	
+							case EB_FW_IMM_GETREGISTERS:
+								strcpy(immstr, " (Immediate Get Registers)");
+								break;	
+							default:
+								strcpy(immstr, " (Immediate - Unknown");
+								break;
+						}
+					}
+					else if (f->osproc != 0)
+					{
+						switch (f->osproc)
+						{
+							case EB_FW_OSPROC_NOTIFY:
+								strcpy(immstr, " (OSPROC Notify)");
+								break;
+							case EB_FW_OSPROC_REMOTE:
+								strcpy(immstr, " (OSPROC Remote)");
+								break;
+							case EB_FW_OSPROC_VIEW:
+								strcpy(immstr, " (OSPROC View Parameters)");
+								break;
+							case EB_FW_OSPROC_FATAL:
+								strcpy(immstr, " (OSPROC Fata error)");
+								break;
+							case EB_FW_OSPROC_RCHAR:
+								strcpy(immstr, " (OSPROC Remote Character)");
+								break;
+							default:
+								strcpy(immstr, " (OSPROC - Unknown)");
+								break;
+						}
+
+					}
+					else strcpy(immstr, "");
+
+					fprintf (stderr, "  %7d %3d.%-3d --> %3d.%-3d port &%02X %s%s", counter++,
 							f->srcnet, f->srcstn,
-							f->dstnet, f->dststn, f->port,
-							(f->action == EB_FW_ACCEPT) ? "Accept" : (f->action == EB_FW_REJECT ? "Drop" : "Pass to")
+							f->dstnet, f->dststn, (f->port == 0xff ? 0 : f->port),
+							(f->action == EB_FW_ACCEPT) ? "Accept" : (f->action == EB_FW_REJECT ? "Drop" : "Pass to"),
+							immstr
 						);
 	
 					if (f->action == EB_FW_CHAIN)
