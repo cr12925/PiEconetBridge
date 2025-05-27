@@ -7236,7 +7236,7 @@ static void * eb_device_despatcher (void * device)
 							eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
 						}
 
-						if (ap && !(d->trunk.remote_host))
+						if (!d->trunk.mt_parent && ap && !(d->trunk.remote_host))
 							eb_debug (0, 3, "DESPATCH", "Trunk    %7d Packet transmission failed - dynamic (or unresolved static) remote endpoint not established", d->trunk.local_port); 
 
 						remove = 1;
