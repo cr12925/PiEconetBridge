@@ -4507,7 +4507,7 @@ void fsop_bulk_dequeue (struct __fs_station *s, uint8_t net, uint8_t stn, uint32
 		 * it probably doesn't matter 
 		 */
 
-		raw_fsop_aun_send_noseq(reply, bytes_required+12, s, a->net, a->stn); /* +12 for header? */
+		raw_fsop_aun_send_noseq(reply, bytes_required, s, a->net, a->stn); 
 
 		eb_free (__FILE__, __LINE__, "FS", "Free databurst packet after transmission", reply);
 	}
