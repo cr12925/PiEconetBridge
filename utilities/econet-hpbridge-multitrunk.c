@@ -515,6 +515,8 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 
 					if (w_result < 0)
 						eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Unable to write to child trunk (%s)", me->trunk->trunk.local_port, strerror(errno));
+					else if (w_result != decrypted_length)
+						eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Failed to write whole packet to child trunk (%s)", me->trunk->trunk.local_port, strerror(errno));
 
 					pthread_cond_broadcast(&(me->trunk->trunk.mt_cond)); // Wakes up BOTH eb_device_listener and eb_device_despatcher
 				}
@@ -559,7 +561,7 @@ int eb_mt_base64_encrypt_tx(uint8_t *data, uint16_t datalength, struct __eb_devi
 	uint8_t		* encrypted;
 	uint16_t	encrypted_length;
 
-	eb_debug (0, 2, "M-Trunk", "eb_mt_base64_encyrpt_tx got packet said to be of length %d", datalength);
+	//eb_debug (0, 2, "M-Trunk", "eb_mt_base64_encyrpt_tx got packet said to be of length %d", datalength);
 
 	if ((encrypted_length = eb_trunk_encrypt(data, datalength, mt->trunk.local_port, mt, &encrypted)) >= 0)
 	{
@@ -859,7 +861,7 @@ void * eb_multitrunk_handler_thread (void * input)
 									realdata_len = ptr - realdata_start;
 	
 									eb_mt_copy_to_cipherpacket (&cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, realdata_start, realdata_len);
-									eb_debug (0, 2, "M-Trunk", "calling eb_mt_debase64 with encrypted packet data length %d", cipherpacket_ptr);
+									//eb_debug (0, 2, "M-Trunk", "calling eb_mt_debase64 with encrypted packet data length %d", cipherpacket_ptr);
 
 									eb_mt_debase64_decrypt_process(me, cipherpacket, cipherpacket_ptr, remotehost, remoteport);
 
