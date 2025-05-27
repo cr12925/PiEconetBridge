@@ -4428,7 +4428,6 @@ void fsop_bulk_dequeue (struct __fs_station *s, uint8_t net, uint8_t stn, uint32
 		if (alq->queue_type == FS_ENQUEUE_LOAD)
 		{
 			fsop_close_interlock(s, alq->internal_handle, alq->mode);
-			usleep (1000000); /* For RISC OS */
 			raw_fsop_aun_send(reply, 2, s, a->net, a->stn);
 		}
 		else
@@ -4440,7 +4439,6 @@ void fsop_bulk_dequeue (struct __fs_station *s, uint8_t net, uint8_t stn, uint32
 			if (alq->is_32bit)
 				reply->p.data[6] = (alq->valid_bytes & 0xFF000000) >> 24;
 
-			usleep (1000000); /* For RISC OS */
 			raw_fsop_aun_send(reply, 6 + (alq->is_32bit ? 1 : 0), s, a->net, a->stn);
 		}
 
@@ -4509,7 +4507,7 @@ void fsop_bulk_dequeue (struct __fs_station *s, uint8_t net, uint8_t stn, uint32
 		 * it probably doesn't matter 
 		 */
 
-		raw_fsop_aun_send_noseq(reply, bytes_required, s, a->net, a->stn);
+		raw_fsop_aun_send_noseq(reply, bytes_required+12, s, a->net, a->stn); /* +12 for header? */
 
 		eb_free (__FILE__, __LINE__, "FS", "Free databurst packet after transmission", reply);
 	}
