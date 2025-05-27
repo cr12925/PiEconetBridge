@@ -6126,25 +6126,38 @@ static void * eb_device_despatcher (void * device)
 					{
 						uint8_t	lbuf[2];
 						uint32_t	datalen, already_read;
+						int	r;
 
-						length = read (d->trunk.mt_data->trunk_socket[0], &(lbuf), 2);
+						r = read (d->trunk.mt_data->trunk_socket[0], &(lbuf), 2);
 
-						if (length < 0)
+						if (r == 2)
 						{
-							eb_debug (0, 2, "DESPATCH", "%-8s %7d Failed to read data length on multitrunk child - fatal", eb_type_str(d->type), d->trunk.local_port); 
-							exit(1);
+							datalen = (lbuf[0] * 256) + lbuf[1];
+							already_read = 0;
+
+							eb_debug (0, 3, "DESPATCH", "%-8s %7d Multitrunk child expecting to receive %04lX bytes", eb_type_str(d->type), d->trunk.local_port, datalen);
+
+							while (already_read < datalen)
+							{
+								r = read (d->trunk.mt_data->trunk_socket[0], &(temp_packet[already_read]), datalen - already_read);
+								if (r < 0)
+									eb_debug(0, 1, "DESPATCH", "%-8s %7d Multitrunk child got error on read from parent: %s", eb_type_str(d->type), d->trunk.local_port, strerror(errno));
+								already_read += r;
+								eb_debug (0, 3, "DESPATCH", "%-8s %7d Multitrunk child received %04lX bytes, waiting for %04lX more", eb_type_str(d->type), d->trunk.local_port, r, datalen-already_read);
+							}
+	
+							length = already_read;
+	
+							eb_debug (0, 3, "DESPATCH", "%-8s %7d Multitrunk packet received by child trunk - received length %04x, marking receipt at %d seconds", eb_type_str(d->type), d->trunk.local_port, length, time(NULL));
+						}
+						else
+						{
+							if (r < 0) /* Error! */
+								eb_debug (0, 3, "DESPATCH", "%-8s %7d Multitrunk child failed to read length specifier - error = %d", eb_type_str(d->type), d->trunk.local_port, r);
+
+							length = 0; /* Hopefully nothing else will process this garbage below */
 						}
 
-						datalen = (lbuf[0] * 256) + lbuf[1];
-						already_read = 0;
-
-						while (already_read < datalen)
-						{
-							length = read (d->trunk.mt_data->trunk_socket[0], &(temp_packet[already_read]), datalen - already_read);
-							already_read += length;
-						}
-
-						eb_debug (0, 3, "DESPATCH", "%-8s %7d Multitrunk packet received by child trunk - received length %04x, marking receipt at %d seconds", eb_type_str(d->type), d->trunk.local_port, length, time(NULL));
 					}
 					else
 						length = recvfrom (l_socket, &(d->trunk.cipherpacket), TRUNK_CIPHER_TOTAL, 0, (struct sockaddr *) &src_addr, &addr_len);
