@@ -559,6 +559,8 @@ int eb_mt_base64_encrypt_tx(uint8_t *data, uint16_t datalength, struct __eb_devi
 	uint8_t		* encrypted;
 	uint16_t	encrypted_length;
 
+	eb_debug (0, 2, "M-Trunk", "\n\n ** eb_mt_base64_encyrpt_tx got packet said to be of length %d\n\n", datalength);
+
 	if ((encrypted_length = eb_trunk_encrypt(data, datalength, mt->trunk.local_port, mt, &encrypted)) >= 0)
 	{
 		/*
@@ -575,13 +577,12 @@ int eb_mt_base64_encrypt_tx(uint8_t *data, uint16_t datalength, struct __eb_devi
 			int send_result;
 			uint16_t	terminated_length;
 
-			terminated_length = strlen(base64)+3;
+			terminated_length = strlen(base64)+2;
 
 			base64_terminated = eb_malloc(__FILE__, __LINE__, "M-Trunk", "New base64 terminated packet", terminated_length);
 			*base64_terminated = delimiter;
 			memcpy ((base64_terminated+1), base64, strlen(base64));
 			*(base64_terminated + terminated_length - 1) = delimiter;
-			*(base64_terminated + terminated_length) = '\0';
 		
 			g_free(base64); // No need for this any more	
 
@@ -590,6 +591,7 @@ int eb_mt_base64_encrypt_tx(uint8_t *data, uint16_t datalength, struct __eb_devi
 			 */
 
 			send_result = send(mt->trunk.mt_data->socket, base64_terminated, terminated_length, MSG_DONTWAIT);
+			
 			if (send_result != terminated_length)
 			{
 				if (send_result == -1) /* Error */
@@ -803,9 +805,9 @@ void * eb_multitrunk_handler_thread (void * input)
 			/* Data on our TCP socket */
 		
 			uint8_t		buffer[EB_MT_TCP_CHUNKSIZE];
-			int16_t		ptr = 0, my_ptr = 0;
+			int32_t		ptr = 0, my_ptr = 0;
 			int		len;
-			int16_t		realdata_start = -1, realdata_len = 0;
+			int32_t		realdata_start = -1, realdata_len = 0;
 
 			len = read (me->socket, buffer, EB_MT_TCP_CHUNKSIZE);
 
