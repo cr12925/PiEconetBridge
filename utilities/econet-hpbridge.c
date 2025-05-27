@@ -2025,7 +2025,7 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 	//   Ie. if we get a reset from an all-pooled trunk, then we'll send it some updates. But we don't forward the reset because
 	//   everything is pooled from this source trunk so our netlist will never change.
 	
-	if (trigger && trigger->all_nets_pooled && !EB_CONFIG_POOL_RESET_FWD)
+	if (trigger && trigger->all_nets_pooled && ctrl == BRIDGE_RESET && !EB_CONFIG_POOL_RESET_FWD)
 	{
 		eb_debug (0, 2, "BRIDGE", "%-8s %7d Bridge %s not forwarded (all nets pooled)", eb_type_str(trigger->type), (trigger->type == EB_DEF_TRUNK ? trigger->trunk.local_port : trigger->net), (ctrl == BRIDGE_RESET) ? "reset" : "update");
 		if (ctrl == BRIDGE_RESET)
