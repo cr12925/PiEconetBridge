@@ -277,12 +277,12 @@ FSOP(0b)
 
 	if (bytes == 0) // No data expected
 	{
-		//FS_LIST_SPLICEFREE(f->server->bulkports,bp,"FS","Freeing unused bulk port struct on a zero-byte transfer");
 		r.p.ctrl = FSOP_CTRL;
 		r.p.data[2] = FS_PERM_OWN_R | FS_PERM_OWN_W;
 		r.p.data[3] = day;
 		r.p.data[4] = monthyear;
 
+		usleep (500000); /* For RISC OS */
 		fsop_aun_send (&r, 5, f);
 	}
 	else if ((incoming_port = fsop_find_bulk_port(f->server))) // Data expected - set up a bulk port
