@@ -559,7 +559,7 @@ int eb_mt_base64_encrypt_tx(uint8_t *data, uint16_t datalength, struct __eb_devi
 	uint8_t		* encrypted;
 	uint16_t	encrypted_length;
 
-	eb_debug (0, 2, "M-Trunk", "\n\n ** eb_mt_base64_encyrpt_tx got packet said to be of length %d\n\n", datalength);
+	eb_debug (0, 2, "M-Trunk", "eb_mt_base64_encyrpt_tx got packet said to be of length %d", datalength);
 
 	if ((encrypted_length = eb_trunk_encrypt(data, datalength, mt->trunk.local_port, mt, &encrypted)) >= 0)
 	{
@@ -859,6 +859,7 @@ void * eb_multitrunk_handler_thread (void * input)
 									realdata_len = ptr - realdata_start;
 	
 									eb_mt_copy_to_cipherpacket (&cipherpacket, &cipherpacket_ptr, &cipherpacket_size, buffer, realdata_start, realdata_len);
+									eb_debug (0, 2, "M-Trunk", "calling eb_mt_debase64 with encrypted packet data length %d", cipherpacket_ptr);
 
 									eb_mt_debase64_decrypt_process(me, cipherpacket, cipherpacket_ptr, remotehost, remoteport);
 
