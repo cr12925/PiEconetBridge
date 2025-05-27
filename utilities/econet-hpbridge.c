@@ -6132,23 +6132,40 @@ static void * eb_device_despatcher (void * device)
 
 						if (r == 2)
 						{
+							uint8_t 	tries = 0;
+
 							datalen = (lbuf[0] * 256) + lbuf[1];
 							already_read = 0;
 
 							eb_debug (0, 3, "DESPATCH", "%-8s %7d Multitrunk child expecting to receive %04lX bytes", eb_type_str(d->type), d->trunk.local_port, datalen);
 
-							while (already_read < datalen)
+							while (already_read < datalen && tries < 5)
 							{
 								r = read (d->trunk.mt_data->trunk_socket[0], &(temp_packet[already_read]), datalen - already_read);
-								if (r < 0)
+								if (r < 0 && r != EAGAIN && r != EWOULDBLOCK)
 									eb_debug(0, 1, "DESPATCH", "%-8s %7d Multitrunk child got error on read from parent: %s", eb_type_str(d->type), d->trunk.local_port, strerror(errno));
-								already_read += r;
-								eb_debug (0, 3, "DESPATCH", "%-8s %7d Multitrunk child received %04lX bytes, waiting for %04lX more", eb_type_str(d->type), d->trunk.local_port, r, datalen-already_read);
+								if (r > 0)
+								{
+									already_read += r;
+									eb_debug (0, 3, "DESPATCH", "%-8s %7d Multitrunk child received %04lX bytes, waiting for %04lX more", eb_type_str(d->type), d->trunk.local_port, r, datalen-already_read);
+								}
+								else
+								{
+									tries++;
+									usleep (1000); /* Wait for pipe to become available */
+								}
 							}
 	
-							length = already_read;
-	
-							eb_debug (0, 3, "DESPATCH", "%-8s %7d Multitrunk packet received by child trunk - received length %04x, marking receipt at %d seconds", eb_type_str(d->type), d->trunk.local_port, length, time(NULL));
+							if (tries < 5)
+							{
+								length = already_read;
+								eb_debug (0, 3, "DESPATCH", "%-8s %7d Multitrunk packet received by child trunk - received length %04x, marking receipt at %d seconds", eb_type_str(d->type), d->trunk.local_port, length, time(NULL));
+							}
+							else
+							{
+								length = 0;
+								eb_debug (0, 3, "DESPATCH", "%-8s %7d Multitrunk packet failed to read from parent!", eb_type_str(d->type), d->trunk.local_port);
+							}
 						}
 						else
 						{
