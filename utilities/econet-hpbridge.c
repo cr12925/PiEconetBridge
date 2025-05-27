@@ -2040,21 +2040,35 @@ void eb_bridge_reset (struct __eb_device *trigger)
 	 *
 	 */
 
+
 	memset (pipe_stations, 0, sizeof(pipe_stations));
 
-	dev = devices;
+        dev = devices;
 
-	while (dev)
-	{
+        while (dev)
+        {
 
-		if ((dev->type == EB_DEF_PIPE) && (dev->pipe.skt_write != -1)) // Active pipe
-		{
-			ECONET_SET_STATION(pipe_stations, dev->net, dev->pipe.stn);
-		}
+                if (dev->type == EB_DEF_WIRE || dev->type == EB_DEF_NULL)
+                {
+                        uint8_t divert;
 
-		dev = dev->next;
+                        for (divert = 1; divert < 255; divert++)
+                        {
+                                if (dev->type == EB_DEF_WIRE && dev->wire.divert[divert] != NULL && dev->wire.divert[divert]->type == EB_DEF_PIPE && dev->wire.divert[divert]->pipe.skt_write != -1)
+                                {
+                                        ECONET_SET_STATION(pipe_stations, dev->net, divert);
+                                }
+                                else if (dev->type == EB_DEF_NULL && dev->null.divert[divert] != NULL && dev->null.divert[divert]->type == EB_DEF_PIPE && dev->null.divert[divert]->pipe.skt_write != -1)
+                                {
+                                        ECONET_SET_STATION(pipe_stations, dev->net, divert);
+                                }
+                        }
+                }
 
-	}
+                dev = dev->next;
+
+        }
+
 
 	pthread_mutex_unlock (&networks_update);
 
@@ -7460,19 +7474,32 @@ void eb_reset_tables (void)
 
 	memset (pipe_stations, 0, sizeof(pipe_stations));
 
-	dev = devices;
+        dev = devices;
 
-	while (dev)
-	{
+        while (dev)
+        {
 
-		if ((dev->type == EB_DEF_PIPE) && (dev->pipe.skt_write != -1)) // Active pipe
-		{
-			ECONET_SET_STATION(pipe_stations, dev->net, dev->pipe.stn);
-		}
+                if (dev->type == EB_DEF_WIRE || dev->type == EB_DEF_NULL)
+                {
+                        uint8_t divert;
 
-		dev = dev->next;
+                        for (divert = 1; divert < 255; divert++)
+                        {
+                                if (dev->type == EB_DEF_WIRE && dev->wire.divert[divert] != NULL && dev->wire.divert[divert]->type == EB_DEF_PIPE && dev->wire.divert[divert]->pipe.skt_write != -1)
+                                {
+                                        ECONET_SET_STATION(pipe_stations, dev->net, divert);
+                                }
+                                else if (dev->type == EB_DEF_NULL && dev->null.divert[divert] != NULL && dev->null.divert[divert]->type == EB_DEF_PIPE && dev->null.divert[divert]->pipe.skt_write != -1)
+                                {
+                                        ECONET_SET_STATION(pipe_stations, dev->net, divert);
+                                }
+                        }
+                }
 
-	}
+                dev = dev->next;
+
+        }
+
 	pthread_mutex_unlock (&networks_update);
 
 	dev = devices;
