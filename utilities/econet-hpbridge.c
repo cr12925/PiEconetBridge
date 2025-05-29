@@ -10261,10 +10261,18 @@ static void * eb_statistics (void *nothing)
 			switch (device->type)
 			{
 				case EB_DEF_TRUNK:
-					sprintf (trunkdest, "%s:%d", 
+				{
+					char	extra[128];
+
+					if (device->trunk.xlate_out[net]) /* Include information about NAT */
+						sprintf (extra, " (Remote: %03d)", device->trunk.xlate_out[net]);
+					else	strcpy (extra, "");
+
+					sprintf (trunkdest, "%s:%d%s", 
 						(device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), 
-						(device->trunk.hostname ? device->trunk.remote_port : 0));
-					break;
+						(device->trunk.hostname ? device->trunk.remote_port : 0),
+						extra);
+				} break;
 				case EB_DEF_WIRE:
 					sprintf (trunkdest, "%s", device->wire.device);
 					break;
