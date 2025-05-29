@@ -398,6 +398,20 @@ struct mt_client {
 /* Multitrunk Admin Command codes */
 #define EB_MT_CMD_VERS	0x01
 
+/* *FAST externs */
+
+extern struct __eb_fast_client * eb_fast_find_conn (struct __eb_device *, uint8_t, uint8_t);
+extern void eb_fast_flag_disconnect (struct __eb_device *, uint8_t, uint8_t);
+extern void eb_fast_flag_datarq (struct __eb_device *, uint8_t, uint8_t);
+extern struct __eb_fast_client * eb_fast_mkclient (struct __eb_device *, uint8_t, uint8_t);
+extern struct __eb_fast_menu * eb_fast_mkmenu (char *, char *, struct __eb_fast_menu **);
+extern struct __eb_fast_menu_item * eb_fast_mkmenuitem (struct __eb_fast_menu *, char *, uint16_t, uint8_t, unsigned char);
+extern int f_printf (struct __eb_fast_client *, char *, ...);
+extern void eb_fast_send_control (struct __eb_fast_client *, uint8_t);
+extern void eb_fast_send_data (struct __eb_fast_client *, uint8_t *, uint16_t);
+extern void eb_port_a0_handler (struct __econet_packet_aun *, uint16_t, void *);
+
+
 /* __eb_fast_client
  *
  * Struct used by local emulators to marshall *FAST and equivalent
@@ -413,29 +427,83 @@ struct __eb_fast_client {
 	struct addrinfo	*dest_host; /* NULL if we are executing a script or using the internal handler, otherwise it's the set of addresses to connect to */
 	uint16_t	port; /* Only valid if dest_host != NULL. TCP port number to connect to. We then fdopen() it into cmd_pipe */
 	char *		command; /* Command to execute and connect the user to. NULL if not using a command - and if no dest_host and no command, it's the internal handler */
-	uint8_t		fastbit; // Oscillates 0, 1 on transmissions from the *FAST handler
+	uint8_t		fast_output_ctrl; // Oscillates 0, 1 on transmissions from *FAST handler
 	uint8_t		fast_input_ctrl; // Ditto on receiption
-	pthread_t	fast_handler; // Thread that is operating the *FAST handler
-	pthread_t	fast_io_handler; // Thread that mediates IO between despatcher and the fast handler
-	pthread_mutex_t	fast_io_mutex; // Governs access to the input/output variables below
-	int		fast_to_despatch[2], fast_to_handler[2]; // Socketpairs
-	uint8_t		fast_thread_alive; // despatcher sets to 0; *FAST thread sets to 1 - so we can tell it's ready. If despatcher sets to 0 again, our threads need to die
-	uint8_t		fast_reset; // Set to 1 when we get a new connection
+	pthread_t	fast_server; // Thread that is operating the *FAST handler
+	pthread_t	fast_io_handler[2]; // Thread that mediates IO between despatcher and the fast handler
+	pthread_mutex_t	fast_io_mutex[2]; // Governs access to the input/output variables below
+	int		fc_socket[2][2]; // pipes
+	FILE *		from_client; // Passed to menu handling functions in case it's of use
+	char		* pending[2]; // Buffers
+	int		pt_len[2]; // Amount of data in buffers
+	int		pt_sz[2]; // Size of buffers
+	uint8_t		fast_thread_ended; // IO thread sets this to 1 when it has finished and cleaned up so that we can free the struct and take it off the list
+	//uint8_t		fast_reset; // Set to 1 when we get a new connection
 	uint8_t		fast_client_ready; // Set to 1 when client indicates it will receive more output to display - happens when we get the USRPROC call. If there is output, we send it. If not, this will get set to 1 so that the fast handler knows it can send it instead
-	pthread_cond_t	fast_wake;
+	uint8_t		fast_client_disconnected; // Set to 0 on init, 1 when we receive EB_FAST_OP_DISCONNECT from client. Causes to_server thread to exit, which kills off the to_network thread and cleans up.
+	pthread_cond_t	fast_wake[2];
+	struct __eb_fast_menu	*menu_home, *menu_current;
 	struct __eb_device	*parent; // Device the user is talking to
-	struct _eb_fast_client	*prev, *next; /* NULL if there isn't a prev or next in the queue */
+	struct __eb_fast_client	*prev, *next; /* NULL if there isn't a prev or next in the queue */
+	struct termios	old_t; /* Used only in test mode */
 };
+
+/* Fast Data Port */
+
+#define EB_FAST_PORT		0xA0
+
+/* *FAST JSR &FFFF codes */
+
+#define EB_FAST_OP_LOGON	0x00
+#define EB_FAST_OP_DATARQ	0x01
+#define EB_FAST_OP_DISCONNECT	0x02
+
+/* Extended signalling within HPB to modified FAST client */
+
+#define EB_FAST_OP_VIEWDATA_ON	0x10
+#define EB_FAST_OP_VIEWDATA_OFF	0x11
+
+/* Server acknowledging connection */
+
+#define EB_FAST_OP_ACK		0x80
+
+/* *FAST port */
+
+#define EB_FAST_DATA_PORT	0xA0
+
+/* *FAST Buffer management */
+
+#define EB_FAST_BUFSIZE 1024
+#define EB_FAST_SHRINKTHRESHOLD 512
+
+/* Timed wait between checking for new output */
+
+#define EB_FAST_OUTPUTWAIT	100	/* 100 ms */
+
+/* *FAST Thread condition macros */
+
+#define EB_FAST_WAKE_SERVER(m) pthread_cond_signal(&(m->fast_wake[EB_FAST_TO_SERVER]))
+#define EB_FAST_WAKE_NETWORK(m) pthread_cond_signal(&(m->fast_wake[EB_FAST_TO_NETWORK]))
+
+/* *FAST Array indices */
+
+#define EB_FAST_TO_SERVER 0
+#define EB_FAST_TO_NETWORK 1
 
 /* V2.2 Updated *FAST handling stuff */
 
-#define EB_FAST_MENU_TCP	0x01
-#define EB_FAST_MENU_SERIAL	0x02
-#define EB_FAST_MENU_SCRIPT	0x03
+#define EB_FAST_MENU_TCP	0x01 /* Connect to TCP port */
+#define EB_FAST_MENU_SERIAL	0x02 /* Connect to serial port */
+#define EB_FAST_MENU_SCRIPT	0x03 /* Execute local script */
 #define EB_FAST_MENU_SYSTEM	0x04 /* System *FAST menu */
 #define EB_FAST_MENU_HEADING	0x05 /* Puts a blank line either side and can't be selected */
-#define EB_FAST_BIN_LOGIN	0x06 /* Pipe to bin login on local host */
+#define EB_FAST_MENU_BIN_LOGIN	0x06 /* Pipe to bin login on local host */
 #define EB_FAST_MENU_SUBMENU	0x07 /* Jump to another menu */
+#define EB_FAST_MENU_FSSTOPSTART	0x08 /* FS Function */
+#define EB_FAST_MENU_SSH	0x09 /* SSH Connection */
+#define EB_FAST_MENU_HOMEMENU	0x0A /* Return to home menu */
+#define EB_FAST_MENU_DISCONNECT	0x0B /* As it sounds ... */
+#define EB_FAST_MENU_BLANKLINE	0x0C /* As it soudns ... */
 
 /*
  * __eb_fast_menu_item
@@ -455,31 +523,52 @@ struct __eb_fast_menu_item	{
 	uint8_t			fm_type; /* One of the defines above, except heading */
 	uint8_t			priv_mask; /* E.g. FS_PRIV_SYSTEM is 0x80. If set to that, unless the user's FS prive has that bit set, this option will not be displayed. */
 	uint8_t			priv2_mask; /* Ditto for priv2 - most common use will be to require bridge privilege, but could potentially also filter on, say, FS_PRIV2_HIDEOTHERS if the menu item might reveal who else is logged in. */
+	unsigned char		keypress; /* Key press for this option */
 	union	{
 
+		uint8_t		is_viewdata; /* If != 0, send viewdata_on when selected, and viewdata_off when back to menu */
+
 		struct {
-			unsigned char	*fm_host;
+			char		*fm_host;
 			struct addrinfo	*fm_address; /* NULL until resolved; resolve on each connection attempt not startup */
 			uint16_t	fm_port; /* Host byte order */
 		} fm_tcp;
 
 		struct {
-			unsigned char	*fm_device;
+			char		*fm_device;
 			speed_t		fm_speed; /* See termios.h */
 			struct termios	*fm_termios; /* Ditto */
 		} fm_serial;
 
 		struct {
-			unsigned char	*fm_script;
+			char		*fm_script;
 		} fm_script;
 
 		struct {
-			unsigned char	*fm_submenu_name; /* During config read, we won't have them all defined, so we resolve this on first call and put the address of the menu struct */
+			char		*fm_submenu_name; /* During config read, we won't have them all defined, so we resolve this on first call and put the address of the menu struct */
 			struct __eb_fast_menu	*fm_submenu; /* INitialize as NULL  - Or, I suppose, having read all the config, we could go back and populate these. */
 		} fm_submenu;
 
+		struct {
+			uint8_t		fm_fs_func; /* FS Function code - not a port &99 FSOp - this is internal to the bridge */
+		} fm_fsfunc;
+
 		/* No struct for system - it's built in. */
 
+		struct {
+			char		*fm_host;
+			uint16_t	fm_port;
+			char		*fm_username; /* NULL if not specified */
+		} fm_ssh;
+
+		struct {
+			char		*fm_banner; /* Login banner file to echo */
+			char 		*fm_username; /* NULL if user can put username in */
+		} fm_binlogin;
+
+		struct {
+			char 		*fm_heading_text;
+		} fm_heading;
 	};
 
 	struct __eb_fast_menu_item	*next; /* Link to next option in this menu */
@@ -491,9 +580,9 @@ struct __eb_fast_menu_item	{
  * be configured to go to a (sub) menu. */
 
 struct __eb_fast_menu {
-	unsigned char			*menu_name; /* Uppercase; used to enable us to assign a starting menu to a given local *FAST handler in JSON */
+	char				*menu_name; /* Uppercase; used to enable us to assign a starting menu to a given local *FAST handler in JSON */
+	char				*menu_heading;
 	struct	__eb_fast_menu_item 	*item;
-	uint8_t				keypress; /* 0 if heading */
 	struct __eb_fast_menu		*next;
 };
 
@@ -542,6 +631,9 @@ struct __eb_fast_station
  *
  * Contains list of __eb_fast_stations, one per net number, to
  * make finding a given client easier.
+ *
+ * Not used at the moment.
+ *
  */
 
 struct __eb_fast_net
@@ -747,6 +839,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			uint8_t			fast_reset; // Set to 1 when we get a new connection
 			uint8_t			fast_client_ready; // Set to 1 when client indicates it will receive more output to display - happens when we get the USRPROC call. If there is output, we send it. If not, this will get set to 1 so that the fast handler knows it can send it instead
 			pthread_cond_t		fast_wake;
+			pthread_mutex_t		fast_client_list_lock;
 			struct __eb_fast_client	*fast_client_list;
 			struct __eb_notify	*notify; // List of stuff received via *notify to a local server
 			pthread_mutex_t		notify_mutex; // Mutex to lock the notify list

@@ -133,10 +133,12 @@ struct __eb_update_info {
 };
 
 /* Some defines for the FAST handler */
+/* OLD
 #define EB_FAST_LOGON 0
 #define EB_FAST_READY 1
 #define EB_FAST_CLOSE 2
 #define EB_FAST_NOTREADY 3
+*/
 
 void eb_exit_cleanup(void)
 {
@@ -1135,6 +1137,7 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 			existing->local.fs.server = NULL; // No station
 			strcpy(existing->local.ip.tunif, ""); // Flag as no IP gateway
 			pthread_mutex_init(&existing->local.ports_mutex, NULL);
+			pthread_mutex_init(&existing->local.fast_client_list_lock, NULL);
 			memset(&(existing->local.ports), 0, sizeof(existing->local.ports)); // Clear ports in use
 			memset(&(existing->local.reserved_ports), 0, sizeof(existing->local.reserved_ports)); // Clear ports in use
 			existing->local.last_port = 0;
@@ -1146,6 +1149,9 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 			EB_PORT_SET(existing, reserved_ports, 0xB0, NULL, NULL); /* FindServer */
 			EB_PORT_SET(existing, reserved_ports, 0xD1, NULL, NULL); /* PS Data */
 			EB_PORT_SET(existing, reserved_ports, 0xD2, NULL, NULL); /* IP/Econet */
+
+			/* Include the FAST data handler */
+			EB_PORT_SET(existing, ports, 0xA0, eb_port_a0_handler, existing);
 
 			DEVINIT_DEBUG("Created new local device on station %d.%d", net, stn);
 
@@ -4401,6 +4407,7 @@ void eb_fast_priv_notify(struct __eb_device *d, uint8_t net, uint8_t stn, uint8_
 	}
 }
 
+/* OLD CODE
 // printf() equivalent but puts the stuff on our pipe to the IO handler
 void fastprintf (struct __eb_device *d, char *fmt, ...)
 {
@@ -4510,7 +4517,7 @@ static void * eb_fast_io_handler (void *device)
 				p->p.dststn = d->local.fast_client_stn;
 				p->p.dstnet = d->local.fast_client_net;
 				p->p.aun_ttype = ECONET_AUN_DATA;
-				p->p.port = 0xA0;
+				p->p.port = EB_FAST_PORT;
 				p->p.ctrl = 0x80 | d->local.fastbit; d->local.fastbit ^= 0x01;
 				p->p.seq = eb_get_local_seq(d);
 				memcpy(&(p->p.data), t, s);
@@ -4530,7 +4537,7 @@ static void * eb_fast_io_handler (void *device)
 	return NULL;
 }
 
-/* Return keypress (blocking) or 0xff if new logon or client signalled close */
+// Return keypress (blocking) or 0xff if new logon or client signalled close 
 uint8_t eb_fast_getkey (struct __eb_device *d)
 {
 
@@ -4571,7 +4578,7 @@ uint8_t eb_fast_getkey (struct __eb_device *d)
 
 }
 
-/* Return 0xFF if new logon or client signalled close */
+// Return 0xFF if new logon or client signalled close 
 uint8_t eb_fast_getstring (struct __eb_device *d, int s, uint8_t len, char *string)
 {
 
@@ -5021,7 +5028,7 @@ fast_handler_reset:
 
 							if (!fork())
 							{
-								/* Grab root privs */
+								// Grab root privs 
 
 								if (!seteuid(0))
 									execl ("/usr/sbin/shutdown", "shutdown", "-h", "now", (char *) 0);
@@ -5053,6 +5060,7 @@ fast_handler_reset:
 	return NULL;
 
 }
+*/ /* End of old FAST code */
 
 /* 
  * Notify logger for local emulation devices
@@ -5698,6 +5706,9 @@ static void * eb_device_despatcher (void * device)
 				
 			}
 
+			ECONET_INIT_STATIONS(d->local.fast_priv_stns); // Clear the privileged station bitmap
+
+/* OLD code
 			// Initialize *FAST handler - but only if we're a fileserver
 
 			if (d->local.fs.rootpath)
@@ -5711,7 +5722,6 @@ static void * eb_device_despatcher (void * device)
 				d->local.fast_reset = 0;
 				d->local.fast_client_net = d->local.fast_client_stn = 0;
 				d->local.fast_client_ready = 0;
-				ECONET_INIT_STATIONS(d->local.fast_priv_stns); // Clear the privileged station bitmap
 				if (pthread_cond_init (&(d->local.fast_wake), NULL) == -1)
 					eb_debug (1, 0, "FAST", "Failed to initialize fast_wake pthread_cond");
 	
@@ -5726,7 +5736,7 @@ static void * eb_device_despatcher (void * device)
 					eb_debug(1, 0, "DESPATCH", "Cannot start *FAST IO handler thread for station %d.%d", d->net, d->local.stn);
 				pthread_detach(d->local.fast_io_handler);
 			}
-
+*/
 			// Initialize the notify list & mutex
 
 			d->local.notify = NULL;
@@ -7619,8 +7629,29 @@ static void * eb_device_despatcher (void * device)
 							eb_free (__FILE__, __LINE__, "BRIDGE", "Freeing PEEK reply packet", reply);
 							
 						}
-						else if (p->p->p.aun_ttype == ECONET_AUN_DATA && p->p->p.port == 0x00 && p->p->p.ctrl == 0x84 && d->local.fs.rootpath && (ECONET_DEV_STATION(d->local.fast_priv_stns, p->p->p.srcnet, p->p->p.srcstn)) && (p->p->p.data[0] == 0xff && p->p->p.data[1] == 0xff)) // USRPROC &FFFF Immediate to a local emulator - but only bother if we are an FS and would have started the *FAST handler - and ignore anything that isn't from a privileged station
+						else if (p->p->p.aun_ttype == ECONET_AUN_DATA 
+								&& p->p->p.port == 0x00 
+								&& p->p->p.ctrl == 0x84 
+							//	&& d->local.fs.rootpath && (ECONET_DEV_STATION(d->local.fast_priv_stns, p->p->p.srcnet, p->p->p.srcstn)) 
+								&& (p->p->p.data[0] == 0xff && p->p->p.data[1] == 0xff)) // USRPROC &FFFF Immediate to a local emulator
 						{
+							uint8_t		fast_function = p->p->p.data[4];
+
+							switch (fast_function)
+							{
+								case EB_FAST_OP_LOGON:
+									eb_fast_mkclient(d, p->p->p.srcnet, p->p->p.srcstn);
+									break;
+								
+								case EB_FAST_OP_DISCONNECT:
+									eb_fast_flag_disconnect(d, p->p->p.srcnet, p->p->p.srcstn);
+									break;
+
+								case EB_FAST_OP_DATARQ:
+									eb_fast_flag_datarq(d, p->p->p.srcnet, p->p->p.srcstn);	
+									break;
+							}
+/* OLD CODE
 							pthread_mutex_lock (&(d->local.fast_io_mutex));
 							d->local.fast_client_ready = p->p->p.data[4]; // 0 = Logon, 1 = Ready for data, 2 = Disconnect
 							if (d->local.fast_client_ready == EB_FAST_LOGON) // New connection
@@ -7688,6 +7719,7 @@ static void * eb_device_despatcher (void * device)
 							}
 							*/
 						}
+						/* FAST data received now handled by handler in handler list
 						else if (p->p->p.port == 0xA0 && p->p->p.aun_ttype == ECONET_AUN_DATA && d->local.fs.rootpath && (ECONET_DEV_STATION(d->local.fast_priv_stns, p->p->p.srcnet, p->p->p.srcstn))) // *FAST character input has arrived
 						{
 							if ((p->p->p.ctrl & 0x01) == d->local.fast_input_ctrl)
@@ -7704,6 +7736,7 @@ static void * eb_device_despatcher (void * device)
 										p->p->p.srcnet, p->p->p.srcstn);
 
 						}
+						*/
 						else if (p->p->p.port == 0x00 && p->p->p.ctrl == 0x88 && p->p->p.aun_ttype == ECONET_AUN_IMM)
 						{
 							// Deal with machinetype queries here
@@ -13593,11 +13626,19 @@ static void * eb_statistics (void *nothing)
 
 			switch (device->type)
 			{
-				case EB_DEF_TRUNK:
-					sprintf (trunkdest, "%s:%d", 
-						(device->trunk.hostname ? device->trunk.hostname : "(Not connected)"), 
-						(device->trunk.hostname ? device->trunk.remote_port : 0));
-					break;
+                                case EB_DEF_TRUNK:
+                                {
+                                        char    extra[128];
+
+                                        if (device->trunk.xlate_out[net]) /* Include information about NAT */
+                                                sprintf (extra, " (Remote: %03d)", device->trunk.xlate_out[net]);
+                                        else    strcpy (extra, "");
+                                        
+                                        sprintf (trunkdest, "%s:%d%s",  
+                                                (device->trunk.hostname ? device->trunk.hostname : "(Not connected)"),
+                                                (device->trunk.hostname ? device->trunk.remote_port : 0),
+                                                extra);
+                                } break;
 				case EB_DEF_WIRE:
 					sprintf (trunkdest, "%s", device->wire.device);
 					if (device->im)
