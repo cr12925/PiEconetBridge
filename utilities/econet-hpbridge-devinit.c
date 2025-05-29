@@ -282,6 +282,44 @@ uint8_t eb_device_init_virtual (uint8_t net)
 
 }
 
+/* eb_device_init_fast
+ *
+ * Simply puts the menu pointer into the structure
+ *
+ */
+
+uint8_t eb_device_init_fast (uint8_t net, uint8_t stn, char *menuname)
+{
+	struct __eb_device	*existing;
+	struct __eb_fast_menu	*fm;
+
+	existing = eb_new_local (net, stn, EB_DEF_LOCAL);
+
+	if (!existing)  eb_debug (1, 0, "CONFIG", "Unable to create *FAST server on %d.%d", net, stn);
+
+	if (existing->local.fast_menu) // Already has a menu
+		eb_debug (1, 0, "CONFIG", "Cannot create *FAST server on %d.%d with menu %s - already configured", net, stn, menuname);
+
+	fm = fast_menus;
+
+	while (fm)
+	{
+		if (!strcasecmp(fm->menu_name, menuname))
+		{
+			existing->local.fast_menu = fm;
+			break;
+		}
+
+		fm = fm->next;
+	}
+
+	if (!fm)
+		eb_debug (1, 0, "CONFIG", "Cannot create *FAST server on %d.%d with menu %s - unknown menu name", net, stn, menuname);
+
+	return 1;
+
+}
+
 /*
  * eb_device_init_fs
  *

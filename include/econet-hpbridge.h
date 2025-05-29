@@ -409,8 +409,12 @@ extern struct __eb_fast_menu_item * eb_fast_mkmenuitem (struct __eb_fast_menu *,
 extern int f_printf (struct __eb_fast_client *, char *, ...);
 extern void eb_fast_send_control (struct __eb_fast_client *, uint8_t);
 extern void eb_fast_send_data (struct __eb_fast_client *, uint8_t *, uint16_t);
+extern void * eb_fast_start_fast_service (void *);
 extern void eb_port_a0_handler (struct __econet_packet_aun *, uint16_t, void *);
 
+/* *FAST global list of menus */
+
+extern struct __eb_fast_menu	*fast_menus;
 
 /* __eb_fast_client
  *
@@ -827,8 +831,8 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			void			*port_param[256]; // Pointer to parameter data registered when the port was seized (e.g. for an FS, it's the __fs_sstation struct)
 			uint8_t			last_port; // Last port we allocated
 			// Stuff to handle *FAST to a local host
+			/* OLD CODE
 			uint8_t			fastbit; // Oscillates 0, 1 on transmissions from the *FAST handler
-			uint8_t			fast_priv_stns[8192]; // Bitmap of stations who have logged into this FS with the Bridge privilege bit (cleared on *BYE by the FS - means that if the FS gets shut down, we can still tell this was a privileged station)
 			uint8_t			fast_input_ctrl; // Ditto on receiption
 			uint8_t			fast_client_net, fast_client_stn; // Current client
 			pthread_t		fast_handler; // Thread that is operating the *FAST handler
@@ -839,11 +843,13 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			uint8_t			fast_reset; // Set to 1 when we get a new connection
 			uint8_t			fast_client_ready; // Set to 1 when client indicates it will receive more output to display - happens when we get the USRPROC call. If there is output, we send it. If not, this will get set to 1 so that the fast handler knows it can send it instead
 			pthread_cond_t		fast_wake;
+			*/
 			pthread_mutex_t		fast_client_list_lock;
 			struct __eb_fast_client	*fast_client_list;
 			struct __eb_notify	*notify; // List of stuff received via *notify to a local server
 			pthread_mutex_t		notify_mutex; // Mutex to lock the notify list
 			pthread_t		notify_thread; // Notify watcher thread for this device
+			uint8_t			fast_priv_stns[8192]; // Bitmap of stations who have logged into this FS with the Bridge privilege bit (cleared on *BYE by the FS - means that if the FS gets shut down, we can still tell this was a privileged station)
 
 			/* V2.2 New *FAST handling stuff */
 
@@ -1214,6 +1220,7 @@ extern uint8_t	eb_device_init_ps (uint8_t, uint8_t, char *, char *, char *, uint
 extern uint8_t 	eb_device_init_ps_handler (uint8_t, uint8_t, char *, char *);
 extern uint8_t	eb_device_init_ip (uint8_t, uint8_t, char *, uint32_t, uint32_t);
 extern uint8_t	eb_device_init_pipe (uint8_t, uint8_t, char *, uint8_t);
+extern uint8_t	eb_device_init_fast (uint8_t, uint8_t, char *);
 extern uint8_t	eb_device_init_aun_host (uint8_t, uint8_t, in_addr_t, uint16_t, uint8_t, uint8_t, struct __eb_fw_chain *, struct __eb_fw_chain *);
 extern uint8_t	eb_device_init_aun_net (uint8_t, in_addr_t, uint8_t, uint16_t, uint8_t, struct __eb_fw_chain *, struct __eb_fw_chain *);
 extern uint8_t	eb_device_init_expose_host (uint8_t, uint8_t, in_addr_t, uint16_t, uint8_t);

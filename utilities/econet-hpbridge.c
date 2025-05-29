@@ -37,7 +37,15 @@ extern short fs_sevenbitbodge;
 extern short normalize_debug;
 extern uint8_t fs_set_syst_bridgepriv;
 
+/* Fast menus */
+
+struct __eb_fast_menu	*fast_menus = NULL;
+
+/* Path to TAR binary */
+
 char	tar_path[PATH_MAX];
+
+/* Loop detection */
 
 uint32_t	interface_index = 0x1000; // Used for loop detection
 uint32_t	last_root_id_seen = 0xFFFFFFFF; // See header
@@ -7640,7 +7648,32 @@ static void * eb_device_despatcher (void * device)
 							switch (fast_function)
 							{
 								case EB_FAST_OP_LOGON:
-									eb_fast_mkclient(d, p->p->p.srcnet, p->p->p.srcstn);
+								{
+									pthread_t	fastthread;
+									struct __eb_fast_client 	*fc;
+
+									fc = eb_fast_mkclient(d, p->p->p.srcnet, p->p->p.srcstn);
+
+									if (!fc)
+									{
+										eb_debug (0, 1, "FAST", "%-8s %3d.%3d Unable to create new *FAST client for %d.%d",
+												eb_type_str(d->type),
+												d->net, d->local.stn,
+												p->p->p.srcnet, p->p->p.srcstn);
+									}
+									else
+									{
+										/* Now start the thread */
+
+										if (pthread_create(&(fastthread), NULL, eb_fast_start_fast_service, fc))
+        									{
+                									eb_debug (0, 1, "FAST", "Fast server thread failed to start");
+								        	}
+										else pthread_detach(fastthread);
+									}
+
+								}
+
 									break;
 								
 								case EB_FAST_OP_DISCONNECT:
@@ -9006,6 +9039,8 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 			eb_ig_insert_member(group_name, networks[net], group_priority);
 		}
+
+
 	}
 	else
 		eb_device_init_virtual(net);
@@ -9014,6 +9049,8 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 	if (json_object_object_get_ex(o, "diverts", &jdiverts))
 	{
+		struct json_object	*jfastmenu;
+
 		jcount = 0;
 
 		jlength = json_object_array_length(jdiverts);
@@ -9170,6 +9207,17 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 				pipebase = eb_malloc (__FILE__, __LINE__, "JSON", "Create pipe base path string", json_object_get_string_len(jpipepath) + 1);
 				strcpy (pipebase, json_object_get_string(jpipepath));
 				eb_device_init_pipe(net, stn, pipebase, flags);
+			}
+
+			/* *FAST handler */
+
+			if (json_object_object_get_ex(o, "fast-menu", &jfastmenu)) /* Re-use of jfw; this is the starting menu for *FAST connections */
+			{
+				char *	menuname;
+
+				menuname = (char *) json_object_get_string(jfastmenu);
+
+				eb_device_init_fast(net, stn, menuname);
 			}
 
 			{
@@ -9367,6 +9415,7 @@ int eb_parse_json_config(struct json_object *jc)
 	 * Create firewall chains / policies (do these first so we can apply them to objects)
 	 * Create interface groups
 	 * Create pools, but without static mappings (we leave statics until we've created the objects they might refer to!)
+	 * Create fast menus & menu items
 	 * Create virtual networks and their 'diverted' servers (in case we've tried to create a virtual network which overlaps with an econet) - No, do this after econets because otherwise our station maps all screw up. Econets first!
 	 * Create the legacy 'dynamic' network - which ultimately will refer to a pool in due course
 	 * Create econets and their 'diverted' servers
@@ -9635,6 +9684,243 @@ int eb_parse_json_config(struct json_object *jc)
 					
 				jcount++;
 			}
+		}
+	}
+
+	/* Now create *FAST menus & menu items */
+
+	{
+		struct json_object	*jmenus, *jmenu;
+		int			jmenus_length, jmenu_count;
+
+		if (json_object_object_get_ex(jc, "fast-menu", &jmenus))
+		{
+			jmenus_length = json_object_array_length (jmenus);	
+			jmenu_count = 0;
+
+			while (jmenu_count < jmenus_length)
+			{
+				struct json_object	*jmenuitems, *jmenuitem, *jtmp;
+				char 			* jmenu_name = NULL, * jmenu_title = NULL;
+
+				struct __eb_fast_menu	*fm;
+
+				jmenu = json_object_array_get_idx(jmenus, jmenu_count);
+
+				if (json_object_object_get_ex(jmenu, "name", &jtmp))
+					jmenu_name = (char *) json_object_get_string(jtmp);
+				else
+					eb_debug (1, 0, "JSON", "Menu created with no name!");
+
+				if (json_object_object_get_ex(jmenu, "title", &jtmp))
+					jmenu_title = (char *) json_object_get_string(jtmp);
+				else
+					eb_debug (1, 0, "JSON", "Menu created with no title!");
+
+				fm = eb_fast_mkmenu(jmenu_title, jmenu_name, &fast_menus); 
+
+				if (!fm)
+					eb_debug (1, 0, "JSON", "Unable to create fast menu %s", jmenu_name);
+
+				if (json_object_object_get_ex(jmenu, "items", &jmenuitems))
+				{
+					int		jitems_length, jitem_count;
+
+					jitems_length = json_object_array_length(jmenuitems);
+
+					jitem_count = 0;
+
+					if (jitems_length < 1)
+						eb_debug (1, 0, "JSON", "Attempt to create menu %s with no items", jmenu_name);
+
+					while (jitem_count < jitems_length)
+					{
+						char *	typestr = NULL, *description = NULL;
+						struct __eb_fast_menu_item *mi;
+						uint16_t	timeout = 0;
+						uint8_t		mtype = 0xFF; /* Rogue */
+						char		key = '\0';
+
+						jmenuitem = json_object_array_get_idx(jmenuitems, jitem_count);
+
+						if (json_object_object_get_ex(jmenuitem, "type", &jtmp))
+							typestr = (char *) json_object_get_string(jtmp);
+						else	eb_debug (1, 0, "JSON", "Menu item %d in menu %s has no type string - error", jitem_count, jmenu_name);
+
+						if (json_object_object_get_ex(jmenuitem, "description", &jtmp))
+							description = (char *) json_object_get_string(jtmp);
+						else	eb_debug (1, 0, "JSON", "Menu item %d in menu %s has no description string - error", jitem_count, jmenu_name);
+
+						if (json_object_object_get_ex(jmenuitem, "key", &jtmp))
+						{
+							char * string;
+							string = (char *) json_object_get_string(jtmp);
+							if (strlen(string) != 1)
+								eb_debug (1, 0, "JSON", "Menu item %d in menu %s has a keypress string which is not of length 1 - error", jitem_count, jmenu_name);
+							key = *string;
+						}
+						else	eb_debug (1, 0, "JSON", "Menu item %d in menu %s has no key - error", jitem_count, jmenu_name);
+
+						if (json_object_object_get_ex(jmenuitem, "timeout", &jtmp))
+							timeout = json_object_get_int(jtmp);
+
+						if (!strcasecmp(typestr, "SSH"))
+							mtype = EB_FAST_MENU_SSH;
+						else if (!strcasecmp(typestr, "DISCONNECT") || !strcasecmp(typestr, "END"))
+							mtype = EB_FAST_MENU_DISCONNECT;
+						else if (!strcasecmp(typestr, "SCRIPT"))
+							mtype = EB_FAST_MENU_SCRIPT;
+						else if (!strcasecmp(typestr, "FSSTOPSTART"))
+							mtype = EB_FAST_MENU_FSSTOPSTART;
+						else if (!strcasecmp(typestr, "LOCALLOGIN") || !strcasecmp(typestr, "LOGIN"))
+							mtype = EB_FAST_MENU_BIN_LOGIN;
+						else if (!strcasecmp(typestr, "SYSTEM"))
+							mtype = EB_FAST_MENU_SYSTEM;
+						else if (!strcasecmp(typestr, "TCP"))
+							mtype = EB_FAST_MENU_TCP;
+						else if (!strcasecmp(typestr, "SERIAL"))
+							mtype = EB_FAST_MENU_SERIAL;
+						else if (!strcasecmp(typestr, "HEADING"))
+							mtype = EB_FAST_MENU_HEADING;
+						else if (!strcasecmp(typestr, "MENU"))
+							mtype = EB_FAST_MENU_SUBMENU;
+						else if ((!strcasecmp(typestr, "HOME") || !strcasecmp(typestr, "START")))
+							mtype = EB_FAST_MENU_HOMEMENU;
+						else if ((!strcasecmp(typestr, "BLANKLINE") || !strcasecmp(typestr, "BLANK")))
+							mtype = EB_FAST_MENU_BLANKLINE;
+						else	eb_debug (1, 0, "JSON", "Menu item %d in menu %s has unknown type string %s - error", jitem_count, jmenu_name, typestr);
+
+						mi = eb_fast_mkmenuitem(fm, description, timeout, mtype, key);
+
+						/* Collect the other data for menu items */
+
+						switch (mtype) {
+							case EB_FAST_MENU_TCP:
+							{
+								char 		*host = NULL;
+								uint16_t	port = 0;
+								
+								if (json_object_object_get_ex(jmenuitem, "host", &jtmp))
+									host = (char *) json_object_get_string(jtmp);
+								else
+									eb_debug (1, 0, "JSON", "Menu item %d in menu %s is of type TCP but has no host element.", jitem_count, jmenu_name);
+
+								if (json_object_object_get_ex(jmenuitem, "port", &jtmp))
+									port = json_object_get_int(jtmp);
+								else
+									eb_debug (1, 0, "JSON", "Menu item %d in menu %s is of type TCP but has no port element.", jitem_count, jmenu_name);
+								
+								mi->fm_tcp.fm_host = eb_malloc(__FILE__, __LINE__, "JSON", "Space for FAST TCP menu item host", strlen(host)+1);
+								strcpy(mi->fm_tcp.fm_host, host);
+								mi->fm_tcp.fm_port = port;
+							} break;
+							
+							case EB_FAST_MENU_SSH:
+							{
+								char 		*host, *username = NULL;
+								uint16_t	port = 0;
+								
+								if (json_object_object_get_ex(jmenuitem, "port", &jtmp))
+									port = json_object_get_int(jtmp);
+
+								if (json_object_object_get_ex(jmenuitem, "user", &jtmp))
+									username = (char *) json_object_get_string(jtmp);
+								
+								if (json_object_object_get_ex(jmenuitem, "host", &jtmp))
+								{
+									host = (char *) json_object_get_string(jtmp);
+									mi->fm_ssh.fm_host = eb_malloc(__FILE__, __LINE__, "JSON", "Space for FAST TCP menu item host", strlen(host)+1);
+									strcpy(mi->fm_ssh.fm_host, host);
+									mi->fm_ssh.fm_port = port;
+								}
+								else
+									eb_debug (1, 0, "JSON", "Menu item %d in menu %s is of type TCP but has no host element.", jitem_count, jmenu_name);
+
+								
+								if (username)
+								{
+									mi->fm_ssh.fm_username = eb_malloc(__FILE__, __LINE__, "JSON", "Space for FAST TCP menu item host", strlen(username)+1);
+									strcpy(mi->fm_ssh.fm_username, username);
+								}
+
+							} break;
+
+							case EB_FAST_MENU_SERIAL:
+							{
+								/* TODO
+								 
+								char *device, *parity, *stopbits;
+								uint32_t	speed;
+								 */
+							} break;
+
+							case EB_FAST_MENU_SCRIPT:
+							{
+								char * script;
+
+								if (json_object_object_get_ex(jmenuitem, "script-path", &jtmp))
+								{
+									script = (char *) json_object_get_string(jtmp);
+									mi->fm_script.fm_script = eb_malloc (__FILE__, __LINE__, "JSON", "Space for FAST srcript name", strlen(script)+1);
+									strcpy (mi->fm_script.fm_script, script);
+								}
+								else
+									eb_debug (1, 0, "JSON", "Menu item %d in menu %s is of type SCRIPT but has no script-path element.", jitem_count, jmenu_name);
+
+							} break;
+
+							case EB_FAST_MENU_BIN_LOGIN:
+							{
+								char * banner = NULL, * username = NULL;
+
+								if (json_object_object_get_ex(jmenuitem, "banner-path", &jtmp))
+									banner = (char *) json_object_get_string(jtmp);
+
+								if (json_object_object_get_ex(jmenuitem, "username", &jtmp))
+									username = (char *) json_object_get_string(jtmp);
+
+								if (banner)
+								{
+									mi->fm_binlogin.fm_banner = eb_malloc (__FILE__, __LINE__, "JSON", "Space for bin/login banner path", strlen(banner)+1);
+									strcpy (mi->fm_binlogin.fm_banner, banner);
+								}
+
+								if (username)
+								{
+									mi->fm_binlogin.fm_username = eb_malloc (__FILE__, __LINE__, "JSON", "Space for bin/login banner path", strlen(username)+1);
+									strcpy (mi->fm_binlogin.fm_username, username);
+								}
+							} break;
+
+							case EB_FAST_MENU_HEADING:
+							{
+								char *heading_text;
+
+								if (json_object_object_get_ex(jmenuitem, "heading-text", &jtmp))
+								{
+									heading_text = (char *) json_object_get_string(jtmp);
+									mi->fm_heading.fm_heading_text = eb_malloc(__FILE__, __LINE__, "JSON", "Space for FAST menu item heading text", strlen(heading_text)+1);
+									strcpy(mi->fm_heading.fm_heading_text, heading_text);
+								}
+								else
+									eb_debug (1, 0, "JSON", "Menu item %d in menu %s is of type HEADING but has no heading-text element.", jitem_count, jmenu_name);
+
+
+							} break;
+
+						}
+
+
+						jitem_count++;
+					}
+				}
+				else
+					eb_debug (1, 0, "JSON", "Menu created with no items!");
+
+				jmenu_count++;
+			}
+
+
 		}
 	}
 

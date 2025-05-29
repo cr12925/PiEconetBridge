@@ -42,6 +42,7 @@ struct __eb_fast_client * eb_fast_find_conn (struct __eb_device *device, uint8_t
 	fc = NULL;
 #endif
 
+	fprintf (stderr, "FAST search returning %p\n", fc);
 	return fc;
 }
 
@@ -54,15 +55,13 @@ struct __eb_fast_client * eb_fast_find_conn (struct __eb_device *device, uint8_t
 void eb_fast_flag_disconnect (struct __eb_device *device, uint8_t net, uint8_t stn)
 {
 
+#ifndef FAST_TEST
 	struct __eb_fast_client *fc;
 
-	pthread_mutex_lock(&(device->local.fast_io_mutex));
-#ifndef FAST_TEST
 	fc = eb_fast_find_conn (device, net, stn);
 	if (fc)
 		pthread_cancel(fc->fast_server); /* Kill the server on disconnect and all else will tidy up. Theoretically. */
 #endif
-	pthread_mutex_unlock(&(device->local.fast_io_mutex));
 
 }
 
@@ -94,6 +93,8 @@ struct __eb_fast_client * eb_fast_mkclient (struct __eb_device *device, uint8_t 
 	/* Find any existing connection and kill it */
 
 #ifndef FAST_TEST
+	eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d *FAST connection initiated",
+			eb_type_str(device->type), device->net, device->local.stn, net, stn);
 	pthread_mutex_lock(&(device->local.fast_client_list_lock));
 	if ((fc = eb_fast_find_conn(device, net, stn))) /* We found a match - kill its server off */
 		pthread_cancel(fc->fast_server); /* It should now clean itself up */
@@ -936,15 +937,44 @@ void * eb_fast_start_fast_service (void *data)
 
 /* Process received data on port &A0 */
 
-void eb_port_a0_handler (struct __econet_packet_aun *p, uint16_t length, void *client)
+void eb_port_a0_handler (struct __econet_packet_aun *p, uint16_t length, void *d)
 {
-	struct __eb_fast_client * fc = (struct __eb_fast_client *) client;
+	struct __eb_device * device = (struct __eb_device *) d;
+
+	struct __eb_fast_client * fc;
+
+	if (device->type != EB_DEF_LOCAL || !device->local.fast_menu)
+	{
+		/* Either not a local device, or it is but there's no menu defined */
+		return; /* Ignore! */
+	}
+
+	/* Potential connection, so find the client */
+
+	pthread_mutex_lock(&(device->local.fast_client_list_lock));
+	fc = device->local.fast_client_list;
+	while (fc)
+	{
+		if (fc->net == p->p.srcnet && fc->stn == p->p.srcstn)
+			break;
+		fc = fc->next;
+	}
+	pthread_mutex_unlock(&(device->local.fast_client_list_lock));
+	
+	if (!fc) /* Not found */
+	{
+		eb_debug (0, 1, "FAST", "%-8s %3d.%3d Unexpected *FAST data traffic from %d.%d",
+				eb_type_str(device->type),
+				device->net, device->local.stn,
+				p->p.srcnet, p->p.srcstn);
+		return;
+	}
 
 	pthread_mutex_lock(&(fc->fast_io_mutex[EB_FAST_TO_SERVER]));
 
 	if ((p->p.ctrl & 0x01) != fc->fast_input_ctrl)
 	{
-		eb_debug (0, 1, "FAST", "%-8s %3d.%3d *FAST handler ignored traffic with duplicate control", eb_type_str(fc->parent->type), fc->net, fc->stn);
+		eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d *FAST handler ignored traffic with duplicate control", eb_type_str(fc->parent->type), device->net, device->local.stn, fc->net, fc->stn);
 		pthread_mutex_unlock(&(fc->fast_io_mutex[EB_FAST_TO_SERVER]));
 		return;
 	}
