@@ -296,13 +296,7 @@ void eb_debug_fmt (uint8_t quit, uint8_t level, char *module, char *formatted)
 	if (level > EB_DEBUG_LEVEL)
 		return;
 
-	//pthread_mutex_lock(&EB_DEBUG_MUTEX);
-
 	fprintf (EB_DEBUG_OUTPUT, "[+%15.6f] %7ld %-8s: %s\n", timediffstart(), syscall(SYS_gettid), module, formatted);
-	//fprintf (EB_DEBUG_OUTPUT, formatted);
-	//fprintf (EB_DEBUG_OUTPUT, "\n");
-
-	//pthread_mutex_unlock(&EB_DEBUG_MUTEX);
 
 	if (quit)
 		exit (EXIT_FAILURE);
@@ -737,7 +731,7 @@ static void *eb_pool_garbage_collector(void *ignored)
 	while (1)
 	{
 
-		eb_debug (0, 4, "POOL", "%16sPool garbage collector running", "");
+		eb_debug (0, 4, "POOL", "%16s Pool garbage collector running", "");
 
 		p = pools;
 
@@ -1150,16 +1144,18 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 			memset(&(existing->local.reserved_ports), 0, sizeof(existing->local.reserved_ports)); // Clear ports in use
 			existing->local.last_port = 0;
 			/* Insert some reserved ports to the port allocator */
-			EB_PORT_SET(existing, reserved_ports, 0x99, NULL, NULL); /* FS */
-			EB_PORT_SET(existing, reserved_ports, 0x9E, NULL, NULL); /* PS ? */
-			EB_PORT_SET(existing, reserved_ports, 0x9F, NULL, NULL); /* PS Query */
-			EB_PORT_SET(existing, reserved_ports, 0xA0, NULL, NULL); /* *FAST */
-			EB_PORT_SET(existing, reserved_ports, 0xB0, NULL, NULL); /* FindServer */
-			EB_PORT_SET(existing, reserved_ports, 0xD1, NULL, NULL); /* PS Data */
-			EB_PORT_SET(existing, reserved_ports, 0xD2, NULL, NULL); /* IP/Econet */
+			EB_PORT_SET(existing, reserved_ports, EB_PORT_FS, NULL, NULL); /* FS */
+			EB_PORT_SET(existing, reserved_ports, EB_PORT_PS, NULL, NULL); /* PS ? */
+			EB_PORT_SET(existing, reserved_ports, EB_PORT_PS_QUERY, NULL, NULL); /* PS Query */
+			EB_PORT_SET(existing, reserved_ports, EB_PORT_FAST, NULL, NULL); /* *FAST */
+			EB_PORT_SET(existing, reserved_ports, EB_PORT_FINDSERVER, NULL, NULL); /* FindServer */
+			EB_PORT_SET(existing, reserved_ports, EB_PORT_PS_DATA, NULL, NULL); /* PS Data */
+			EB_PORT_SET(existing, reserved_ports, EB_PORT_IP, NULL, NULL); /* IP/Econet */
 
 			/* Include the FAST data handler */
-			EB_PORT_SET(existing, ports, 0xA0, eb_port_a0_handler, existing);
+			EB_PORT_SET(existing, ports, EB_PORT_FAST, eb_port_a0_handler, existing);
+
+			existing->local.fast_menu = NULL;
 
 			DEVINIT_DEBUG("Created new local device on station %d.%d", net, stn);
 
@@ -4416,214 +4412,6 @@ void eb_fast_priv_notify(struct __eb_device *d, uint8_t net, uint8_t stn, uint8_
 }
 
 /* OLD CODE
-// printf() equivalent but puts the stuff on our pipe to the IO handler
-void fastprintf (struct __eb_device *d, char *fmt, ...)
-{
-
-	va_list ap;
-	char str[16384];
-
-	va_start(ap, fmt);
-
-	vsnprintf (str, 16382, fmt, ap);
-
-	va_end(ap);
-
-	write (d->local.fast_to_handler[0], str, strlen(str));
-	pthread_cond_signal(&(d->local.fast_wake)); // Wake up the IO thread
-
-}
-
-// Send a *fast input ready notification
-void eb_fast_input_ready(struct __eb_device *d, uint8_t net, uint8_t stn, uint8_t cmd)
-{
-	struct __econet_packet_aun *reply;
-
-	reply = eb_malloc(__FILE__, __LINE__, "FAST", "Allocate input request packet", ECONET_MAX_PACKET_SIZE);
-
-	if (!reply)
-		eb_debug (1, 0, "FAST", "Failed to allocate input request packet structure");
-
-	reply->p.port = 0x00; 
-	reply->p.ctrl = 0x84;
-	reply->p.seq = eb_get_local_seq(d);
-	reply->p.dstnet = net;
-	reply->p.dststn = stn;
-	reply->p.srcnet = d->net;
-	reply->p.srcstn = d->local.stn;
-	reply->p.aun_ttype = ECONET_AUN_DATA;
-
-	reply->p.data[0] = 0xff;
-	reply->p.data[1] = 0xff;
-	reply->p.data[2] = 0xff;
-	reply->p.data[3] = 0xff;
-	reply->p.data[4] = d->local.stn;
-	reply->p.data[5] = (d->net == net) ? 0 : d->net;
-	reply->p.data[6] = cmd; // See if this is it!
-
-	eb_enqueue_output(d, reply, 7, NULL);
-	pthread_cond_signal(&(d->qwake));
-}
-
-// Thread to mediate IO between despatcher and the *FAST handler
-static void * eb_fast_io_handler (void *device)
-{
-
-	struct __eb_device 	*d = device;
-	struct pollfd		fds;
-
-	eb_debug (0, 2, "FAST", "FAST     %3d.%3d Initializing *FAST IO handler thread", d->net, d->local.stn);
-
-	pthread_mutex_lock(&(d->local.fast_io_mutex));
-
-	while (1)
-	{
-
-		eb_debug (0, 3, "FAST", "Fast Handler Loop - client ready = %d, about to sleep", d->local.fast_client_ready);
-
-		// the cond wait will release the mutex, wait on the signal, and re-acquire the mutex on wake - so we don't need to tinker with it
-
-		pthread_cond_wait(&(d->local.fast_wake), &(d->local.fast_io_mutex));
-
-		eb_debug (0, 3, "FAST", "Fast Handler Loop - client ready = %d, just woken", d->local.fast_client_ready);
-		// Look for reset here and if so, sink everything coming from the handler
-		// How shall we sink the input from both handler and despatcher?
-
-		// We don't bother with input from client - it goes straight from despatch to the handler
-
-		// If fast_client_ready, read up to 32 bytes from fast_to_handler[1] and put it on the output queue; reset fast_client_ready to 0
-
-		fds.fd = d->local.fast_to_handler[1];
-		fds.events = POLLIN;
-		fds.revents = 0;
-
-		if ((d->local.fast_client_ready == EB_FAST_READY) && poll(&fds, 1, 0) && (fds.revents & POLLIN))
-		{
-			unsigned char	t[33];
-			uint8_t		s;
-
-
-			s = read(d->local.fast_to_handler[1], t, 32);
-
-			if (s)
-			{
-				struct __econet_packet_aun 	*p;
-
-				// Now indicate not ready and wait for it to reset
-
-				//eb_debug (0, 3, "FAST", "Fast Handler Read from Handler - s = %d", s);
-
-				d->local.fast_client_ready = EB_FAST_NOTREADY;
-
-				p = eb_malloc(__FILE__, __LINE__, "FAST", "Allocate fast output packet", ECONET_MAX_PACKET_SIZE);
-
-				if (!p)
-					eb_debug (1, 0, "FAST", "Unable to allocate memory for *FAST output packet");
-
-				p->p.srcstn = d->local.stn;
-				p->p.srcnet = d->net;
-				p->p.dststn = d->local.fast_client_stn;
-				p->p.dstnet = d->local.fast_client_net;
-				p->p.aun_ttype = ECONET_AUN_DATA;
-				p->p.port = EB_FAST_PORT;
-				p->p.ctrl = 0x80 | d->local.fastbit; d->local.fastbit ^= 0x01;
-				p->p.seq = eb_get_local_seq(d);
-				memcpy(&(p->p.data), t, s);
-
-				eb_debug (0, 3, "FAST", "Fast Handler Loop - if(ready) succeeded - transmitting output to device %p, packet at %p, length %d to %d.%d", d, p, s, p->p.dstnet, p->p.dststn);
-				eb_enqueue_output(d, p, s, NULL);
-				pthread_cond_signal(&(d->qwake));
-				eb_fast_input_ready(d, d->local.fast_client_net, d->local.fast_client_stn, EB_FAST_READY);
-
-				eb_free(__FILE__, __LINE__, "FAST", "Free fast output packet", p);
-			}
-		}
-		else
-			eb_debug (0, 3, "FAST", "Fast Handler Loop - if(ready) failed: client ready = %d, revents is %s", d->local.fast_client_ready, (fds.revents & POLLIN) ? "set" : "unset");
-	}
-
-	return NULL;
-}
-
-// Return keypress (blocking) or 0xff if new logon or client signalled close 
-uint8_t eb_fast_getkey (struct __eb_device *d)
-{
-
-	int				s = d->local.fast_to_handler[0];
-	uint8_t				c, quit = 0;
-	struct pollfd			fds;
-	int				pollresult;
-
-	eb_fast_input_ready(d, d->local.fast_client_net, d->local.fast_client_stn, EB_FAST_READY);
-
-	fds.fd = s;
-	fds.events = POLLIN;
-
-	pollresult = poll(&fds, 1, 100); // 100ms poll
-
-	while (!quit)
-	{
-		if (pollresult)
-			read(s, &c, 1);
-
-		pthread_mutex_lock(&(d->local.fast_io_mutex));
-		// When logged on, the fast client ready state will be EB_FAST_READY (client has signalled it wants output), or EB_FAST_NOTREADY (logged on, but not ready for output). If it's neither of those, then the client has either started a new session (EB_FAST_LOGON), or has requested severance of the connection (EB_FAST_CLOSE) - so signal quit
-		if (d->local.fast_client_ready != EB_FAST_READY && d->local.fast_client_ready != EB_FAST_NOTREADY)
-			quit = 1;
-		pthread_mutex_unlock(&(d->local.fast_io_mutex));
-
-		if (pollresult && !quit)
-			return c;
-
-		fds.fd = s;
-		fds.events = POLLIN;
-
-		pollresult = poll(&fds, 1, 100); // 100ms poll
-
-	}
-
-	return 0xff; // Nothing read - give up
-
-}
-
-// Return 0xFF if new logon or client signalled close 
-uint8_t eb_fast_getstring (struct __eb_device *d, int s, uint8_t len, char *string)
-{
-
-	unsigned char	c;
-	uint8_t		ptr = 0;
-
-	*string = 0; // Initialize
-
-	while ((c = eb_fast_getkey(d)))
-	{
-		if (c == 0xff) break;
-
-		if (c == 0x0D) // Enter
-			break;
-		else if (c == 0x7F)
-		{
-			if (ptr > 0)
-			{
-				string[ptr-1] = 0;
-				ptr--;
-				fastprintf (d, "%c%c%c", 0x08, 0x20, 0x08);
-			}
-		}
-		else if (ptr < len)
-		{
-			fastprintf (d, "%c", c);
-			string[ptr] = c;
-			string[ptr+1] = 0;
-			ptr++;
-		}
-	}
-
-	if (c == 0xff)
-		return 0xff;
-
-	return ptr;
-}
 
 // Print FS disc names in order (for *FAST handler)
 
@@ -7640,8 +7428,8 @@ static void * eb_device_despatcher (void * device)
 						else if (p->p->p.aun_ttype == ECONET_AUN_DATA 
 								&& p->p->p.port == 0x00 
 								&& p->p->p.ctrl == 0x84 
-							//	&& d->local.fs.rootpath && (ECONET_DEV_STATION(d->local.fast_priv_stns, p->p->p.srcnet, p->p->p.srcstn)) 
-								&& (p->p->p.data[0] == 0xff && p->p->p.data[1] == 0xff)) // USRPROC &FFFF Immediate to a local emulator
+								&& (p->p->p.data[0] == 0xff && p->p->p.data[1] == 0xff) // USRPROC &FFFF = *FAST
+								&& d->local.fast_menu) // must have a menu defined
 						{
 							uint8_t		fast_function = p->p->p.data[4];
 
@@ -7649,7 +7437,6 @@ static void * eb_device_despatcher (void * device)
 							{
 								case EB_FAST_OP_LOGON:
 								{
-									pthread_t	fastthread;
 									struct __eb_fast_client 	*fc;
 
 									fc = eb_fast_mkclient(d, p->p->p.srcnet, p->p->p.srcstn);
@@ -7665,11 +7452,17 @@ static void * eb_device_despatcher (void * device)
 									{
 										/* Now start the thread */
 
-										if (pthread_create(&(fastthread), NULL, eb_fast_start_fast_service, fc))
-        									{
+										fc->menu_home = d->local.fast_menu;
+
+										eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST connection with menu %s",
+												eb_type_str(d->type),
+												d->net, d->local.stn,
+												p->p->p.srcnet, p->p->p.srcstn,
+												fc->menu_home->menu_name);
+
+										if (pthread_create(&(fc->fast_supervisor), NULL, eb_fast_start_fast_service, fc))
                 									eb_debug (0, 1, "FAST", "Fast server thread failed to start");
-								        	}
-										else pthread_detach(fastthread);
+										else pthread_detach(fc->fast_supervisor);
 									}
 
 								}
@@ -7684,92 +7477,7 @@ static void * eb_device_despatcher (void * device)
 									eb_fast_flag_datarq(d, p->p->p.srcnet, p->p->p.srcstn);	
 									break;
 							}
-/* OLD CODE
-							pthread_mutex_lock (&(d->local.fast_io_mutex));
-							d->local.fast_client_ready = p->p->p.data[4]; // 0 = Logon, 1 = Ready for data, 2 = Disconnect
-							if (d->local.fast_client_ready == EB_FAST_LOGON) // New connection
-							{
-
-								d->local.fastbit = 0x00;
-								d->local.fast_input_ctrl = 0;
-								d->local.fast_client_net = p->p->p.srcnet;
-								d->local.fast_client_stn = p->p->p.srcstn;
-
-							}
-
-							pthread_mutex_unlock(&(d->local.fast_io_mutex));
-							pthread_cond_signal (&(d->local.fast_wake)); // Wake up the FAST handler - it should find its reset and ... well, reset.
-							/*
-							struct __econet_packet_aun	*r;
-
-							if (p->p->p.data[4] == 0x00) // *FAST New Connection
-							{
-								eb_debug (0, 2, "LOCAL", "Local    %3d.%3d from %3d.%3d New *FAST connection",
-									p->p->p.dstnet, p->p->p.dststn,
-									p->p->p.srcnet, p->p->p.srcstn);
-
-								r = eb_malloc (__FILE__, __LINE__, "FAST", "Allocate initial reply packet", ECONET_MAX_PACKET_SIZE);
-
-								if (!r)
-									eb_debug (1, 0, "FAST", "Local           Cannot allocate packet structure");
-
-								r->p.srcstn = d->local.stn;
-								r->p.srcnet = d->net;
-								r->p.dststn = p->p->p.srcstn;
-								r->p.dstnet = p->p->p.srcnet;
-								r->p.aun_ttype = ECONET_AUN_DATA;
-								r->p.port = 0x00;
-								r->p.ctrl = 0x84;
-								r->p.seq = eb_get_local_seq(d);
-								memset(&(r->p.data), 0xff, 4);
-								r->p.data[4] = 0x80;
-
-								pthread_mutex_lock (&(d->local.fast_io_mutex));
-
-								d->local.fastbit = 0x00;
-								d->local.fast_input_ctrl = 0;
-								d->local.fast_reset = 0x01; // Please re-set
-								d->local.fast_client_net = p->p->p.srcnet;
-								d->local.fast_client_stn = p->p->p.srcstn;
-								d->local.fast_client_ready = 0;
-
-								pthread_mutex_unlock (&(d->local.fast_io_mutex));
-
-								pthread_cond_signal (&(d->local.fast_wake)); // Wake up the FAST handler - it should find its reset and ... well, reset.
-
-								eb_enqueue_output (d, r, 5, NULL);
-
-								eb_free(__FILE__, __LINE__, "FAST", "Freeing initial reply packet", r);
-
-							}
-							if (p->p->p.data[4] == 0x01) // *FAST "Client ready for output reception"
-							{
-								//eb_debug (0, 2, "FAST", "FAST Client signalled ready for output");
-								pthread_mutex_lock (&(d->local.fast_io_mutex));
-								d->local.fast_client_ready = 1;
-								pthread_mutex_unlock(&(d->local.fast_io_mutex));
-								pthread_cond_signal (&(d->local.fast_wake)); // Wake up the FAST handler - it should find its reset and ... well, reset.
-							}
-							*/
 						}
-						/* FAST data received now handled by handler in handler list
-						else if (p->p->p.port == 0xA0 && p->p->p.aun_ttype == ECONET_AUN_DATA && d->local.fs.rootpath && (ECONET_DEV_STATION(d->local.fast_priv_stns, p->p->p.srcnet, p->p->p.srcstn))) // *FAST character input has arrived
-						{
-							if ((p->p->p.ctrl & 0x01) == d->local.fast_input_ctrl)
-							{
-								write (d->local.fast_to_handler[1], p->p->p.data, p->length); // Write straight to the handler - why not...
-								d->local.fast_input_ctrl ^= 1;
-								// Signal we're ready for more input...
-								eb_fast_input_ready(d, d->local.fast_client_net, d->local.fast_client_stn, EB_FAST_READY);
-								new_output = 1;
-							}
-							else
-								eb_debug (0, 2, "FAST", "         %3d.%3d from %3d.%3d Fast input ignored (ctrl bit wrong)", 
-										p->p->p.dstnet, p->p->p.dststn,
-										p->p->p.srcnet, p->p->p.srcstn);
-
-						}
-						*/
 						else if (p->p->p.port == 0x00 && p->p->p.ctrl == 0x88 && p->p->p.aun_ttype == ECONET_AUN_IMM)
 						{
 							// Deal with machinetype queries here
@@ -8215,8 +7923,6 @@ static void * eb_device_despatcher (void * device)
 								eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
 								(d->local.port_funcs[p->p->p.port])(p->p, p->length + 12, d->local.port_param[p->p->p.port]);
 							}
-							/* JOB : If it's ECONET_AUN_DATA and we get here, send a NAK - port not handled - e.g. fileserver shut down. */
-							/* JOB : Probably want to handle requests for port &00 here - we'll need a *list* of functions we need to send them to because it'll be more than one bit of code - but the list will be port ctrl byte, within port &00 - logically only one bit of code can handle each type of immediate. */
 							else if (p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK)
 							{
 								/* Send ACK & NAK to fileserver, if active */
@@ -8248,7 +7954,12 @@ static void * eb_device_despatcher (void * device)
 
 							}
 							else
-								eb_debug (0, 3, "BRIDGE", "%-8s %3d.%3d NO HANDLER found for port &%02X type 0x%02X", eb_type_str(d->type), d->net, d->local.stn,p->p->p.port, p->p->p.aun_ttype);
+							{
+							/* JOB : If it's ECONET_AUN_DATA and we get here, send a NAK - port not handled - e.g. fileserver shut down. */
+							/* JOB : Probably want to handle requests for port &00 here - we'll need a *list* of functions we need to send them to because it'll be more than one bit of code - but the list will be port ctrl byte, within port &00 - logically only one bit of code can handle each type of immediate. */
+								
+								eb_debug (0, 1, "BRIDGE", "%-8s %3d.%3d from %3d.%3d traffic to port &%02X whcih is not listening", eb_type_str(d->type), d->net, d->local.stn, p->p->p.srcnet, p->p->p.srcstn, p->p->p.port);
+							}
 						}
 					} break;
 
@@ -9211,7 +8922,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 			/* *FAST handler */
 
-			if (json_object_object_get_ex(o, "fast-menu", &jfastmenu)) /* Re-use of jfw; this is the starting menu for *FAST connections */
+			if (json_object_object_get_ex(jstation, "fast-menu", &jfastmenu)) /* Re-use of jfw; this is the starting menu for *FAST connections */
 			{
 				char *	menuname;
 
@@ -9809,6 +9520,21 @@ int eb_parse_json_config(struct json_object *jc)
 									port = json_object_get_int(jtmp);
 								else
 									eb_debug (1, 0, "JSON", "Menu item %d in menu %s is of type TCP but has no port element.", jitem_count, jmenu_name);
+
+								if (json_object_object_get_ex(jmenuitem, "family", &jtmp))
+								{
+									char * family;
+									family = (char *) json_object_get_string(jtmp);
+
+									mi->fm_tcp.fm_family = AF_UNSPEC;
+
+									if (strchr(family, '4'))
+										mi->fm_tcp.fm_family = AF_INET;
+									else if (strchr(family, '4'))
+										mi->fm_tcp.fm_family = AF_INET6;
+									else
+										eb_debug (1, 0, "JSON", "Menu item %d in menu %s is of type TYPE but has unknown family %s", jitem_count, jmenu_name, family);
+								}
 								
 								mi->fm_tcp.fm_host = eb_malloc(__FILE__, __LINE__, "JSON", "Space for FAST TCP menu item host", strlen(host)+1);
 								strcpy(mi->fm_tcp.fm_host, host);
@@ -9847,11 +9573,66 @@ int eb_parse_json_config(struct json_object *jc)
 
 							case EB_FAST_MENU_SERIAL:
 							{
-								/* TODO
-								 
-								char *device, *parity, *stopbits;
-								uint32_t	speed;
-								 */
+								char *device;
+								json_object	*jserial;
+
+								if (json_object_object_get_ex(jmenuitem, "device", &jserial))
+								{
+									device = (char *) json_object_get_string(jserial);
+									mi->fm_serial.fm_device = eb_malloc(__FILE__, __LINE__, "JSON", "Space for serial device name", strlen(device)+1);
+									strcpy(mi->fm_serial.fm_device, device);
+								}
+								else
+									eb_debug (1, 0, "JSON", "Menu item %d in menu %s is of type SERIAL but has no device element.", jitem_count, jmenu_name);
+
+								if (json_object_object_get_ex(jmenuitem, "speed", &jserial))
+									mi->fm_serial.fm_speed = json_object_get_int(jserial);
+								else
+									eb_debug (1, 0, "JSON", "Menu item %d in menu %s is of type SERIAL but has no speed element.", jitem_count, jmenu_name);
+
+								mi->fm_serial.fm_parity = PAR_NONE;
+
+								if (json_object_object_get_ex(jmenuitem, "parity", &jserial))
+								{
+									device = (char *) json_object_get_string(jserial);
+									if (!strcasecmp(device, "odd"))
+										mi->fm_serial.fm_parity = PAR_ODD;
+									else if (!strcasecmp(device, "even"))
+										mi->fm_serial.fm_parity = PAR_EVEN;
+									else if (!strcasecmp(device, "none"))
+										mi->fm_serial.fm_parity = PAR_NONE;
+									else
+										eb_debug (1, 0, "JSON", "Menu item %d in menu %s is of type SERIAL and parity key given but not set to odd, even or none", jitem_count, jmenu_name);
+								}
+
+								mi->fm_serial.fm_stopbits = 1;
+
+								if (json_object_object_get_ex(jmenuitem, "stopbits", &jserial))
+								{
+									uint8_t	b;
+
+									b = json_object_get_int(jserial);
+
+									if (b != 1 && b != 2)
+										eb_debug (1, 0, "JSON", "Menu item %d in menu %s is of type SERIAL and stopbits key given but not set to either 1 or 2", jitem_count, jmenu_name);
+
+									mi->fm_serial.fm_stopbits = b;
+								}
+										
+								mi->fm_serial.fm_wordlength = BIT_EIGHT;
+
+								if (json_object_object_get_ex(jmenuitem, "wordlength", &jserial))
+								{
+									uint8_t b;
+
+									b = json_object_get_int(jserial);
+
+									if (b != 7 && b != 8)
+										eb_debug (1, 0, "JSON", "Menu item %d in menu %s is of type SERIAL and wordlength key given but not set to either 7 or 8", jitem_count, jmenu_name);
+									if (b == 7)
+										mi->fm_serial.fm_wordlength = BIT_SEVEN;
+									/* 8 is the default above */
+								}
 							} break;
 
 							case EB_FAST_MENU_SCRIPT:
@@ -13074,6 +12855,15 @@ int main (int argc, char **argv)
 								prev_info = 1;
 							}
 							
+							if (d && d->type == EB_DEF_LOCAL && d->local.fast_menu) /* FAST enabled */
+							{
+								char	extra[1024];
+
+								sprintf (extra, ", FAST server with menu %s", d->local.fast_menu->menu_name);
+								strcat (info, extra);
+
+							}
+
 							if (exposed)
 							{
 								char	exp_string[128];
@@ -13306,6 +13096,36 @@ int main (int argc, char **argv)
 
 		}
 
+		if (fast_menus)
+		{
+			struct __eb_fast_menu *m;
+
+			fprintf (stderr, "\nFAST Menus\n\n");
+
+			m = fast_menus;
+
+			while (m)
+			{
+				struct __eb_fast_menu_item *i;
+
+				fprintf (stderr, "  Menu name %s, heading '%s':\n\n", m->menu_name, m->menu_heading);
+
+				i = m->item;
+
+				while (i)
+				{
+					fprintf (stderr, "  %c type %02X %s\n", i->keypress, i->fm_type, i->fm_description);
+					i=i->next;
+				}
+				fprintf (stderr, "\n");
+
+				m = m->next;
+			}
+
+			fprintf (stderr, "\n");
+
+		}
+
 	}
 	
 	/* Start the engines, captain! */
@@ -13524,6 +13344,7 @@ int main (int argc, char **argv)
 	signal (SIGINT, eb_signal_handler);
 	signal (SIGUSR1, eb_signal_handler);
 	signal (SIGUSR2, eb_signal_handler);
+	signal (SIGCHLD, SIG_IGN); /* To ignore exit status from child scripts */
 
 	/* Now doze off */
 

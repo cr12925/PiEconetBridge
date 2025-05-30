@@ -128,6 +128,14 @@
 #define ECONET_BRIDGE_KEEPALIVE_CTRL	0xD0	// Ctrl byte used for trunk keepalive packets
 #define ECONET_BRIDGE_LOOP_PROBE	0xCF	// Used to for loop probes to see if we need to shut a device down
 
+/* Some port numbers - others are defined below */
+
+#define EB_PORT_PS_QUERY	0x9F
+#define EB_PORT_PS		0x9E
+#define EB_PORT_FINDSERVER	0xB0
+#define EB_PORT_PS_DATA		0xD1
+#define EB_PORT_IP		0xD2
+
 /* 
  * struct containing the data elements of 
  * a loop probe
@@ -433,6 +441,7 @@ struct __eb_fast_client {
 	char *		command; /* Command to execute and connect the user to. NULL if not using a command - and if no dest_host and no command, it's the internal handler */
 	uint8_t		fast_output_ctrl; // Oscillates 0, 1 on transmissions from *FAST handler
 	uint8_t		fast_input_ctrl; // Ditto on receiption
+	pthread_t	fast_supervisor; // Thread that spins off the other threads
 	pthread_t	fast_server; // Thread that is operating the *FAST handler
 	pthread_t	fast_io_handler[2]; // Thread that mediates IO between despatcher and the fast handler
 	pthread_mutex_t	fast_io_mutex[2]; // Governs access to the input/output variables below
@@ -441,10 +450,12 @@ struct __eb_fast_client {
 	char		* pending[2]; // Buffers
 	int		pt_len[2]; // Amount of data in buffers
 	int		pt_sz[2]; // Size of buffers
-	uint8_t		fast_thread_ended; // IO thread sets this to 1 when it has finished and cleaned up so that we can free the struct and take it off the list
+	uint8_t		fast_exit; // IO and server threads set this to 1 when they want the other threads to die
 	//uint8_t		fast_reset; // Set to 1 when we get a new connection
 	uint8_t		fast_client_ready; // Set to 1 when client indicates it will receive more output to display - happens when we get the USRPROC call. If there is output, we send it. If not, this will get set to 1 so that the fast handler knows it can send it instead
 	uint8_t		fast_client_disconnected; // Set to 0 on init, 1 when we receive EB_FAST_OP_DISCONNECT from client. Causes to_server thread to exit, which kills off the to_network thread and cleans up.
+	uint32_t	fast_timeout;
+	pid_t		fast_child; // Process we spawned for login, script, etc.
 	pthread_cond_t	fast_wake[2];
 	struct __eb_fast_menu	*menu_home, *menu_current;
 	struct __eb_device	*parent; // Device the user is talking to
@@ -454,7 +465,7 @@ struct __eb_fast_client {
 
 /* Fast Data Port */
 
-#define EB_FAST_PORT		0xA0
+#define EB_PORT_FAST		0xA0
 
 /* *FAST JSR &FFFF codes */
 
@@ -469,7 +480,7 @@ struct __eb_fast_client {
 
 /* Server acknowledging connection */
 
-#define EB_FAST_OP_ACK		0x80
+#define EB_FAST_OP_WELCOME	0x80
 
 /* *FAST port */
 
@@ -536,12 +547,16 @@ struct __eb_fast_menu_item	{
 			char		*fm_host;
 			struct addrinfo	*fm_address; /* NULL until resolved; resolve on each connection attempt not startup */
 			uint16_t	fm_port; /* Host byte order */
+			int		fm_socket; /* Socket FD used by connection */
+			int		fm_family; /* Address family - AF_UNSPEC, AF_INET, AF_INET6 */
 		} fm_tcp;
 
 		struct {
 			char		*fm_device;
-			speed_t		fm_speed; /* See termios.h */
-			struct termios	*fm_termios; /* Ditto */
+			int		fm_speed;
+			enum		{ PAR_NONE, PAR_EVEN, PAR_ODD } fm_parity;
+			enum		{ BIT_SEVEN, BIT_EIGHT } fm_wordlength;
+			uint8_t		fm_stopbits;
 		} fm_serial;
 
 		struct {
@@ -606,6 +621,7 @@ struct __eb_fast_menu {
  *
  */
 
+#if 0 /* old code */
 struct __eb_fast_station
 {
 	uint8_t			net, stn; /* Where the client is */
@@ -646,6 +662,8 @@ struct __eb_fast_net
 	struct __eb_fast_station	*stns; 
 	struct __eb_fast_net	*next, *prev;
 };
+
+#endif /* old code */
 
 /* __eb_device
 
@@ -830,31 +848,17 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			port_func		port_funcs[256]; // Function handlers for each port
 			void			*port_param[256]; // Pointer to parameter data registered when the port was seized (e.g. for an FS, it's the __fs_sstation struct)
 			uint8_t			last_port; // Last port we allocated
+
 			// Stuff to handle *FAST to a local host
-			/* OLD CODE
-			uint8_t			fastbit; // Oscillates 0, 1 on transmissions from the *FAST handler
-			uint8_t			fast_input_ctrl; // Ditto on receiption
-			uint8_t			fast_client_net, fast_client_stn; // Current client
-			pthread_t		fast_handler; // Thread that is operating the *FAST handler
-			pthread_t		fast_io_handler; // Thread that mediates IO between despatcher and the fast handler
-			pthread_mutex_t		fast_io_mutex; // Governs access to the input/output variables below
-			int			fast_to_despatch[2], fast_to_handler[2]; // Socketpairs
-			uint8_t			fast_thread_alive; // despatcher sets to 0; *FAST thread sets to 1 - so we can tell it's ready
-			uint8_t			fast_reset; // Set to 1 when we get a new connection
-			uint8_t			fast_client_ready; // Set to 1 when client indicates it will receive more output to display - happens when we get the USRPROC call. If there is output, we send it. If not, this will get set to 1 so that the fast handler knows it can send it instead
-			pthread_cond_t		fast_wake;
-			*/
 			pthread_mutex_t		fast_client_list_lock;
 			struct __eb_fast_client	*fast_client_list;
+			uint8_t			fast_priv_stns[8192]; // Bitmap of stations who have logged into this FS with the Bridge privilege bit (cleared on *BYE by the FS - means that if the FS gets shut down, we can still tell this was a privileged station)
+			struct __eb_fast_menu		*fast_menu; /* Starting menu name */
+
+			// Notify handling
 			struct __eb_notify	*notify; // List of stuff received via *notify to a local server
 			pthread_mutex_t		notify_mutex; // Mutex to lock the notify list
 			pthread_t		notify_thread; // Notify watcher thread for this device
-			uint8_t			fast_priv_stns[8192]; // Bitmap of stations who have logged into this FS with the Bridge privilege bit (cleared on *BYE by the FS - means that if the FS gets shut down, we can still tell this was a privileged station)
-
-			/* V2.2 New *FAST handling stuff */
-
-			struct __eb_fast_net		*fast_nets; /* List of nets which have clients in them. Better to search net first. */
-			struct __eb_fast_menu		*fast_menu; /* Starting menu name */
 
 		} local;
 
