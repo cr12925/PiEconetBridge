@@ -15,7 +15,7 @@ int main (int argc, char **argv)
 	FILE 	*in, *out;
 	unsigned char	infile[1024], outfile[1024];
 	uint8_t	tr_mode = 0; // Beeb to Unix
-	int	c;
+	int	c, last_char;
 
 	infile[0] = outfile[0] = 0;
 
@@ -68,11 +68,33 @@ int main (int argc, char **argv)
 		exit (EXIT_FAILURE);
 	}
 
+	last_char = 0;
+
 	while ((c = fgetc(in)) != EOF)
 	{
-		if (c == (tr_mode ? 0x0d : 0x0a))
-			c = (tr_mode ? 0x0a : 0x0d);
-		fputc(c, out);
+		//if (c == (tr_mode ? 0x0d : 0x0a))
+			//c = (tr_mode ? 0x0a : 0x0d);
+		if (tr_mode)
+		{
+			if (last_char == 0x0D && c == 0x0A)
+				fputc(0x0A, out);
+			else if (last_char == 0x0A && c == 0x0D)
+				fputc(0x0A, out);
+			else if (last_char == 0x0D || last_char == 0x0A)
+				fputc(last_char, out);
+
+			if (c != 0x0D && c != 0x0A)
+				fputc(c, out);
+			else if (last_char)
+				last_char = 0x00;
+			else	last_char = c;
+		}
+		else
+		{
+			if (c == 0x0A)
+				fputc(0x0D, out);
+			fputc(c, out);
+		}
 	}
 
 	fclose (in); fclose (out);

@@ -7953,13 +7953,15 @@ static void * eb_device_despatcher (void * device)
 								fsop_register_machine (m); /* this function will free the struct */
 
 							}
-							else
+							else if (p->p->p.aun_ttype == ECONET_AUN_DATA || p->p->p.aun_ttype == ECONET_AUN_BCAST)
 							{
 							/* JOB : If it's ECONET_AUN_DATA and we get here, send a NAK - port not handled - e.g. fileserver shut down. */
 							/* JOB : Probably want to handle requests for port &00 here - we'll need a *list* of functions we need to send them to because it'll be more than one bit of code - but the list will be port ctrl byte, within port &00 - logically only one bit of code can handle each type of immediate. */
 								
-								eb_debug (0, 1, "BRIDGE", "%-8s %3d.%3d from %3d.%3d traffic to port &%02X whcih is not listening", eb_type_str(d->type), d->net, d->local.stn, p->p->p.srcnet, p->p->p.srcstn, p->p->p.port);
+								eb_dump_packet (d, EB_PKT_DUMP_DUMPED, p->p, p->length);
+								eb_debug (0, 1, "BRIDGE", "%-8s %3d.%3d from %3d.%3d Received traffic to port &%02X whcih is not listening", eb_type_str(d->type), d->net, d->local.stn, p->p->p.srcnet, p->p->p.srcstn, p->p->p.port);
 							}
+							/* Else ignore it - it's an immediate we are not interested in or have dealt with above */
 						}
 					} break;
 
@@ -9536,6 +9538,9 @@ int eb_parse_json_config(struct json_object *jc)
 										eb_debug (1, 0, "JSON", "Menu item %d in menu %s is of type TYPE but has unknown family %s", jitem_count, jmenu_name, family);
 								}
 								
+								if (json_object_object_get_ex(jmenuitem, "viewdata", &jtmp) && json_object_get_boolean(jtmp))
+									mi->is_viewdata = 1;
+
 								mi->fm_tcp.fm_host = eb_malloc(__FILE__, __LINE__, "JSON", "Space for FAST TCP menu item host", strlen(host)+1);
 								strcpy(mi->fm_tcp.fm_host, host);
 								mi->fm_tcp.fm_port = port;
@@ -9633,6 +9638,9 @@ int eb_parse_json_config(struct json_object *jc)
 										mi->fm_serial.fm_wordlength = BIT_SEVEN;
 									/* 8 is the default above */
 								}
+								
+								if (json_object_object_get_ex(jmenuitem, "viewdata", &jserial) && json_object_get_boolean(jserial))
+									mi->is_viewdata = 1;
 							} break;
 
 							case EB_FAST_MENU_SCRIPT:

@@ -569,7 +569,8 @@ struct __eb_fast_menu_item	{
 		} fm_submenu;
 
 		struct {
-			uint8_t		fm_fs_func; /* FS Function code - not a port &99 FSOp - this is internal to the bridge */
+			enum		{ FAST_FS_STOPSTART, FAST_FS_DISC_LIST, FAST_FS_DISC_RENAME, FAST_FS_TAPE_FORMAT, FAST_FS_TAPE_MOUNT, FAST_FS_DISMOUNT, FAST_FS_TAPE_LIST_MOUNTED,
+					FAST_FS_USER_LOGGEDON, FAST_FS_USER_LOGOFF, FAST_FS_STATION_LOGOFF } fm_fsfunc;
 		} fm_fsfunc;
 
 		/* No struct for system - it's built in. */
@@ -1172,6 +1173,9 @@ struct __econet_packet_ip {
 
 #endif
 
+/* Utility externs */
+
+unsigned long timediffmsec(struct timeval *s, struct timeval *d);
 
 /* Externs for the FS */
 extern struct __eb_device * eb_find_station (uint8_t, struct __econet_packet_aun *);

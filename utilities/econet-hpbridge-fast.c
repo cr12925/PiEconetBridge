@@ -489,6 +489,9 @@ void eb_fast_run_connection (struct __eb_fast_client *fc, int sock)
 	struct pollfd	p[2];
 	int	pollres;
 
+	fcntl(fc->fc_socket[EB_FAST_TO_SERVER][0], F_SETFL, fcntl(fc->fc_socket[EB_FAST_TO_SERVER][0], F_GETFL) | O_NONBLOCK);
+	fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) | O_NONBLOCK);
+
 	p[0].fd = sock;
 	p[0].revents = 0;
 	p[0].events = POLLIN | POLLHUP;
@@ -531,14 +534,23 @@ void eb_fast_run_connection (struct __eb_fast_client *fc, int sock)
 	
 				if (res > 0)
 				{
+					int	writeres;
+
 					if (count == 0)
-						write(fc->fc_socket[EB_FAST_TO_NETWORK][1], data, res);
+						writeres = write(fc->fc_socket[EB_FAST_TO_NETWORK][1], data, res);
 					else
-						write(sock, data, res);
+						writeres = write(sock, data, res);
+
+					if (writeres < 0)
+						eb_debug (0, 2, "FAST", "%-8s %3d.%3d from %3d.%3d FAST server encoutered error writing to %s (%s)", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, (count == 0 ? "Econet" : "distant"), strerror(errno));
+				}
+				else if (res < 0 && errno == EWOULDBLOCK)
+				{
+					/* do nothing */
 				}
 				else if (res < 0)
 				{	
-					eb_debug (0, 2, "FAST", "%-8s %3d.%3d from %3d.%3d FAST server encoutered error writing to %s (%s)", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, (count == 0 ? "network" : "TCP socket"), strerror(errno));
+					eb_debug (0, 2, "FAST", "%-8s %3d.%3d from %3d.%3d FAST server encoutered error reading %s (%s)", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, (count == 0 ? "distant" : "Econet"), strerror(errno));
 					return;
 				}
 			}
@@ -553,6 +565,10 @@ void eb_fast_run_connection (struct __eb_fast_client *fc, int sock)
 		p[1].events = POLLIN | POLLHUP;
 
 	}
+
+	fcntl(fc->fc_socket[EB_FAST_TO_SERVER][0], F_SETFL, fcntl(fc->fc_socket[EB_FAST_TO_SERVER][0], F_GETFL) & ~O_NONBLOCK);
+	fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) & ~O_NONBLOCK);
+
 }
 
 /* Repeatedly display menu until quit */
@@ -601,8 +617,6 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 		return;
 	}
 
-
-	//while (1) { sleep (10); } /* Test */
 
 #ifdef FAST_TEST
 	eb_debug (0, 1, "FAST", "FAST display menu routine begun - in = %p, out = %d", fc->from_client, fc->fc_socket[EB_FAST_TO_SERVER][1]);
@@ -772,9 +786,11 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 									}
 									else
 									{
+										uint8_t	option=1;
 										/* Connection open */
 
 										eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Connected to %s:%d", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_tcp.fm_host, i->fm_tcp.fm_port);
+										setsockopt (i->fm_tcp.fm_socket, SOL_SOCKET, SOCK_NONBLOCK, &option, 1);
 										eb_fast_run_connection (fc, i->fm_tcp.fm_socket);
 
 									}
@@ -793,7 +809,7 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 								struct termios	t;
 								char	connstring[64];
 
-								conn = open(i->fm_serial.fm_device, O_RDWR);
+								conn = open(i->fm_serial.fm_device, O_RDWR | O_NONBLOCK);
 
 								if (conn < 0)
 								{
@@ -930,8 +946,6 @@ void *	eb_fast_server_thread(void * fc)
 
 	me = (struct __eb_fast_client *) fc;
 
-	//fprintf (stderr, "\n\n*** eb_fast_server_thead(%p)", me);
-
 #ifndef FAST_TEST
 	eb_debug (0, 4, "FAST", "%-8s %3d.%3d from %d.%d FAST server thread starting", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn);
 #else
@@ -978,6 +992,7 @@ void * eb_fast_io_handler_to_network (void * fc)
 	{
 		int pollreturn;
 		struct timespec t, t2;
+		struct timeval last_tx, now;
 
 		/* Wait for request for data from remote end - we get signalled here from both the 
 		 * server end, and the receiver when more data is requested
@@ -995,13 +1010,81 @@ void * eb_fast_io_handler_to_network (void * fc)
 		 * more
 		 */
 
-		if (pthread_cond_timedwait (&(me->fast_wake[EB_FAST_TO_NETWORK]), &(me->fast_io_mutex[EB_FAST_TO_NETWORK]), &t) < 0)
+		gettimeofday(&now, 0);
+		last_tx.tv_sec = last_tx.tv_usec = 0;
+
+		if (!(me->pt_len[EB_FAST_TO_NETWORK] > 0 && me->fast_client_ready && timediffmsec(&last_tx, &now) < EB_FAST_OUTPUTWAIT) && pthread_cond_timedwait (&(me->fast_wake[EB_FAST_TO_NETWORK]), &(me->fast_io_mutex[EB_FAST_TO_NETWORK]), &t) < 0) /* Wait if (i) nothing waiting to send to net, or client not ready, or last transmission was less than OUTPUTWAIT ms ago (to minimize number of small packets) */
 		{
 			eb_debug (1, 0, "FAST", "Fatal error doing timewait on fast_wake[TO_NETWORK]");
 		}
 
 		if (me->fast_exit) /* quit */
 			break;
+
+		/* Process output - 32 byte chunks we think */
+
+		if (me->fast_client_ready && me->pt_len[EB_FAST_TO_NETWORK] > 0)
+		{
+			int	sz = (me->pt_len[EB_FAST_TO_NETWORK] > 32 ? 32 : me->pt_len[EB_FAST_TO_NETWORK]);
+
+			gettimeofday(&last_tx, 0);
+
+			eb_debug (0, 4, "FAST", "%-8s %3d.%3d from %3d.%3d FAST IO thread to network: checking for data to send to network", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn);
+
+			// pthread_mutex_lock(&(me->fast_io_mutex[EB_FAST_TO_NETWORK]));
+
+
+#ifdef FAST_TEST
+			/* for test purposes, write to stdout  - when in production, check client is ready and send a packet */
+
+			write(STDOUT_FILENO, me->pending[EB_FAST_TO_NETWORK], sz);
+
+			me->fast_client_ready = 1; /* Fudge for testing */
+
+#else
+			/* Stuff here to write to network */
+			eb_fast_send_data (me, me->pending[EB_FAST_TO_NETWORK], sz);
+			me->fast_client_ready = 0;
+#endif
+
+			eb_debug (0, 4, "FAST", "%-8s %3d.%3d from %3d.%3d FAST IO thread to network: send %d bytes to network", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn, sz);
+
+			memmove(me->pending[EB_FAST_TO_NETWORK], &(me->pending[EB_FAST_TO_NETWORK][sz]), me->pt_len[EB_FAST_TO_NETWORK]);
+
+			me->pt_len[EB_FAST_TO_NETWORK] -= sz;
+
+#ifndef FAST_TEST
+			eb_debug (0, 4, "FAST", "%-8s %3d.%3d from %3d.%3d FAST IO thread to network checking whether can shrink buffer: current len/size/diff  %d/%d/%d", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn, me->pt_len[EB_FAST_TO_NETWORK], me->pt_sz[EB_FAST_TO_NETWORK], (me->pt_sz[EB_FAST_TO_NETWORK] - me->pt_len[EB_FAST_TO_NETWORK]));
+#else
+			eb_debug (0, 4, "FAST", "FAST IO thread to network checking to see if it can shrink the buffer: current to_network size = %d, len = %d, diff = %d", 
+					me->pt_sz[EB_FAST_TO_NETWORK],
+					me->pt_len[EB_FAST_TO_NETWORK],
+					(me->pt_sz[EB_FAST_TO_NETWORK] - me->pt_len[EB_FAST_TO_NETWORK]));
+#endif
+
+			if ((me->pt_sz[EB_FAST_TO_NETWORK] > EB_FAST_BUFSIZE) && (me->pt_sz[EB_FAST_TO_NETWORK] - me->pt_len[EB_FAST_TO_NETWORK]) >= (EB_FAST_SHRINKTHRESHOLD))
+			{
+				uint32_t	new_sz;
+
+				/* Shrink the buffer, but not below BUFSIZE */
+			
+				new_sz = ((me->pt_sz[EB_FAST_TO_NETWORK] - me->pt_len[EB_FAST_TO_NETWORK]) / EB_FAST_BUFSIZE) * EB_FAST_BUFSIZE;
+
+				if (new_sz == 0)
+					new_sz = EB_FAST_BUFSIZE;
+
+#ifndef FAST_TEST
+				eb_debug (0, 4, "FAST", "%-8s %3d.%3d from %3d.%3d FAST IO thread to network shrunk buffer now used/len %d/%d", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn, me->pt_len[EB_FAST_TO_NETWORK], new_sz);
+#else
+				eb_debug (0, 4, "FAST", "FAST IO thread shrunk buffer now used/len %d/%d", me->pt_len[EB_FAST_TO_NETWORK], new_sz);
+#endif
+
+				me->pending[EB_FAST_TO_NETWORK] = realloc(me->pending[EB_FAST_TO_NETWORK], new_sz);
+
+				me->pt_sz[EB_FAST_TO_NETWORK] = new_sz;
+			}
+
+		}
 
 		/* Poll to-network socket */
 
@@ -1081,69 +1164,6 @@ void * eb_fast_io_handler_to_network (void * fc)
 		else
 			eb_debug (0, 4, "FAST", "%-8s %3d.%3d from %3d.%3d FAST IO thread to network: nothing to process into buffer", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn);
 
-		/* Process output - 32 byte chunks we think */
-
-		if (me->fast_client_ready && me->pt_len[EB_FAST_TO_NETWORK] > 0)
-		{
-			int	sz = (me->pt_len[EB_FAST_TO_NETWORK] > 32 ? 32 : me->pt_len[EB_FAST_TO_NETWORK]);
-
-			eb_debug (0, 4, "FAST", "%-8s %3d.%3d from %3d.%3d FAST IO thread to network: checking for data to send to network", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn);
-
-			// pthread_mutex_lock(&(me->fast_io_mutex[EB_FAST_TO_NETWORK]));
-
-
-#ifdef FAST_TEST
-			/* for test purposes, write to stdout  - when in production, check client is ready and send a packet */
-
-			write(STDOUT_FILENO, me->pending[EB_FAST_TO_NETWORK], sz);
-
-			me->fast_client_ready = 1; /* Fudge for testing */
-
-#else
-			/* Stuff here to write to network */
-			eb_fast_send_data (me, me->pending[EB_FAST_TO_NETWORK], sz);
-			me->fast_client_ready = 0;
-#endif
-
-			eb_debug (0, 4, "FAST", "%-8s %3d.%3d from %3d.%3d FAST IO thread to network: send %d bytes to network", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn, sz);
-
-			memmove(me->pending[EB_FAST_TO_NETWORK], &(me->pending[EB_FAST_TO_NETWORK][sz]), me->pt_len[EB_FAST_TO_NETWORK]);
-
-			me->pt_len[EB_FAST_TO_NETWORK] -= sz;
-
-#ifndef FAST_TEST
-			eb_debug (0, 4, "FAST", "%-8s %3d.%3d from %3d.%3d FAST IO thread to network checking whether can shrink buffer: current len/size/diff  %d/%d/%d", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn, me->pt_len[EB_FAST_TO_NETWORK], me->pt_sz[EB_FAST_TO_NETWORK], (me->pt_sz[EB_FAST_TO_NETWORK] - me->pt_len[EB_FAST_TO_NETWORK]));
-#else
-			eb_debug (0, 4, "FAST", "FAST IO thread to network checking to see if it can shrink the buffer: current to_network size = %d, len = %d, diff = %d", 
-					me->pt_sz[EB_FAST_TO_NETWORK],
-					me->pt_len[EB_FAST_TO_NETWORK],
-					(me->pt_sz[EB_FAST_TO_NETWORK] - me->pt_len[EB_FAST_TO_NETWORK]));
-#endif
-
-			if ((me->pt_sz[EB_FAST_TO_NETWORK] > EB_FAST_BUFSIZE) && (me->pt_sz[EB_FAST_TO_NETWORK] - me->pt_len[EB_FAST_TO_NETWORK]) >= (EB_FAST_SHRINKTHRESHOLD))
-			{
-				uint32_t	new_sz;
-
-				/* Shrink the buffer, but not below BUFSIZE */
-			
-				new_sz = ((me->pt_sz[EB_FAST_TO_NETWORK] - me->pt_len[EB_FAST_TO_NETWORK]) / EB_FAST_BUFSIZE) * EB_FAST_BUFSIZE;
-
-				if (new_sz == 0)
-					new_sz = EB_FAST_BUFSIZE;
-
-#ifndef FAST_TEST
-				eb_debug (0, 4, "FAST", "%-8s %3d.%3d from %3d.%3d FAST IO thread to network shrunk buffer now used/len %d/%d", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn, me->pt_len[EB_FAST_TO_NETWORK], new_sz);
-#else
-				eb_debug (0, 4, "FAST", "FAST IO thread shrunk buffer now used/len %d/%d", me->pt_len[EB_FAST_TO_NETWORK], new_sz);
-#endif
-
-				me->pending[EB_FAST_TO_NETWORK] = realloc(me->pending[EB_FAST_TO_NETWORK], new_sz);
-
-				me->pt_sz[EB_FAST_TO_NETWORK] = new_sz;
-			}
-
-		}
-
 		/* Snooze off again */
 
 #ifndef FAST_TEST
@@ -1197,13 +1217,14 @@ void * eb_fast_io_handler_to_server (void * fc)
 		/* Wait for something to do */
 
 		clock_gettime(CLOCK_REALTIME, &t);
-		clock_gettime(CLOCK_REALTIME, &t2);
+		memcpy(&t2, &t, sizeof(struct timespec));
 
 		t.tv_nsec += 1000000 * EB_FAST_OUTPUTWAIT; // 100ms
 		if (t2.tv_nsec < t.tv_nsec)
 			t.tv_sec++;
 
-		pthread_cond_timedwait (&(me->fast_wake[EB_FAST_TO_SERVER]), &(me->fast_io_mutex[EB_FAST_TO_SERVER]), &t);
+		if (me->pt_len[EB_FAST_TO_SERVER] == 0) /* Snooze off, otherwise, send more */
+			pthread_cond_timedwait (&(me->fast_wake[EB_FAST_TO_SERVER]), &(me->fast_io_mutex[EB_FAST_TO_SERVER]), &t);
 
 		if (me->fast_exit)
 			break; /* Get out */
@@ -1290,8 +1311,6 @@ void * eb_fast_start_fast_service (void *data)
 	}
 
 	/* Spawn a server thread */
-
-	//fprintf (stderr, "\n\n*** Starting eb_fast_server_thread(%p)\n\n", fc);
 
 	if (pthread_create(&(fc->fast_server), NULL, eb_fast_server_thread, fc))
 	{
@@ -1573,6 +1592,11 @@ void * main_io_routine (void * input)
 	pthread_cancel(fc->fast_server);
 
 	return NULL;
+}
+
+char * eb_type_str(uint16_t t)
+{
+	return "FastTest";
 }
 
 int main (void)

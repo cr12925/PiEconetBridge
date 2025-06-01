@@ -315,6 +315,8 @@ uint8_t eb_device_init_fast (uint8_t net, uint8_t stn, char *menuname)
 
 	if (!fm)
 		eb_debug (1, 0, "CONFIG", "Cannot create *FAST server on %d.%d with menu %s - unknown menu name", net, stn, menuname);
+	else
+		eb_debug (0, 1, "CONFIG", "%-8s %3d.%3d Assigned FAST menu %s", eb_type_str(existing->type), existing->net, existing->local.stn, fm->menu_name);
 
 	return 1;
 
@@ -979,6 +981,9 @@ uint8_t eb_device_init_set_pooled_nets (struct __eb_pool *pool, struct __eb_devi
 
 	source->all_nets_pooled = all_pooled;
 
+	if (all_pooled)
+		memset(nets, 0xFF, sizeof(uint8_t) * 255);
+
 	if (source->type == EB_DEF_TRUNK)
 	{
 		source->trunk.pool = pool;
@@ -987,7 +992,7 @@ uint8_t eb_device_init_set_pooled_nets (struct __eb_pool *pool, struct __eb_devi
 	else
 	{
 		source->wire.pool = pool;
-		memcpy(&(source->trunk.use_pool), nets, sizeof(uint8_t) * 255);
+		memcpy(&(source->wire.use_pool), nets, sizeof(uint8_t) * 255);
 	}
 
 	DEVINIT_DEBUG("Applied pool %s on device %s %s %d",

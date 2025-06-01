@@ -16,6 +16,8 @@
 #define FS_CONFIG_PIFSPERMS	0x40
 #define FS_CONFIG_MASKDIRWRR	0x80
 
+#define EB_PORT_FS		0x99
+
 extern void fs_setup(void);
 
 extern struct __eb_device * eb_find_station (uint8_t, struct __econet_packet_aun *);

@@ -517,8 +517,13 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 					lbuf[0] = (decrypted_length & 0xff00) >> 8;
 					lbuf[1] = (decrypted_length & 0xff);
 
-					if (write(me->trunk_socket[1], lbuf, 2) != 2)
-						eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Failed to write packet length to child trunk", me->trunk->trunk.local_port);
+					if ((w_result = write(me->trunk_socket[1], lbuf, 2) != 2))
+					{
+						if (w_result < 0)
+							eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Failed to write packet length to child trunk (%s)", me->trunk->trunk.local_port, strerror(errno));
+						else
+							eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Failed to write packet length to child trunk (short write of %d bytes vs 2 requested)", me->trunk->trunk.local_port, w_result);
+					}
 					else
 					{
 						w_result = write (me->trunk_socket[1], buffer, decrypted_length);
@@ -867,7 +872,7 @@ void * eb_multitrunk_handler_thread (void * input)
 							{
 								realdata_start = ++ptr;
 	
-								if ((ptr = eb_multitrunk_find_marker(buffer, ptr, len)) >= 0) /* Close marker found */
+								if ((ptr = eb_multitrunk_find_marker(buffer, ptr, len)) >= 0 && (ptr-realdata_start > 1)) /* Close marker found and there's actual data in between */
 								{
 									realdata_len = ptr - realdata_start;
 	

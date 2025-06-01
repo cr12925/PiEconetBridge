@@ -25,7 +25,7 @@ FSOP(10)
 	time_t		now;
 	uint8_t		monthyear, day;
 
-        fs_debug (0, 2, "%12sfrom %3d.%3d Read FS time", "", f->net, f->stn);
+        fs_debug_full (0, 2, f->server, f->net, f->stn, "Read FS time", "", f->net, f->stn);
 
         now = time(NULL);
         t = *localtime(&now);
