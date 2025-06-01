@@ -9017,9 +9017,7 @@ void eb_json_pool_assignment (struct json_object *j, uint8_t objtype)
 		jdevice = json_object_array_get_idx (j, dcount);
 
 		json_object_object_get_ex (jdevice, "pool-assignment", &jpools);
-		json_object_object_get_ex (jdevice, "pool-all", &jallpool);
-		if (jallpool) all_pooled = json_object_get_boolean(jallpool);
-	
+
 		if (jpools)
 		{
 			uint16_t	pcount = 0, plength;
@@ -9060,9 +9058,13 @@ void eb_json_pool_assignment (struct json_object *j, uint8_t objtype)
 				if (!pool)
 					eb_debug (1, 0, "JSON", "Cannot implement pool assignment for %s %d - pool name %s does not exist for array index %d", objtype ? "Trunk" : "Econet", netlocalport, poolname, pcount);
 
+				json_object_object_get_ex (jpool, "pool-all", &jallpool);
+
+				if (jallpool && (json_object_get_boolean(jallpool) == TRUE)) all_pooled = 1;
+	
 				json_object_object_get_ex (jpool, "nets", &jnets);
 
-				if (!jnets)
+				if (!all_pooled && !jnets)
 					eb_debug (1, 0, "JSON", "Cannot implement pool assignment for %s %d - no pool 'nets' key for pool assignment array index %d", objtype ? "Trunk" : "Econet", netlocalport, pcount);
 
 				memset(nets, 0, 255);
@@ -9170,7 +9172,7 @@ int eb_parse_json_config(struct json_object *jc)
 
 				policy = EB_FW_ACCEPT;
 
-				if (json_object_object_get_ex(jchain, "accept", &jchain_default) && !json_object_get_boolean(jchain_default))
+				if (json_object_object_get_ex(jchain, "accept", &jchain_default) && (json_object_get_boolean(jchain_default) == FALSE))
 					policy = EB_FW_REJECT;
 
 				fw_chain = eb_malloc (__FILE__, __LINE__, "JSON", "Create new firewall chain head", sizeof(struct __eb_fw_chain));
@@ -9274,7 +9276,7 @@ int eb_parse_json_config(struct json_object *jc)
 
 						if ((json_object_object_get_ex(jentry, "accept", &jpolicy)))
 						{
-							if (json_object_get_boolean(jpolicy))
+							if (json_object_get_boolean(jpolicy) == TRUE)
 								fw_entry->action = EB_FW_ACCEPT;
 							else	fw_entry->action = EB_FW_REJECT;
 						}
@@ -9538,7 +9540,7 @@ int eb_parse_json_config(struct json_object *jc)
 										eb_debug (1, 0, "JSON", "Menu item %d in menu %s is of type TYPE but has unknown family %s", jitem_count, jmenu_name, family);
 								}
 								
-								if (json_object_object_get_ex(jmenuitem, "viewdata", &jtmp) && json_object_get_boolean(jtmp))
+								if (json_object_object_get_ex(jmenuitem, "viewdata", &jtmp) && (json_object_get_boolean(jtmp) == TRUE))
 									mi->is_viewdata = 1;
 
 								mi->fm_tcp.fm_host = eb_malloc(__FILE__, __LINE__, "JSON", "Space for FAST TCP menu item host", strlen(host)+1);
@@ -9639,7 +9641,7 @@ int eb_parse_json_config(struct json_object *jc)
 									/* 8 is the default above */
 								}
 								
-								if (json_object_object_get_ex(jmenuitem, "viewdata", &jserial) && json_object_get_boolean(jserial))
+								if (json_object_object_get_ex(jmenuitem, "viewdata", &jserial) && (json_object_get_boolean(jserial) == TRUE))
 									mi->is_viewdata = 1;
 							} break;
 
@@ -9749,7 +9751,7 @@ int eb_parse_json_config(struct json_object *jc)
 			if (json_object_object_get_ex(jgeneral, "dynamic-fw-out", &jfw))
 				fw_out = eb_get_fw_chain_byname((char *) json_object_get_string(jfw));
 
-			if (json_object_object_get_ex(jgeneral, "dynamic-autoack", &jdynamic_autoack) && json_object_get_boolean(jdynamic_autoack))
+			if (json_object_object_get_ex(jgeneral, "dynamic-autoack", &jdynamic_autoack) && (json_object_get_boolean(jdynamic_autoack) == TRUE))
 				flags |= EB_DEV_CONF_AUTOACK;
 
 			net = json_object_get_int(jdynamic);
@@ -9808,16 +9810,16 @@ int eb_parse_json_config(struct json_object *jc)
 							json_object_object_get_ex(jaun_entry, "autoack", &jstation_autoack);
 							json_object_object_get_ex(jaun_entry, "net-address", &jstation_host);
 
-							if (jstation_autoack && json_object_get_boolean(jstation_autoack))
+							if (jstation_autoack && (json_object_get_boolean(jstation_autoack) == TRUE))
 								is_autoack = 1;
 
 							if (jnet_baseport)
 								port = json_object_get_int(jnet_baseport);
 
-							if (jnet_fixedport && !json_object_get_boolean(jnet_fixedport))
+							if (jnet_fixedport && (json_object_get_boolean(jnet_fixedport) == FALSE))
 								is_fixed = 0;
 
-							if (jstation_autoack && json_object_get_boolean(jstation_autoack))
+							if (jstation_autoack && (json_object_get_boolean(jstation_autoack) == TRUE))
 								flags |= EB_DEV_CONF_AUTOACK;
 
 							net_address = eb_malloc (__FILE__, __LINE__, "JSON", "New AUN Net address string", json_object_get_string_len(jstations)+1);
@@ -9869,7 +9871,7 @@ int eb_parse_json_config(struct json_object *jc)
 								json_object_object_get_ex(jstation, "port", &jstation_port);
 								json_object_object_get_ex(jstation, "autoack", &jstation_autoack);
 
-								if (json_object_get_boolean(jstation_autoack))
+								if (json_object_get_boolean(jstation_autoack) == TRUE)
 									flags |= EB_DEV_CONF_AUTOACK;
 
 								if (jstation_port)
@@ -10064,7 +10066,7 @@ int eb_parse_json_config(struct json_object *jc)
 					if (!mtp_device)
 						eb_debug (1, 0, "JSON", "Multitrunk parent name %s unknown while creating trunk index %d", json_object_get_string(jmt_parent), tcount);
 
-					if (json_object_get_boolean(jmt_type)) /* Is client */
+					if (json_object_get_boolean(jmt_type) == TRUE) /* Is client */
 						mt_type = 1;
 				}
 				else	mtp_device = NULL;
@@ -10333,7 +10335,7 @@ int eb_parse_json_config(struct json_object *jc)
 							(addr_parts[2] << 8) |
 							(addr_parts[3]);
 
-						is_fixed = json_object_get_boolean(jfixed);
+						is_fixed = (json_object_get_boolean(jfixed) == TRUE) ? 1 : 0;
 
 						if (jport)
 							port = json_object_get_int(jport);
@@ -12050,6 +12052,12 @@ int eb_readconfig(char *f, char *json)
 				if (!strcasecmp("TRUNK", dtype))
 					variant = TRUNK;
 
+				if (!strcmp(eb_getstring(line, &matches[4]), "*"))
+				{
+					all_pooled = 1; // Flag for reset purposes
+					//source->all_nets_pooled = 1; // Flag for reset purposes
+				}
+					
 #ifndef EB_JSONCONFIG
 				// See if we can find the pool
 				
@@ -12093,9 +12101,6 @@ int eb_readconfig(char *f, char *json)
 				if (!first_net)
 					eb_debug (1, 0, "Bad net list in pool deployment %s", eb_getstring(line, &matches[0]));
 
-				if (!strcmp(eb_getstring(line, &matches[4]), "*"))
-					all_pooled = 1; // Flag for reset purposes
-					//source->all_nets_pooled = 1; // Flag for reset purposes
 #endif
 
 #ifdef EB_JSONCONFIG

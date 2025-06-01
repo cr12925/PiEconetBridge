@@ -995,11 +995,12 @@ uint8_t eb_device_init_set_pooled_nets (struct __eb_pool *pool, struct __eb_devi
 		memcpy(&(source->wire.use_pool), nets, sizeof(uint8_t) * 255);
 	}
 
-	DEVINIT_DEBUG("Applied pool %s on device %s %s %d",
+	DEVINIT_DEBUG("Applied pool %s on device %s %s %d%s",
 			pool->name,
 			eb_type_str(source->type),
 			source->type == EB_DEF_WIRE ? "net" : "local port",
-			source->type == EB_DEF_WIRE ? source->net : source->trunk.local_port);
+			source->type == EB_DEF_WIRE ? source->net : source->trunk.local_port,
+			all_pooled ? " (All pooled)" : "");
 
 	return 1;
 }
