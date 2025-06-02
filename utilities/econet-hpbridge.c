@@ -9006,41 +9006,100 @@ void eb_json_pool_assignment (struct json_object *j, uint8_t objtype)
 
 	struct json_object	*jdevice, *jpools, *jpool, *jnets, *jnet, *jpoolname, *jallpool;
 
-	uint8_t			all_pooled = 0;
+	/*
 	char 			*poolname;
+	*/
 	uint16_t		dcount = 0, dlength;
 
 	dlength = json_object_array_length(j);
 
 	while (dcount < dlength)
 	{
+		struct json_object	*jnetlocalport;
+		uint16_t		netlocalport;
+		struct __eb_device	*d;
+		uint8_t			all_pooled = 0;
+		struct __eb_pool	*pool;
+		uint8_t			nets[255];
+		struct __eb_device	*trunk;
+
 		jdevice = json_object_array_get_idx (j, dcount);
 
+		if (objtype) /* Trunk */
+			json_object_object_get_ex (jdevice, "local-port", &jnetlocalport);
+		else
+			json_object_object_get_ex (jdevice, "net", &jnetlocalport);
+
+		if (!jnetlocalport)
+			eb_debug (1, 0, "JSON", "%s cannot find %s key whilst trying to do pool assignments", objtype ? "Trunk" : "Econet", objtype ? "local-port" : "net");
+
+		netlocalport = json_object_get_int(jnetlocalport);
+
+		/* Find the relevant wire or trunk device, and the named pool, and call eb_device_init_set_pooled_nets (pool, dev, all_pooled, nets) */
+
+		if (!objtype) /* Econet */
+		{
+			if (!(networks[netlocalport] && networks[netlocalport]->net == netlocalport))
+				eb_debug (1, 0, "JSON", "Cannot implement pool assignment for Wire net %d - cannot find network!", netlocalport);
+		}
+		else
+		{
+			/* Find relevant trunk */
+
+			trunk = trunks;
+
+			while (trunk)
+			{
+				if (trunk->trunk.local_port == netlocalport)
+					break;
+
+				trunk = trunk->next;
+			}
+
+			if (!trunk)
+				eb_debug (1, 0, "JSON", "Cannot implement pool assignment for %s %d - cannot find trunk local port %d", objtype ? "Trunk" : "Econet", netlocalport);
+		}
+
+		d = (objtype ? trunk : networks[netlocalport]);
+
+		/* Check for pool-all key - trumps pool-assignment */
+
+		json_object_object_get_ex(jdevice, "pool-all", &jallpool);
 		json_object_object_get_ex (jdevice, "pool-assignment", &jpools);
 
-		if (jpools)
+		if (jallpool && jpools) /* Can't have both! */
+			eb_debug (1, 0, "JSON", "Cannot have both pool-all and pool-assignment for %s %d", objtype ? "Trunk" : "Econet", netlocalport);
+
+		if (jallpool)
+		{
+			char	*jallpoolname;
+
+			/* Pool everything; ignore pool-assignment */
+
+			jallpoolname = (char *) json_object_get_string(jallpool);
+
+			if (!jallpoolname)
+				eb_debug (1, 0, "JSON", "pool-all key for %s %s %d invalid", objtype ? "Trunk" : "Econet", objtype ? "local-port" : "net", netlocalport);
+			
+			all_pooled = 1;
+
+			pool = eb_find_pool_by_name((char *) json_object_get_string(jpoolname));
+
+			if (!pool)
+				eb_debug (1, 0, "JSON", "Cannot implement pool assignment for %s %d - pool name %s does not exist", objtype ? "Trunk" : "Econet", netlocalport, json_object_get_string(jpoolname));
+
+			eb_device_init_set_pooled_nets (pool, d, all_pooled, nets);
+
+		}
+		else if (jpools)
 		{
 			uint16_t	pcount = 0, plength;
-			struct json_object	*jnetlocalport;
 	
-			if (objtype) /* Trunk */
-				json_object_object_get_ex (jdevice, "local-port", &jnetlocalport);
-			else
-				json_object_object_get_ex (jdevice, "net", &jnetlocalport);
-
-			if (!jnetlocalport)
-				eb_debug (1, 0, "JSON", "%s cannot find %s key whilst trying to do pool assignments", objtype ? "Trunk" : "Econet", objtype ? "local-port" : "net");
-
 			plength = json_object_array_length (jpools);
 	
 			while (pcount < plength && pcount < 1) /* Second clause limits us to the first one */
 			{
 				uint8_t		ncount = 0, nlength;
-				uint16_t	netlocalport;
-				struct __eb_pool	*pool;
-				uint8_t		nets[255];
-
-				netlocalport = json_object_get_int(jnetlocalport);
 
 				jpool = json_object_array_get_idx(jpools, pcount);
 	
@@ -9049,22 +9108,19 @@ void eb_json_pool_assignment (struct json_object *j, uint8_t objtype)
 				if (!jpoolname)
 					eb_debug (1, 0, "JSON", "Cannot implement pool assignment for %s %d - no pool name in pool assignment array index %d", objtype ? "Trunk" : "Econet", netlocalport, pcount);
 
-				poolname = eb_malloc (__FILE__, __LINE__, "JSON", "Pool name string", json_object_get_string_len(jpoolname) + 1);
+				/*poolname = eb_malloc (__FILE__, __LINE__, "JSON", "Pool name string", json_object_get_string_len(jpoolname) + 1);
 
 				strcpy (poolname, json_object_get_string(jpoolname));
+				*/
 
-				pool = eb_find_pool_by_name(poolname);
+				pool = eb_find_pool_by_name((char *) json_object_get_string(jpoolname));
 
 				if (!pool)
-					eb_debug (1, 0, "JSON", "Cannot implement pool assignment for %s %d - pool name %s does not exist for array index %d", objtype ? "Trunk" : "Econet", netlocalport, poolname, pcount);
+					eb_debug (1, 0, "JSON", "Cannot implement pool assignment for %s %d - pool name %s does not exist", objtype ? "Trunk" : "Econet", netlocalport, json_object_get_string(jpoolname));
 
-				json_object_object_get_ex (jpool, "pool-all", &jallpool);
-
-				if (jallpool && (json_object_get_boolean(jallpool) == TRUE)) all_pooled = 1;
-	
 				json_object_object_get_ex (jpool, "nets", &jnets);
 
-				if (!all_pooled && !jnets)
+				if (!jnets)
 					eb_debug (1, 0, "JSON", "Cannot implement pool assignment for %s %d - no pool 'nets' key for pool assignment array index %d", objtype ? "Trunk" : "Econet", netlocalport, pcount);
 
 				memset(nets, 0, 255);
@@ -9079,37 +9135,8 @@ void eb_json_pool_assignment (struct json_object *j, uint8_t objtype)
 
 					ncount++;
 				}
-				
-				/* Find the relevant wire or trunk device, and the named pool, and call eb_device_init_set_pooled_nets (pool, dev, all_pooled, nets) */
 
-				if (!objtype) /* Econet */
-				{
-					if (networks[netlocalport] && networks[netlocalport]->net == netlocalport)
-						eb_device_init_set_pooled_nets (pool, networks[netlocalport], all_pooled, nets);
-				}
-				else
-				{
-					struct __eb_device	*trunk;
-					uint8_t			found = 0;
-
-					/* Find relevant trunk */
-
-					trunk = trunks;
-
-					while (trunk && !found)
-					{
-						if (trunk->trunk.local_port == netlocalport)
-						{
-							eb_device_init_set_pooled_nets (pool, trunk, all_pooled, nets);
-							found = 1;
-						}
-
-						trunk = trunk->next;
-					}
-
-					if (!found)
-						eb_debug (1, 0, "JSON", "Cannot implement pool assignment for %s %d - cannot find trunk local port %d array index %d", objtype ? "Trunk" : "Econet", netlocalport, pcount);
-				}
+				eb_device_init_set_pooled_nets (pool, d, all_pooled, nets);
 
 				pcount++;
 			}
@@ -10929,7 +10956,7 @@ int eb_readconfig(char *f, char *json)
 				json_object_object_add(wire, "device", json_object_new_string(device));
 				json_object_object_add(wire, "net", json_object_new_int(net));
 				json_object_object_add(wire, "diverts", json_object_new_array());
-				json_object_object_add(wire, "pool-assignment", json_object_new_array());
+				// Now added if not all pooled: json_object_object_add(wire, "pool-assignment", json_object_new_array());
 				json_object_array_add(econets, wire);
 #else
 				eb_device_init_wire (net, device, NULL, NULL);
@@ -10996,7 +11023,7 @@ int eb_readconfig(char *f, char *json)
 				json_object_object_get_ex(jc, "trunks", &jtrunks);
 				jtrunk = json_object_new_object();
 				json_object_object_add(jtrunk, "nat", json_object_new_array());
-				json_object_object_add(jtrunk, "pool-assignment", json_object_new_array());
+				// Now only added if not all pooled: json_object_object_add(jtrunk, "pool-assignment", json_object_new_array());
 				json_object_object_add(jtrunk, "local-port", json_object_new_int(local_port));
 				// Old if (!is_dynamic)
 				if (destination) /* Not dyunamic */
@@ -12129,17 +12156,19 @@ int eb_readconfig(char *f, char *json)
 					{
 						if (json_object_get_int(jdevice_ref) == trunkportorwirenet)
 						{
-							json_object_object_get_ex(jdevice_object, "pool-assignment", &jdevice_pool_array);
-							jdevice_assignment = json_object_new_object();
-							json_object_array_add(jdevice_pool_array, jdevice_assignment);
-							jdevice_nets = json_object_new_array();
-							json_object_object_add (jdevice_assignment, "nets", jdevice_nets);
-							json_object_object_add (jdevice_assignment, "pool-name", json_object_new_string(poolname));
 
 							if (all_pooled)
-								json_object_object_add(jdevice_object, "pool-all", json_object_new_boolean((json_bool) 1));
+								json_object_object_add(jdevice_object, "pool-all", json_object_new_string(poolname));
 							else
 							{
+								jdevice_pool_array = json_object_new_object();
+								json_object_object_add (jdevice_object, "pool-assignment", jdevice_pool_array);
+								// json_object_object_get_ex(jdevice_object, "pool-assignment", &jdevice_pool_array);
+								jdevice_assignment = json_object_new_object();
+								json_object_array_add(jdevice_pool_array, jdevice_assignment);
+								jdevice_nets = json_object_new_array();
+								json_object_object_add (jdevice_assignment, "nets", jdevice_nets);
+								json_object_object_add (jdevice_assignment, "pool-name", json_object_new_string(poolname));
 								for (uint8_t net = 1; net < 255; net++)
 								{
 									if (nets[net])
