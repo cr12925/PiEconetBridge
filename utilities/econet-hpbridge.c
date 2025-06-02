@@ -9072,7 +9072,8 @@ void eb_json_pool_assignment (struct json_object *j, uint8_t objtype)
 
 		if (jallpool)
 		{
-			char	*jallpoolname;
+
+			char	 		*jallpoolname;
 
 			/* Pool everything; ignore pool-assignment */
 
@@ -9083,7 +9084,7 @@ void eb_json_pool_assignment (struct json_object *j, uint8_t objtype)
 			
 			all_pooled = 1;
 
-			pool = eb_find_pool_by_name((char *) json_object_get_string(jpoolname));
+			pool = eb_find_pool_by_name(jallpoolname);
 
 			if (!pool)
 				eb_debug (1, 0, "JSON", "Cannot implement pool assignment for %s %d - pool name %s does not exist", objtype ? "Trunk" : "Econet", netlocalport, json_object_get_string(jpoolname));
@@ -9100,6 +9101,7 @@ void eb_json_pool_assignment (struct json_object *j, uint8_t objtype)
 			while (pcount < plength && pcount < 1) /* Second clause limits us to the first one */
 			{
 				uint8_t		ncount = 0, nlength;
+				char 		*poolname;
 
 				jpool = json_object_array_get_idx(jpools, pcount);
 	
@@ -9108,12 +9110,15 @@ void eb_json_pool_assignment (struct json_object *j, uint8_t objtype)
 				if (!jpoolname)
 					eb_debug (1, 0, "JSON", "Cannot implement pool assignment for %s %d - no pool name in pool assignment array index %d", objtype ? "Trunk" : "Econet", netlocalport, pcount);
 
-				/*poolname = eb_malloc (__FILE__, __LINE__, "JSON", "Pool name string", json_object_get_string_len(jpoolname) + 1);
+				poolname = (char *) json_object_get_string(jpoolname);
+
+				/*
+				poolname = eb_malloc (__FILE__, __LINE__, "JSON", "Pool name string", json_object_get_string_len(jpoolname) + 1);
 
 				strcpy (poolname, json_object_get_string(jpoolname));
 				*/
 
-				pool = eb_find_pool_by_name((char *) json_object_get_string(jpoolname));
+				pool = eb_find_pool_by_name(poolname);
 
 				if (!pool)
 					eb_debug (1, 0, "JSON", "Cannot implement pool assignment for %s %d - pool name %s does not exist", objtype ? "Trunk" : "Econet", netlocalport, json_object_get_string(jpoolname));
