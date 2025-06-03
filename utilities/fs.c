@@ -1593,23 +1593,22 @@ int fs_check_dir(DIR *h, char *e,  char *r)
 // This will be hidden at the Acorn layer because filenames can't have
 // a dot in them (that's a directory separator in the Acorn world)
 
-unsigned char *pathname_to_dotfile(unsigned char *path, uint8_t infcolon)
+unsigned char *pathname_to_dotfile(unsigned char *path, uint8_t server)
 {
 	unsigned char *dotfile;
-	//dotfile=malloc(strlen(path)+ECONET_ABS_MAX_FILENAME_LENGTH);
 	dotfile = eb_malloc(__FILE__, __LINE__, "FS", "Dot file name", strlen(path)+ECONET_ABS_MAX_FILENAME_LENGTH);
 	strcpy(dotfile,path);
 	// If last character is a / then strip it off; we want the
 	// filename in the parent directory
 	while (dotfile[strlen(dotfile)-1] == '/')
 		dotfile[strlen(dotfile)-1] = '\0';
-	strcat(dotfile, infcolon ? ":inf" : ".inf");
+	strcat(dotfile, fs_config[server].fs_infcolon ? ":inf" : ".inf");
 	return dotfile;
 }
 
 void fs_read_attr_from_file(unsigned char *path, struct objattr *r, int server)
 {
-	char *dotfile=pathname_to_dotfile(path, fs_config[server].fs_infcolon);
+	char *dotfile=pathname_to_dotfile(path, server);
 	FILE *f=fopen(dotfile,"r");
 	if (f != NULL)
 	{
@@ -1638,7 +1637,7 @@ void fs_read_attr_from_file(unsigned char *path, struct objattr *r, int server)
 
 void fs_write_attr_to_file(unsigned char *path, int owner, short perm, unsigned long load, unsigned long exec, int homeof, int server)
 {
-	char *dotfile=pathname_to_dotfile(path, fs_config[server].fs_infcolon);
+	char *dotfile=pathname_to_dotfile(path, server);
 	FILE *f=fopen(dotfile,"w");
 	if (f != NULL)
 	{
@@ -1747,7 +1746,7 @@ void fs_write_xattr(unsigned char *path, uint16_t owner, uint16_t perm, uint32_t
 	struct objattr existing;
 	unsigned char attrbuf[20];
 	unsigned char old_owner[10];
-	char *dotfile=pathname_to_dotfile(path, fs_config[server].fs_infcolon);
+	char *dotfile=pathname_to_dotfile(path, server);
 	int dotexists=access(dotfile, F_OK);
 
 	//free(dotfile);
