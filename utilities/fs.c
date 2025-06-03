@@ -67,7 +67,7 @@
 
 uint8_t fs_set_syst_bridgepriv = 0; // If set to 1 by the HP Bridge, then on initialization, each FS will enable the bridge priv on its SYST user
 short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for extra year information
-short use_xattr=1 ; // When set use filesystem extended attributes, otherwise use a dotfile
+//short use_xattr=1 ; // When set use filesystem extended attributes, otherwise use a dotfile
 short normalize_debug = 0; // Whether we spew out loads of debug about filename normalization
 
 int fsop_scandir_regex(const struct dirent *, struct fsop_data *);
@@ -1517,7 +1517,7 @@ void fsop_read_xattr(unsigned char *path, struct objattr *r, struct fsop_data *f
 
 	free(dotfile);
 
-	if (!use_xattr || dotexists==0)
+	if (!f->server->use_xattr || dotexists==0)
 	{
 		fsop_read_attr_from_file(path, r, f);
 		return;
@@ -1633,7 +1633,7 @@ void fsop_write_xattr(unsigned char *path, uint16_t owner, uint16_t perm, uint32
 		perm |= FS_CONF_DEFAULT_DIR_PERM(f->server); // imply default if dir perm given as 'no perms'
 		// No equivalent for files, because can justifiably set to, e.g. "/"
 
-	if (!use_xattr || dotexists==0)
+	if (!f->server->use_xattr || dotexists==0)
 	{
 		fs_write_attr_to_file(path, owner, perm & 0xFF, load, exec, homeof, f);
 		return;
@@ -3326,6 +3326,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
         server->enabled = 0;
         server->fs_device = device;
         server->fs_workqueue = NULL;
+	server->use_xattr = 1;
 	server->peeks = NULL;
         /* Don't touch next, prev - they'll be initialized by the list management macros */
 
@@ -3354,7 +3355,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 	if (access(autoinf, F_OK) == 0)
 	{
 		fs_debug_full (0, 1, server, 0, 0, "Automatically turned on -x mode because of %s", autoinf);
-		use_xattr = 0;
+		server->use_xattr = 0;
 	}
 
 	free(autoinf);

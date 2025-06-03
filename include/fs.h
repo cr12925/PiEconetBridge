@@ -170,6 +170,7 @@ struct __fs_station {
 	struct __eb_packetqueue	*fs_workqueue; // Packets to be processed by this FS
 	regex_t			r_pathname; // Pathname by filename length
 	regex_t			r_wildcard, r_discname, r_discwildcard; /* Regexes for filenames */
+	uint8_t			use_xattr; // Whether to get file attribs from xattr or .inf for this server
 	struct __fs_station	*next, *prev; // Up and down the tree
 };
 
