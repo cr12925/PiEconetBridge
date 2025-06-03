@@ -537,9 +537,27 @@ void eb_fast_run_connection (struct __eb_fast_client *fc, int sock)
 					int	writeres;
 
 					if (count == 0)
+					{
+						/*
+						fprintf (stderr, "\n\n*** run_conn write to network: ");
+						for (uint8_t c = 0; c < res; c++)
+							fprintf (stderr, " %c %02X", (data[c] > 32 && data[c] < 127) ? data[c] : '.', data[c]);
+						fprintf (stderr, "\n\n");
+						*/
 						writeres = write(fc->fc_socket[EB_FAST_TO_NETWORK][1], data, res);
+						pthread_cond_signal(&(fc->fast_wake[EB_FAST_TO_NETWORK]));
+					}
 					else
+					{
+						/*
+						fprintf (stderr, "\n\n*** run_conn write to socket: ");
+						for (uint8_t c = 0; c < res; c++)
+							fprintf (stderr, " %c %02X", (data[c] > 32 && data[c] < 127) ? data[c] : '.', data[c]);
+						fprintf (stderr, "\n\n");
+						*/
 						writeres = write(sock, data, res);
+						//pthread_cond_signal(&(fc->fast_wake[EB_FAST_TO_SERVER]));
+					}
 
 					if (writeres < 0)
 						eb_debug (0, 2, "FAST", "%-8s %3d.%3d from %3d.%3d FAST server encoutered error writing to %s (%s)", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, (count == 0 ? "Econet" : "distant"), strerror(errno));
@@ -1220,8 +1238,10 @@ void * eb_fast_io_handler_to_server (void * fc)
 		memcpy(&t2, &t, sizeof(struct timespec));
 
 		t.tv_nsec += 1000000 * EB_FAST_OUTPUTWAIT; // 100ms
+		/* Skip this. We might get a short timeout but so what 
 		if (t2.tv_nsec < t.tv_nsec)
 			t.tv_sec++;
+			*/
 
 		if (me->pt_len[EB_FAST_TO_SERVER] == 0) /* Snooze off, otherwise, send more */
 			pthread_cond_timedwait (&(me->fast_wake[EB_FAST_TO_SERVER]), &(me->fast_io_mutex[EB_FAST_TO_SERVER]), &t);
@@ -1245,18 +1265,21 @@ void * eb_fast_io_handler_to_server (void * fc)
 		{
 			l = write (me->fc_socket[EB_FAST_TO_SERVER][1], me->pending[EB_FAST_TO_SERVER], me->pt_len[EB_FAST_TO_SERVER]);
 	
-			eb_debug (0, 4, "FAST", "FAST IO thread wrote %d byte(s) to the server", l);
-	
-			if (me->pt_sz[EB_FAST_TO_SERVER] > EB_FAST_BUFSIZE)
+			if (l > 0)
 			{
-				me->pending[EB_FAST_TO_SERVER] = realloc(me->pending[EB_FAST_TO_SERVER], EB_FAST_BUFSIZE);
-				me->pt_sz[EB_FAST_TO_SERVER] = EB_FAST_BUFSIZE;
-				eb_debug (0, 4, "FAST", "%-8s %3d.%3d from %3d.%3d FAST IO thread shrunk to_server buffer to EB_FAST_BUFSIZE", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn);
-			}
-	
-			me->pt_len[EB_FAST_TO_SERVER] = 0; /* Emtpy buffer */
+				eb_debug (0, 4, "FAST", "FAST IO thread wrote %d byte(s) to the server", l);
+		
+				if (me->pt_sz[EB_FAST_TO_SERVER] > EB_FAST_BUFSIZE)
+				{
+					me->pending[EB_FAST_TO_SERVER] = realloc(me->pending[EB_FAST_TO_SERVER], EB_FAST_BUFSIZE);
+					me->pt_sz[EB_FAST_TO_SERVER] = EB_FAST_BUFSIZE;
+					eb_debug (0, 4, "FAST", "%-8s %3d.%3d from %3d.%3d FAST IO thread shrunk to_server buffer to EB_FAST_BUFSIZE", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn);
+				}
+		
+				me->pt_len[EB_FAST_TO_SERVER] = 0; /* Empty buffer - assumes we wrote everything we asked to - need to sort */
 
-			eb_fast_send_control (fc, EB_FAST_OP_DATARQ); /* Please, Sir, can I have some more? */
+				eb_fast_send_control (fc, EB_FAST_OP_DATARQ); /* Please, Sir, can I have some more? */
+			}
 		}
 
 
@@ -1294,7 +1317,6 @@ void * eb_fast_start_fast_service (void *data)
 	/* Send the startup control */
 
 	eb_fast_send_control (fc, EB_FAST_OP_WELCOME);
-
 	
 	/* Spawn the IO threads */
 
@@ -1408,6 +1430,8 @@ void eb_port_a0_handler (struct __econet_packet_aun *p, uint16_t length, void *d
 
 	struct __eb_fast_client * fc;
 
+	uint16_t	data_length = length - 12;
+
 	if (device->type != EB_DEF_LOCAL || !device->local.fast_menu)
 	{
 		/* Either not a local device, or it is but there's no menu defined */
@@ -1456,15 +1480,15 @@ void eb_port_a0_handler (struct __econet_packet_aun *p, uint16_t length, void *d
 
 	fc->fast_input_ctrl ^= 0x01; /* Toggle bit */
 
-	if ((fc->pt_len[EB_FAST_TO_SERVER] + length) > fc->pt_sz[EB_FAST_TO_SERVER]) /* Buffer full */
+	if ((fc->pt_len[EB_FAST_TO_SERVER] + data_length) > fc->pt_sz[EB_FAST_TO_SERVER]) /* Buffer full */
 	{
 		fc->pending[EB_FAST_TO_SERVER] = realloc(fc->pending[EB_FAST_TO_SERVER], fc->pt_sz[EB_FAST_TO_SERVER] + EB_FAST_BUFSIZE); /* Expand by 1k */
 		fc->pt_sz[EB_FAST_TO_SERVER] += EB_FAST_BUFSIZE;
 	}
 
-	memcpy (&(fc->pending[EB_FAST_TO_SERVER][fc->pt_len[EB_FAST_TO_SERVER]]), p->p.data, length);
+	memcpy (&(fc->pending[EB_FAST_TO_SERVER][fc->pt_len[EB_FAST_TO_SERVER]]), p->p.data, data_length);
 
-	fc->pt_len[EB_FAST_TO_SERVER] += length;
+	fc->pt_len[EB_FAST_TO_SERVER] += data_length;
 
 	eb_debug (0, 4, "FAST", "FAST added %d characters to pending(server) buffer, size now %d, occupancy now %d", length, fc->pt_sz[EB_FAST_TO_SERVER], fc->pt_len[EB_FAST_TO_SERVER]);
 
