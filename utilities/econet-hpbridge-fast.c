@@ -645,7 +645,7 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 
 		while (!fm_exit)
 		{
-			int		key;
+			uint8_t		key;
 
 			mi = fc->menu_current->item;
 		
