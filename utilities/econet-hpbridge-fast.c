@@ -700,7 +700,10 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 
 			}
 			else
+			{
+				fm_exit = 1; /* Quit out after one go */
 				key = fc->menu_current->item->keypress;
+			}
 	
 			if (key >= 'a' && key <= 'z')
 			{
