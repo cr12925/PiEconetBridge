@@ -539,9 +539,9 @@ struct __eb_fast_menu_item	{
 	uint8_t			priv_mask; /* E.g. FS_PRIV_SYSTEM is 0x80. If set to that, unless the user's FS prive has that bit set, this option will not be displayed. */
 	uint8_t			priv2_mask; /* Ditto for priv2 - most common use will be to require bridge privilege, but could potentially also filter on, say, FS_PRIV2_HIDEOTHERS if the menu item might reveal who else is logged in. */
 	unsigned char		keypress; /* Key press for this option */
-	union	{
+	uint8_t		 	is_viewdata; /* If != 0, send viewdata_on when selected, and viewdata_off when back to menu */
 
-		uint8_t		is_viewdata; /* If != 0, send viewdata_on when selected, and viewdata_off when back to menu */
+	union	{
 
 		struct {
 			char		*fm_host;
