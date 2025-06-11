@@ -1,0 +1,550 @@
+fsop_00_access.c:	fs_debug_full (0, 1, f->server, f->net, f->stn, "*ACCESS %s %s", path, perm_str);
+fsop_00_access.c:		if (((dirs && e->ftype == FS_FTYPE_DIR) || (e->ftype == FS_FTYPE_FILE)) && (FS_PERM_EFFOWNER(f->active, e->owner)) || (FS_PERM_EFFOWNER(f->active, e->parent_owner)))
+fsop_00_access.c:			internal_perm |= FS_CONF_DEFAULT_DIR_PERM(f->server);
+fsop_00_access.c:		//fprintf (stderr, "File %s, Type %02X, Effowner (file: %02X, parent %02X)\n", e->unixpath, e->ftype, FS_PERM_EFFOWNER(f->active, e->owner), FS_PERM_EFFOWNER(f->active, e->parent_owner));
+fsop_00_access.c:		&&	(FS_PERM_EFFOWNER(f->active, e->owner) || FS_PERM_EFFOWNER(f->active, e->parent_owner))
+fsop_00_bye.c:	fsop_bye_internal(f->active, 1, FSOP_REPLY_PORT);
+fsop_00_cat.c:	//fprintf (stderr, "fsop_00_catalogue: num = %d, param_start = %d, f->data+5 = %s\n", num, param_start, f->data+5);
+fsop_00_cat.c:		fsop_00_oscli_extract(f->data, p, 0, path, 240, param_start);
+fsop_00_cat.c:	fs_debug (0, 1, "%12sfrom %3d.%3d *CAT %s (path length %d)", "", f->net, f->stn, path, strlen(path));
+fsop_00_copy.c:	fsop_00_oscli_extract(f->data, p, 0, source, 125, param_start);
+fsop_00_copy.c:		fsop_00_oscli_extract(f->data, p, 1, destination, 125, param_start);
+fsop_00_copy.c:		//strcpy(destination, f->active->fhandles[f->active->current].acornfullpath);
+fsop_00_copy.c:		strcpy(destination, f->active->fhandles[f->cwd].acornfullpath);
+fsop_00_copy.c:	fs_debug (0, 1, "%12sfrom %3d.%3d *COPY %s %s", "", f->net, f->stn, source, destination);
+fsop_00_copy.c:	//if (!fsop_normalize_path_wildcard(f, source, f->active->current, &p_src, 1))
+fsop_00_copy.c:	if (!fsop_normalize_path_wildcard(f, source, f->cwd, &p_src, 1))
+fsop_00_copy.c:		if (e->ftype == FS_FTYPE_FILE && ((FS_PERM_EFFOWNER(f->active, e->owner) || (e->perm & FS_PERM_OTH_R))))
+fsop_00_copy.c:	//if (!fsop_normalize_path(f, destination, f->active->current, &p_dst))
+fsop_00_copy.c:	if (!fsop_normalize_path(f, destination, f->cwd, &p_dst))
+fsop_00_copy.c:		fs_debug (0, 1, "%12sfrom %3d.%3d Copying %s to %s, length %06lX", "", f->net, f->stn, e->unixpath, destfile, length);
+fsop_00_copy.c:				fsop_close_interlock(f->server, in_handle, 1);
+fsop_00_copy.c:				fsop_close_interlock(f->server, out_handle, 3);
+fsop_00_copy.c:		fsop_write_xattr(destfile, f->userid, a.perm, a.load, a.exec, a.homeof, f);
+fsop_00_copy.c:		fsop_close_interlock(f->server, in_handle, 1);
+fsop_00_copy.c:		fsop_close_interlock(f->server, out_handle, 3);
+fsop_00_dirlib.c:	else if (!FS_PERM_EFFOWNER(f->active, p.owner) && !(p.perm & FS_PERM_OTH_R))
+fsop_00_dirlib.c:		else if (!(handle = fsop_allocate_user_dir_channel(f->active, n)))
+fsop_00_dirlib.c:			fsop_close_interlock(f->server, n, 1);
+fsop_00_dirlib.c:			fs_debug_full (0, 2, f->server, f->net, f->stn, "Closing old %s handle %d", is_dir ? "CWD" : "LIB", *user_handle);
+fsop_00_dirlib.c:			fsop_deallocate_user_dir_channel(f->active, *user_handle);
+fsop_00_dirlib.c:			strcpy (f->active->fhandles[handle].acornfullpath, new_dir);
+fsop_00_dirlib.c:			strcpy (f->active->fhandles[handle].acorntailpath, tail);
+fsop_00_dirlib.c:			fs_debug_full (0, 2, f->server, f->net, f->stn, "User handle %d allocated for new %s (%s)", handle, is_dir ? "CWD" : "LIB", new_dir);
+fsop_00_dirlib.c:				strncpy((char *) f->active->current_dir, (const char *) new_dir, 255);
+fsop_00_dirlib.c:				strcpy(f->active->current_dir_tail, tail);
+fsop_00_dirlib.c:				f->active->current_disc = p.disc;
+fsop_00_dirlib.c:				f->active->current = handle;
+fsop_00_dirlib.c:				reply.p.data[2] = FS_MULHANDLE(f->active,handle);
+fsop_00_dirlib.c:				strncpy((char *) f->active->lib_dir, (const char *) new_dir, 255);
+fsop_00_dirlib.c:				strcpy(f->active->lib_dir_tail, tail);
+fsop_00_dirlib.c:				f->active->lib = handle;
+fsop_00_dirlib.c:				reply.p.data[2] = FS_MULHANDLE(f->active,handle);
+fsop_00_dirlib.c:	//fsop_00_dirlib_internal(f, &(f->active->current), dirname, 1);
+fsop_00_dirlib.c:	fsop_00_dirlib_internal(f, &(f->cwd), dirname, 1);
+fsop_00_dirlib.c:	//fs_debug_full (0, 1, f->server, f->net, f->stn, "DIR %s (handle &%02X)", dirname, f->active->current);
+fsop_00_dirlib.c:	fs_debug_full (0, 1, f->server, f->net, f->stn, "DIR %s (handle &%02X)", dirname, f->cwd);
+fsop_00_dirlib.c:	//fsop_00_dirlib_internal(f, &(f->active->lib), dirname, 0);
+fsop_00_dirlib.c:	fsop_00_dirlib_internal(f, &(f->lib), dirname, 0);
+fsop_00_dirlib.c:	//fs_debug_full (0, 1, f->server, f->net, f->stn, "LIB %s (handle &%02X)", dirname, f->active->lib);
+fsop_00_dirlib.c:	fs_debug_full (0, 1, f->server, f->net, f->stn, "LIB %s (handle &%02X)", dirname, f->lib);
+fsop_00_discmask.c:	fs_debug (0, 1, "%12sfrom %3d.%3d *DISCMASK %s %s", "", f->net, f->stn, username, discs);
+fsop_00_discmask.c:	userid = fsop_get_uid(f->server, username);
+fsop_00_discmask.c:	mask = f->user->discmask;
+fsop_00_discmask.c:	if (mask != f->server->users[userid].discmask)
+fsop_00_discmask.c:		f->server->users[userid].discmask = mask;
+fsop_00_fsconfig.c:	fsop_00_oscli_extract(f->data, p, 0, parameter, 99, param_start);
+fsop_00_fsconfig.c:				f->server->config->fs_fnamelen = length;
+fsop_00_fsconfig.c:			FS_CONF_DEFAULT_DIR_PERM(f->server) = perm;
+fsop_00_fsconfig.c:			FS_CONF_DEFAULT_FILE_PERM(f->server) = perm;
+fsop_00_fsconfig.c:	fs_debug_full (0, 1, f->server, f->net, f->stn, "*FSCONFIG - %s %s", configitem, (operator == '+' ? "ON" : "OFF"));
+fsop_00_fsconfig.c:		f->server->config->fs_acorn_home = (operator == '+' ? 1 : 0);
+fsop_00_fsconfig.c:		f->server->config->fs_infcolon = (operator == '+' ? 1 : 0);
+fsop_00_fsconfig.c:		f->server->config->fs_sjfunc = (operator == '+' ? 1 : 0);
+fsop_00_fsconfig.c:		f->server->config->fs_mdfsinfo = (operator == '+' ? 1 : 0);
+fsop_00_fsconfig.c:		f->server->config->fs_mask_dir_wrr = (operator == '+' ? 1 : 0);
+fsop_00_fsconfig.c:		f->server->config->fs_pifsperms = (operator == '+' ? 1 : 0);
+fsop_00_info.c:        fs_debug (0, 2, "%12sfrom %3d.%3d *INFO %s", "", f->net, f->stn, path);
+fsop_00_info.c:		is_owner = FS_PERM_EFFOWNER(f->active, pt.owner);
+fsop_00_info.c:		mdfsinfo = FS_CONFIG(f->server,fs_mdfsinfo);
+fsop_00_info.c:                        if (FS_CONFIG(f->server,fs_mask_dir_wrr) && pt.ftype == FS_FTYPE_DIR && (pt.perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == FS_ACORN_DIR_MASK)
+fsop_00_link.c:	fsop_00_oscli_extract(f->data, p, 0, source, 127, param_start);
+fsop_00_link.c:	fsop_00_oscli_extract(f->data, p, 1, destination, 127, param_start);
+fsop_00_link.c:	fs_debug (0, 1, "%12sfrom %3d.%3d LINK %s %s", "", f->net, f->stn, source, destination);
+fsop_00_link.c:	//if (!fsop_normalize_path(f, source, f->active->current, &p_src) || (p_src.ftype == FS_FTYPE_NOTFOUND))
+fsop_00_link.c:	if (!fsop_normalize_path(f, source, f->cwd, &p_src) || (p_src.ftype == FS_FTYPE_NOTFOUND))
+fsop_00_link.c:	//if (!fsop_normalize_path(f, destination, f->active->current, &p_dst) || (p_src.ftype == FS_FTYPE_NOTFOUND))
+fsop_00_link.c:	if (!fsop_normalize_path(f, destination, f->cwd, &p_dst) || (p_src.ftype == FS_FTYPE_NOTFOUND))
+fsop_00_link.c:		fs_debug_full (0, 1, f->server, f->net, f->stn, "Unable to link %s to %s", p_src.unixpath, p_dst.unixpath);
+fsop_00_link.c:	fsop_00_oscli_extract(f->data, p, 0, link, 254, param_start);
+fsop_00_link.c:	fs_debug (0, 1, "%12sfrom %3d.%3d UNLINK %s", "", f->net, f->stn, link);
+fsop_00_link.c:	//if (!fsop_normalize_path(f, link, f->active->current, &pu) || (pu.ftype == FS_FTYPE_NOTFOUND))
+fsop_00_link.c:	if (!fsop_normalize_path(f, link, f->cwd, &pu) || (pu.ftype == FS_FTYPE_NOTFOUND))
+fsop_00_load.c:	fsop_00_oscli_extract(f->data, p, 0, path, 240, param_start);
+fsop_00_load.c:		fsop_00_oscli_extract(f->data, p, 1, load_string, 8, param_start);
+fsop_00_load.c:	fs_debug (0, 1, "%12sfrom %3d.%3d *LOAD %s %s (0x%08X)", "", f->net, f->stn, path, load_string, load);
+fsop_00_load.c:	fsop_00_oscli_extract(f->data, p, 0, path, 240, param_start);
+fsop_00_load.c:	fsop_00_oscli_extract(f->data, p, 1, save_s, 8, param_start);
+fsop_00_load.c:	fsop_00_oscli_extract(f->data, p, 2, len_s, 7, param_start); /* Length is 24 bits only, optionally with + */
+fsop_00_load.c:		fsop_00_oscli_extract(f->data, p, 3, exec_s, 8, param_start); 
+fsop_00_load.c:		fsop_00_oscli_extract(f->data, p, 4, load_s, 8, param_start); 
+fsop_00_login.c:	a = f->active;
+fsop_00_login.c:		//fsop_close_dir_handle(f->server, a->fhandles[*handle].handle);
+fsop_00_login.c:		fsop_close_interlock(f->server, a->fhandles[*handle].handle, 1);
+fsop_00_login.c:		fs_debug_full (0, 1, f->server, f->net, f->stn, "Select disc - %s %s not found, attempting to map $ for user id %04X", which, full_path, f->userid);
+fsop_00_login.c:		fs_debug_full (0, 1, f->server, f->net, f->stn, "Select disc - bad %s %s for userid %d", which, full_path, f->userid);
+fsop_00_login.c:		fs_debug_full (0, 1, f->server, f->net, f->stn, "Select disc - unreadable %s %s for userid %d", which, full_path, f->userid);
+fsop_00_login.c:	if (f->server->config->fs_acorn_home && !strcasecmp(which, "URD"))
+fsop_00_login.c:			fsop_write_xattr(p.unixpath, oa.owner, oa.perm, oa.load, oa.exec, f->userid, f);
+fsop_00_login.c:		fs_debug_full (0, 1, f->server, f->net, f->stn, "Select disc - unmappable %s %s for userid %04X", which, full_path, f->userid);
+fsop_00_login.c:		fsop_close_interlock(f->server, h, 1);
+fsop_00_login.c:		fs_debug_full (0, 1, f->server, f->net, f->stn, "Sellect disc - no channel for %s %s for userid %04X", which, full_path, f->userid);
+fsop_00_login.c:	fs_debug_full (0, 2, f->server, f->net, f->stn, "Map dir successful - handle %02X for user %04X, full path %s, tail path %s", *handle, f->userid, a->fhandles[*handle].acornfullpath, a->fhandles[*handle].acorntailpath);
+fsop_00_login.c:	a = f->active;
+fsop_00_login.c:	d = f->server->discs;
+fsop_00_login.c:			fsop_close_interlock(f->server, h, 1);
+fsop_00_login.c:	fs_copy_padded(a->root_dir_tail, a->fhandles[a->root].acorntailpath, f->server->config->fs_fnamelen);
+fsop_00_login.c:			fsop_close_interlock(f->server, a->fhandles[a->root].handle, 1);
+fsop_00_login.c:			fsop_close_interlock(f->server, h, 1);
+fsop_00_login.c:	fs_copy_padded(a->current_dir_tail, a->fhandles[a->current].acorntailpath, f->server->config->fs_fnamelen);
+fsop_00_login.c:		fsop_close_interlock(f->server, a->fhandles[a->root].handle, 1);
+fsop_00_login.c:		fsop_close_interlock(f->server, a->fhandles[a->current].handle, 1);
+fsop_00_login.c:		fsop_close_interlock(f->server, h, 1);
+fsop_00_login.c:	fs_copy_padded(a->current_dir_tail, a->fhandles[a->current].acorntailpath, f->server->config->fs_fnamelen);
+fsop_00_login.c:		fsop_close_interlock(f->server, a->fhandles[a->root].handle, 1);
+fsop_00_login.c:		fsop_close_interlock(f->server, a->fhandles[a->current].handle, 1);
+fsop_00_login.c:			fsop_close_interlock(f->server, h, 1);
+fsop_00_login.c:	fs_copy_padded(a->lib_dir_tail, a->fhandles[a->lib].acorntailpath, f->server->config->fs_fnamelen);
+fsop_00_login.c:	fs_debug_full (0, 2, f->server, f->net, f->stn, "Select disc - Handles allocated for URD for userid %d - URD (%02X), CWD (%02X), LIB (%02X)", f->userid, a->root, a->current, a->lib);
+fsop_00_login.c:	eb_fast_priv_notify(f->server->fs_device, f->net, f->stn, 0);
+fsop_00_login.c:	FS_LIST_MAKENEW(struct __fs_machine_peek_reg,f->server->peeks,1,stnpeek,"FS","New machinepeek probe structure");
+fsop_00_login.c:	stnpeek->net = f->net;
+fsop_00_login.c:	stnpeek->stn = f->stn;
+fsop_00_login.c:	stnpeek->s = f->server;
+fsop_00_login.c:	pthread_mutex_lock(&(f->server->fs_mpeek_mutex));
+fsop_00_login.c:	pthread_cond_timedwait(&(f->server->fs_condition), &(f->server->fs_mpeek_mutex), &peek_timeout);
+fsop_00_login.c:	pthread_mutex_unlock(&(f->server->fs_mpeek_mutex));
+fsop_00_login.c:	FS_LIST_SPLICEFREE(f->server->peeks, stnpeek, "FS", "Freeing machinepeek probe structure");
+fsop_00_login.c:	fsop_00_oscli_extract(f->data, p, 0, username_extract, 10, param_start);
+fsop_00_login.c:		fsop_00_oscli_extract(f->data, p, 1, username_extract, 10, param_start);
+fsop_00_login.c:		fsop_00_oscli_extract(f->data, p, 1+skip_first, password_extract, 19, param_start);
+fsop_00_login.c:		fs_debug_full(0, 2, f->server, f->net, f->stn, "Dequoting password >>>%s<<<", password_extract);
+fsop_00_login.c:		fs_debug_full(0, 2, f->server, f->net, f->stn, "Dequoted password >>>%s<<<", password_extract);
+fsop_00_login.c:	while (counter < f->server->total_users && !found)
+fsop_00_login.c:		memcpy (pwuser, &(f->server->users[counter].username), 10);
+fsop_00_login.c:		if (!strncasecmp(pwuser, username, 10) && (f->server->users[counter].priv != 0))
+fsop_00_login.c:		if (strncasecmp((const char *) f->server->users[counter].password, password, 10))
+fsop_00_login.c:			memcpy (pw1, f->server->users[counter].password, 10);
+fsop_00_login.c:			fs_debug_full(0, 1, f->server, f->net, f->stn, "Login attempt - username '%s' - Wrong password ('%s' vs '%s')", username, password, pw1);
+fsop_00_login.c:		else if (f->server->users[counter].priv & FS_PRIV_LOCKED)
+fsop_00_login.c:			fs_debug_full (0, 1, f->server, f->net, f->stn, "Login attempt - username '%s' - Account locked", username);
+fsop_00_login.c:			a = f->server->actives;
+fsop_00_login.c:				if ((a->net == f->net && a->stn == f->stn)) // Allows us to overwrite an existing handle if the station is already logged in
+fsop_00_login.c:			FS_LIST_MAKENEW(struct __fs_active,f->server->actives,1,a,"FS","Login making new active struct");
+fsop_00_login.c:			a->net = (f->net == 0 ? f->server->net : f->net);
+fsop_00_login.c:			a->stn = f->stn;
+fsop_00_login.c:			a->user = &(f->server->users[counter]);
+fsop_00_login.c:			a->bootopt = f->server->users[counter].bootopt;
+fsop_00_login.c:			a->priv = f->server->users[counter].priv;
+fsop_00_login.c:			a->current_disc = f->server->users[counter].home_disc; // Need to set here so that first normalize for URD works.
+fsop_00_login.c:			a->server = f->server;
+fsop_00_login.c:			f->active = a;
+fsop_00_login.c:			f->userid = counter;
+fsop_00_login.c:				fs_debug (0, 1, "from %3d.%3d Login attempt - %s %s for userid %04X", f->net, f->stn, which, error, a->userid);
+fsop_00_login.c:				FS_LIST_SPLICEFREE(f->server->actives, a, "FS", "Freeing active struct when cannot mount disc");
+fsop_00_login.c:				eb_fast_priv_notify(a->server->fs_device, f->net, f->stn, 1);
+fsop_00_login.c:			fs_debug_full (0, 1, a->server, f->net, f->stn, "Login as %s, id %04X, disc %d, URD %s, CWD %s, LIB %s, priv 0x%02x%s from %s running %02X.%02X with %d handles", username, a->userid, a->current_disc, a->root_dir, a->current_dir, a->lib_dir, a->user->priv, (a->user->priv2 & FS_PRIV2_BRIDGE) ? " (with bridge privileges)" : "", fsop_machine_type_str(mtype >> 16), (mtype & 0xFF), (mtype & 0xFF00) >> 8, (a->manyhandles) ? 32 : 8);
+fsop_00_login.c:		fs_debug_full (0, 1, f->server, f->net, f->stn, "Login attempt - username '%s' - Unknown user", username_extract);
+fsop_00_login.c:	a = f->active;
+fsop_00_login.c:		disc_no = f->server->users[f->userid].home_disc;
+fsop_00_login.c:		fs_debug_full (0, 1, f->server, f->net, f->stn, "SDISC");
+fsop_00_login.c:		fsop_00_oscli_extract(f->data, p, 0, disc, 16, param_start);
+fsop_00_login.c:		fs_debug_full (0, 1, f->server, f->net, f->stn, "SDISC %s", disc);
+fsop_00_login.c:	d = f->server->discs;
+fsop_00_login.c:	if (!found || !FS_DISC_VIS(f->server, f->userid, disc_no))
+fsop_00_login.c:		fs_debug (0, 1, "%12sfrom %3d.%3d *SDISC to disc %d - %s %s for userid %04X", "", f->net, f->stn, disc_no, which, error, f->userid);
+fsop_00_login.c:		FS_LIST_SPLICEFREE(f->server->actives, f->active, "FS", "Freeing active struct when cannot mount disc");
+fsop_00_login.c:	f->active->current_disc = disc_no;
+fsop_00_login.c:	if (f->server->users[f->userid].priv2 & FS_PRIV2_CHROOT) // Fudge the root directory information so that $ maps to URD
+fsop_00_logoff.c:			else    l_net = f->server->net;
+fsop_00_logoff.c:		fs_debug (0, 1, "%12sfrom %3d.%3d Force log off station %d.%d", "", f->net, f->stn, l_net, l_stn);
+fsop_00_logoff.c:		a = f->server->actives;
+fsop_00_logoff.c:		fs_debug (0, 1, "%12sfrom %3d.%3d Force log off user '%s'", "", f->net, f->stn, parameter);
+fsop_00_logoff.c:		userid = fsop_get_uid (f->server, parameter);
+fsop_00_logoff.c:		a = f->server->actives;
+fsop_00_newuserpriv.c:	if ((userid = fsop_get_uid(f->server, username)) >= 0)
+fsop_00_newuserpriv.c:		if (f->server->users[userid].priv == 0)
+fsop_00_newuserpriv.c:	disc = f->server->discs;
+fsop_00_newuserpriv.c:	user = &(f->server->users[userid]);
+fsop_00_newuserpriv.c:	sprintf(homepath, "%s/%1x%s/%s", f->server->directory, 0, disc_found->name, username);
+fsop_00_newuserpriv.c:		fs_debug (0, 1, "%12sfrom %3d.%3d New user %s's home path exists and is not a directory - fs_exists() returned %d", "", f->net, f->stn, username, ftype);
+fsop_00_newuserpriv.c:		fs_debug (0, 1, "%12sfrom %3d.%3d New User %s, id = %04X", "", f->net, f->stn, username, userid);
+fsop_00_newuserpriv.c:	userid = fsop_get_uid(f->server, username);
+fsop_00_newuserpriv.c:		priv = f->server->users[userid].priv;
+fsop_00_newuserpriv.c:		priv2 = f->server->users[userid].priv2;
+fsop_00_newuserpriv.c:		fsop_set_priv_byte(&(f->server->users[userid]), priv, priv2); 
+fsop_00_newuserpriv.c:	userid = fsop_get_uid(f->server, username);
+fsop_00_newuserpriv.c:		fsop_set_priv_byte(&(f->server->users[userid]), 0, 0); 
+fsop_00_newuserpriv.c:	userid = fsop_get_uid(f->server, username);
+fsop_00_newuserpriv.c:		fsop_set_priv_byte(&(f->server->users[userid]), f->server->users[userid].priv, (f->server->users[userid].priv2 | FS_PRIV2_BRIDGE)); 
+fsop_00_oscli.c:	cr = f->data + f->datalen - 1;
+fsop_00_oscli.c:	crptr = memchr(f->data, 0x0d, f->datalen);
+fsop_00_oscli.c:	if ((cmd = fsop_00_match(f->data, &param_start)))
+fsop_00_oscli.c:		num = fsop_00_oscli_parse(f->data, &p[0], param_start);
+fsop_00_oscli.c:		if (param_start - 5 == strlen(cmd->cmd) && num > 0 && *(f->data + 5 + param_start) != ' ')
+fsop_00_oscli.c:		if ((cmd->flags & FSOP_00_LOGGEDIN) && (!f->user))
+fsop_00_oscli.c:		else if ((cmd->flags & FSOP_00_SYSTEM) && !(f->user->priv & FS_PRIV_SYSTEM))
+fsop_00_oscli.c:		else if ((cmd->flags & FSOP_00_BRIDGE) && !(f->user->priv2 & FS_PRIV2_BRIDGE))
+fsop_00_oscli.c:		memcpy(&(reply.p.data[2]), (f->data + 5), f->datalen - 5);
+fsop_00_oscli.c:		reply.p.data[f->datalen-5 + 2] = 0x0D;
+fsop_00_oscli.c:		fsop_aun_send(&reply,f->datalen-5+2,f);
+fsop_00_owner.c:	mtype = f->active->machinepeek;
+fsop_00_owner.c:	fsop_00_oscli_extract(f->data, p, 0, path, 240, param_start);
+fsop_00_owner.c:	fs_debug_full (0, 1, f->server, f->net, f->stn, "*OWNER %s from type", path);
+fsop_00_owner.c:	if (!fsop_normalize_path(f, path, f->cwd, &pn) || pn.ftype == FS_FTYPE_NOTFOUND)
+fsop_00_owner.c:		snprintf(username, 11, "%-10s", f->server->users[pn.owner].username);
+fsop_00_pass.c:	if (f->server->users[f->userid].priv & FS_PRIV_NOPASSWORDCHANGE)
+fsop_00_pass.c:	memcpy(pw_cur, f->server->users[f->userid].password, 10);
+fsop_00_pass.c:		memcpy(&(f->server->users[f->userid].password), pw_new_padded, 10);
+fsop_00_pass.c:		strncpy((char *) username, (const char *) f->server->users[f->userid].username, 10);
+fsop_00_pass.c:		fs_debug_full (0, 1, f->server, f->net, f->stn, "User %s changed password", username);
+fsop_00_pass.c:	userid = fsop_get_uid(f->server, username);
+fsop_00_pass.c:		fs_debug (0, 1, "%12sfrom %3d.%3d *SETPASS %s %s (user UNKNOWN)", "", f->net, f->stn, username, password);
+fsop_00_pass.c:	fs_debug (0, 1, "%12sfrom %3d.%3d *SETPASS %s %s (user ID %d)", "", f->net, f->stn, username, password, userid);
+fsop_00_pass.c:	memcpy (&(f->server->users[userid].password), password_padded, 10);
+fsop_00_printer.c:        printerindex = get_printer(f->server->net, f->server->stn, pname);
+fsop_00_printer.c:        fs_debug (0, 1, "%12sfrom %3d.%3d Select printer %s - %s", "", f->net, f->stn, pname, (printerindex == -1) ? "UNKNOWN" : "Succeeded");
+fsop_00_printer.c:                f->active->printer = printerindex;
+fsop_00_printout.c:	printer = fsop_get_user_printer(f->active);
+fsop_00_printout.c:	handler = get_user_print_handler (f->server->net, f->server->stn, printer = 0xff ? 1 : printer, unixprinter, acornprinter);
+fsop_00_printout.c:	fs_debug (0, 2, "%12sfrom %3d.%3d *PRINTOUT %s (destination %s)", "", f->net, f->stn, file, acornprinter);
+fsop_00_printout.c:			memcpy(username, &(f->server->users[f->userid].username), 10);
+fsop_00_printout.c:			send_printjob (handler, f->server->net, f->server->stn, f->net, f->stn, username, acornprinter, unixprinter, template);
+fsop_00_rename.c:	fsop_00_oscli_extract(f->data, p, 0, from_path, 255, param_start);
+fsop_00_rename.c:	fsop_00_oscli_extract(f->data, p, 1, to_path, 255, param_start);
+fsop_00_rename.c:        fs_debug (0, 1, "%12sfrom %3d.%3d *RENAME %s %s", "", f->net, f->stn, from_path, to_path);
+fsop_00_rename.c:        if ((!FS_PERM_EFFOWNER(f->active,p_from.owner)) && (!FS_PERM_EFFOWNER(f->active,p_from.parent_owner)) && (!FS_ACTIVE_SYST(f->active)))
+fsop_00_rename.c:        if ((p_to.ftype == FS_FTYPE_NOTFOUND) && !FS_PERM_EFFOWNER(f->active,p_to.parent_owner) && ((p_to.parent_perm & FS_PERM_OTH_W) == 0)) // Attempt to move to a directory we don't own and don't have write access to
+fsop_00_rename.c:        if (p_to.ftype != FS_FTYPE_NOTFOUND && !FS_PERM_EFFOWNER(f->active, p_to.owner)) // Destination exists (so must be dir), not owned by us, and we're not system
+fsop_00_rename.c:                fsop_close_interlock(f->server, handle, 2);
+fsop_00_rename.c:                fs_debug (0, 1, "%12sfrom %3d.%3d Rename from %s to %s failed (%s)", "", f->net, f->stn, p_from.unixpath, p_to.unixpath, strerror(errno));
+fsop_00_rename.c:        char *olddot=pathname_to_dotfile(p_from.unixpath, FS_CONFIG(f->server,fs_infcolon));
+fsop_00_rename.c:        char *newdot=pathname_to_dotfile(p_to.unixpath, FS_CONFIG(f->server,fs_infcolon));
+fsop_00_renuser.c:	uid = fsop_get_uid(f->server, username);
+fsop_00_renuser.c:		if (uid == f->active->userid)
+fsop_00_renuser.c:			memcpy(f->server->users[uid].username, new_padded, 10);
+fsop_00_renuser.c:			fs_debug (0, 1, "%12sfrom %3d.%3d Rename user %s to %s (uid %d)", "", f->net, f->stn, username, new_padded, uid);
+fsop_00_setlibhome.c:		fs_debug (0, 1, "%12sfrom %3d.%3d SET%s for uid %04X to %s", "", f->net, f->stn, lib ? "LIB" : "HOME", userid, path);
+fsop_00_setlibhome.c:		if (!lib && f->server->users[userid].home[0])
+fsop_00_setlibhome.c:			fsop_get_disc_name (f->server, f->server->users[userid].home_disc, homediscname);
+fsop_00_setlibhome.c:			sprintf(homepath, ":%s.%s", homediscname, f->server->users[userid].home);
+fsop_00_setlibhome.c:		if (*path != '%' && fsop_normalize_path(f, path, FSOP_CWD, &p) && (p.ftype == FS_FTYPE_DIR) && strlen((const char *) p.path_from_root) < 94 && (!lib || p.disc == f->server->users[userid].home_disc))
+fsop_00_setlibhome.c:				strcpy(f->server->users[userid].lib, "$");
+fsop_00_setlibhome.c:			else	strcpy(f->server->users[userid].home, "$");
+fsop_00_setlibhome.c:					strcat(f->server->users[userid].lib, ".");
+fsop_00_setlibhome.c:				else	strcat(f->server->users[userid].home, ".");
+fsop_00_setlibhome.c:				strncat((char *) f->server->users[userid].lib, (const char *) p.path_from_root, 79);
+fsop_00_setlibhome.c:				strncat((char *) f->server->users[userid].home, (const char *) p.path_from_root, 79);
+fsop_00_setlibhome.c:				f->server->users[userid].home_disc = p.disc;
+fsop_00_setlibhome.c:				strncpy((char *) f->server->users[userid].lib, "", 79);
+fsop_00_setlibhome.c:				strncpy((char *) f->server->users[userid].home, "", 79);
+fsop_00_setlibhome.c:	if (!FS_ACTIVE_SYST(f->active) && num == 2)
+fsop_00_setlibhome.c:	if (!FS_ACTIVE_SYST(f->active) && (f->active->priv & FS_PRIV_LOCKED))
+fsop_00_setlibhome.c:		userid = fsop_get_uid(f->server, userstr);
+fsop_00_setlibhome.c:		userid = f->userid;
+fsop_00_setlibhome.c:		userid = fsop_get_uid(f->server, userstr);
+fsop_00_setlibhome.c:		userid = f->userid;
+fsop_00_setowner.c:	fsop_00_oscli_extract(f->data, p, 0, path, 240, param_start);
+fsop_00_setowner.c:		fsop_00_oscli_extract(f->data, p, 1, username, 10, param_start);
+fsop_00_setowner.c:		if ((userid = fsop_get_uid(f->server, username)) == -1)
+fsop_00_setowner.c:		if ((userid != f->userid) && (!FS_ACTIVE_SYST(f->active)))
+fsop_00_setowner.c:		userid = f->userid;
+fsop_00_setowner.c:		fs_debug (0, 1, "%12sfrom %3d.%3d *SETOWNER %s %s (uid %d)", "", f->net, f->stn, path, username, userid);
+fsop_00_setowner.c:		fs_debug (0, 1, "%12sfrom %3d.%3d *SETOWNER %s", "", f->net, f->stn, path);
+fsop_00_setowner.c:	if (!fsop_normalize_path(f, path, f->cwd, &pn) || pn.ftype == FS_FTYPE_NOTFOUND)
+fsop_00_setowner.c:	else if (pn.parent_owner == userid || FS_ACTIVE_SYST(f->active))
+fsop_01_save_create.c:	unsigned char   *data = f->data; /* Just convenient - don't have to change them all to f->data! */
+fsop_01_save_create.c:	fs_debug_full (0, 1, f->server, f->net, f->stn, "%s%s %s %08lx %08lx %06lx", (create_only ? "CREATE" : "SAVE"), (is_32bit ? "32" : ""), filename, load, exec, length);
+fsop_01_save_create.c:	if (create_only || (incoming_port = fsop_find_bulk_port(f->server)))
+fsop_01_save_create.c:						(       (       FS_PERM_EFFOWNER(f->active, p.parent_owner) // Owner & SYST can always write to a parent directory - at least for now - stuffs up RISC OS otherwise.
+fsop_01_save_create.c:					|| FS_ACTIVE_SYST(f->active)
+fsop_01_save_create.c:							perm = FS_CONF_DEFAULT_FILE_PERM(f->server);
+fsop_01_save_create.c:						fsop_write_xattr(p.unixpath, f->userid, perm, load, exec, 0, f);  // homeof = 0 because it's a file
+fsop_01_save_create.c:						r.p.ctrl = f->ctrl; // Copy from request
+fsop_01_save_create.c:							fsop_close_interlock(f->server, internal_handle, 3);
+fsop_01_save_create.c:							r.p.ctrl = f->ctrl;
+fsop_01_save_create.c:							r.p.data[2] = fsop_perm_to_acorn(f->server, FS_CONF_DEFAULT_FILE_PERM(f->server), FS_FTYPE_FILE);
+fsop_01_save_create.c:							FS_LIST_MAKENEW(struct __fs_bulk_port,f->server->bulkports,1,bp,"FS","Allocate new bulk port structure");
+fsop_01_save_create.c:							bp->active = f->active;
+fsop_01_save_create.c:							bp->rx_ctrl = f->ctrl;
+fsop_01_save_create.c:					fs_debug_full (0, 2, f->server, f->net, f->stn, "%s%s %s ftype=%02X, parent_perm=%02X, my_perm=%02X, parent_owner=%04X, uid=%04X", (create_only ? "CREATE" : "SAVE"), (is_32bit ? "32" : ""), filename, p.ftype, p.parent_perm, p.my_perm, p.parent_owner, f->userid);
+fsop_02_load.c:        uint8_t 		data_port = *(f->data+2);
+fsop_02_load.c:	uint8_t 		loadas = (*(f->data+1) == 0x05 ? 1 : 0);
+fsop_02_load.c:	uint8_t 		is_32bit = (*(f->data+1) == 0x28 ? 1 : 0);
+fsop_02_load.c:        fs_copy_to_cr(command, f->data+5, 256);
+fsop_02_load.c:        fs_debug_full (0, 1, f->server, f->net, f->stn, "%s%s %s", (loadas ? "RUN" : "LOAD"), (is_32bit ? "32" : ""), command);
+fsop_02_load.c:        if ((!result || (p.ftype == FS_FTYPE_NOTFOUND)) && (loadas || (FS_CONFIG(f->server,fs_sjfunc))) && !fsop_normalize_path(f, command, f->active->lib, &p))   // Either in current, or lib if loadas set
+fsop_02_load.c:        if (!((FS_ACTIVE_SYST(f->active)) || (p.my_perm & FS_PERM_OWN_R))) // Note: my_perm has all the relevant privilege bits in the bottom 4
+fsop_02_load.c:	if (!(FS_ACTIVE_SYST(f->active)) && !loadas && (p.perm & FS_PERM_EXEC)) // Execute only bit set, and not SYST
+fsop_02_load.c:        r.p.seq = eb_get_local_seq(f->server->fs_device);
+fsop_02_load.c:	FS_LIST_MAKENEW(struct __fs_active_load_queue,f->active->load_queue,1,alq,"FS","Create new active load queue structure for load operation");
+fsop_02_load.c:	alq->ctrl = f->ctrl; /* So that the close packet can echo it */
+fsop_02_load.c:	alq->chunk_size = f->active->chunk_size; /* Copy from login process */
+fsop_02_load.c:                                fs_debug_full (0, 1, f->server, f->net, f->stn, "Data burst enqueue failed (fread() error)");
+fsop_03_examine.c:	start = *(f->data + 6);
+fsop_03_examine.c:	n = *(f->data + 7);
+fsop_03_examine.c:	fs_copy_to_cr(path, (f->data + 8), 255);
+fsop_03_examine.c:	fs_debug_full (0, 2, f->server, f->net, f->stn, "Examine %s relative to %d (%s), start %d, extent %d, arg = %d", path, relative_to, f->active->fhandles[relative_to].acornfullpath, start, n, arg);
+fsop_03_examine.c:		if ((e->perm & FS_PERM_H) == 0 || (e->owner == f->userid)) // not hidden
+fsop_03_examine.c:		if (FS_ACTIVE_SYST(f->active) || (e->perm & FS_PERM_H) == 0 || (e->owner == f->userid)) // not hidden or we are the owner
+fsop_03_examine.c:					reply.p.data[replylen++] = fsop_perm_to_acorn(f->server, e->perm, e->ftype);
+fsop_03_examine.c:					if (f->server->config->fs_sjfunc) // Next three bytes are ownership information - main & aux. We always set aux to 0 for now.
+fsop_03_examine.c:					is_owner = FS_PERM_EFFOWNER(f->active, e->owner);
+fsop_03_examine.c:					if (f->server->config->fs_mask_dir_wrr && e->ftype == FS_FTYPE_DIR && (e->perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == FS_ACORN_DIR_MASK)
+fsop_03_examine.c:						((e->perm & FS_PERM_OWN_W) ? (is_owner ? "W" : FS_CONFIG(f->server,fs_mdfsinfo) ? "w": "W") : ""),
+fsop_03_examine.c:						((e->perm & FS_PERM_OWN_R) ? (is_owner ? "R" : FS_CONFIG(f->server,fs_mdfsinfo) ? "r" : "R") : "") );
+fsop_03_examine.c:						((e->perm & FS_PERM_OTH_W) ? (FS_CONFIG(f->server,fs_mdfsinfo) ? (is_owner ? "w" : "W") : "W") : ""),
+fsop_03_examine.c:						((e->perm & FS_PERM_OTH_R) ? (FS_CONFIG(f->server,fs_mdfsinfo) ? (is_owner ? "r" : "R") : "R") : "") );
+fsop_03_examine.c:					is_owner = FS_PERM_EFFOWNER(f->active, e->owner);
+fsop_03_examine.c:					if (f->server->config->fs_mask_dir_wrr && e->ftype == FS_FTYPE_DIR && (e->perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == FS_ACORN_DIR_MASK)
+fsop_03_examine.c:						((e->perm & FS_PERM_OWN_W) ? (is_owner ? "W" : f->server->config->fs_mdfsinfo ? "w": "W") : ""),
+fsop_03_examine.c:						((e->perm & FS_PERM_OWN_R) ? (is_owner ? "R" : f->server->config->fs_mdfsinfo ? "r" : "R") : "") );
+fsop_03_examine.c:						((e->perm & FS_PERM_OTH_W) ? (f->server->config->fs_mdfsinfo ? (is_owner ? "w" : "W") : "W") : ""),
+fsop_03_examine.c:						((e->perm & FS_PERM_OTH_R) ? (f->server->config->fs_mdfsinfo ? (is_owner ? "r" : "R") : "R") : "") );
+fsop_03_examine.c:					if (f->server->config->fs_mask_dir_wrr && e->ftype == FS_FTYPE_DIR && (e->perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == FS_ACORN_DIR_MASK)
+fsop_03_examine.c:					reply.p.data[replylen++] = fsop_perm_to_acorn(f->server, e->perm, (e->ftype == FS_FTYPE_DIR ? 1 : 0));
+fsop_04_catheader.c:	fs_copy_to_cr(path, f->data + 5, 1022);
+fsop_04_catheader.c:	fs_debug (0, 2, "%12sfrom %3d.%3d Read catalogue header %s", "", f->net, f->stn, path);
+fsop_04_catheader.c:		else if ((pt.my_perm & FS_PERM_OWN_R) || FS_ACTIVE_SYST(f->active))
+fsop_04_catheader.c:			fsop_get_disc_name(f->server, f->active->current_disc, discname);
+fsop_04_catheader.c:				FS_PERM_EFFOWNER(f->active, pt.owner) ? 'O' : 'P',
+fsop_06_openclose.c:	if (!f->active->fhandles[handle].handle) // Handle not open
+fsop_06_openclose.c:		if (f->active->fhandles[handle].is_dir)
+fsop_06_openclose.c:			fsop_deallocate_user_dir_channel (f->active, handle);
+fsop_06_openclose.c:			fsop_close_interlock(f->server, f->active->fhandles[handle].handle, f->active->fhandles[handle].mode);
+fsop_06_openclose.c:	uint8_t		existingfile = *(f->data+5);
+fsop_06_openclose.c:	uint8_t		readonly = *(f->data+6);
+fsop_06_openclose.c:	if (*(f->data+1) == 0x2E)
+fsop_06_openclose.c:	while (*(f->data+count) == ' ' && count < f->datalen)
+fsop_06_openclose.c:	if (count == f->datalen)
+fsop_06_openclose.c:	while (*(f->data+count) != ' ' && count < f->datalen)
+fsop_06_openclose.c:	if (count != f->datalen) // space in the filename!
+fsop_06_openclose.c:		*(f->data+count) = 0x0d; // So terminate it early
+fsop_06_openclose.c:	fs_copy_to_cr(filename, f->data+start, 1023);
+fsop_06_openclose.c:	fs_debug_full (0, 2, f->server, f->net, f->stn, "Open%s %s readonly %s, must exist? %s", (is_32bit ? "32" : ""), filename, (readonly ? "yes" : "no"), (existingfile ? "yes" : "no"));
+fsop_06_openclose.c:	if ((!result || p.ftype == FS_FTYPE_NOTFOUND) && (FS_CONFIG(f->server,fs_sjfunc)) && existingfile) /* If MDFS functionality is on, OPENIN and OPENUP will search library, apparently, if not found in CWD... */
+fsop_06_openclose.c:	else if ((p.ftype == FS_FTYPE_FILE) && !readonly && ((p.my_perm & FS_PERM_OWN_W) == 0) && !FS_ACTIVE_SYST(f->active))
+fsop_06_openclose.c:	else if ((p.ftype == FS_FTYPE_FILE) && ((p.my_perm & FS_PERM_OWN_R) == 0) && !FS_ACTIVE_SYST(f->active))
+fsop_06_openclose.c:	else if ((p.ftype == FS_FTYPE_FILE) && ((p.perm & FS_PERM_EXEC) && !FS_ACTIVE_SYST(f->active)))
+fsop_06_openclose.c:			(p.ftype == FS_FTYPE_NOTFOUND) && !FS_ACTIVE_SYST(f->active)
+fsop_06_openclose.c:		(       ((!(FS_PERM_EFFOWNER(f->active, p.parent_owner))) && ((p.parent_perm & FS_PERM_OTH_W) == 0)) ||
+fsop_06_openclose.c:			((FS_PERM_EFFOWNER(f->active, p.parent_owner)) && ((p.parent_perm & FS_PERM_OWN_W) == 0))
+fsop_06_openclose.c:		fs_debug_full (0,2, f->server, f->net, f->stn, "Attempt to open %s for write - p.parent_owner = %d, p.parent_perm = %02X, p.perm = %02X, userid = %d", filename, p.parent_owner, p.parent_perm, p.perm, f->userid);
+fsop_06_openclose.c:		userhandle = fsop_allocate_user_file_channel(f->active);
+fsop_06_openclose.c:				fsop_deallocate_user_file_channel(f->active, userhandle);
+fsop_06_openclose.c:				fsop_deallocate_user_file_channel(f->active, userhandle);
+fsop_06_openclose.c:				fsop_deallocate_user_file_channel(f->active, userhandle);
+fsop_06_openclose.c:				struct __fs_active 	*a = f->active;
+fsop_06_openclose.c:				// fs_debug (0, 2, "%12sfrom %3d.%3d User handle %02X allocated for %s", "", f->net, f->stn, userhandle, realfullpath);
+fsop_06_openclose.c:				fs_debug_full (0, 2, f->server, f->net, f->stn, "Opened handle %02X (%s)", userhandle, a->fhandles[userhandle].acornfullpath);
+fsop_06_openclose.c:	uint8_t		handle = FS_DIVHANDLE(f->active,*(f->data+5));
+fsop_06_openclose.c:	struct __fs_active	*a = f->active;
+fsop_06_openclose.c:		fs_debug_full (0, 2, f->server, f->net, f->stn, "Attempt to close bad/unknown handle &%02X", handle);
+fsop_06_openclose.c:		fs_debug_full (0, 2, f->server, f->net, f->stn, "Close handle &%02X (%s)", handle, a->fhandles[handle].acornfullpath);
+fsop_06_openclose.c:				fs_debug_full (0, 2, f->server, f->net, f->stn, "Close handle &%02X (%s)", count, a->fhandles[count].acornfullpath);
+fsop_08_getputbyte.c:	a = f->active;
+fsop_08_getputbyte.c:	ctrl = f->ctrl;
+fsop_08_getputbyte.c:	fs_debug (0, 2, "%12sfrom %3d.%3d Get byte on channel %02x, cursor %04lX, ctrl seq is %s (stored: %02X, received: %02X)", "", f->net, f->stn, handle, a->fhandles[handle].cursor,
+fsop_08_getputbyte.c:	fs_debug (0, 2, "%12sfrom %3d.%3d Get byte on channel %02x, cursor %04lX, file length = %04lX, seek to %04lX", "", f->net, f->stn, handle, a->fhandles[handle].cursor, ftell(h));
+fsop_08_getputbyte.c:	a = f->active;
+fsop_08_getputbyte.c:	ctrl = f->ctrl;
+fsop_08_getputbyte.c:	fs_debug (0, 2, "%12sfrom %3d.%3d Put byte %02X on channel %02x, cursor %06lX ctrl seq is %s (stored: %02X, received: %02X)", "", f->net, f->stn, b, handle, a->fhandles[handle].cursor,
+fsop_08_getputbyte.c:	fs_debug (0, 2, "%12sfrom %3d.%3d Put byte %02X on channel %02x, updated cursor %06lX", "", f->net, f->stn, b, handle, a->fhandles[handle].cursor);
+fsop_0a_getputbytes.c:	a = f->active;
+fsop_0a_getputbytes.c:	is_32bit = (*(f->data+1) == 0x2A) ? 1 : 0; 
+fsop_0a_getputbytes.c:		handle = FS_DIVHANDLE(a,*(f->data+5));
+fsop_0a_getputbytes.c:		offsetstatus = *(f->data+6);
+fsop_0a_getputbytes.c:		bytes = (((*(f->data+7))) + ((*(f->data+8)) << 8) + (*(f->data+9) << 16));
+fsop_0a_getputbytes.c:		offset = (((*(f->data+10))) + ((*(f->data+11)) << 8) + (*(f->data+12) << 16));
+fsop_0a_getputbytes.c:		handle = FS_DIVHANDLE(a,*(f->data+8)); // See mdfs.net. Things are not in the analogous place to the 24-bit version
+fsop_0a_getputbytes.c:		txport = *(f->data+7); 
+fsop_0a_getputbytes.c:		offsetstatus = *(f->data+6);
+fsop_0a_getputbytes.c:		bytes = (((*(f->data+9))) + ((*(f->data+10)) << 8) + (*(f->data+11) << 16) + (*(f->data+12) << 24));
+fsop_0a_getputbytes.c:		offset = (((*(f->data+13))) + ((*(f->data+14)) << 8) + (*(f->data+15) << 16) + (*(f->data+16) << 24));
+fsop_0a_getputbytes.c:	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB%s Get %08lX from offset %08lX (%s) by user %04x on handle %02X", 
+fsop_0a_getputbytes.c:			bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), f->userid, handle);
+fsop_0a_getputbytes.c:	if ((!is_32bit && f->datalen < 13) || (is_32bit && f->datalen < 17))
+fsop_0a_getputbytes.c:		fs_debug_full (0, 1, f->server, f->net, f->stn, "OSGBPB Get on channel %02X - error on finding length of file: %s", handle, error_str);
+fsop_0a_getputbytes.c:	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Get from offset %06lX, file length %06lX, beyond EOF %s", offset, length, (eofreached ? "Yes" : "No"));
+fsop_0a_getputbytes.c:	seq = eb_get_local_seq(f->server->fs_device);
+fsop_0a_getputbytes.c:        FS_LIST_MAKENEW(struct __fs_active_load_queue,f->active->load_queue,1,alq,"FS","Create new active load queue structure for GetBytes operation");
+fsop_0a_getputbytes.c:        alq->mode = f->active->fhandles[handle].mode; 
+fsop_0a_getputbytes.c:        alq->ctrl = f->ctrl; /* So that the close packet can echo it */
+fsop_0a_getputbytes.c:        alq->chunk_size = f->active->chunk_size;  /* Copy from login process */
+fsop_0a_getputbytes.c:	a = f->active;
+fsop_0a_getputbytes.c:	is_32bit = (*(f->data+1) == 0x2B) ? 1 : 0; 
+fsop_0a_getputbytes.c:		handle = FS_DIVHANDLE(a,*(f->data + 5));
+fsop_0a_getputbytes.c:		txport = *(f->data+2);
+fsop_0a_getputbytes.c:		offsetstatus = *(f->data+6);
+fsop_0a_getputbytes.c:		bytes = (((*(f->data+9)) << 16) + ((*(f->data+8)) << 8) + (*(f->data+7)));
+fsop_0a_getputbytes.c:		offset = (((*(f->data+12)) << 16) + ((*(f->data+11)) << 8) + (*(f->data+10)));
+fsop_0a_getputbytes.c:		handle = FS_DIVHANDLE(a,*(f->data + 8));
+fsop_0a_getputbytes.c:		txport = *(f->data+7);
+fsop_0a_getputbytes.c:		offsetstatus = *(f->data+6);
+fsop_0a_getputbytes.c:		bytes = (((*(f->data+9))) + ((*(f->data+10)) << 8) + (*(f->data+11) << 16) + (*(f->data+12) << 24));
+fsop_0a_getputbytes.c:		offset = (((*(f->data+13))) + ((*(f->data+14)) << 8) + (*(f->data+15) << 16) + (*(f->data+16) << 24));
+fsop_0a_getputbytes.c:	if (f->datalen < 13)
+fsop_0a_getputbytes.c:	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB%s Put %08lX at offset %08lX by user %04X on handle %02X",
+fsop_0a_getputbytes.c:			bytes, offset, f->userid,  handle);
+fsop_0a_getputbytes.c:		fs_debug_full (0, 3, f->server, f->net, f->stn, "OSGBPB Put Attempt to write at offset %06X beyond file end (length %06X) - padding with nulls", offset, length);
+fsop_0a_getputbytes.c:	if ((incoming_port = fsop_find_bulk_port(f->server)))
+fsop_0a_getputbytes.c:		FS_LIST_MAKENEW(struct __fs_bulk_port,f->server->bulkports,1,bp,"FS","New FS bulk port for GetBytes()");
+fsop_0a_getputbytes.c:		r.p.data[3] = (FS_CONFIG(f->server,fs_bigchunks) ? FS_MAX_BULK_SIZE : 0x500) & 0xff; // Max trf size
+fsop_0a_getputbytes.c:		r.p.data[4] = ((FS_CONFIG(f->server,fs_bigchunks) ? FS_MAX_BULK_SIZE : 0x500) & 0xff00) >> 8; // High byte of max trf
+fsop_0a_getputbytes.c:		FS_LIST_SPLICEFREE(f->server->bulkports,bp,"FS","Freeing unused bulk port struct on a zero-byte transfer");
+fsop_0c_getsetrandom.c:	a = f->active;
+fsop_0c_getsetrandom.c:	handle = FS_DIVHANDLE(a,*(f->data+5));
+fsop_0c_getsetrandom.c:	function = FS_DIVHANDLE(a,*(f->data+6));
+fsop_0c_getsetrandom.c:			fs_debug_full (0, 2, f->server, f->net, f->stn, "Get random access info on handle %02X, function %02X - cursor %06lX - data returned %02X %02X %02X", handle, function, a->fhandles[handle].cursor, r.p.data[2], r.p.data[3], r.p.data[4]);
+fsop_0c_getsetrandom.c:			fs_debug_full (0, 2, f->server, f->net, f->stn, "Get random access info on handle %02X, function %02X - extent %06lX", handle, function, s.st_size);
+fsop_0c_getsetrandom.c:	a = f->active;
+fsop_0c_getsetrandom.c:	is_32bit = ((*(f->data+1)) == 0x2A) ? 1 : 0;
+fsop_0c_getsetrandom.c:	function = *(f->data+6);
+fsop_0c_getsetrandom.c:	value = (*(f->data+7)) + ((*(f->data+8)) << 8) + ((*(f->data+9)) << 16);
+fsop_0c_getsetrandom.c:		value += (*(f->data+8)) << 24;
+fsop_0c_getsetrandom.c:			fs_debug_full (0, 2, f->server, f->net, f->stn, "Set file pointer%s on channel %02X to %06lX, current extent %06lX%s", (is_32bit ? " (32 bit)" : ""), handle, value, extent, (value > extent) ? " which is beyond EOF" : "");
+fsop_0c_getsetrandom.c:					fs_debug_full (0, 1, f->server, f->net, f->stn, "Tried to write %06X bytes, actually wrote %06lX", chunk, written);
+fsop_0c_getsetrandom.c:			fs_debug_full (0, 2, f->server, f->net, f->stn, "Set file extent%s on channel %02X to %06lX, current extent %06lX%s", (is_32bit ? " (32 bit)" : ""), handle, value, extent, (value > extent) ? " so adding bytes to end of file" : "");
+fsop_0c_getsetrandom.c:			fs_debug_full (0, 3, f->server, f->net, f->stn, "   - %s file accordingly", (is_32bit ? " (32 bit)" : ""), ((value < extent) ? "truncating" : "extending"));
+fsop_0c_getsetrandom.c:				exec = (*(f->data+11)) + ((*(f->data+12)) << 8) + ((*(f->data+13)) << 16) + ((*(f->data+14)) << 24);
+fsop_0c_getsetrandom.c:	a = f->active;
+fsop_0c_getsetrandom.c:	handle = FS_DIVHANDLE(a,*(f->data+5));
+fsop_0c_getsetrandom.c:	function = (*(f->data+6));
+fsop_0c_getsetrandom.c:			fs_debug_full (0, 2, f->server, f->net, f->stn, "Get random access info (32 bit) on handle %02X, function %02X - cursor %08lX, size %08lX (extent is same)", handle, function, a->fhandles[handle].cursor, s.st_size);
+fsop_0e_read_discs.c:	uint8_t		number = *(f->data+6);
+fsop_0e_read_discs.c:	fs_debug_full (0, 2, f->server, f->net, f->stn, "Read Discs from %d (up to %d)", start, number);
+fsop_0e_read_discs.c:	disc = f->server->discs;
+fsop_0e_read_discs.c:		//fprintf(stderr, "Looking at disc at %p index %d, Visible = %d\n", disc, disc->index, FS_DISC_VIS(f->server, f->userid, disc->index));
+fsop_0e_read_discs.c:		if ((f->user && FS_DISC_VIS(f->server, f->userid, disc->index) && (disc->index >= start)) || (!f->user && disc->index == 0 && start == 0))
+fsop_0f_read_users.c:	number = *(f->data + 6);
+fsop_0f_read_users.c:	fs_debug_full (0, 2, f->server, f->net, f->stn, "Read logged on users %d to %d", start, number);
+fsop_0f_read_users.c:	a = f->server->actives;
+fsop_0f_read_users.c:			(f->user->priv & FS_PRIV_SYSTEM)
+fsop_0f_read_users.c:		||	!(f->server->users[a->userid].priv & FS_PRIV_SYSTEM) /* We aren't syst and the logged on user is */
+fsop_0f_read_users.c:		||	a->userid == f->userid
+fsop_0f_read_users.c:		||	!(f->server->users[a->userid].priv2 & FS_PRIV2_HIDEOTHERS)
+fsop_0f_read_users.c:			(f->user->priv & FS_PRIV_SYSTEM)
+fsop_0f_read_users.c:		||	!(f->server->users[a->userid].priv & FS_PRIV_SYSTEM) /* We aren't syst and the logged on user is */
+fsop_0f_read_users.c:		||	a->userid == f->userid
+fsop_0f_read_users.c:		||	!(f->server->users[a->userid].priv2 & FS_PRIV2_HIDEOTHERS)
+fsop_0f_read_users.c:			memcpy(username, f->server->users[a->userid].username, 10);
+fsop_0f_read_users.c:				((f->server->users[a->userid].priv & FS_PRIV_SYSTEM) ? 1 : 0) 
+fsop_10_readtime.c:        fs_debug (0, 2, "%12sfrom %3d.%3d Read FS time", "", f->net, f->stn);
+fsop_11_eof.c:	uint8_t	handle = FS_DIVHANDLE(f->active,FSOP_ARG);
+fsop_11_eof.c:	if (handle < 1 || handle >= FS_MAX_OPEN_FILES || !(f->active->fhandles[handle].handle))
+fsop_11_eof.c:		ptr = (struct __fs_file *) f->active->fhandles[handle].handle;
+fsop_11_eof.c:		if (f->active->fhandles[handle].cursor == filesize)
+fsop_12_readobjinfo.c:        unsigned char *data = f->data; /* Saves time */
+fsop_12_readobjinfo.c:		fs_debug_full (0, 2, f->server, f->net, f->stn, "NetFS 32 bit support probe");
+fsop_12_readobjinfo.c:        fs_debug_full (0, 2, f->server, f->net, f->stn, "Get Object Info '%s' relative to %02X (%s), command %d", path, relative_to, f->active->fhandles[relative_to].acornfullpath, command);
+fsop_12_readobjinfo.c:        if (p.ftype == FS_FTYPE_DIR && !((FS_PERM_EFFOWNER(f->active, p.owner) && (p.perm & FS_PERM_OWN_R)) || (p.perm & FS_PERM_OTH_R) || FS_ACTIVE_SYST(f->active)))
+fsop_12_readobjinfo.c:                reply.p.data[replylen++] = fsop_perm_to_acorn(f->server, p.perm, p.ftype);
+fsop_12_readobjinfo.c:                reply.p.data[replylen++] = (FS_PERM_EFFOWNER(f->active, p.owner) ? 0x00 : 0xFF);
+fsop_12_readobjinfo.c:                reply.p.data[replylen++] = (f->userid == p.owner) ? 0x00 : 0xff;
+fsop_12_readobjinfo.c:                if (!(f->server->config->fs_sjfunc))
+fsop_13_setobjinfo.c:	unsigned char *data = f->data; // Saves changing loads of stuff from the old version
+fsop_13_setobjinfo.c:	uint16_t	datalen = f->datalen;
+fsop_13_setobjinfo.c:	a = f->active;
+fsop_13_setobjinfo.c:	if (command == 0x40 && !(f->server->config->fs_sjfunc))
+fsop_13_setobjinfo.c:	fs_copy_to_cr(path, (f->data+filenameposition), 1023);
+fsop_13_setobjinfo.c:		fs_debug_full (0, 2, f->server, f->net, f->stn, "Set Object Info %s relative to %s, command %d", path, relative_to == a->root ? "Root" : relative_to == a->lib ? "Library" : "Current", command);
+fsop_13_setobjinfo.c:		fs_debug_full (0, 2, f->server, f->net, f->stn, "Set Object Info %s relative to %s, command %d, attribute &%02X", path, relative_to == a->root ? "Root" : relative_to == a->lib ? "Library" : "Current", command, (*(f->data + 6)));
+fsop_13_setobjinfo.c:				attr.perm = fsop_perm_from_acorn(f->server, *(data+14));
+fsop_13_setobjinfo.c:						attr.perm |= FS_CONF_DEFAULT_DIR_PERM(f->server);
+fsop_13_setobjinfo.c:					else    attr.perm |= FS_CONF_DEFAULT_FILE_PERM(f->server);
+fsop_13_setobjinfo.c:				attr.perm = fsop_perm_from_acorn(f->server, *(data+6));
+fsop_13_setobjinfo.c:						attr.perm |= FS_CONF_DEFAULT_DIR_PERM(f->server);
+fsop_13_setobjinfo.c:					else    attr.perm |= FS_CONF_DEFAULT_FILE_PERM(f->server);
+fsop_13_setobjinfo.c:					fsop_set_create_time (p.unixpath, *(f->data+6), *(f->data+7), 0, 0, 0); // Sets to midnight since no time given
+fsop_13_setobjinfo.c:					fsop_set_create_time (p.unixpath, *(f->data+11), *(f->data+12), *(f->data+13), *(f->data+14), *(f->data+15));
+fsop_13_setobjinfo.c:		fs_debug_full (0, 2, f->server, f->net, f->stn, "Set Object Info %s relative to %s, command %d, writing to path %s, owner %04X, perm %02X, load %08X, exec %08X, homeof %04X", path, f->active->fhandles[relative_to].acornfullpath, command, p.unixpath, attr.owner, attr.perm, attr.load, attr.exec, attr.homeof);
+fsop_14_delete.c:	//fprintf (stderr, "fsop_delete_internal(%s = %s.%s,%02X)\n", path, f->active->fhandles[relative_to].acornfullpath, path, relative_to);
+fsop_14_delete.c:			else    fsop_close_interlock(f->server, handle, 2);
+fsop_14_delete.c:				!( FS_PERM_EFFOWNER(f->active,e->owner) || (FS_PERM_EFFOWNER(f->active,e->parent_owner) && (e->parent_perm & FS_PERM_OWN_W))
+fsop_14_delete.c:				char *dotfile=pathname_to_dotfile(e->unixpath, FS_CONFIG(f->server,fs_infcolon));
+fsop_14_delete.c:	while (path_start < f->datalen && *(f->data + path_start) == ' ')
+fsop_14_delete.c:	fs_copy_to_cr(path, (f->data + path_start), 1023);
+fsop_14_delete.c:	fs_debug_full (0, 1, f->server, f->net, f->stn, "*DELETE %s relative to %02X (%s)", path, FSOP_CWD, f->active->fhandles[FSOP_CWD].acornfullpath);
+fsop_14_delete.c:	fsop_00_oscli_extract(f->data, p, 0, path, 255, param_start);
+fsop_15_readuserenv.c:	a = f->active;
+fsop_15_readuserenv.c:	//fs_debug (0, 2, "%12sfrom %3d.%3d Read user environment - current user handle %d, current lib handle %d", "", f->net, f->stn, f->active->current, f->active->lib);
+fsop_15_readuserenv.c:	fs_debug_full (0, 2, f->server, f->net, f->stn, "Read user environment - current user handle %d (dir:%c ptr:%p), current lib handle %d (dir:%c ptr:%p)", f->cwd, a->fhandles[a->current].is_dir ? 'Y' : 'N',
+fsop_15_readuserenv.c:				a->fhandles[a->current].handle, f->lib, a->fhandles[a->lib].is_dir ? 'Y' : 'N', a->fhandles[a->lib].handle);
+fsop_15_readuserenv.c:	fsop_get_disc_name(f->server, a->current_disc, discname);
+fsop_16_opt.c:	f->server->users[uid].bootopt = opt;
+fsop_16_opt.c:	a = f->server->actives;
+fsop_16_opt.c:	if (f->server->users[f->userid].priv2 & FS_PRIV2_FIXOPT)
+fsop_16_opt.c:		fsop_setopt_internal(f, f->userid, opt);
+fsop_16_opt.c:	uid = fsop_get_uid(f->server, username);
+fsop_16_opt.c:	fs_debug (0, 2, "%12sfrom %3d.%3d Set boot option %d for user %s", "", f->net, f->stn, new_opt, username);
+fsop_17_bye.c:	fsop_bye_internal(f->active, 1, FSOP_REPLY_PORT); /* Do reply */
+fsop_18_readuserinfo.c:	fs_copy_to_cr(username, (f->data + 5), 10);
+fsop_18_readuserinfo.c:        fs_debug (0, 2, "%12sfrom %3d.%3d Read user info for %s", "", f->net, f->stn, username);
+fsop_18_readuserinfo.c:	a = f->server->actives;
+fsop_18_readuserinfo.c:                if (!strncasecmp((const char *) username_padded, (const char *) f->server->users[a->userid].username, 10))
+fsop_18_readuserinfo.c:                        if (f->server->users[a->userid].priv & FS_PRIV_SYSTEM)
+fsop_1a_getfree.c:	fs_copy_to_cr(discname, f->data+5, 16);
+fsop_1a_getfree.c:	fs_debug_full (0, 2, f->server, f->net, f->stn, "Read free space on %s", discname);
+fsop_1a_getfree.c:	disc = f->server->discs;
+fsop_1a_getfree.c:			snprintf((char * ) path, 1024, "%s/%1X%s",(const char * ) f->server->directory, disc->index, (const char *) disc->name);
+fsop_1b_cdir.c:	if (!FS_PERM_EFFOWNER(f->active, p.parent_owner)) /* No rights in the parent directory */
+fsop_1b_cdir.c:		fsop_write_xattr(p.unixpath, f->userid, FS_CONF_DEFAULT_DIR_PERM(f->server), 0, 0, 0, f);
+fsop_1b_cdir.c:	while (path_start < f->datalen && *(f->data + path_start) == ' ')
+fsop_1b_cdir.c:	fs_copy_to_cr(path, (f->data + path_start), 1023);
+fsop_1b_cdir.c:	fs_debug_full (0, 1, f->server, f->net, f->stn, "*CDIR %s", path);
+fsop_1b_cdir.c:	fsop_00_oscli_extract(f->data, p, 0, path, 255, param_start);
+fsop_40_mdfs.c:	start = *(f->data+8) + (*(f->data + 9) << 8);
+fsop_40_mdfs.c:	count = *(f->data + 10) + (*(f->data + 11) << 8);
+fsop_40_mdfs.c:	disc = *(f->data + 12);
+fsop_40_mdfs.c:	fs_debug (0, 1, "%12sfrom %3d.%3d SJ Read Account information from %d for %d entries on disc no. %d - Not yet implemented", "", f->net, f->stn, start, count, disc);
+fsop_40_mdfs.c:	reply.p.data[6] = f->userid & 0xff;
+fsop_40_mdfs.c:	reply.p.data[7] = (f->userid & 0xff00) >> 8;
+fsop_41_sysinfo.c:	uint8_t		*data = f->data; /* Cheat */
+fsop_41_sysinfo.c:	uint8_t		net = f->net, stn = f->stn; /* Cheat */
+fsop_41_sysinfo.c:			if (!get_printer_info(f->server->net, f->server->stn,
+fsop_41_sysinfo.c:			if (set_printer_info(f->server->net, f->server->stn,
+fsop_41_sysinfo.c:				if (get_printer_info(f->server->net, f->server->stn,
+fsop_43_mdfstape.c:	arg = *(f->data + 5);
+fsop_43_mdfstape.c:	fs_debug (0, 1, "%12sfrom %3d.%3d SJ Read Account information from %d for %d entries on disc no. %d - Not yet implemented", "", f->net, f->stn, start, count, disc);
+fsop_43_mdfstape.c:	reply.p.data[6] = f->userid & 0xff;
+fsop_43_mdfstape.c:	reply.p.data[7] = (f->userid & 0xff00) >> 8;
+fsop_60_pibridge.c:                        (FSOP_ARG < 16 && !FS_ACTIVE_BRIDGE(f->active))
+fsop_60_pibridge.c:                ||      (FSOP_ARG >= 16 && FSOP_ARG < 32 && !FS_ACTIVE_SYST(f->active))
+fsop_60_pibridge.c:                fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call - prohibited", "", f->net, f->stn);
+fsop_60_pibridge.c:                        fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 1 - Pi Shutdown", "", f->net, f->stn);
+fsop_60_pibridge.c:                        fs_copy_to_cr((unsigned char *) username, (f->data + 6), 10);
+fsop_60_pibridge.c:			uid = fsop_get_uid(f->server, username);
+fsop_60_pibridge.c:                        fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 16 - Get UID and priv bits for %s", "", f->net, f->stn, username);
+fsop_60_pibridge.c:                        fsop_get_parameters (f->server, &params, &(data[4]));
+fsop_60_pibridge.c:                        fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 17 - Get FS parameters (0x%04X, filename length %d)", "", f->net, f->stn, params, data[4]);
+fsop_60_pibridge.c:                        params =        (*(f->data+6))
+fsop_60_pibridge.c:                                +       (*(f->data+7) << 8)
+fsop_60_pibridge.c:                                +       (*(f->data+8) << 16)
+fsop_60_pibridge.c:                                +       (*(f->data+9) << 24);
+fsop_60_pibridge.c:                        fnlength = *(f->data+10);
+fsop_60_pibridge.c:                        fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 18 - Set FS parameters (0x%04X, filename length %d)", "", f->net, f->stn, params, fnlength);
+fsop_60_pibridge.c:                        fsop_set_parameters (f->server, params, fnlength);
+fsop_60_pibridge.c:                        snprintf (shutdown_msg, 127, "Fileserver at %d.%d shutting down\x0d", f->server->net, f->server->stn);
+fsop_60_pibridge.c:                        fs_debug_full (0, 2, f->server, f->net, f->stn, "FS PiBridge call arg = 19 - Shut down fileserver");
+fsop_60_pibridge.c:			f->server->enabled = 0; /* The fsop_thread() routine does the actual shutdown */
+fsop_60_pibridge.c:                        //fsop_shutdown(f->server);
+fsop_60_pibridge.c:                        arg2 = *(f->data+6);
+fsop_60_pibridge.c:                                        if (f->datalen < 9) /* One character username + 0x0D */
+fsop_60_pibridge.c:                                        fs_copy_to_cr ((unsigned char *) username, (f->data+7), 10);
+fsop_60_pibridge.c:                                        uid = fsop_get_uid(f->server, username);
+fsop_60_pibridge.c:                                        if (f->datalen < 9)
+fsop_60_pibridge.c:                                        uid = (*(f->data + 7)) + (*(f->data + 8) << 8);
+fsop_60_pibridge.c:                                        if (f->datalen < 9)
+fsop_60_pibridge.c:                                        l_net = *(f->data+7);
+fsop_60_pibridge.c:                                        l_stn = *(f->data+8);
+fsop_60_pibridge.c:			a = f->server->actives;

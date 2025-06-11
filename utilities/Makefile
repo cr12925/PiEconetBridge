@@ -1,16 +1,17 @@
 GIT_VERSION := "$(shell git branch) $(shell git rev-parse --short HEAD)"
 CFLAGS=-g -O2 -I../include -I/usr/include/glib-2.0 -I/usr/lib/aarch64-linux-gnu/glib-2.0/include -I/usr/lib/arm-linux-gnueabihf/glib-2.0/include  -I/usr/lib64/glib-2.0/include
 
-fsop_objects := $(patsubst %.c,%.o,$(wildcard fsop/*.c))
 econet_hpb_objects := $(patsubst %.c,%.o,$(wildcard econet-hpbridge*.c))
+econet_hpb_modules := $(patsubst %.c,%.o,$(wildcard modules/*.c))
+fsop_objects := $(patsubst %.c,%.o,$(wildcard modules/fsop/*.c))
 
 all:	econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers econet-poke econet-isnets unix2beeb
 
 unix2beeb:	unix2beeb.c
 	cc $(CFLAGS) -Wall -Wno-pointer-sign unix2beeb.c -o unix2beeb
 
-econet-hpbridge:	Makefile fsv2.o $(fsop_objects) $(econet_hpb_objects)
-	if [ -f .noexplain ]; then cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) fsv2.o $(fsop_objects) -lpthread -lssl -lcrypto -ljson-c -lglib-2.0; else cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) fsv2.o $(fsop_objects) -lpthread -lssl -lcrypto -lexplain -ljson-c -lglib-2.0; fi
+econet-hpbridge:	Makefile $(fsop_objects) $(econet_hpb_objects) $(econet_hpb_modules)
+	if [ -f .noexplain ]; then cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) $(econet_hpb_modules) $(fsop_objects) -lpthread -lssl -lcrypto -ljson-c -lglib-2.0; else cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) $(econet_hpb_modules) $(fsop_objects) -lpthread -lssl -lcrypto -lexplain -ljson-c -lglib-2.0; fi
 	-chgrp econet econet-hpbridge
 
 $(fsop_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
@@ -19,8 +20,8 @@ $(fsop_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consum
 $(econet_hpb_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
 	cc $(CFLAGS) -DGIT_VERSION=\"$(GIT_VERSION)\" -I/usr/include/json-c -I../include -c $< -Wall -Wno-pointer-sign -o $@
 
-fsv2.o: Makefile fs.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/fs.h
-	cc $(CFLAGS) -I../include -DGIT_VERSION=\"$(GIT_VERSION)\" -D BRIDGE_V2 -c fs.c -o fsv2.o -Wall -Wno-pointer-sign
+$(econet_hpb_modules): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
+	cc $(CFLAGS) -DGIT_VERSION=\"$(GIT_VERSION)\" -I/usr/include/json-c -I../include -c $< -Wall -Wno-pointer-sign -o $@
 
 fast-test.o: Makefile econet-hpbridge-fast.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/fs.h 
 	cc $(CFLAGS) -DFAST_TEST -I../include -I/usr/include/json-c -DGIT_VERSION=\"$(GIT_VERSION)\" -c econet-hpbridge-fast.c -o fast-test.o -Wall

@@ -55,6 +55,11 @@ pthread_t	loopdetect_thread;
 pthread_mutex_t	loopdetect_mutex;
 void *		eb_loopdetect_thread(void *);
 
+/* Broadcast handling */
+struct __eb_bcast_address_list *eb_bcast_addresses = NULL; /* Initialize - none to start with */
+void eb_broadcast_handler (struct __eb_device *, struct __econet_packet_aun *, uint16_t);
+pthread_t	eb_bcast_listener_thread;
+
 // Some globals
 
 char	hostname[255];
@@ -98,7 +103,9 @@ pthread_mutex_t		threadcount_mutex; // Locks the thread counter
 #define eb_thread_ready() { pthread_mutex_lock(&threadcount_mutex); threads_ready++; pthread_mutex_unlock(&threadcount_mutex); }
 */
 	
+/* Moved to header
 #define eb_update_lastrx(d) { pthread_mutex_lock(&(d->statsmutex)); d->last_rx = time(NULL); pthread_mutex_unlock(&(d->statsmutex)); }
+*/
 
 pthread_mutex_t         networks_update; // Must acquire before changing/reading networks[] array
 
@@ -1147,15 +1154,17 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_FS, NULL, NULL); /* FS */
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_PS, NULL, NULL); /* PS ? */
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_PS_QUERY, NULL, NULL); /* PS Query */
+			EB_PORT_SET(existing, reserved_ports, EB_PORT_PS_DATA, NULL, NULL); /* PS Data */
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_FAST, NULL, NULL); /* *FAST */
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_FINDSERVER, NULL, NULL); /* FindServer */
-			EB_PORT_SET(existing, reserved_ports, EB_PORT_PS_DATA, NULL, NULL); /* PS Data */
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_IP, NULL, NULL); /* IP/Econet */
 
 			/* Include the FAST data handler */
 			EB_PORT_SET(existing, ports, EB_PORT_FAST, eb_port_a0_handler, existing);
-
 			existing->local.fast_menu = NULL;
+
+			/* And the FINDSERVER handler */
+			EB_PORT_SET(existing, ports, EB_PORT_FINDSERVER, eb_handle_findserver_traffic, existing);
 
 			DEVINIT_DEBUG("Created new local device on station %d.%d", net, stn);
 
@@ -2563,6 +2572,125 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 	return 1; // Flag as processed. We return 0 if we don't want this traffic forwarded - to avoid storms.
 }
 
+/*
+ * Broadcast listener thread.
+ *
+ * Listens on port 32768 (native / true AUN)
+ * Does so on the configured IP addresses so that
+ * we avoid litening on (for example) virtual
+ * addresses on the loopback which are there for
+ * AUN exposures and the like.
+ */
+
+void * eb_broadcast_listener (void *p)
+{
+
+	struct __eb_bcast_address_list	* bcast_addrs = (struct __eb_bcast_address_list *) p,
+					* bcast_ptr = (struct __eb_bcast_address_list *) p;
+	uint16_t	numaddrs = 0;
+	struct pollfd	*pfd_initial, *pfd;
+	struct sockaddr_in	localaddr, remoteaddr;
+	socklen_t	remoteaddr_len;
+	struct __econet_packet_aun incoming;
+
+	/* Count up how many there are */
+
+	while (bcast_ptr)
+	{
+		numaddrs++;
+		bcast_ptr = bcast_ptr->next;
+	}
+
+	if (numaddrs == 0) /* Nothing to do */
+		return NULL;
+
+	eb_debug (0, 1, "BCAST", "AUN              AUN Broadcast listener starting");
+
+	pfd_initial = eb_malloc (__FILE__, __LINE__, "AUN", "Allocate sockets structure for broadcast receiver", sizeof(struct pollfd) * numaddrs);
+	pfd = eb_malloc (__FILE__, __LINE__, "AUN", "Allocate sockets structure for broadcast receiver", sizeof(struct pollfd) * numaddrs);
+
+	numaddrs = 0;
+	bcast_ptr = bcast_addrs;
+
+	while (bcast_ptr)
+	{
+		/* Open sockets */
+
+		pfd_initial[numaddrs].events = POLLIN;
+		pfd_initial[numaddrs].revents = 0;
+		if ((pfd_initial[numaddrs].fd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+			eb_debug (1, 0, "BCAST", "AUN              Unable to open socket for broadcast listener: %s", strerror(errno));
+
+		memset (&localaddr, 0, sizeof(struct sockaddr_in));
+
+		localaddr.sin_family = AF_INET;
+		localaddr.sin_addr.s_addr = bcast_ptr->address; /* the inetaddr call in parse_json_config will have put it in right order */
+		localaddr.sin_port = htons(32768); /* We're only interested in 32768 for these purposes */
+
+		if (bind(pfd_initial[numaddrs].fd, (struct sockaddr *) &localaddr, sizeof(struct sockaddr)) == -1)
+			eb_debug (1, 0, "BCAST", "AUN              Unable to bind socket for broadcast listener for address %d.%d.%d.%d/%d: %s",
+					(bcast_ptr->address & 0xFF000000) >> 24,
+					(bcast_ptr->address & 0xFF0000) >> 16,
+					(bcast_ptr->address & 0xFF00) >> 8,
+					(bcast_ptr->address & 0xFF),
+					bcast_ptr->masklen,
+					strerror(errno));
+
+		bcast_ptr = bcast_ptr->next;
+		numaddrs++;
+	}
+
+	eb_thread_ready();
+
+	/* Poll & deal */
+
+	memcpy (pfd, pfd_initial, sizeof(struct pollfd) * numaddrs);
+
+	while (poll(pfd, numaddrs, 0))
+	{
+		uint16_t	count;
+
+		count = 0;
+
+		while (count < numaddrs)
+		{
+			if (pfd[count].revents & POLLIN)
+			{
+	
+				int length;
+
+				/* Receive stuff here - TODO */
+
+				length = recvfrom(pfd[count].fd,  &incoming, sizeof(struct __econet_packet_aun), 0, (struct sockaddr *) &remoteaddr, &remoteaddr_len);
+	
+				if (length >= 8) /* Successful receipt of something potentially valid */
+				{
+					in_addr_t	remote_address;
+					uint16_t	remote_port;
+					struct __eb_device 	*source_device;
+
+					remote_address = ntohl(remoteaddr.sin_addr.s_addr);
+					remote_port = ntohs(remoteaddr.sin_port);
+					source_device = eb_find_aun_remote(remote_address, remote_port);
+
+					if (source_device) /* Source of broadcast found */
+						eb_broadcast_handler (source_device, &incoming, length-8);
+					else
+						eb_debug (0, 1, "AUN", "Broadcast received from %s:%d which was an unknown AUN host",
+								inet_ntoa(remoteaddr.sin_addr),
+								ntohs(remoteaddr.sin_port));
+				}
+			}
+
+			count++;
+		}
+
+		memcpy (pfd, pfd_initial, sizeof(struct pollfd) * numaddrs);
+	}
+
+	return NULL;
+}
+
 /* Broadcast handler.
  * 
  * If it's bridge traffic (port 0x9C) then handle locally only.
@@ -3085,6 +3213,94 @@ uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_au
 	return result;
 }
 
+/*
+ * Take a packet, usually from a module like PS, IPGW, etc. which is fully
+ * populated and get it where it's supposed to go but via an input queue
+ *
+ * The device is the SOURCE device from which the packet is being sent.
+ * len is data length, not complete length.
+ */
+
+uint16_t eb_raw_send (struct __eb_device *d, struct __econet_packet_aun *p, uint16_t len)
+{
+        struct __econet_packet_aun      *copy;
+        struct __eb_device      *destdevice;
+
+        copy = eb_malloc(__FILE__, __LINE__, "PS", "Copy output packet going on input queue", len+12);
+
+        memcpy(copy, p, len+12);
+
+        copy->p.seq = eb_get_local_seq(d);
+        copy->p.padding = 0x00;
+
+        if (copy->p.dstnet == 0)    copy->p.dstnet = copy->p.srcnet;
+
+	if (p->p.dstnet == 0xFF && p->p.dststn == 0xFF) /* Broadcast */
+		eb_broadcast_handler (d, copy, len);
+	else if ((destdevice = eb_find_station(2, p)))
+        {
+                if (destdevice->type == EB_DEF_AUN)
+                {
+                        /* Put on AUN output queue */
+                        if (eb_aunpacket_to_aun_queue(d, destdevice, copy, len))
+                        {
+                                eb_add_stats (&(d->statsmutex), &(d->b_out), len);
+                                return len;
+                        }
+                        else /* Went wrong */
+                        {
+                                eb_free(__FILE__, __LINE__, "PS", "PROBLEM: Freeing AUN packet after failed tx to AUN queue", p);
+                                return 0;
+                        }
+                }
+                else
+                {
+                        /* Put it on the real destination device */
+                        eb_enqueue_input(destdevice, copy, len);
+                        pthread_cond_signal(&(destdevice->qwake));
+                        return len;
+                }
+        }
+
+        return 0;
+
+}
+
+/* Send an ACK to a data packet.
+ *
+ * the device struct is the SOURCE device.
+ * type = ECONET_AUN_ACK or NAK or INK
+ * Sends via input queues
+ *
+ *
+ */
+
+void eb_send_ack (struct __eb_device *d, struct __econet_packet_aun *p, uint8_t type)
+{
+
+	struct __econet_packet_aun *ack;
+
+	ack = eb_malloc (__FILE__, __LINE__, "TRAFFIC", "New ACK packet", 12);
+
+	ack->p.srcstn = p->p.dststn;
+	ack->p.srcnet = p->p.dstnet;
+	ack->p.dststn = p->p.srcstn;
+	ack->p.dstnet = p->p.srcnet;
+	ack->p.seq = p->p.seq;
+	ack->p.aun_ttype = type;
+	ack->p.port = p->p.port;
+	ack->p.ctrl = p->p.ctrl;
+	ack->p.padding = 0x00;
+
+	eb_raw_send (d, p, 0);
+
+	/* Free it - no longer needed because eb_raw_send copies it */
+
+	eb_free (__FILE__, __LINE__, "TRAFFIC", "Free ACK packet", ack); 
+	
+
+}
+
 /* Take a packet which will usually be sitting on a device's output queue (but might be an
    internal bridge broadcast that didn't originate within a device at all) and put it on
    another device's input queue. Then wake that device up.
@@ -3283,6 +3499,7 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
  * for it
  */
 
+/* Moved to external file 
 uint16_t eb_ipgw_arp_dest(struct __eb_device *d, uint32_t addr)
 {
 
@@ -3304,12 +3521,14 @@ uint16_t eb_ipgw_arp_dest(struct __eb_device *d, uint32_t addr)
 	return (a->econet);
 
 }
+*/
 
 /*  
  * eb_ipgw_set_arp(host order IP, net, stn)
  *
  */
 
+/* Moved to external file
 void eb_ipgw_set_arp(struct __eb_device *d, uint32_t addr, uint8_t net, uint8_t stn)
 {
 
@@ -3348,11 +3567,13 @@ void eb_ipgw_set_arp(struct __eb_device *d, uint32_t addr, uint8_t net, uint8_t 
 		eb_type_str(d->type), d->net, d->local.stn, addr, net, stn);
 
 }
+*/
 
 /* eb_ipgw_transmit - send packets which are sitting on our pending queue
    This is called when we've updated the arp cache
 */
 
+/* Moved to external file
 uint8_t eb_ipgw_transmit (struct __eb_device *d, uint32_t addr)
 {
 	// TODO. Look through d->local.ip.addresses->ipq looking for packets
@@ -3425,6 +3646,7 @@ uint8_t eb_ipgw_transmit (struct __eb_device *d, uint32_t addr)
 
 	return result;
 }
+*/
 
 /* Implement a firewall chain without a policy, and recursively call sub-chains */
 
@@ -3766,6 +3988,8 @@ void eb_setup_aun_listener_socket (void * exposure)
 
 	char 			portname[6];
 
+	int			broadcast = 1;
+
 	e = exposure;
 
 	// TO DO - CREATE INTERFACE FOR e->addr HERE IF REQUIRED BY USER
@@ -3806,7 +4030,68 @@ void eb_setup_aun_listener_socket (void * exposure)
 			e->port,
 			e->socket);
 
+	/* Allow the socket to broadcast */
+
+	if (setsockopt(e->socket, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(int)) != 0)
+		eb_debug (1, 0, "LISTEN", "%-8s         Unable to set broadcast option on socket for station %d.%d (%s)", "AUN", e->net, e->stn, strerror(errno));	
+
 	// No return - it'll kill the process if it can't listen
+}
+
+/* Allocate a dynamic station device if one is available, return
+ * the device pointer. Input parameters are the ip address and source port
+ * from which the traffic has arrived
+ */
+struct __eb_device * eb_allocate_dynamic_aun(in_addr_t source_address, uint16_t source_port)
+{
+	struct __eb_aun_remote	  *station;
+	uint8_t			 found;
+	struct timeval		  now;
+
+	// If we allocate a dynamic station, send *BYE from it to known FS (need to track them) and then set source_device to the one we allocate so the next IF statement operates
+	// eb_debug (0, 2, "DYNAMIC", "%-8s	  Traffic received from %s:%d - unknown source. Attempting to allocate dynamic host.", e->parent, inet_ntoa(addr.sin_addr), source_port);
+
+	found = 0;
+
+	station = aun_remotes;
+
+	gettimeofday (&now, 0);
+
+	while (station && !found)
+	{
+		struct __eb_aun_remote  *n;
+
+		pthread_mutex_lock (&(station->updatemutex));
+
+		n = station->next;
+
+		if (station->is_dynamic && (station->port == -1 || (timediffmsec(&(station->last_dynamic), &now) > (EB_CONFIG_DYNAMIC_EXPIRY * 60 * 1000)))) // bother with this one - must be dynamic, and either no port (unused), or last used more than the timeout ago
+		{
+
+			found = 1;
+
+			station->b_in = station->b_out = 0;
+			gettimeofday(&(station->last_dynamic), 0);
+			station->port = source_port;
+			station->addr = source_address;
+
+			eb_debug (0, 2, "DYNAMIC", "%-8s %3d.%3d Traffic received from unknown source %d.%d.%d.%d:%d - Allocated dynamic host.", eb_type_str(station->eb_device->type), station->eb_device->net, station->stn, 
+				(source_address & 0xFF000000) >> 24,
+				(source_address & 0xFF0000) >> 16,
+				(source_address & 0xFF00) >> 8,
+				(source_address & 0xFF),
+				source_port);
+		}
+
+		pthread_mutex_unlock (&(station->updatemutex));
+
+		if (!found)     station = n;
+	}
+
+	if (!station)
+		return NULL;
+	else
+		return station->eb_device; 
 }
 
 void eb_process_incoming_aun (struct __eb_aun_exposure *e)
@@ -3841,106 +4126,8 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 
 			if (!source_device) // See if we can allocate a dynamic host
 			{
-	
-				struct __eb_aun_remote		*station;
-				uint8_t				found;
-				struct timeval			now;
-
-				// If we allocate a dynamic station, send *BYE from it to known FS (need to track them) and then set source_device to the one we allocate so the next IF statement operates
-				// eb_debug (0, 2, "DYNAMIC", "%-8s          Traffic received from %s:%d - unknown source. Attempting to allocate dynamic host.", e->parent, inet_ntoa(addr.sin_addr), source_port);
-
-				found = 0;
-
-				station = aun_remotes;
-
-				gettimeofday (&now, 0);
-
-				while (station && !found)
-				{
-					struct __eb_aun_remote	*n;
-
-					pthread_mutex_lock (&(station->updatemutex));
-
-					n = station->next;
-
-					if (station->is_dynamic && (station->port == -1 || (timediffmsec(&(station->last_dynamic), &now) > (EB_CONFIG_DYNAMIC_EXPIRY * 60 * 1000)))) // bother with this one - must be dynamic, and either no port (unused), or last used more than the timeout ago
-					{
-
-						found = 1;
-
-						station->b_in = station->b_out = 0;
-
-						gettimeofday(&(station->last_dynamic), 0);
-
-						station->port = source_port;
-
-						station->addr = source_address;
-					
-						eb_debug (0, 2, "DYNAMIC", "%-8s %3d.%3d Traffic received from unknown source %s:%d - Allocated dynamic host.", eb_type_str(station->eb_device->type), station->eb_device->net, station->stn, inet_ntoa(addr.sin_addr), source_port);
-					}
-					
-					pthread_mutex_unlock (&(station->updatemutex));
-
-					if (!found)	station = n;
-				}
-
-				if (found)
-				{
-
-/*
-					struct __eb_fs_list	*f;
-*/
-
-					source_device = station->eb_device;
-
-					// Send BYE packet to all known fileservers
-
-					// (And the ones we don't know can't have had any traffic
-					//  from this station address...)
-
-/* Confuses the hell out of BeebEm. It gets answers from fileservers it wasn't talking to.
-
-					pthread_mutex_lock(&(port99_mutex));
-
-					f = port99_list;
-
-					while (f)
-					{
-						struct __econet_packet_aun *bye;
-						struct __eb_device *server;
-
-						bye = eb_malloc(__FILE__, __LINE__, "DYNAMIC", "Allocating storage for spoofed *BYE to fileservers on dynamic station allocation", 12 + 2);
-				
-						if (!bye)
-							eb_debug (1, 0, "DYNAMIC", "AUN      %3d.%3d Unable to malloc() spoofed *BYE to %3d.%3d!", station->eb_device->net, station->stn, f->net, f->stn);
-
-						bye->p.aun_ttype = ECONET_AUN_DATA;
-						bye->p.port = 0x99;
-						bye->p.ctrl = 0x80;
-						bye->p.seq = 0x0004;
-						bye->p.srcnet = station->eb_device->net;
-						bye->p.srcstn = station->stn;
-						bye->p.dstnet = f->net;
-						bye->p.dststn = f->stn;
-						bye->p.data[0] = 0x01;
-						bye->p.data[1] = 0x17; // Bye
-
-						server = eb_find_station(2, bye);
-					
-						if (server)
-						{
-							eb_enqueue_input(server, bye, 14);
-							eb_debug (0, 2, "DYNAMIC", "AUN      %3d.%3d Send spoof *BYE to fileserver at %3d.%3d", station->eb_device->net, station->stn, f->net, f->stn);
-						}
-
-						f = f->next;
-
-					}
-					
-					pthread_mutex_unlock(&(port99_mutex));
-*/ 
-				}
-				else
+				source_device = eb_allocate_dynamic_aun (source_address, source_port);
+				if (!source_device)
 					eb_debug (0, 2, "AUN", "%-8s         Traffic received from unknown source %s:%d - Unable to allocate dynamic host.", eb_type_str(e->parent->type), inet_ntoa(addr.sin_addr), source_port);
 				
 			}
@@ -4107,19 +4294,26 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 	
 						memcpy (input_packet, &incoming, length + 4);
 	
-						home_device = eb_find_station (2, &incoming);
+						/* See if it's a broadcast, and handle it accordingly */
+
+						if (incoming.p.aun_ttype == ECONET_AUN_BCAST) /* This won't catch IP broadcasts if they're not flagged as AUN Broadcasts, but I can't really see why there would be an IP broadcast that wasn't flagged that way - but we'll see */
+							eb_broadcast_handler (source_device, &incoming, length);
+						else
+						{
+							home_device = eb_find_station (2, &incoming);
 	
-						enqueue_result = 0;
+							enqueue_result = 0;
 	
-						if (home_device) enqueue_result = eb_enqueue_input (home_device, input_packet, length - 8); // Only give data length here
+							if (home_device) enqueue_result = eb_enqueue_input (home_device, input_packet, length - 8); // Only give data length here
 	
-						if (!enqueue_result)
-							ack.p.aun_ttype = ECONET_AUN_NAK; // NAK if we couldn't enqueue the packet
+							if (!enqueue_result)
+								ack.p.aun_ttype = ECONET_AUN_NAK; // NAK if we couldn't enqueue the packet
 	
-					/* AUN PROCESS */
-						eb_debug (0, 4, "AUN", "                 source_device = %p, type %s, AUN Auto Ack is %s", source_device, eb_type_str(source_device->type), (source_device->config & EB_DEV_CONF_AUTOACK) ? "On" : "Off");
-						if ((!enqueue_result) || (incoming.p.aun_ttype == ECONET_AUN_DATA && (source_device->config & EB_DEV_CONF_AUTOACK))) // NAK if we didn't manage to enqueue; ACK if other end if AUTO ACK
-							sendto (e->socket, &(ack.p.aun_ttype), 8, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
+							/* AUN PROCESS */
+							eb_debug (0, 4, "AUN", "                 source_device = %p, type %s, AUN Auto Ack is %s", source_device, eb_type_str(source_device->type), (source_device->config & EB_DEV_CONF_AUTOACK) ? "On" : "Off");
+							if ((!enqueue_result) || (incoming.p.aun_ttype == ECONET_AUN_DATA && (source_device->config & EB_DEV_CONF_AUTOACK))) // NAK if we didn't manage to enqueue; ACK if other end if AUTO ACK
+								sendto (e->socket, &(ack.p.aun_ttype), 8, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
+						}
 	
 					}
 					else	// MAY AS WELL SEND A NAK (even if not auto ack because the other end will never hear of this packet!)
@@ -4336,6 +4530,7 @@ static void * eb_trunk_keepalive (void * device)
 	return NULL;
 }
 
+/* Moved to separate handler 
 void send_printjob (char *handler, uint8_t fs_net, uint8_t fs_stn, uint8_t clt_net, uint8_t clt_stn, char *username, char *acorn_printer, char *unix_printer, char *file)
 {
 
@@ -4391,6 +4586,8 @@ char * get_user_print_handler (uint8_t net, uint8_t stn, uint8_t printer_index, 
 	}
 
 }
+
+*/
 
 void beeb_print (uint8_t y, uint8_t x, char *s) /* Display string in beebmem at x,y */
 {
@@ -6231,7 +6428,8 @@ static void * eb_device_despatcher (void * device)
 			}
 			else if (d->type == EB_DEF_LOCAL) // Must be an IP gateway - this is tunnel interface traffic arriving (i.e. IP)
 			{
-
+				eb_ipgw_incoming_ip(d);
+/* Moved to external file
 				struct __econet_packet_ip	incoming;
 				struct __econet_packet_aun	*outgoing;
 				int 				length;
@@ -6325,6 +6523,7 @@ static void * eb_device_despatcher (void * device)
 					else eb_debug (1, 0, "IPGW", "Local    %3d.%3d Unable to malloc() storage for incoming IP packet for transmission into the network", d->net, d->local.stn);
 
 				}
+*/
 				
 			}
 			else // Pipe, so read packet length first
@@ -7490,6 +7689,7 @@ static void * eb_device_despatcher (void * device)
 							new_output = 1;
 
 						}
+						/* Moved to separate handler 
 						else if (p->p->p.port == 0x9f && (p->p->p.aun_ttype == ECONET_AUN_DATA || p->p->p.aun_ttype == ECONET_AUN_BCAST)) // Print server query
 						{
 							uint8_t		querytype;
@@ -7717,23 +7917,6 @@ static void * eb_device_despatcher (void * device)
 
 	
 										fclose (job->spoolfile);
-	/*	
-										// Send to handler
-	
-										sprintf(command, "%s %d %d %d %d %s %s %s %s",
-											handler,
-											reply->p.srcnet,
-											reply->p.srcstn,
-											reply->p.dstnet,
-											reply->p.dststn,
-											job->username,
-											printer->unix_name,
-											printer->acorn_name,
-											job->spoolfilename);
-										
-										if (!fork())
-											execl ("/bin/sh", "sh", "-c", command, (char *) 0);
-*/
 
 										send_printjob (handler, reply->p.srcnet, reply->p.srcstn, 
 												reply->p.dstnet, reply->p.dststn,
@@ -7769,6 +7952,8 @@ static void * eb_device_despatcher (void * device)
 							}
 
 						}
+						*/
+						/* Moved to external file
 						else if (p->p->p.port == 0xB0 && p->p->p.ctrl == 0x80 && (p->p->p.aun_ttype == ECONET_AUN_DATA || p->p->p.aun_ttype == ECONET_AUN_BCAST)) // FindServer query
 						{
 
@@ -7850,6 +8035,8 @@ static void * eb_device_despatcher (void * device)
 							eb_free (__FILE__, __LINE__, "FINDSRVR", "Freeing FindServer reply packet", reply);
 
 						}
+						*/
+						/* Moved to external file
 						else if (p->p->p.port == 0xD2 && d->local.ip.tunif[0] && (p->p->p.aun_ttype == ECONET_AUN_DATA || p->p->p.aun_ttype == ECONET_AUN_BCAST)) // IP/Econet
 						{
 							uint32_t src_ip, dst_ip;
@@ -7911,6 +8098,7 @@ static void * eb_device_despatcher (void * device)
 								} break;
 							}
 						}
+						*/
 						else
 						{
 							/* Check to see if this is a handled port */
@@ -7923,7 +8111,7 @@ static void * eb_device_despatcher (void * device)
 								eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
 								(d->local.port_funcs[p->p->p.port])(p->p, p->length + 12, d->local.port_param[p->p->p.port]);
 							}
-							else if (p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK)
+							else if (p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK) /* Query whether this actually ever gets called given the above? */
 							{
 								/* Send ACK & NAK to fileserver, if active */
 
@@ -10607,6 +10795,56 @@ int eb_parse_json_config(struct json_object *jc)
                         if (strchr(opt, 'O'))        EB_CONFIG_PKT_DUMP_OPTS |= EB_PKT_DUMP_POST_O;
 		}
  
+		json_object_object_get_ex(jgen, "aun-broadcast-listeners", &j);
+
+		if (j)
+		{
+			struct json_object	*jarray_entry;
+			int			len = 0, count = 0;
+
+			len = json_object_array_length(j);
+
+			while (count < len)
+			{
+				char *		addr;
+
+				jarray_entry = json_object_array_get_idx(j, count);
+
+				addr = (char *) json_object_get_string(jarray_entry);
+
+				if (addr)
+				{
+					char int_addr[20];
+					uint8_t	masklen;
+					struct __eb_bcast_address_list *n;
+					char * slash;
+
+					if ((slash = strchr(addr, '/')))
+					{
+						*slash = '\0';
+						strcpy (int_addr, addr); /* Now doesn't have the /nn on it */
+						sscanf(slash+1, "%hhd", &masklen);
+					}
+					else
+						eb_debug (1, 0, "JSON", "Bad AUN broadcast listener entry %s", addr);
+
+					if (masklen > 31 || masklen < 1) /* Bad mask length */
+						eb_debug (1, 0, "JSON", "Bad AUN broadcast listener entry %s - bad mask length", addr);
+
+					n = eb_malloc(__FILE__, __LINE__, "JSON", "Allocate new AUN Broadcast listener struct", sizeof(struct __eb_bcast_address_list));
+
+					n->address = inet_addr(int_addr);
+					n->masklen = masklen;
+					n->next = eb_bcast_addresses;
+					eb_bcast_addresses = n;
+
+				}
+
+				count++;
+
+			}
+
+		}
 	}
 
 	/* Free up the pointers */
@@ -13336,6 +13574,20 @@ int main (int argc, char **argv)
 
 		eb_thread_started();
 		pthread_detach(loopdetect_thread);
+	}
+
+	/* Start the broadcast thread if there's anything to do */
+
+	if (eb_bcast_addresses)
+	{
+		int err;
+
+		if ((err = pthread_create(&eb_bcast_listener_thread, NULL,  eb_broadcast_listener, eb_bcast_addresses)))
+			eb_debug (1, 0, "MAIN", "Thread creation for broadcast listener failed: %s", strerror(err));
+
+		eb_thread_started();
+		pthread_detach(eb_bcast_listener_thread);
+
 	}
 
 	/* See if all the threads are in the ready state */

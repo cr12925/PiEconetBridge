@@ -136,6 +136,16 @@
 #define EB_PORT_PS_DATA		0xD1
 #define EB_PORT_IP		0xD2
 
+/* Broadcast receiver addresses */
+
+struct __eb_bcast_address_list {
+	in_addr_t	address;
+	uint8_t		masklen;
+	struct __eb_bcast_address_list 	*next;
+};
+
+extern struct __eb_bcast_address_list * eb_bcast_addresses;
+
 /* 
  * struct containing the data elements of 
  * a loop probe
@@ -406,20 +416,6 @@ struct mt_client {
 /* Multitrunk Admin Command codes */
 #define EB_MT_CMD_VERS	0x01
 
-/* *FAST externs */
-
-extern struct __eb_fast_client * eb_fast_find_conn (struct __eb_device *, uint8_t, uint8_t);
-extern void eb_fast_flag_disconnect (struct __eb_device *, uint8_t, uint8_t);
-extern void eb_fast_flag_datarq (struct __eb_device *, uint8_t, uint8_t);
-extern struct __eb_fast_client * eb_fast_mkclient (struct __eb_device *, uint8_t, uint8_t);
-extern struct __eb_fast_menu * eb_fast_mkmenu (char *, char *, struct __eb_fast_menu **);
-extern struct __eb_fast_menu_item * eb_fast_mkmenuitem (struct __eb_fast_menu *, char *, uint16_t, uint8_t, unsigned char);
-extern int f_printf (struct __eb_fast_client *, char *, ...);
-extern void eb_fast_send_control (struct __eb_fast_client *, uint8_t);
-extern void eb_fast_send_data (struct __eb_fast_client *, uint8_t *, uint16_t);
-extern void * eb_fast_start_fast_service (void *);
-extern void eb_port_a0_handler (struct __econet_packet_aun *, uint16_t, void *);
-
 /* *FAST global list of menus */
 
 extern struct __eb_fast_menu	*fast_menus;
@@ -685,6 +681,10 @@ struct __eb_fast_net
 // Port handler function
 
 typedef void (*port_func) (struct __econet_packet_aun *, uint16_t, void *);
+
+/* External port handler function prototypes */
+
+void eb_handle_ps_traffic (struct __econet_packet_aun *, uint16_t, void *);
 
 struct __eb_device { // Structure holding information about a "physical" device to which we might send packets to / receive packets from.
 
@@ -1178,9 +1178,13 @@ struct __econet_packet_ip {
 unsigned long timediffmsec(struct timeval *s, struct timeval *d);
 
 /* Externs for the FS */
+
 extern struct __eb_device * eb_find_station (uint8_t, struct __econet_packet_aun *);
+extern struct __eb_device * eb_find_station_internal (uint8_t, uint8_t);
 extern uint8_t eb_aunpacket_to_aun_queue(struct __eb_device *, struct __eb_device *, struct __econet_packet_aun *, uint16_t);
 extern uint8_t eb_enqueue_input (struct __eb_device *, struct __econet_packet_aun *, uint16_t);
+extern uint16_t eb_raw_send (struct __eb_device *, struct __econet_packet_aun *, uint16_t);
+extern void eb_send_ack (struct __eb_device *, struct __econet_packet_aun *, uint8_t);
 
 /* Debug externs */
 extern void eb_debug_fmt (uint8_t, uint8_t, char *, char *);
@@ -1241,6 +1245,13 @@ extern uint8_t	eb_device_init_create_pool (char *, uint8_t, uint8_t *);
 extern uint8_t	eb_device_init_set_pool_static (struct __eb_pool *, struct __eb_device *, uint8_t, uint8_t, uint8_t, uint8_t);
 extern uint8_t	eb_device_init_set_pooled_nets (struct __eb_pool *, struct __eb_device *, uint8_t, uint8_t *);
 
+/* Externs in econet-hpbridge.c used in other code */
+
+void eb_add_stats (pthread_mutex_t *, uint64_t *, uint16_t);
+#define eb_update_lastrx(d) { pthread_mutex_lock(&(d->statsmutex)); d->last_rx = time(NULL); pthread_mutex_unlock(&(d->statsmutex)); }
+void eb_dump_packet (struct __eb_device *, char, struct __econet_packet_aun *, uint16_t);
+uint32_t eb_get_local_seq (struct __eb_device *);
+
 /* Multitrunk */
 
 extern void * eb_multitrunk_server_device (void *);
@@ -1248,6 +1259,34 @@ extern void * eb_multitrunk_client_device (void *);
 extern int eb_mt_base64_encrypt_tx(uint8_t *, uint16_t, struct __eb_device *, char);
 extern struct __eb_device * eb_mt_find (char *);
 void eb_bridge_reset (struct __eb_device *);
+
+/* PS externs */
+
+extern char * get_user_print_handler (uint8_t, uint8_t, uint8_t, char *, char *);
+extern void send_printjob (char *, uint8_t, uint8_t, uint8_t, uint8_t, char *, char *, char *, char *);
+
+/* IPGW externs */
+
+void eb_handle_ipgw_traffic (struct __econet_packet_aun *, uint16_t, void *);
+void eb_ipgw_incoming_ip (struct __eb_device *);
+
+/* FINDSERVER externs */
+
+void eb_handle_findserver_traffic (struct __econet_packet_aun *, uint16_t, void *);
+
+/* *FAST externs */
+
+extern struct __eb_fast_client * eb_fast_find_conn (struct __eb_device *, uint8_t, uint8_t);
+extern void eb_fast_flag_disconnect (struct __eb_device *, uint8_t, uint8_t);
+extern void eb_fast_flag_datarq (struct __eb_device *, uint8_t, uint8_t);
+extern struct __eb_fast_client * eb_fast_mkclient (struct __eb_device *, uint8_t, uint8_t);
+extern struct __eb_fast_menu * eb_fast_mkmenu (char *, char *, struct __eb_fast_menu **);
+extern struct __eb_fast_menu_item * eb_fast_mkmenuitem (struct __eb_fast_menu *, char *, uint16_t, uint8_t, unsigned char);
+extern int f_printf (struct __eb_fast_client *, char *, ...);
+extern void eb_fast_send_control (struct __eb_fast_client *, uint8_t);
+extern void eb_fast_send_data (struct __eb_fast_client *, uint8_t *, uint16_t);
+extern void * eb_fast_start_fast_service (void *);
+extern void eb_port_a0_handler (struct __econet_packet_aun *, uint16_t, void *);
 
 /* JSON */
 

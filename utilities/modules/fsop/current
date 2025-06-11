@@ -1,0 +1,40 @@
+fsop_00_copy.c:		strcpy(destination, f->active->fhandles[f->active->current].acornfullpath);
+fsop_00_copy.c:	if (!fsop_normalize_path_wildcard(f, source, f->active->current, &p_src, 1))
+fsop_00_copy.c:	if (!fsop_normalize_path(f, destination, f->active->current, &p_dst))
+fsop_00_dirlib.c:			strcpy (f->active->fhandles[handle].acornfullpath, new_dir);
+fsop_00_dirlib.c:			strcpy (f->active->fhandles[handle].acorntailpath, tail);
+fsop_00_dirlib.c:				strncpy((char *) f->active->current_dir, (const char *) new_dir, 255);
+fsop_00_dirlib.c:				strcpy(f->active->current_dir_tail, tail);
+fsop_00_dirlib.c:				f->active->current_disc = p.disc;
+fsop_00_dirlib.c:				strncpy((char *) f->active->lib_dir, (const char *) new_dir, 255);
+fsop_00_dirlib.c:				strcpy(f->active->lib_dir_tail, tail);
+fsop_00_dirlib.c:	fsop_00_dirlib_internal(f, &(f->active->current), dirname, 1);
+fsop_00_dirlib.c:	fs_debug_full (0, 1, f->server, f->net, f->stn, "DIR %s (handle &%02X)", dirname, f->active->current);
+fsop_00_dirlib.c:	fsop_00_dirlib_internal(f, &(f->active->lib), dirname, 0);
+fsop_00_dirlib.c:	fs_debug_full (0, 1, f->server, f->net, f->stn, "LIB %s (handle &%02X)", dirname, f->active->lib);
+fsop_00_link.c:	if (!fsop_normalize_path(f, source, f->active->current, &p_src) || (p_src.ftype == FS_FTYPE_NOTFOUND))
+fsop_00_link.c:	if (!fsop_normalize_path(f, destination, f->active->current, &p_dst) || (p_src.ftype == FS_FTYPE_NOTFOUND))
+fsop_00_link.c:	if (!fsop_normalize_path(f, link, f->active->current, &pu) || (pu.ftype == FS_FTYPE_NOTFOUND))
+fsop_00_login.c:	err = fsop_move_disc (f, f->active->current_disc);
+fsop_00_owner.c:	mtype = f->active->machinepeek;
+fsop_00_printer.c:                f->active->printer = printerindex;
+fsop_00_renuser.c:		if (uid == f->active->userid)
+fsop_00_setlibhome.c:	if (!FS_ACTIVE_SYST(f->active) && (f->active->priv & FS_PRIV_LOCKED))
+fsop_02_load.c:        if ((!result || (p.ftype == FS_FTYPE_NOTFOUND)) && loadas && !fsop_normalize_path(f, command, f->active->lib, &p))   // Either in current, or lib if loadas set
+fsop_02_load.c:	FS_LIST_MAKENEW(struct __fs_active_load_queue,f->active->load_queue,1,alq,"FS","Create new active load queue structure for load operation");
+fsop_02_load.c:	alq->chunk_size = f->active->chunk_size; /* Copy from login process */
+fsop_03_examine.c:	fs_debug_full (0, 2, f->server, f->net, f->stn, "Examine %s relative to %d (%s), start %d, extent %d, arg = %d", path, relative_to, f->active->fhandles[relative_to].acornfullpath, start, n, arg);
+fsop_04_catheader.c:			fsop_get_disc_name(f->server, f->active->current_disc, discname);
+fsop_06_openclose.c:	if (!f->active->fhandles[handle].handle) // Handle not open
+fsop_06_openclose.c:		if (f->active->fhandles[handle].is_dir)
+fsop_06_openclose.c:			fsop_close_interlock(f->server, f->active->fhandles[handle].handle, f->active->fhandles[handle].mode);
+fsop_0a_getputbytes.c:        FS_LIST_MAKENEW(struct __fs_active_load_queue,f->active->load_queue,1,alq,"FS","Create new active load queue structure for GetBytes operation");
+fsop_0a_getputbytes.c:        alq->mode = f->active->fhandles[handle].mode; 
+fsop_0a_getputbytes.c:        alq->chunk_size = f->active->chunk_size;  /* Copy from login process */
+fsop_11_eof.c:	if (handle < 1 || handle >= FS_MAX_OPEN_FILES || !(f->active->fhandles[handle].handle))
+fsop_11_eof.c:		ptr = (struct __fs_file *) f->active->fhandles[handle].handle;
+fsop_11_eof.c:		if (f->active->fhandles[handle].cursor == filesize)
+fsop_12_readobjinfo.c:        fs_debug_full (0, 2, f->server, f->net, f->stn, "Get Object Info '%s' relative to %02X (%s), command %d", path, relative_to, f->active->fhandles[relative_to].acornfullpath, command);
+fsop_14_delete.c:	//fprintf (stderr, "fsop_delete_internal(%s = %s.%s,%02X)\n", path, f->active->fhandles[relative_to].acornfullpath, path, relative_to);
+fsop_14_delete.c:	fs_debug_full (0, 1, f->server, f->net, f->stn, "*DELETE %s relative to %02X (%s)", path, FSOP_CWD, f->active->fhandles[FSOP_CWD].acornfullpath);
+fsop_15_readuserenv.c:	fs_debug (0, 2, "%12sfrom %3d.%3d Read user environment - current user handle %d, current lib handle %d", "", f->net, f->stn, f->active->current, f->active->lib);

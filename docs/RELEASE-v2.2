@@ -89,6 +89,12 @@ RELEASE NOTES FOR V2.2
   *SETFREE CHRIS 1000 
   sets CHRIS's free space to 65,536 bytes irrespective of what the
   user presently has stored.
+- Fileserver, Printserver, IP Gateway server, and FindServer 
+  server have all been modularised out into separate source
+  files for ease of coding.
+- Bridge can now be configured to listen for local network
+  AUN/IP broadcasts on port 32768 and deal with them
+  appropriately
 
 KNOWN ISSUES
 ------------
@@ -98,6 +104,7 @@ the Fileserver Operations interface will crash the bridge. There
 appears to be some heap corruption somewhere I have not yet 
 tracked down.
 
+---> IMPORTANT:
 If you have RISC OS files in your fileserver which have filenames
 involving a hard space (character &A0) then they will need to be
 renamed on the linux command line. The old fileserver used
