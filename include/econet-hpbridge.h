@@ -515,6 +515,15 @@ struct __eb_fast_client {
 #define EB_FAST_MENU_HOMEMENU	0x0A /* Return to home menu */
 #define EB_FAST_MENU_DISCONNECT	0x0B /* As it sounds ... */
 #define EB_FAST_MENU_BLANKLINE	0x0C /* As it soudns ... */
+#define EB_FAST_MENU_FSTOGGLEMDFS 0x0D /* MDFS funcs on/off */
+#define EB_FAST_MENU_FSTOGGLEMDFSINFO 0x0E /* MDFS Extended *INFO on/off */
+#define EB_FAST_MENU_FSTOGGLEINFCOLON 0x0F /* Use : instead of . to separate inf suffix */
+#define EB_FAST_MENU_FSTOGGLEPIPERMS 0x10 /* PiFS permissions model */
+#define EB_FAST_MENU_FSTOGGLEACORNDIR 0x11 /* Acorn dir perms display on/off */
+#define EB_FAST_MENU_FSSETNAMELEN 0x12 /* Change fileserver filename length */
+#define EB_FAST_MENU_FSPRINTERS 0x13 /* Display printers */
+#define EB_FAST_MENU_FSDISCS 0x14 /* Display disks */
+#define EB_FAST_MENU_FSINFO 0x15 /* Display FS info */
 
 /*
  * __eb_fast_menu_item
@@ -532,8 +541,8 @@ struct __eb_fast_menu_item	{
 	unsigned char 		*fm_description;
 	uint16_t		fm_timeout; /* Inactivity timeout in seconds, 0 if none - but that's a bit dangerous... */
 	uint8_t			fm_type; /* One of the defines above, except heading */
-	uint8_t			priv_mask; /* E.g. FS_PRIV_SYSTEM is 0x80. If set to that, unless the user's FS prive has that bit set, this option will not be displayed. */
-	uint8_t			priv2_mask; /* Ditto for priv2 - most common use will be to require bridge privilege, but could potentially also filter on, say, FS_PRIV2_HIDEOTHERS if the menu item might reveal who else is logged in. */
+	uint8_t			fm_priv_mask; /* E.g. FS_PRIV_SYSTEM is 0x80. If set to that, unless the user's FS prive has that bit set, this option will not be displayed. */
+	uint8_t			fm_priv2_mask; /* Ditto for priv2 - most common use will be to require bridge privilege, but could potentially also filter on, say, FS_PRIV2_HIDEOTHERS if the menu item might reveal who else is logged in. */
 	unsigned char		keypress; /* Key press for this option */
 	uint8_t		 	is_viewdata; /* If != 0, send viewdata_on when selected, and viewdata_off when back to menu */
 
@@ -573,8 +582,12 @@ struct __eb_fast_menu_item	{
 
 		struct {
 			char		*fm_host;
+			struct addrinfo	*fm_address;
 			uint16_t	fm_port;
 			char		*fm_username; /* NULL if not specified */
+			char		*fm_password; /* NULL if user might have to enter it */
+			char		*fm_privkey; /* Private key file if there is one */
+			char		*fm_pubkey; /* Public key file if there is one */
 		} fm_ssh;
 
 		struct {
@@ -1281,7 +1294,7 @@ extern void eb_fast_flag_disconnect (struct __eb_device *, uint8_t, uint8_t);
 extern void eb_fast_flag_datarq (struct __eb_device *, uint8_t, uint8_t);
 extern struct __eb_fast_client * eb_fast_mkclient (struct __eb_device *, uint8_t, uint8_t);
 extern struct __eb_fast_menu * eb_fast_mkmenu (char *, char *, struct __eb_fast_menu **);
-extern struct __eb_fast_menu_item * eb_fast_mkmenuitem (struct __eb_fast_menu *, char *, uint16_t, uint8_t, unsigned char);
+extern struct __eb_fast_menu_item * eb_fast_mkmenuitem (struct __eb_fast_menu *, char *, uint16_t, uint8_t, unsigned char, uint8_t, uint8_t);
 extern int f_printf (struct __eb_fast_client *, char *, ...);
 extern void eb_fast_send_control (struct __eb_fast_client *, uint8_t);
 extern void eb_fast_send_data (struct __eb_fast_client *, uint8_t *, uint16_t);

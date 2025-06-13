@@ -2592,6 +2592,7 @@ void * eb_broadcast_listener (void *p)
 	struct sockaddr_in	localaddr, remoteaddr;
 	socklen_t	remoteaddr_len;
 	struct __econet_packet_aun incoming;
+	int	broadcast = 1;
 
 	/* Count up how many there are */
 
@@ -2618,13 +2619,19 @@ void * eb_broadcast_listener (void *p)
 
 		pfd_initial[numaddrs].events = POLLIN;
 		pfd_initial[numaddrs].revents = 0;
-		if ((pfd_initial[numaddrs].fd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+		if ((pfd_initial[numaddrs].fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
 			eb_debug (1, 0, "BCAST", "AUN              Unable to open socket for broadcast listener: %s", strerror(errno));
+
+		if (setsockopt(pfd_initial[numaddrs].fd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(int)) != 0)
+			eb_debug (0, 1, "BCAST", "AUN              Unable to set SO_BROADCAST on broadcast listener socket - broadcasts may not work: %s", strerror(errno));
+
+		if (setsockopt(pfd_initial[numaddrs].fd, SOL_SOCKET, SO_REUSEADDR, &broadcast, sizeof(int)) != 0)
+			eb_debug (0, 1, "BCAST", "AUN              Unable to set SO_REUSEADDR on broadcast listener socket - broadcasts may not work: %s", strerror(errno));
 
 		memset (&localaddr, 0, sizeof(struct sockaddr_in));
 
 		localaddr.sin_family = AF_INET;
-		localaddr.sin_addr.s_addr = bcast_ptr->address; /* the inetaddr call in parse_json_config will have put it in right order */
+		localaddr.sin_addr.s_addr = INADDR_ANY; //bcast_ptr->address; /* the inetaddr call in parse_json_config will have put it in right order */
 		localaddr.sin_port = htons(32768); /* We're only interested in 32768 for these purposes */
 
 		if (bind(pfd_initial[numaddrs].fd, (struct sockaddr *) &localaddr, sizeof(struct sockaddr)) == -1)
@@ -2642,6 +2649,8 @@ void * eb_broadcast_listener (void *p)
 
 	eb_thread_ready();
 
+	eb_debug (0, 1, "BCAST", "AUN              AUN Broadcast listener running on %d address(s)", numaddrs);
+
 	/* Poll & deal */
 
 	memcpy (pfd, pfd_initial, sizeof(struct pollfd) * numaddrs);
@@ -2652,6 +2661,8 @@ void * eb_broadcast_listener (void *p)
 
 		count = 0;
 
+		fprintf (stderr, "\n\n*** Broadcast poll() returned\n\n");
+
 		while (count < numaddrs)
 		{
 			if (pfd[count].revents & POLLIN)
@@ -2659,10 +2670,10 @@ void * eb_broadcast_listener (void *p)
 	
 				int length;
 
-				/* Receive stuff here - TODO */
-
 				length = recvfrom(pfd[count].fd,  &incoming, sizeof(struct __econet_packet_aun), 0, (struct sockaddr *) &remoteaddr, &remoteaddr_len);
 	
+				fprintf (stderr, "\n\n*** Broadcast UDP packet length %d received\n\n", length);
+
 				if (length >= 8) /* Successful receipt of something potentially valid */
 				{
 					in_addr_t	remote_address;
@@ -4009,6 +4020,8 @@ void eb_setup_aun_listener_socket (void * exposure)
 
 	if (e->socket == -1)
 		eb_debug (1, 0, "LISTEN", "%-8s         Unable to open AUN listener socket for station %d.%d on port %d (%s)", "AUN", e->net, e->stn, e->port, strerror(errno));
+
+	setsockopt(e->socket, SOL_SOCKET, SO_REUSEADDR, &broadcast, sizeof(int));
 
 	service.sin_family = AF_INET;
 	service.sin_addr.s_addr = htonl(e->addr);
@@ -9675,6 +9688,7 @@ int eb_parse_json_config(struct json_object *jc)
 						uint16_t	timeout = 0;
 						uint8_t		mtype = 0xFF; /* Rogue */
 						char		key = '\0';
+						uint8_t		priv = 0, priv2 = 0;
 
 						jmenuitem = json_object_array_get_idx(jmenuitems, jitem_count);
 
@@ -9699,6 +9713,16 @@ int eb_parse_json_config(struct json_object *jc)
 						if (json_object_object_get_ex(jmenuitem, "timeout", &jtmp))
 							timeout = json_object_get_int(jtmp);
 
+						if (json_object_object_get_ex(jmenuitem, "priv", &jtmp))
+						{
+							char *	privilege = (char *) json_object_get_string(jtmp);
+							if (!strcasecmp(privilege, "SYST"))
+								priv = FS_PRIV_SYSTEM;
+							else if (!strcasecmp(privilege, "BRIDGE"))
+								priv2 = FS_PRIV2_BRIDGE;
+							else	eb_debug (1, 0, "JSON", "Menu item %d in menu %s has unknown privilege setting (%s) - error", jitem_count, jmenu_name, jtmp);
+						}
+
 						if (!strcasecmp(typestr, "SSH"))
 							mtype = EB_FAST_MENU_SSH;
 						else if (!strcasecmp(typestr, "DISCONNECT") || !strcasecmp(typestr, "END"))
@@ -9707,6 +9731,24 @@ int eb_parse_json_config(struct json_object *jc)
 							mtype = EB_FAST_MENU_SCRIPT;
 						else if (!strcasecmp(typestr, "FSSTOPSTART"))
 							mtype = EB_FAST_MENU_FSSTOPSTART;
+						else if (!strcasecmp(typestr, "FSTOGGLEMDFS"))
+							mtype = EB_FAST_MENU_FSTOGGLEMDFS;
+						else if (!strcasecmp(typestr, "FSTOGGLEMDFSINFO"))
+							mtype = EB_FAST_MENU_FSTOGGLEMDFSINFO;
+						else if (!strcasecmp(typestr, "FSTOGGLEINFCOLON"))
+							mtype = EB_FAST_MENU_FSTOGGLEINFCOLON;
+						else if (!strcasecmp(typestr, "FSTOGGLEPIPERMS"))
+							mtype = EB_FAST_MENU_FSTOGGLEPIPERMS;
+						else if (!strcasecmp(typestr, "FSTOGGLEACORNDIR"))
+							mtype = EB_FAST_MENU_FSTOGGLEACORNDIR;
+						else if (!strcasecmp(typestr, "FSSETNAMELEN"))
+							mtype = EB_FAST_MENU_FSSETNAMELEN;
+						else if (!strcasecmp(typestr, "FSPRINTERS"))
+							mtype = EB_FAST_MENU_FSPRINTERS;
+						else if (!strcasecmp(typestr, "FSINFO"))
+							mtype = EB_FAST_MENU_FSINFO;
+						else if ((!strcasecmp(typestr, "FSDISCS") || !strcasecmp(typestr, "FSDISKS")))
+							mtype = EB_FAST_MENU_FSDISCS;
 						else if (!strcasecmp(typestr, "LOCALLOGIN") || !strcasecmp(typestr, "LOGIN"))
 							mtype = EB_FAST_MENU_BIN_LOGIN;
 						else if (!strcasecmp(typestr, "SYSTEM"))
@@ -9725,7 +9767,7 @@ int eb_parse_json_config(struct json_object *jc)
 							mtype = EB_FAST_MENU_BLANKLINE;
 						else	eb_debug (1, 0, "JSON", "Menu item %d in menu %s has unknown type string %s - error", jitem_count, jmenu_name, typestr);
 
-						mi = eb_fast_mkmenuitem(fm, description, timeout, mtype, key);
+						mi = eb_fast_mkmenuitem(fm, description, timeout, mtype, key, priv, priv2);
 
 						/* Collect the other data for menu items */
 

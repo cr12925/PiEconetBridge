@@ -11,14 +11,30 @@
 #define FAST_TEST_DEBUG 1
 */
 
-/* Now in econet-hpbridge.h
-#define EB_FAST_BUFSIZE 1024
-#define EB_FAST_SHRINKTHRESHOLD 512
-#define EB_FAST_TO_SERVER 0
-#define EB_FAST_TO_NETWORK 1
-#define EB_FAST_WAKE_SERVER(m) pthread_cond_signal(&(m->fast_wake[EB_FAST_TO_SERVER]))
-#define EB_FAST_WAKE_NETWORK(m) pthread_cond_signal(&(m->fast_wake[EB_FAST_TO_NETWORK]))
-*/
+/* Fileserver interaction functions */
+
+// Print FS disc names in order (for *FAST handler)
+
+uint8_t eb_fast_printdiscs (struct __eb_fast_client *fc)
+{
+
+        uint8_t         count;
+        uint8_t         max_discs;
+	struct __eb_device	*d = fc->parent;
+
+        max_discs = fs_get_maxdiscs();
+
+        for (count = 0; count < max_discs; count++)
+        {
+                unsigned char   discname[128];
+
+                fsop_get_disc_name (d->local.fs.server, count, discname);
+
+                f_printf (fc, "%1x: %02d - %s\r\n", count, count, discname);
+        }
+
+        return max_discs;
+}
 
 /*
  * eb_fast_find_conn
@@ -243,19 +259,16 @@ struct __eb_fast_menu *	eb_fast_mkmenu(char *menu_heading, char *menu_name, stru
 
 /* Make a menu item, put it on the end of the list and return its struct address */
 
-struct __eb_fast_menu_item * eb_fast_mkmenuitem(struct __eb_fast_menu *menu, char * description, uint16_t timeout, uint8_t menutype, unsigned char keypress)
+struct __eb_fast_menu_item * eb_fast_mkmenuitem(struct __eb_fast_menu *menu, char * description, uint16_t timeout, uint8_t menutype, unsigned char keypress, uint8_t priv_mask, uint8_t priv2_mask)
 {
-	/* Caller needs to populate priv, priv2 (which are initialized as 0 - anyone can see/use)
-	 * and viewdata flag + any other entries in the union.
-	 */
-
 	struct __eb_fast_menu_item *mi, *mi_find;
 
 	mi = eb_malloc(__FILE__, __LINE__, "FAST", "Create new menu item structure", sizeof(struct __eb_fast_menu_item));
 
 	mi->fm_timeout = timeout;
 	mi->fm_type = menutype;
-	mi->priv_mask = mi->priv2_mask = 0;
+	mi->fm_priv_mask = priv_mask;
+	mi->fm_priv2_mask = priv2_mask;
 	mi->keypress = keypress;
 	mi->is_viewdata = 0;
 	mi->next = NULL;
@@ -646,6 +659,27 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 		while (!fm_exit)
 		{
 			uint8_t		key;
+			uint8_t		priv, priv2;
+			struct		__fs_station *s;
+
+			priv = priv2 = 0;
+
+			s = fc->parent->local.fs.server;
+
+			if (s)
+			{
+				struct __fs_active	*a;
+				a = fsop_stn_logged_in(s, fc->net, fc->stn);
+
+				if (a)
+				{
+					priv = a->user->priv;
+					priv2 = a->user->priv2;
+				}
+			}
+
+			if (ECONET_DEV_STATION(fc->parent->local.fast_priv_stns, fc->net, fc->stn))
+				priv2 |= FS_PRIV2_BRIDGE;
 
 			mi = fc->menu_current->item;
 		
@@ -660,19 +694,27 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 	
 			while (mi && (vk_count < (sizeof(valid_keys)-1)))
 			{
-				if (mi->fm_type == EB_FAST_MENU_BLANKLINE)
+				if (
+					(priv & mi->fm_priv_mask) == mi->fm_priv_mask
+				&&	(priv2 & mi->fm_priv2_mask) == mi->fm_priv2_mask
+				) /* Only display if we have the right privs */
 				{
-					if (fc->menu_current->item->next) 
+					
+					if (mi->fm_type == EB_FAST_MENU_BLANKLINE)
+					
+					{
+						if (fc->menu_current->item->next) 
 						f_printf (fc, "\r\n");
+					}
+					else if (mi->fm_type != EB_FAST_MENU_HEADING)
+					{
+						if (fc->menu_current->item->next)
+							f_printf (fc, "%c. %s\r\n", mi->keypress, mi->fm_description);
+						valid_keys[vk_count++] = mi->keypress;
+					}
+					else if (fc->menu_current->item->next)
+						f_printf (fc, "\r\n%s\r\n", mi->fm_description);
 				}
-				else if (mi->fm_type != EB_FAST_MENU_HEADING)
-				{
-					if (fc->menu_current->item->next)
-						f_printf (fc, "%c. %s\r\n", mi->keypress, mi->fm_description);
-					valid_keys[vk_count++] = mi->keypress;
-				}
-				else if (fc->menu_current->item->next)
-					f_printf (fc, "\r\n%s\r\n", mi->fm_description);
 		
 				mi = mi->next;
 			}
@@ -1502,188 +1544,3 @@ void eb_port_a0_handler (struct __econet_packet_aun *p, uint16_t length, void *d
 	EB_FAST_WAKE_SERVER(fc); /* Wake up the IO thread */
 }
 
-#ifdef FAST_TEST
-
-struct timeval	start;
-
-/* Memory management debug
- * Both these *were* static inline, but changed to support FS
-*/
-
-void eb_free (char *file, int line, char *module, char *purpose, void *ptr)
-{
-
-	eb_debug (0, 2, "MEM MGT", "%-8s	 %s:%d freeing %p for purpose %s", module, file, line, ptr, purpose);
-
-	free (ptr);
-
-}
-
-void * eb_malloc (char *file, int line, char *module, char *purpose, size_t size)
-{
-
-	void *r;
-
-	r = calloc(1, size);
-
-	eb_debug (0, 2, "MEM MGT", "%-8s	 %s:%d sought  malloc(%d) for purpose %s (r = %p)", module, file, line, size, purpose, r);
-
-	return r;
-
-}
-
-/* Calculate ms difference between two times
-*/
-
-unsigned long timediffmsec(struct timeval *s, struct timeval *d)
-{
-	return (((d->tv_sec - s->tv_sec) * 1000) + ((d->tv_usec - s->tv_usec) / 1000));
-}
-/* Return a float for seconds since bridge start time
-*/
-
-float timediffstart()
-{
-
-	struct timeval  now;
-
-	gettimeofday (&now, 0);
-
-	return (float) timediffmsec(&start, &now) / 1000;
-
-}
-
-void eb_debug_fmt (uint8_t quit, uint8_t level, char *module, char *formatted)
-{
-
-	fprintf (stdout, "[+%15.6f] %7ld %-8s: %s\n", timediffstart(), syscall(SYS_gettid), module, formatted);
-
-	if (quit)
-		exit (EXIT_FAILURE);
-}
-
-/* Format a varargs debug string and send it off to the debug output
-*/
-
-void eb_debug (uint8_t quit, uint8_t level, char *module, char *fmt, ...)
-{
-
-#ifdef FAST_TEST_DEBUG
-	va_list ap;
-	char str[16384];
-
-	va_start(ap, fmt);
-
-	vsnprintf (str, 16382, fmt, ap);
-
-	va_end(ap);
- 
-	eb_debug_fmt (quit, level, module, str);
-#endif
-
-}
-
-void * main_io_routine (void * input)
-{
-
-	struct __eb_fast_client 	*fc = (struct __eb_fast_client *) input;
-	struct termios			old_t;
-	unsigned char			c;
-	int				res;
-
-	/* For test purposes, collect stuff from stdin and put it in the pending_to_server buffer, update the buffer length, and wake the io handler */
-
-	/* Also for test purposes, set STDIN to non-line-buffered */
-
-	memcpy(&old_t, &fc->old_t, sizeof (struct termios));
-	old_t.c_lflag &= ~(ECHO | ICANON);
-	tcsetattr(STDIN_FILENO, TCSANOW, &old_t);
-
-	while ((res = read(STDIN_FILENO, &c, 1)))
-	{
-		struct __econet_packet_aun	p;
-
-		p.p.data[0] = c;
-
-		if (res < 0)
-			break;
-
-		/* Put it on the queue */
-
-		eb_port_a0_handler (&p, 1, fc);
-
-	}
-
-	/* Stop the server and everything else will magically clean up */
-
-	pthread_cancel(fc->fast_server);
-
-	return NULL;
-}
-
-char * eb_type_str(uint16_t t)
-{
-	return "FastTest";
-}
-
-int main (void)
-{
-
-	struct __eb_fast_client		*fc;
-	struct __eb_fast_menu		*fm = NULL, *fm_list = NULL;
-	struct __eb_fast_menu_item	*mi;
-	pthread_t			fastthread, iothread;
-
-	printf ("*FAST test handler starting\n\n");
-
-	gettimeofday (&start, 0);
-
-	fm = eb_fast_mkmenu("Connections menu", "CONNECTIONS", &fm_list);
-
-	mi = eb_fast_mkmenuitem(fm, "Log in to local host", 300, EB_FAST_MENU_BIN_LOGIN, '1');
-
-	mi->fm_binlogin.fm_banner = "/etc/econet-gpio/login.banner";
-	mi->fm_binlogin.fm_username = NULL;
-
-	mi = eb_fast_mkmenuitem(fm, "Connect to Phoenix viewdata", 300, EB_FAST_MENU_TCP, '2');
-
-	mi->fm_tcp.fm_host = "phoenix.server.royle.org";
-	mi->fm_tcp.fm_port = 6854;
-	mi->fm_tcp.fm_address = NULL;
-	mi->is_viewdata = 1;
-
-	mi = eb_fast_mkmenuitem(fm, "", 300, EB_FAST_MENU_BLANKLINE, 0xFF);
-
-	mi = eb_fast_mkmenuitem(fm, "Execute test script", 300, EB_FAST_MENU_SCRIPT, '3');
-
-	mi->fm_script.fm_script = "/etc/econet-gpio/test.script";
-
-	mi = eb_fast_mkmenuitem(fm, "", 300, EB_FAST_MENU_BLANKLINE, 0xFF);
-	
-	mi = eb_fast_mkmenuitem(fm, "Disconnect", 300, EB_FAST_MENU_DISCONNECT, 'Q');
-
-	fc = eb_fast_mkclient(NULL, 1, 1);
-
-	fc->menu_home = fc->menu_current = fm;
-
-	tcgetattr(STDIN_FILENO, &fc->old_t);
-
-	/* Spawn a fast thread */
-
-	if (pthread_create(&(fastthread), NULL, eb_fast_start_fast_service, fc))
-	{
-		eb_debug (0, 1, "FAST", "Fast server thread failed to start");
-		exit (1);
-	}
-
-	pthread_create (&iothread, NULL, main_io_routine, fc);
-	pthread_join (fastthread, NULL);
-	pthread_cancel (iothread);
-
-	tcsetattr(STDIN_FILENO, TCSANOW, &fc->old_t);
-
-	return(0);
-
-}
-
-#endif
