@@ -2585,83 +2585,57 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 void * eb_broadcast_listener (void *p)
 {
 
-	struct __eb_bcast_address_list	* bcast_addrs = (struct __eb_bcast_address_list *) p,
-					* bcast_ptr = (struct __eb_bcast_address_list *) p;
 	uint16_t	numaddrs = 0;
 	struct pollfd	*pfd_initial, *pfd;
-	struct sockaddr_in	localaddr, remoteaddr;
+	struct sockaddr_in	remoteaddr, localaddr;
 	socklen_t	remoteaddr_len;
 	struct __econet_packet_aun incoming;
 	int	broadcast = 1;
 
-	/* Count up how many there are */
-
-	while (bcast_ptr)
-	{
-		numaddrs++;
-		bcast_ptr = bcast_ptr->next;
-	}
-
-	if (numaddrs == 0) /* Nothing to do */
-		return NULL;
-
 	eb_debug (0, 1, "BCAST", "AUN              AUN Broadcast listener starting");
 
+	numaddrs = 1;
+
 	pfd_initial = eb_malloc (__FILE__, __LINE__, "AUN", "Allocate sockets structure for broadcast receiver", sizeof(struct pollfd) * numaddrs);
+
 	pfd = eb_malloc (__FILE__, __LINE__, "AUN", "Allocate sockets structure for broadcast receiver", sizeof(struct pollfd) * numaddrs);
 
-	numaddrs = 0;
-	bcast_ptr = bcast_addrs;
+	pfd_initial[0].events = POLLIN;
+	pfd_initial[0].revents = 0;
+	if ((pfd_initial[0].fd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+		eb_debug (1, 0, "BCAST", "AUN              Unable to open socket for broadcast listener: %s", strerror(errno));
 
-	while (bcast_ptr)
-	{
-		/* Open sockets */
+	if (setsockopt(pfd_initial[0].fd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(int)) != 0)
+		eb_debug (0, 1, "BCAST", "AUN              Unable to set SO_BROADCAST on broadcast listener socket - broadcasts may not work: %s", strerror(errno));
 
-		pfd_initial[numaddrs].events = POLLIN;
-		pfd_initial[numaddrs].revents = 0;
-		if ((pfd_initial[numaddrs].fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
-			eb_debug (1, 0, "BCAST", "AUN              Unable to open socket for broadcast listener: %s", strerror(errno));
+	if (setsockopt(pfd_initial[0].fd, SOL_SOCKET, SO_REUSEADDR, &broadcast, sizeof(int)) != 0)
+		eb_debug (0, 1, "BCAST", "AUN              Unable to set SO_REUSEADDR on broadcast listener socket - broadcasts may not work: %s", strerror(errno));
 
-		if (setsockopt(pfd_initial[numaddrs].fd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(int)) != 0)
-			eb_debug (0, 1, "BCAST", "AUN              Unable to set SO_BROADCAST on broadcast listener socket - broadcasts may not work: %s", strerror(errno));
+	if (setsockopt(pfd_initial[0].fd, SOL_SOCKET, SO_REUSEPORT, &broadcast, sizeof(int)) != 0)
+		eb_debug (0, 1, "BCAST", "AUN              Unable to set SO_REUSEPORT on broadcast listener socket - broadcasts may not work: %s", strerror(errno));
 
-		if (setsockopt(pfd_initial[numaddrs].fd, SOL_SOCKET, SO_REUSEADDR, &broadcast, sizeof(int)) != 0)
-			eb_debug (0, 1, "BCAST", "AUN              Unable to set SO_REUSEADDR on broadcast listener socket - broadcasts may not work: %s", strerror(errno));
+	localaddr.sin_family = AF_INET;
+	localaddr.sin_addr.s_addr = INADDR_ANY; //bcast_ptr->address; /* the inetaddr call in parse_json_config will have put it in right order */
+	localaddr.sin_port = htons(32768); /* We're only interested in 32768 for these purposes */
+	memset(&(localaddr.sin_zero), 0, sizeof(localaddr.sin_zero));
 
-		memset (&localaddr, 0, sizeof(struct sockaddr_in));
-
-		localaddr.sin_family = AF_INET;
-		localaddr.sin_addr.s_addr = INADDR_ANY; //bcast_ptr->address; /* the inetaddr call in parse_json_config will have put it in right order */
-		localaddr.sin_port = htons(32768); /* We're only interested in 32768 for these purposes */
-
-		if (bind(pfd_initial[numaddrs].fd, (struct sockaddr *) &localaddr, sizeof(struct sockaddr)) == -1)
-			eb_debug (1, 0, "BCAST", "AUN              Unable to bind socket for broadcast listener for address %d.%d.%d.%d/%d: %s",
-					(bcast_ptr->address & 0xFF000000) >> 24,
-					(bcast_ptr->address & 0xFF0000) >> 16,
-					(bcast_ptr->address & 0xFF00) >> 8,
-					(bcast_ptr->address & 0xFF),
-					bcast_ptr->masklen,
-					strerror(errno));
-
-		bcast_ptr = bcast_ptr->next;
-		numaddrs++;
-	}
+	if (bind(pfd_initial[0].fd, (struct sockaddr *) &localaddr, sizeof(struct sockaddr)) == -1)
+		eb_debug (1, 0, "BCAST", "AUN              Unable to bind socket for broadcast listener: %s",
+				strerror(errno));
 
 	eb_thread_ready();
 
-	eb_debug (0, 1, "BCAST", "AUN              AUN Broadcast listener running on %d address(s)", numaddrs);
+	eb_debug (0, 1, "BCAST", "AUN              AUN Broadcast listener running on %d address(es)", numaddrs);
 
 	/* Poll & deal */
 
 	memcpy (pfd, pfd_initial, sizeof(struct pollfd) * numaddrs);
 
-	while (poll(pfd, numaddrs, 0))
+	while (poll(pfd, numaddrs, -1))
 	{
 		uint16_t	count;
 
 		count = 0;
-
-		fprintf (stderr, "\n\n*** Broadcast poll() returned\n\n");
 
 		while (count < numaddrs)
 		{
@@ -2670,10 +2644,10 @@ void * eb_broadcast_listener (void *p)
 	
 				int length;
 
-				length = recvfrom(pfd[count].fd,  &incoming, sizeof(struct __econet_packet_aun), 0, (struct sockaddr *) &remoteaddr, &remoteaddr_len);
-	
-				fprintf (stderr, "\n\n*** Broadcast UDP packet length %d received\n\n", length);
+				remoteaddr_len = sizeof(struct sockaddr_in);
 
+				length = recvfrom(pfd[count].fd, &(incoming.p.aun_ttype), sizeof(struct __econet_packet_aun), 0, (struct sockaddr *) &remoteaddr, &remoteaddr_len);
+	
 				if (length >= 8) /* Successful receipt of something potentially valid */
 				{
 					in_addr_t	remote_address;
@@ -2684,12 +2658,38 @@ void * eb_broadcast_listener (void *p)
 					remote_port = ntohs(remoteaddr.sin_port);
 					source_device = eb_find_aun_remote(remote_address, remote_port);
 
-					if (source_device) /* Source of broadcast found */
-						eb_broadcast_handler (source_device, &incoming, length-8);
+					if (!source_device) // See if we can allocate a dynamic host
+					{
+						source_device = eb_allocate_dynamic_aun (remote_address, remote_port);
+						if (!source_device)
+							eb_debug (0, 2, "AUN", "%-8s         Traffic received from unknown source %s:%d - Unable to allocate dynamic host.", "BCAST", inet_ntoa(remoteaddr.sin_addr), remote_port);
+			
+					}
+
+					if (source_device)
+					{
+						uint8_t	fw_result;
+
+						incoming.p.srcstn = source_device->aun->stn;
+						incoming.p.srcnet = source_device->net;
+						incoming.p.dststn = incoming.p.dstnet = 0xFF; /* Broadcast */
+												
+						if ((fw_result = eb_firewall(source_device->fw_out, &incoming)) == EB_FW_REJECT) // fw_out because this is traffic coming *from* the AUN device. fw_in is for traffic going *to* it.
+						{
+							eb_dump_packet (source_device, EB_PKT_DUMP_FIREWALLED, &incoming, length - 8); // (Drop the header length)
+						}
+						else
+						{
+							eb_dump_packet (source_device, EB_PKT_DUMP_POST_I, &incoming, length - 8); // (Drop the header length)
+		
+							// Update the last transaction time - we do this whether dynamic or not, because it doesn't matter
+		
+							gettimeofday(&(source_device->aun->last_dynamic), 0);
+							eb_broadcast_handler (source_device, &incoming, length-8);
+						}
+					}
 					else
-						eb_debug (0, 1, "AUN", "Broadcast received from %s:%d which was an unknown AUN host",
-								inet_ntoa(remoteaddr.sin_addr),
-								ntohs(remoteaddr.sin_port));
+						eb_debug (0, 1, "AUN", "BCAST            No source device - this should not happen!");
 				}
 			}
 
@@ -4060,6 +4060,9 @@ struct __eb_device * eb_allocate_dynamic_aun(in_addr_t source_address, uint16_t 
 	struct __eb_aun_remote	  *station;
 	uint8_t			 found;
 	struct timeval		  now;
+
+	if (source_address == INADDR_ANY) /* Reject */
+		return NULL;
 
 	// If we allocate a dynamic station, send *BYE from it to known FS (need to track them) and then set source_device to the one we allocate so the next IF statement operates
 	// eb_debug (0, 2, "DYNAMIC", "%-8s	  Traffic received from %s:%d - unknown source. Attempting to allocate dynamic host.", e->parent, inet_ntoa(addr.sin_addr), source_port);
