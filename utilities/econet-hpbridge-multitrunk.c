@@ -520,9 +520,9 @@ uint8_t eb_mt_debase64_decrypt_process(struct mt_client *me, uint8_t *cipherpack
 					if ((w_result = write(me->trunk_socket[1], lbuf, 2) != 2))
 					{
 						if (w_result < 0)
-							eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Failed to write packet length to child trunk (%s)", me->trunk->trunk.local_port, strerror(errno));
+							eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Failed to write packet length to child trunk (%s)", me->trunk->trunk.local_port, strerror(errno));
 						else
-							eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Failed to write packet length to child trunk (short write of %d bytes vs 2 requested)", me->trunk->trunk.local_port, w_result);
+							eb_debug (0, 3, "M-TRUNK", "M-Trunk  %7d Failed to write packet length to child trunk (short write of %d bytes vs 2 requested)", me->trunk->trunk.local_port, w_result);
 					}
 					else
 					{
