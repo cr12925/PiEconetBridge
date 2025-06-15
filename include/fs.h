@@ -91,8 +91,8 @@
 #define FS_PRIV_INVALID 0x00
 
 // MDFS-related privs in our native format - this doesn't work because we don't check for priv & FS_PRIV_SYSTEM for example, we check equality. Use the macro and fix the macro. TODO.
-#define FS_PRIV_PERMENABLE 0x08
-#define FS_PRIV_NOSHORTSAVE 0x04
+#define FS_PRIV_PERMENABLE 0x08 /* Permanent *Delete with wildcards enabled */
+#define FS_PRIV_NOSHORTSAVE 0x04 /* Disables saves < 16 bytes */
 #define FS_PRIV_RUNONLY 0x02
 #define FS_PRIV_NOLIB 0x10 /* Yes, this one is different - we don't have 0x10 as a flag in our native priv system */
 
@@ -110,6 +110,7 @@
 #define FS_PRIV2_HIDEOTHERS 0x04 /* Don't show other users in fs_users() */
 #define FS_PRIV2_ANFSNAMEBODGE 0x08 /* ANFS strips the colon off the start of a filename if it appears to be a disc number instead of a disc name. This privilege causes the normalizer to spot [0-9].$ and replace with :[0-9].$ in filenames. This is a per user priv because it can break filenames! */
 #define FS_PRIV2_FIXOPT 0x10 /* User cannot change boot option */
+#define FS_PRIV2_LIBRARYSEARCH 0x80 /* LOAD/OPENIN searches library */
 
 /* user *opt 4,x options */
 #define FS_BOOTOPT_OFF 0x00
@@ -189,7 +190,10 @@ struct __fs_config {
         uint8_t fs_default_dir_perm; // Default permission to apply to a directory when created / if no xattr file. Will pick wr/r if config file exists (existing fileserver), or wr/ otherwise (for level3-alikeness)
         uint8_t fs_default_file_perm; // Ditto for files. If the config file exists, it'll pick wr/r for backward compat; otherwise wr/ for level3-alikeness
         uint8_t fs_mask_dir_wrr; // Whether to mask off the wr/r bits on a directory in human and non-human-readable output. These are implied if a client sets perms on a directory to &00 anyway. Won't mask if ((perms & wr/r) != wr/r) so that manually set permissions are shown/returned.
-        uint8_t pad[243]; // Spare spare in the config
+	uint8_t fs_mdfsextsearch; // Whether to search lib on LOAD/OPENIN or not (0 = not) NB: users can change this for themselves temporarily
+	uint8_t fs_shortsavesoff; // 1 means no short saves - ditto re users
+	uint8_t fs_deletewildcard; // 1 means wildcards can be used on *DELETE
+        uint8_t pad[240]; // Spare spare in the config
 };
 
 /* __fs_discs - disc information for a particular server */
@@ -428,6 +432,11 @@ struct path {
 // Macro to identify if we have bridge privileges
 #define FS_ACTIVE_BRIDGE(a) (a->server->users[a->userid].priv2 & FS_PRIV2_BRIDGE)
 
+// Macros to determine whether active user has various enable bits set
+#define FS_ACTIVE_DELETEWILDCARD(f) (FS_CONFIG(f->server,fs_sjfunc) && ((FS_CONFIG(f->server,fs_deletewildcard) || (f->active->priv & FS_PRIV_PERMENABLE))))
+#define FS_ACTIVE_NOSHORTSAVES(f) (FS_CONFIG(f->server,fs_sjfunc) && ((FS_CONFIG(f->server,fs_shortsavesoff) || (f->active->priv & FS_PRIV_NOSHORTSAVE))))
+#define FS_ACTIVE_LIBRARYSEARCH(f) (FS_CONFIG(f->server,fs_sjfunc) && (FS_CONFIG(f->server,fs_mdfsextsearch) || (f->active->priv2 & FS_PRIV2_LIBRARYSEARCH)))
+
 // Macro to get us at the user config from an fs_active - First must be active, and takes a pointer to the user's '__fs_active' structure, the second is any user, and just needs a user id.
 #define FS_UINFO(a)	a->server->users[a->userid]
 #define FS_UINFOU(u)	f->server->users[(u)]
@@ -562,6 +571,7 @@ struct __fs_active {
         uint8_t bootopt;
 
         uint8_t priv; // Copy of priv bits from user info
+	uint8_t priv2; // Copy of priv2 bits from user info
 
 	uint32_t machinepeek; /* Machinepeek result if it's happened */
 	uint32_t chunk_size; /* Max bulk transfer outbound chunk size */
@@ -1114,8 +1124,10 @@ FSOP_00_EXTERN(CREDIT);
 FSOP_00_EXTERN(DEBIT);
 FSOP_00_EXTERN(DELETE);
 FSOP_00_EXTERN(DIR);
+FSOP_00_EXTERN(DISABLE);
 FSOP_00_EXTERN(DISCMASK);
 FSOP_00_EXTERN(DISKMASK);
+FSOP_00_EXTERN(ENABLE);
 FSOP_00_EXTERN(FSCONFIG);
 FSOP_00_EXTERN(INFO);
 FSOP_00_EXTERN(LIB);

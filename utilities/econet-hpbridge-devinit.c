@@ -239,6 +239,7 @@ uint8_t eb_device_init_dynamic (uint8_t net, uint8_t flags, struct __eb_fw_chain
 		a->eb_device = r; // Pointer to divert device
 		a->is_dynamic = 1;
 		a->b_in = a->b_out = 0; // Traffic stats
+		a->uses_gateway = 0; // Not initialized to use gateway
 
 		if (pthread_mutex_init(&(a->statsmutex), NULL) == -1)
 eb_debug (1, 0, "CONFIG", "Cannot initialize stats mutex for AUN/IP exposure at %d.%d", net, stn);
@@ -411,6 +412,12 @@ uint8_t eb_device_init_ps (uint8_t net, uint8_t stn, char * acorn_printer, char 
 
 	current_printers = existing->local.printers;
 
+	if (!current_printers) /* Grab the port */
+	{
+		EB_PORT_SET(existing, ports, EB_PORT_PS_DATA, eb_handle_ps_traffic, existing);
+		EB_PORT_SET(existing, ports, EB_PORT_PS_QUERY, eb_handle_ps_traffic, existing);
+	}
+
 	while (current_printers && current_printers->next)
 		current_printers = current_printers->next;
 
@@ -521,6 +528,8 @@ uint8_t	eb_device_init_ip (uint8_t net, uint8_t stn, char * tunif, uint32_t ip_h
 
 	existing->local.ip.addresses = local;
 	
+	EB_PORT_SET(existing, ports, EB_PORT_IP, eb_handle_ipgw_traffic, existing);
+
 	DEVINIT_DEBUG("Created IP server on %d.%d via interface %s with IP address %s", net, stn, tunif, addr);
 
 	return 1;
@@ -597,6 +606,8 @@ uint8_t eb_device_init_aun_host (uint8_t net, uint8_t stn, in_addr_t address, ui
 
 	d->fw_in = fw_in;
 	d->fw_out = fw_out;
+
+	e->uses_gateway = 0;
 
 	aun_remotes = e;
 

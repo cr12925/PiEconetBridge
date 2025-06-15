@@ -117,7 +117,7 @@
 #define BRIDGE_UPDATE	0x81
 #define BRIDGE_WHATNET	0x82
 #define BRIDGE_ISNET	0x83
-#define BRIDGE_REQUEST_GW	0x90 /* PiEconetBridge responds to this ctrl byte on broadcasts by replying with the IP address and port number of its AUN gateway, which will handle traffic to any address, and will send all return traffic to the station that uses it back through that same socket rather than any specific exposure. The reply simply a 6 byte UDP packet: 4 bytes IPv4 address in network byte order, 2 byte port in network byte order - it is *not* an AUN packet. Traffic via the gateway is in extended AUN, with 4 addressing bytes on the front (see struct __econet_packet_aun) */
+#define BRIDGE_REQUEST_GW	0x90 /* PiEconetBridge responds to this ctrl byte on broadcasts by replying with the IP address and port number of its AUN gateway, which will handle traffic to any address, and will send all return traffic to the station that uses it back through that same socket rather than any specific exposure. The reply will be to the source, and will be to the specified reply port, ctrl byte &90 (as was the request) and the data portion will be 6 bytes: 4 bytes IPv4 address in network byte order, 2 byte port in network byte order */
 
 /*
  * The following are part of the HPB's bridge system
@@ -139,6 +139,7 @@
 
 /* Broadcast receiver addresses */
 
+/* Disused
 struct __eb_bcast_address_list {
 	in_addr_t	address;
 	uint8_t		masklen;
@@ -146,6 +147,7 @@ struct __eb_bcast_address_list {
 };
 
 extern struct __eb_bcast_address_list * eb_bcast_addresses;
+*/
 
 /* 
  * struct containing the data elements of 
@@ -333,6 +335,7 @@ struct __eb_aun_remote {
 	uint64_t	b_in, b_out; // Traffic stats
 	uint8_t		is_dynamic; // 1 = Available for dynamic use.
 	struct timeval	last_dynamic; // Last time we saw traffic on a dynamic host. If > 1 hour, dump it & reuse. Set to 0 on init so they get used.
+	uint8_t		uses_gateway; // 1 if all traffic via the magic AUN gateway
 	struct __eb_aun_remote	*next;
 };
 
@@ -1016,6 +1019,11 @@ struct __eb_config {
 	uint8_t		bridge_loop_detect; // (Default is to) periodically send broadcast packets with port &9C port &CF with a random number in them to see if they come back. If they come back, we'll ignore traffic on that trunk except a reset, and after a reset we send another loop detect probe
 	uint8_t		nokeepalivedebug; // Stops the bridge logging trunk keepalives (or at least anything on port &9C, ctrl &D0)
 	uint8_t		nobridgeannouncedebug; // Stops bridge logging bridge reset/updates - anything withn port 9C including keepalives
+
+/* Magic AUN gateway for emulators so they don't need a full AUN config */
+	in_addr_t	gateway_address; // Set if the AUN-extended gateway is enabled (for BeebEm, initially) - stored in network byte order
+	uint16_t	gateway_port; // UDP port number of gateway, in network byte order
+	int		gateway_socket; // UDP Socket on which we operate the gateway
 };
 
 /* Global debug vars */
@@ -1074,6 +1082,9 @@ struct __eb_config {
 #define EB_CONFIG_POOL_RESET_FWD	(config.pool_reset_forward)
 #define EB_CONFIG_BRIDGE_LOOP_DETECT	(config.bridge_loop_detect)
 #define EB_CONFIG_NOBRIDGEANNOUNCEDEBUG	(config.nobridgeannouncedebug)
+#define EB_CONFIG_GATEWAY_IP_ADDRESS	(config.gateway_address)
+#define EB_CONFIG_GATEWAY_PORT		(config.gateway_port)
+#define EB_CONFIG_GATEWAY_SOCKET	(config.gateway_socket)
 
 // Printer status
 
