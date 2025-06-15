@@ -77,8 +77,9 @@ FSOP(02)
 	 */
 
 	/* 20250315 Now searches lib if sjfunc enabled - apparently MDFS does this! You can *LOAD something from the library... */
+	/* 20250615 Now only searches lib if forced to by global FS config OR user has *ENABLE LIBRARY on */
 
-        if ((!result || (p.ftype == FS_FTYPE_NOTFOUND)) && (loadas || (FS_CONFIG(f->server,fs_sjfunc))) && !fsop_normalize_path(f, command, f->active->lib, &p))   // Either in current, or lib if loadas set
+        if ((!result || (p.ftype == FS_FTYPE_NOTFOUND)) && (loadas || (FS_ACTIVE_LIBRARYSEARCH(f))) && !fsop_normalize_path(f, command, f->active->lib, &p))   // Either in current, or lib if loadas set
         {
                 fsop_error(f, 0xFE, "Bad command");
                 return;

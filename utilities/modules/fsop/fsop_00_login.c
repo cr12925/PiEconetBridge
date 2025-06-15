@@ -467,6 +467,7 @@ FSOP_00(LOGIN)
 			a->user = &(f->server->users[counter]);
 			a->bootopt = f->server->users[counter].bootopt;
 			a->priv = f->server->users[counter].priv;
+			a->priv2 = f->server->users[counter].priv2;
 			a->userid = counter;
 			a->current_disc = f->server->users[counter].home_disc; // Need to set here so that first normalize for URD works.
 			a->machinepeek = mtype;

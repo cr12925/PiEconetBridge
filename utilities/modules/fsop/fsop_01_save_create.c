@@ -46,6 +46,12 @@ void fsop_save_internal(struct fsop_data *f, uint8_t is_32bit)
 
 	length = (*(data+13)) + ((*(data+14)) << 8) + ((*(data+15)) << 16);
 
+	if (length < 16 && FS_ACTIVE_NOSHORTSAVES(f))
+	{
+		fsop_error (f, 0xFF, "Short saves not ENABLEd");
+		return;
+	}
+
 	if (is_32bit) length += (*(data + 16) << 24);
 
 	fs_debug_full (0, 1, f->server, f->net, f->stn, "%s%s %s %08lx %08lx %06lx", (create_only ? "CREATE" : "SAVE"), (is_32bit ? "32" : ""), filename, load, exec, length);

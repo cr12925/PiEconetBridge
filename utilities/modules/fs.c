@@ -5202,6 +5202,7 @@ void fsop_setup(void)
 	FSOP_SET (42, (FSOP_F_NONE)); /* MDFS Read encryption key */
 	FSOP_SET (43, (FSOP_F_LOGGEDIN | FSOP_F_MDFS | FSOP_F_SYST)); /* MDFS Tape interface */
 	FSOP_SET (60, (FSOP_F_LOGGEDIN | FSOP_F_SYST)); /* PiBridge functions */
+
 	/* Initialize known command list */
 
 	/* Catalogue done as a special case */
@@ -5226,8 +5227,10 @@ void fsop_setup(void)
 	FSOP_OSCLI(DEBIT,(FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 2, 2, 3);
 	FSOP_OSCLI(DELETE,(FSOP_00_LOGGEDIN), 1, 1, 3);
 	FSOP_OSCLI(DIR,(FSOP_00_LOGGEDIN), 0, 1, 2);
+	FSOP_OSCLI(DISABLE,(FSOP_00_LOGGEDIN), 0, 2, 4);
 	FSOP_OSCLI(DISCMASK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 5);
 	FSOP_OSCLI(DISKMASK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 5);
+	FSOP_OSCLI(ENABLE,(FSOP_00_LOGGEDIN), 0, 2, 2);
 	FSOP_OSCLI(FSCONFIG,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 1, 2, 4);
 	FSOP_OSCLI(INFO,(FSOP_00_LOGGEDIN), 1, 1, 1); /* Has to cope with stupid *i. from M128 */
 	FSOP_OSCLI(LIB,(FSOP_00_LOGGEDIN), 0, 1, 3);

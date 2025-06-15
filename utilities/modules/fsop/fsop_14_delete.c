@@ -200,7 +200,10 @@ FSOP_00(DELETE)
 
 	fsop_00_oscli_extract(f->data, p, 0, path, 255, param_start);
 
-	fsop_do_delete(f, path, FSOP_CWD);
+	if (!FS_ACTIVE_DELETEWILDCARD(f) && (strchr(path, '*') || strchr(path, '#')))
+		fsop_error (f, 0xFF, "Wildcards not ENABLEd");
+	else
+		fsop_do_delete(f, path, FSOP_CWD);
 
 }
 
