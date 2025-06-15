@@ -117,6 +117,7 @@
 #define BRIDGE_UPDATE	0x81
 #define BRIDGE_WHATNET	0x82
 #define BRIDGE_ISNET	0x83
+#define BRIDGE_REQUEST_GW	0x90 /* PiEconetBridge responds to this ctrl byte on broadcasts by replying with the IP address and port number of its AUN gateway, which will handle traffic to any address, and will send all return traffic to the station that uses it back through that same socket rather than any specific exposure. The reply simply a 6 byte UDP packet: 4 bytes IPv4 address in network byte order, 2 byte port in network byte order - it is *not* an AUN packet. Traffic via the gateway is in extended AUN, with 4 addressing bytes on the front (see struct __econet_packet_aun) */
 
 /*
  * The following are part of the HPB's bridge system
@@ -1264,6 +1265,7 @@ void eb_add_stats (pthread_mutex_t *, uint64_t *, uint16_t);
 #define eb_update_lastrx(d) { pthread_mutex_lock(&(d->statsmutex)); d->last_rx = time(NULL); pthread_mutex_unlock(&(d->statsmutex)); }
 void eb_dump_packet (struct __eb_device *, char, struct __econet_packet_aun *, uint16_t);
 uint32_t eb_get_local_seq (struct __eb_device *);
+struct __eb_device * eb_allocate_dynamic_aun(in_addr_t, uint16_t);
 
 /* Multitrunk */
 

@@ -496,7 +496,7 @@ void eb_fast_bin_login(struct __eb_fast_client *fc, struct __eb_fast_menu_item *
 
 /* Mediate traffic between sock -> fc->fc_socket[EB_FAST_TO_NETWORK][1]   and fc->fc_socket[EB_FAST_TO_SERVER][0] -> sock */
 
-void eb_fast_run_connection (struct __eb_fast_client *fc, int sock)
+void eb_fast_run_connection (struct __eb_fast_client *fc, int sock, uint8_t is_ssh)
 {
 
 	struct pollfd	p[2];
@@ -854,7 +854,7 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 
 										eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Connected to %s:%d", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_tcp.fm_host, i->fm_tcp.fm_port);
 										setsockopt (i->fm_tcp.fm_socket, SOL_SOCKET, SOCK_NONBLOCK, &option, 1);
-										eb_fast_run_connection (fc, i->fm_tcp.fm_socket);
+										eb_fast_run_connection (fc, i->fm_tcp.fm_socket, 0);
 
 									}
 
@@ -920,7 +920,7 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 
 								eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Serial connection to %s opened %s", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_serial.fm_device, connstring);
 
-								eb_fast_run_connection (fc, conn);
+								eb_fast_run_connection (fc, conn, 0);
 
 								eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Serial connection to %s closed", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_serial.fm_device);
 
