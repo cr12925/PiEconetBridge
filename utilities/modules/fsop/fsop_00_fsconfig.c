@@ -201,7 +201,7 @@ void fsop_00_enable_disable_internal(uint8_t mode, struct fsop_data *f, struct o
 
 	uid = f->userid;
 
-	if (num > 1 && !FS_ACTIVE_SYST(f->active)) /* param 1 will be username, but we must be syst */
+	if (num > 1) /* param 1 will be username, but we must be syst */
 	{
 		if (!FS_ACTIVE_SYST(f->active))
 		{
@@ -212,7 +212,7 @@ void fsop_00_enable_disable_internal(uint8_t mode, struct fsop_data *f, struct o
 		{
 			unsigned char	userid[11];
 
-			FSOP_EXTRACT(f,1,userid,10);
+			FSOP_EXTRACT(f,0,userid,10);
 
 			uid = fsop_get_uid(f->server, userid);
 
@@ -230,7 +230,7 @@ void fsop_00_enable_disable_internal(uint8_t mode, struct fsop_data *f, struct o
 	{
 		unsigned char		optiontext[11];
 
-		FSOP_EXTRACT(f, num, optiontext, 10);
+		FSOP_EXTRACT(f, num-1, optiontext, 10);
 
 		if (!strcasecmp(optiontext, "DELETE"))
 			option = FS_ED_DELETE;
