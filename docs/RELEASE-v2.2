@@ -15,53 +15,97 @@ with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 */
 
+MIGRATING FROM 2.1 to 2.2
+-------------------------
+
+You will need to install some additional libraries before compilation:
+
+	sudo apt install libglib2.0-dev cmake libssh2-dev
+
+Build & install v2.2
+
+	(Follow the instructions in the README)
+
+Then convert your existing configuration to JSON if you want to use
+any of the new features
+
+	econet-hpbridge --json-config-write /etc/econet-gpio/econet-hpbridge.json
+
+For safety, move your old config out of the way
+
+	mv /etc/econet-gpio/econet-hpbridge.cfg /etc/econet-gpio/econet-hpbridge.cfg~
+
+Start v2.2
+
+	sudo systemctl enable econet-hpbridge
+	sudo systemctl restart econet-hpbridge
+
 RELEASE NOTES FOR V2.2
 ----------------------
 
 - Fileserver restructured to be extensible, and a single thread per server
+
 - Limit on number of fileservers supported removed
+
 - Limit on number of logged on users and open files (at system level)
   removed. (Limit on maximum number of handles for a logged in user
   remains 30.)
+
 - Fileserver now dynamically allocates memory instead of statically,
   which should save on RAM
+
 - *FLOG has been removed in favour of *LOGOFF
+
 - *PRIV will now take an expanded privilege parameter (see docs)
+
 - *NEWUSER takes a new privilege parameter to set privileges at user
   creation time.
+
 - *NETCONF/*NETCONFIG have been retired in favour of *FSCONFIG
+
 - *FNLENGTH has been retired in favour of *FSCONFIG FNLENGTH <n>
+
 - *FSDEFPERM has been retired in favour of *FSCONFIG DEFPERM <(D)perm>
+
 - *NETCONF BIGHANDLE has been retired. The FS now determines how many
   handles a user can have based on their machine type / NFS version.
+
 - The FS will now send larger data burst packets to Archimedes and
   RISC PC class machines, if it discovers one at login
+
 - Human-readable output of FS Examine now pads filenames
   to 10, 40 or 80 characters depending on the length of the longest
   filename in the directory in question, in order to make output tidier.
   *INFO output modified similarly based on length of the one filename
   being returned.
+
 - The previous, rather heavyweight, load dequeuer has been retired
   in favour of one which simply reads the relevant file on demand.
+
 - Legacy configuration form is now internally converted to JSON
   and implemented from the JSON. The resulting JSON can be written
   to a file using a command line switch --json-config-write
+
 - The bridge will look for /etc/econet-gpio/econet-hpbridge.{cfg,json}
   and will read the most recently modified. If the JSON is more
   recent, it will use that. Alternative config files (both
   legacy and JSON) can be specified with -c and -j respectively.
+
 - Thus you can convert your legacy config to JSON using the
   switch above, and then save it as econet-hpbridge.json and
   unless you subsequently modify your legacy file (.cfg), the
   bridge will use the JSON version. 
+
 - The JSON config is intended to facilitate web-based configuration
   of the HPB. When that is done, it will hopefully also be
   friendly to text-browsers such as lynx so as to provide
   an effect text-based config tool.
+
 - The JSON config "general" key can have within it keys which
   reflect the long command line parameters so that those settings
   can be made semi-permanent without having to have them on the
   command line. 
+
 - Each interface and device can have an inbound and outbound firewall
   chain associated with it to provide granular filtering. Inbound
   means from the device - e.g. received on a trunk or from a pipe. 
@@ -69,6 +113,7 @@ RELEASE NOTES FOR V2.2
   to filter traffic with network / station numbers as received, i.e.
   before any NAT or pooling. Outbound filters are the reverse - the
   matching is done prior to the undoing of any NAT etc. 
+
 - MDFS tape interface implemented, with up to four drives by default
   (MDFS had one only). 
   Further tape management commands:
@@ -82,6 +127,7 @@ RELEASE NOTES FOR V2.2
               FS disc "discname" onto partition nn of the tape in
               either the currently selected drive, or the specified
               drive.
+
 - User quotas implemented. No quota is adjusted for System users.
   If a user has an unexpected quota (which may default to nil!),
   use the Acorn *SETFREE utility to set it to something else. THe
@@ -89,12 +135,49 @@ RELEASE NOTES FOR V2.2
   *SETFREE CHRIS 1000 
   sets CHRIS's free space to 65,536 bytes irrespective of what the
   user presently has stored.
+
 - Fileserver, Printserver, IP Gateway server, and FindServer 
   server have all been modularised out into separate source
   files for ease of coding.
+
 - Bridge can now be configured to listen for local network
   AUN/IP broadcasts on port 32768 and deal with them
   appropriately
+
+- The MDFS *ENABLE/*DISABLE functionality (which controls
+  whether the library is searched on LOAD/OPEN as well as
+  RUN, short saves, and *DELETE with wildcards) is now 
+  implemented but is only operational if in MDFS mode.
+  There are three settings:
+  *ENABLE LIBRARY - which searches Library on LOAD/OPENIN
+    which is enabled by default in MDFS mode, but can be
+    disabled by a user with *DISABLE LIBRARY and re-enabled
+    with *ENABLE LIBRARY
+  *ENABLE SAVES - saving files of < 16 bytes is disabled
+    by default in MDFS mode. SYST can change that default
+    with *FSCONFIG +SAVES (and disable with -SAVES).
+    Users can enable/disable with ENABLE SAVES / DISABLE SAVES.
+  *ENABLE (i.e. without a parameter) enables wildcard 
+    functionality on *DELETE. *DISABLE the converse.
+    There is a synonym for this command which is 
+    *ENABLE DELETE / *DISABLE DELETE in case SYST wishes
+    to use it as described below.
+  SYST can set a permanent flags per use in respect of
+    each of the above, to override the global FS setting.
+    It is not possible to globally DISABLE in this way,
+    only to ENABLE. To do so, SYST is permitted to add
+    a username before the operational parameter, e.g.
+
+    *ENABLE BLOGGS SAVES
+
+    To unset the override:
+
+    *DISABLE BLOGGS SAVES
+
+    Note that the latter DOES NOT mean that the user
+    has the setting permanently disabled, only that the
+    permanent *enable* flag is cleared, so that the user
+    will be subject to the FS-wide default.
 
 KNOWN ISSUES
 ------------
@@ -282,4 +365,4 @@ Roadmap to v2.3
     Acorn topologies.
 
 CR
-June 2024
+June 2025
