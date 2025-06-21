@@ -112,7 +112,7 @@
  *
  */
 
-#define BRIDGE_PORT	0x9C
+#define BRIDGE_PORT	EB_PORT_BRIDGE
 #define BRIDGE_RESET	0x80
 #define BRIDGE_UPDATE	0x81
 #define BRIDGE_WHATNET	0x82
@@ -125,17 +125,28 @@
  *
  */
 
-#define ECONET_TRACE_PORT		0x9B	// Port number used for HPB traceroute functionality
+#define ECONET_TRACE_PORT		EB_PORT_TRACE	// Port number used for HPB traceroute functionality
 #define ECONET_BRIDGE_KEEPALIVE_CTRL	0xD0	// Ctrl byte used for trunk keepalive packets
 #define ECONET_BRIDGE_LOOP_PROBE	0xCF	// Used to for loop probes to see if we need to shut a device down
 
 /* Some port numbers - others are defined below */
 
-#define EB_PORT_PS_QUERY	0x9F
-#define EB_PORT_PS		0x9E
-#define EB_PORT_FINDSERVER	0xB0
-#define EB_PORT_PS_DATA		0xD1
-#define EB_PORT_IP		0xD2
+#define EB_PORT_REMOTE			0x93
+/* Defined in the fs-bridge-common header #define EB_PORT_FS		0x99 */
+#define EB_PORT_TRACE			0x9B
+#define EB_PORT_BRIDGE			0x9C
+#define EB_PORT_RESOURCE_LOCATOR	0x9D
+#define EB_PORT_PS_QUERY		0x9F
+#define EB_PORT_PS			0x9E
+#define EB_PORT_FAST			0xA0
+#define EB_PORT_FINDSERVER		0xB0
+#define EB_PORT_FINDSERVER_REPLY	0xB1
+#define EB_PORT_TELETEXT_S_REPLY	0xB2
+#define EB_PORT_TELETEXT_S_CMD		0xB3
+#define EB_PORT_TELETEXT_DATA		0xB4
+#define EB_PORT_TELETEXT_HEADER		0xB5
+#define EB_PORT_PS_DATA			0xD1
+#define EB_PORT_IP			0xD2
 
 /* Broadcast receiver addresses */
 
@@ -465,7 +476,9 @@ struct __eb_fast_client {
 
 /* Fast Data Port */
 
+/* Now defined above
 #define EB_PORT_FAST		0xA0
+*/
 
 /* *FAST JSR &FFFF codes */
 

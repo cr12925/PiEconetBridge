@@ -2128,6 +2128,12 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 			strcpy(final_path, "Configuration.txt");
 			acorn_start_ptr = received_path + strlen(received_path) - 7 + 1;
 		}
+		else if ((strlen(received_path) >= 6) && !strcasecmp(received_path + strlen(received_path)-5, "%CLOCK"))
+		{
+			if (normalize_debug) fs_debug (0, 1, "Found request for special file %%CLOCK");
+			strcpy(final_path, clock_speed_filename);
+			acorn_start_ptr = received_path + strlen(received_path) - 6 + 1;
+		}
 
 		if (final_path[0] != '\0')
 		{

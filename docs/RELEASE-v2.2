@@ -20,7 +20,7 @@ MIGRATING FROM 2.1 to 2.2
 
 You will need to install some additional libraries before compilation:
 
-	sudo apt install libglib2.0-dev cmake libssh2-dev
+	sudo apt install libglib2.0-dev cmake libssh2-dev libjson-c-dev
 
 Build & install v2.2
 
@@ -30,6 +30,8 @@ Then convert your existing configuration to JSON if you want to use
 any of the new features
 
 	econet-hpbridge --json-config-write /etc/econet-gpio/econet-hpbridge.json
+	
+	(Once it has started up, Ctrl-C)
 
 For safety, move your old config out of the way
 
@@ -178,6 +180,23 @@ RELEASE NOTES FOR V2.2
     has the setting permanently disabled, only that the
     permanent *enable* flag is cleared, so that the user
     will be subject to the FS-wide default.
+
+- BeebEm / Other emulators AUN 'gateway' functionality
+  implemented, allowing emulators to send traffic for
+  any station to the bridge on a dedicated port, to save
+  mapping every possibly AUN host via an exposure on the
+  bridge. Also saves exposing AUN hosts and networks in
+  the bridge if you are only using emulators and not
+  true AUN devices like RISC OS.
+
+- Virtual file %CLOCK implemented in fileservers which
+  allows read-only access to a file containing a list of
+  clock rates, per Econet device, configured on the
+  local bridge. NB: this cannot and does not work out
+  the clock speed of a hardware clock elsewhere on the
+  network. It will only ever report clock speeds
+  configured on the HPB itself. If there are none, this
+  will give "Not found" to a client station.
 
 KNOWN ISSUES
 ------------
