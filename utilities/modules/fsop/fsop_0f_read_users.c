@@ -56,9 +56,9 @@ FSOP(0f)
 	{
 		if (
 			(f->user->priv & FS_PRIV_SYSTEM)
-		||	!(f->server->users[a->userid].priv & FS_PRIV_SYSTEM) /* We aren't syst and the logged on user is */
+		//||	!(f->server->users[a->userid].priv & FS_PRIV_SYSTEM) /* We aren't syst and the logged on user isn't either */
 		||	a->userid == f->userid
-		||	!(f->server->users[a->userid].priv2 & FS_PRIV2_HIDEOTHERS)
+		||	!((f->server->users[a->userid].priv2 & FS_PRIV2_HIDEOTHERS) || (f->server->users[a->userid].priv & FS_PRIV_SYSTEM)) /* Not hiding others, and the user we're looking at isn't system */
 		)
 			found++;
 
@@ -71,9 +71,10 @@ FSOP(0f)
 	{
 		if (
 			(f->user->priv & FS_PRIV_SYSTEM)
-		||	!(f->server->users[a->userid].priv & FS_PRIV_SYSTEM) /* We aren't syst and the logged on user is */
+		//||	!(f->server->users[a->userid].priv & FS_PRIV_SYSTEM) /* We aren't syst and the logged on user is */
 		||	a->userid == f->userid
-		||	!(f->server->users[a->userid].priv2 & FS_PRIV2_HIDEOTHERS)
+		//||	!(f->server->users[a->userid].priv2 & FS_PRIV2_HIDEOTHERS)
+		||	!((f->server->users[a->userid].priv2 & FS_PRIV2_HIDEOTHERS) || (f->server->users[a->userid].priv & FS_PRIV_SYSTEM)) /* Not hiding others, and the user we're looking at isn't system */
 		)
 		{
 			char *space;
