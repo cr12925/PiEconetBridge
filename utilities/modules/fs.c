@@ -2107,6 +2107,7 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 	{
 		unsigned char	final_path[30];
 		unsigned char 	*acorn_start_ptr;
+		uint8_t		special_relative_to_root = 0;
 
 		final_path[0] = '\0';
 
@@ -2128,11 +2129,12 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 			strcpy(final_path, "Configuration.txt");
 			acorn_start_ptr = received_path + strlen(received_path) - 7 + 1;
 		}
-		else if ((strlen(received_path) >= 6) && !strcasecmp(received_path + strlen(received_path)-5, "%CLOCK"))
+		else if ((strlen(received_path) >= 6) && !strcasecmp(received_path + strlen(received_path)-6, "%CLOCK"))
 		{
 			if (normalize_debug) fs_debug (0, 1, "Found request for special file %%CLOCK");
 			strcpy(final_path, clock_speed_filename);
 			acorn_start_ptr = received_path + strlen(received_path) - 6 + 1;
+			special_relative_to_root = 1; /* Don't append FS root dir to unix path */
 		}
 
 		if (final_path[0] != '\0')
@@ -2149,7 +2151,10 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 			strcpy(result->path[0], acorn_start_ptr);
 			strcpy(result->acornname, acorn_start_ptr);
 			strcpy(result->path_from_root, acorn_start_ptr);
-			sprintf(result->unixpath, "%s/%s", f->server->directory, final_path);
+			if (!special_relative_to_root)
+				sprintf(result->unixpath, "%s/%s", f->server->directory, final_path);
+			else
+				sprintf(result->unixpath, "%s", final_path);
 			sprintf(result->acornfullpath, "$.%s", acorn_start_ptr);
 			strcpy(result->unixfname, final_path);
 					

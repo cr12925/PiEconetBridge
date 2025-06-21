@@ -61,6 +61,12 @@ void eb_broadcast_handler (struct __eb_device *, struct __econet_packet_aun *, u
 pthread_t	eb_bcast_listener_thread;
 pthread_t	eb_gateway_listener_thread;
 
+/* Clock speed reporting to user stations */
+
+int		clock_speed_file = -1;
+FILE *		clock_speed_stream = NULL;
+char		clock_speed_filename[48] = "/tmp/econet-hpbridge.clock.XXXXXX";
+
 // Some globals
 
 char	hostname[255];
@@ -161,7 +167,9 @@ void eb_exit_cleanup(void)
 {
 
 	// Remove any IP addresses / tunnel interfaces we may have created
-
+	
+	if (clock_speed_stream)
+		fclose(clock_speed_stream); /* Get rid of any temp clock data file */
 }
 
 void eb_signal_handler (int sig)
@@ -170,6 +178,11 @@ void eb_signal_handler (int sig)
 	switch (sig)
 	{
 
+		case SIGTERM:
+			eb_exit_cleanup();
+			signal(SIGTERM, SIG_DFL);
+			raise(SIGTERM);
+			break;
 		case SIGINT:
 			eb_exit_cleanup();
 			signal(SIGINT, SIG_DFL);
@@ -9525,6 +9538,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 	uint8_t		net, stn;
 	uint16_t	jcount, jlength;
 	struct json_object	*jdiverts, *jstation, *jstation_number, *jprinters, *jfs, *jips, *jpipepath, *jnetclock;
+	char		device[128];
 
 	if (!json_object_object_get_ex(o, "net", &jdiverts)) /* Temp use of jdiverts */
 		eb_debug (1, 0, "JSON", "Econet or virtual device in %s JSON config without a network numbers", (otype == 2) ? "Econet" : "Virtual");
@@ -9547,6 +9561,8 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 		else
 			eb_debug (1, 0, "JSON", "Econet device in JSON config without a device name");
 
+		strncpy (device, json_object_get_string(jdiverts), 128);
+
 		if (json_object_object_get_ex(o, "resilience", &jfw)) // jfw being used temporarily
 			networks[net]->wire.resilience = (json_object_get_boolean(jfw) ? 1 : 0);
 
@@ -9558,6 +9574,24 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 				eb_debug (1, 0, "JSON", "Invalid clock specifier for econet device %s", json_object_get_string(jdiverts));
 
 			eb_device_init_set_net_clock(networks[net], period, mark);
+
+			/* Record it in the temporary file */
+
+			if (clock_speed_file == -1)  /* Make the file & open it if we need to */
+			{
+				clock_speed_file = mkstemp(clock_speed_filename);
+				if (clock_speed_file != -1)
+				{
+					clock_speed_stream = fdopen(clock_speed_file, "w+");
+					fprintf (clock_speed_stream,"#Interface\tPeriod\tMark\r\n");
+				}
+			}
+
+			if (clock_speed_stream)
+			{
+				fprintf (clock_speed_stream, "%s\t%2.2f\t%2.2f\r\n", device, period, mark);
+				fflush (clock_speed_stream);
+			}
 
 		}
 
@@ -10621,6 +10655,11 @@ int eb_parse_json_config(struct json_object *jc)
 		if (json_object_object_get_ex(jc, "virtuals", &jvirtuals))
 			eb_create_json_virtuals_econets_loop(jvirtuals, 1);
 	}
+
+	/* Close the clock text file */
+
+	//if (clock_speed_stream)
+		//fclose(clock_speed_stream);
 
 	/* Now set up the legacy 'dynamic' network */
 
@@ -14311,6 +14350,7 @@ int main (int argc, char **argv)
 	/* Set up our signal handler */
 
 	signal (SIGINT, eb_signal_handler);
+	signal (SIGTERM, eb_signal_handler);
 	signal (SIGUSR1, eb_signal_handler);
 	signal (SIGUSR2, eb_signal_handler);
 	signal (SIGCHLD, SIG_IGN); /* To ignore exit status from child scripts */
