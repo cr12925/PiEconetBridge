@@ -1,9 +1,11 @@
-GIT_VERSION := "$(shell git branch) $(shell git rev-parse --short HEAD)"
+#GIT_VERSION := "$(shell git branch) $(shell git rev-parse --short HEAD)"
+GIT_VERSION := "CR Build tree"
 CFLAGS=-g -O2 -I../include -I/usr/include/glib-2.0 -I/usr/lib/aarch64-linux-gnu/glib-2.0/include -I/usr/lib/arm-linux-gnueabihf/glib-2.0/include  -I/usr/lib64/glib-2.0/include
 
 econet_hpb_objects := $(patsubst %.c,%.o,$(wildcard econet-hpbridge*.c))
 econet_hpb_modules := $(patsubst %.c,%.o,$(wildcard modules/*.c))
 fsop_objects := $(patsubst %.c,%.o,$(wildcard modules/fsop/*.c))
+libs := -lpthread -lssl -lcrypto -ljson-c -lglib-2.0 -lssh2
 
 all:	econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers econet-poke econet-isnets unix2beeb
 
@@ -11,7 +13,7 @@ unix2beeb:	unix2beeb.c
 	cc $(CFLAGS) -Wall -Wno-pointer-sign unix2beeb.c -o unix2beeb
 
 econet-hpbridge:	Makefile $(fsop_objects) $(econet_hpb_objects) $(econet_hpb_modules)
-	if [ -f .noexplain ]; then cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) $(econet_hpb_modules) $(fsop_objects) -lpthread -lssl -lcrypto -ljson-c -lglib-2.0; else cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) $(econet_hpb_modules) $(fsop_objects) -lpthread -lssl -lcrypto -lexplain -ljson-c -lglib-2.0; fi
+	if [ -f .noexplain ]; then cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) $(econet_hpb_modules) $(fsop_objects) $(libs); else cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) $(econet_hpb_modules) $(fsop_objects) $(libs) -lexplain; fi
 	-chgrp econet econet-hpbridge
 
 $(fsop_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
