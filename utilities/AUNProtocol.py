@@ -19,6 +19,9 @@ import re
 import threading
 import socket
 import os
+import select
+import termios
+import tty
 
 # machinePeek reply data
 PEEK_HW=0xEEE0
@@ -74,6 +77,16 @@ AUN_TX_RESULT_NOT_LISTENING=-1
 AUN_TX_RESULT_NO_ADDRESS=-2
 AUN_TX_RESULT_UNKNOWN=-255
 
+# FAST port / ctrl
+FAST_DATA_PORT=0xA0
+FAST_LOGON=0x00
+FAST_READY=0x01
+FAST_DISCONNECT=0x02
+FAST_VIEWDATA_ON=0x10
+FAST_VIEWDATA_OFF=0x11
+FAST_LOGON_ACK=0x80
+IMM_USRPROC=0x84
+
 class AUNClient:
 
     def __init__(self, localport = 32768, bind_addr = '', timeout = 1.5, debug_on = False, traffic_debug_on = False, aunmap_file = None, hostmap_file = None, pipebase = None):
@@ -83,6 +96,7 @@ class AUNClient:
         self.port_conditions = { }
         self.port_callbacks = { }
         self.port_doqueue = { }
+        self.immediate_callbacks = { }
         self.aunmap = { }
         self.hostmap = { }
         self.acknak = { } # Dictionary of ACKs, NAKs, and IMMREPs received
@@ -210,7 +224,8 @@ class AUNClient:
             else:
                 addr_string = f" ({addr})"
 
-            packet[AUN_CTRL] |= 0x80
+            if (self.pipemode == False):
+                packet[AUN_CTRL] |= 0x80
 
             if (net == 0): # Dump packet
                 traffic = f"--> {self.aun_typestr(packet[AUN_PTYPE]):>5} {packet[AUN_PORT]:02X}:{packet[AUN_CTRL]:02X} Seq {seq:08X}: {packet[8:]} from Unknown Source!{addr_string}"
@@ -241,13 +256,15 @@ class AUNClient:
                     mp_reply = bytearray([(PEEK_HW & 0xff), ((PEEK_HW & 0xff00) >> 8), (PEEK_VERS & 0xff), (PEEK_VERS & 0xff00) >> 8])
                     mp_reply_aun = self.AUNPacket(AUN_PT_IMMREP, 0x00, 0x88, seq, mp_reply)
                     self.AUNTransmit(net, stn, mp_reply_aun)
+                elif self.immediate_callbacks.get(AUN_CTRL) != None:
+                    self.immediate_callbacks.get(AUN_CTRL) (net, stn, packet_port, packet_ctrl, packet_type, packet_seq, packet[8:])
 
             if (packet[AUN_PTYPE] == AUN_PT_DATA): # Data - send ACK - we'll be more particular later!
 
                 if self.port_conditions.get(packet_port):
                     self.port_conditions[packet_port].acquire()
 
-                if self.ports.get(packet_port) == None and self.port_callbacks.get(packet_port) == None:
+                if packet_port != 0x00 and self.ports.get(packet_port) == None and self.port_callbacks.get(packet_port) == None: # The Bridge will send some Immediates as DATA where they are 4-ways on the wire
 
                     # Port not listening
                     nak = self.AUNPacket(AUN_PT_NAK, packet_port, packet_ctrl, seq, bytearray([]))
@@ -258,18 +275,24 @@ class AUNClient:
                     ack = self.AUNPacket(AUN_PT_ACK, packet_port, packet_ctrl, seq, bytearray([]))
                     self.AUNTransmit(net, stn, ack)
 
-                    if self.port_doqueue.get(packet_port) and self.ports.get(packet_port) != None: # Queue exists and we've been asked to put traffic on the queue
+                    if packet_port == 0: # Notify immediate 4-way handlers
+                        if self.immediate_callbacks.get(packet_ctrl) != None:
+                            self.immediate_callbacks.get(packet_ctrl) (net, stn, packet_port, packet_ctrl, packet_type, packet_seq, packet[8:])
+
+                    elif self.port_doqueue.get(packet_port) and self.ports.get(packet_port) != None: # Queue exists and we've been asked to put traffic on the queue
                         self.ports[packet_port].append(packet)
 
                         if self.port_conditions[packet_port] != None:
                             self.port_conditions[packet_port].notify()
-
 
                     if self.port_callbacks.get(packet_port) != None:
                         self.port_callbacks.get(packet_port) (net, stn, packet_port, packet_ctrl, packet_type, packet_seq, packet[8:])
 
                 if self.port_conditions.get(packet_port):
                     self.port_conditions[packet_port].release()
+
+    def GetSeq(self):
+        return self.seq
 
     def AUNPacket(self, ptype, port, ctrl, seq, data):
         header = bytearray([ptype, port, ctrl | 0x80, 0x00, (seq & 0xff), (seq & 0xff00) >> 8, (seq & 0xff0000) >> 16, (seq & 0xff000000) >> 24])
@@ -290,7 +313,9 @@ class AUNClient:
         else:
             output = f"<-- {self.aun_typestr(packet[AUN_PTYPE]):>5} {packet[AUN_PORT]:02X}:{packet[AUN_CTRL]:02X} Seq {seq:08X}: {packet[8:]} to {net}.{stn} ({netaddress}:{netport})"
         self.traffic_debug(output)
-        packet[AUN_CTRL] &= 0x7f # Strip high bit
+        
+        if (self.pipemode == False):
+            packet[AUN_CTRL] &= 0x7f # Strip high bit
 
         tx_seq = seq
         tx_count = 0
@@ -397,7 +422,6 @@ class AUNClient:
             handle_lib = self.handles[(net, stn)][2]
 
         self.op_data = bytearray([self.ReplyPort, OpNumber, handle_urd, handle_cwd, handle_lib]) + data
-    
 
         packet = self.AUNPacket(AUN_PT_DATA, 0x99, 0x80, self.seq, self.op_data)
         result, ack = self.AUNTransmit(net, stn, packet)
@@ -488,15 +512,38 @@ class AUNClient:
                     self.debug ("No available ports!")
                     self.ports_mutex.release()
                     return 0
-            else:
-                self.ports[self.port] = [ ]
-                self.port_conditions[self.port] = threading.Condition()
-                self.port_callbacks[self.port] = callback
-                self.port_doqueue[self.port] = enqueue
-                self.last_port = self.port
-                self.ports_mutex.release()
-                return self.port
+
+        self.last_port = self.port
+        result = self.GetPortSpecificInternal(self.port, callback, enqueue)
+
+        self.ports_mutex.release()
+
+        return result
      
+    def GetPortSpecificInternal(self, port, callback, enqueue = True):
+
+        if port in self.ports:
+            return 0
+
+        self.ports[port] = [ ]
+        self.port_conditions[port] = threading.Condition()
+        self.port_callbacks[port] = callback
+        self.port_doqueue[port] = enqueue
+        return port
+
+    def GetPortSpecific(self, port, callback, enqueue = True):
+
+        self.ports_mutex.acquire()
+        result = self.GetPortSpecificInternal(port, callback, enqueue)
+        self.ports_mutex.release()
+        return result
+
+    def SetImmediateCallBack(self,ctrl,callback):
+        self.immediate_callbacks[ctrl] = callback
+
+    def ClearImmediateCallBack(self,ctrl):
+        self.immediate_callbacks.pop(ctrl)
+
     def AUNBroadcastProcessor(self, net, stn, seq, packet):
         traffic = f"--> {self.aun_typestr(packet[AUN_PTYPE]):>5} {packet[AUN_PORT]:02X}:{packet[AUN_CTRL]:02X} Seq {seq:08X}: {packet} from {net}.{stn} ({addr})"
         self.traffic_debug(traffic)
@@ -547,5 +594,129 @@ class AUNClient:
     def debug (self, info):
         if self.debug_enabled:
             print(info)
+
+
+class FastClient:
+
+    def __init__ (self, aun_client, net, stn):
+        self.net = int(net)
+        self.stn = int(stn)
+        self.remote_ready = 0
+        self.remote_ready_cond = threading.Condition()
+        self.remote_disconnect = 0
+        self.logged_on = 0
+        self.logged_on_cond = threading.Condition()
+        self.aun_client = aun_client
+        self.out_buf_cond = threading.Condition()
+        self.out_buf = [ ]
+        self.ctrl_bit_in = 0x00
+        self.ctrl_bit_out = 0x00
+
+        self.aun_client.SetImmediateCallBack(IMM_USRPROC, self.USRPROC_Callback)
+        self.aun_client.GetPortSpecific(FAST_DATA_PORT, self.DataCallback)
+
+    def USRPROC_Callback (self, net, stn, port, ctrl, ptype, seq, data):
+
+        if len(data) < 5:
+            print ("Bad FAST control packet received!")
+            return
+
+        fast_ctrl = data[4]
+
+        if fast_ctrl == FAST_LOGON_ACK:
+            self.logged_on_cond.acquire()
+            self.logged_on = 1
+            self.logged_on_cond.notify()
+            self.logged_on_cond.release()
+        elif fast_ctrl == FAST_DISCONNECT:
+            self.out_buf_cond.acquire()
+            self.remote_disconnect = 1
+            self.out_buf_cond.release()
+        elif fast_ctrl == FAST_READY:
+            self.out_buf_cond.acquire()
+            self.remote_ready = 1
+            self.out_buf_cond.notify()
+            self.out_buf_cond.release()
+        elif fast_ctrl == FAST_VIEWDATA_ON:
+                print ("Viewdata mode requested but not implemented")
+        elif fast_ctrl == FAST_VIEWDATA_OFF:
+                print ("Viewdata mode disable request, but not implemented")
+        else:
+            print (f"Unknown FAST control code received {fast_ctrl:02X}")
+        
+    def DataCallback (self, net, stn, port, ctrl, ptype, seq, data):
+
+        if (ctrl & self.ctrl_bit_in == 0x00): # Ignore duplicates
+            sys.stdout.write(data.decode('ascii'))
+        self.ctrl_bit_in ^= 0x01 
+        self.SendCtrl (FAST_READY)
+
+    def SendInternal (self, packet):
+
+        (result, ack) = self.aun_client.AUNTransmit(self.net, self.stn, packet)
+        return result
+
+    def SendCtrl (self, ctrl):
+
+        ctrl_packet = self.aun_client.AUNPacket(AUN_PT_DATA, 0x00, IMM_USRPROC, self.aun_client.GetSeq(), bytearray( [ 0xFF, 0xFF, 0xFF, 0xFF, ctrl ]));
+        return self.SendInternal (ctrl_packet)
+
+    def SendData (self, data):
+
+        data_packet = self.aun_client.AUNPacket(AUN_PT_DATA, FAST_DATA_PORT, 0x80 | self.ctrl_bit_out, self.aun_client.GetSeq(), bytes(data));
+        self.ctrl_bit_out ^= 0x01
+        return self.SendInternal (data_packet)
+
+    def Run (self):
+
+        self.finished = 0
+        self.SendCtrl(FAST_LOGON)
+
+        # Wait for logged on reply
+        self.logged_on_cond.acquire()
+
+        if self.logged_on_cond.wait(2):
+            self.logged_on_cond.release()
+
+            # Raw mode
+            fd = sys.stdin.fileno()
+            old_termios = termios.tcgetattr(fd)
+            tty.setraw(sys.stdin.fileno())
+
+            self.SendCtrl (FAST_READY)
+
+            while self.finished == 0:
+                # Run connection
+
+                if select.select([sys.stdin, ], [], [], 0.0)[0]: #Data
+                    c = sys.stdin.read(1)
+                    self.out_buf += bytearray ( c.encode("ascii") )
+
+                self.out_buf_cond.acquire()
+                self.out_buf_cond.wait(1)
+
+                if len(self.out_buf) > 0 and self.remote_ready:
+                    amount = len(self.out_buf)
+                    if amount > 32:
+                        amount = 32
+                    self.SendData(self.out_buf[:amount-1])
+                    out_buf = self.out_buf[amount:]
+                    self.remote_ready = 0
+
+                if self.remote_disconnect:
+                    self.finished = 1
+
+                self.out_buf_cond.release()
+
+            # Put the tty back again
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_termios)
+            self.aun_client.ClearImmediateCallBack(IMM_USRPROC)
+            self.aun_client.PutPort(FAST_DATA_PORT)
+
+        else:
+            self.logged_on_cond.release()
+            print ("Unable to connect")
+
+        return
 
 

@@ -118,17 +118,27 @@ def fsop_cat(aun_client, net, stn, path):
                     print ("Error &{fsop_error:02X} - {error_string}")
                 else:
                     entries_returned = reply_packet[10]
-                    for index in range(0, entries_returned):
-                        fdata = reply_packet[(12+(19*index)):(12+(19*index)+18)].decode('ascii')
+                    for index_count in range(0, entries_returned):
+                        fdata = reply_packet[(12+(19*index_count)):(12+(19*index_count)+18)].decode('ascii')
                         print (fdata, end="")
                         print ("   ", end="")
-                        if index % 4 == 3:
+                        if index_count % 4 == 3:
                             print ("")
-                    print (f"Index: {index} ; Entries returned: {entries_returned}")
                     index = index + entries_returned
                     if (entries_returned < 4):
                         finished = 1
 
+            print ("")
+
+def fast(aun_client, net, stn):
+
+    fastclient = AUNProtocol.FastClient(aun_client, net, stn)
+    
+    if fastclient == None:
+        print (f"Unable to connect to %d.%d", net, stn)
+    else:
+        fastclient.Run()
+    
 
 def user_thread(aun_client, server = "1.254", username = "", password = ""):
 
@@ -139,7 +149,7 @@ def user_thread(aun_client, server = "1.254", username = "", password = ""):
 
     if login(my_net, my_stn, username, password) == False:
         return None
-    
+
     cmd = ""
 
     while (re.search("^\s*quit\s*$", cmd, re.I) == None and re.search("^\s*bye\s*$", cmd, re.I) == None):
@@ -151,20 +161,18 @@ def user_thread(aun_client, server = "1.254", username = "", password = ""):
             my_stn = int(fs_match.group(2))
         elif re.search("quit", cmd, re.I):
             continue
-        elif re.search("^\.\s*(\S*)\s*$", cmd, re.I):
-            try:
-                path = fs_match.group(1)
-            except:
-                path = ""
+        elif re.search("^(\.|cat\s)\s*(\S+)\s*$", cmd, re.I):
+            fs_match = re.search("^(\.|cat\s)\s*(\S+)\s*$", cmd, re.I)
+            path = fs_match.group(2)
             fsop_cat(aun_client, my_net, my_stn, path)
-        elif re.search("^cat\s*(\S*)\s*$", cmd, re.I):
-            try:
-                path = fs_match.group(1)
-            except:
-                path = ""
+        elif re.search("^(\.|cat)\s*$", cmd, re.I):
+            path = ""
             fsop_cat(aun_client, my_net, my_stn, path)
+        elif re.search("^fast\s+(\d{1,3})\.(\d{1,3})", cmd, re.I):
+            fs_match = re.search("^fast\s+(\d{1,3})\.(\d{1,3})", cmd, re.I)
+            fast(aun_client, fs_match.group(1), fs_match.group(2));
         else:
-            fsop_result, fsop_error, reply_packet = aun_client.FSOp(my_net, my_stn, 0x00, bytearray(cmd, "ascii"))
+            fsop_result, fsop_error, reply_packet = aun_client.FSOp(my_net, my_stn, 0x00, bytearray(cmd, "ascii") + bytearray ( 0x0D))
             if fsop_error != 0:
                 error_string = aun_client.report_FSOp_result(aun_client, fsop_result, fsop_error, reply_packet)
                 print (f"Error &{fsop_error:02X} - {error_string}")
