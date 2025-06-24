@@ -186,9 +186,12 @@ FSOP(14)
 
 	fs_copy_to_cr(path, (f->data + path_start), 1023);
 
-	fs_debug_full (0, 1, f->server, f->net, f->stn, "*DELETE %s relative to %02X (%s)", path, FSOP_CWD, f->active->fhandles[FSOP_CWD].acornfullpath);
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "DELETE %s relative to %02X (%s)", path, FSOP_CWD, f->active->fhandles[FSOP_CWD].acornfullpath);
 
-	fsop_do_delete(f, path, FSOP_CWD);
+	if (!FS_ACTIVE_DELETEWILDCARD(f) && (strchr(path, '*') || strchr(path, '#')))
+		fsop_error (f, 0xFF, "Wildcards not ENABLEd");
+	else
+		fsop_do_delete(f, path, FSOP_CWD);
 
 	return;
 
@@ -199,6 +202,8 @@ FSOP_00(DELETE)
 	unsigned char	path[256];
 
 	fsop_00_oscli_extract(f->data, p, 0, path, 255, param_start);
+
+	fs_debug_full (0, 1, f->server, f->net, f->stn, "*DELETE %s relative to %02X (%s)", path, FSOP_CWD, f->active->fhandles[FSOP_CWD].acornfullpath);
 
 	if (!FS_ACTIVE_DELETEWILDCARD(f) && (strchr(path, '*') || strchr(path, '#')))
 		fsop_error (f, 0xFF, "Wildcards not ENABLEd");

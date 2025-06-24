@@ -24,14 +24,18 @@ uint8_t eb_fast_printdiscs (struct __eb_fast_client *fc)
 
         max_discs = fs_get_maxdiscs();
 
+	f_printf (fc, "\n\rCurrently configured discs:\n\r\n\r");
+
         for (count = 0; count < max_discs; count++)
         {
                 unsigned char   discname[128];
 
                 fsop_get_disc_name (d->local.fs.server, count, discname);
 
-                f_printf (fc, "%1x: %02d - %s\r\n", count, count, discname);
+                if (discname[0]) f_printf (fc, "%1x: %02d - %s\r\n", count, count, discname);
         }
+
+	f_printf (fc, "\r\n");
 
         return max_discs;
 }
@@ -541,7 +545,9 @@ void eb_fast_run_connection (struct __eb_fast_client *fc, int sock, uint8_t is_s
 				int	res;
 		
 				if (count == 0)
+				{
 					res = read(sock, data, 128);
+				}
 				else
 					res = read(fc->fc_socket[EB_FAST_TO_SERVER][0], data, 128);
 	
@@ -551,25 +557,12 @@ void eb_fast_run_connection (struct __eb_fast_client *fc, int sock, uint8_t is_s
 
 					if (count == 0)
 					{
-						/*
-						fprintf (stderr, "\n\n*** run_conn write to network: ");
-						for (uint8_t c = 0; c < res; c++)
-							fprintf (stderr, " %c %02X", (data[c] > 32 && data[c] < 127) ? data[c] : '.', data[c]);
-						fprintf (stderr, "\n\n");
-						*/
 						writeres = write(fc->fc_socket[EB_FAST_TO_NETWORK][1], data, res);
 						pthread_cond_signal(&(fc->fast_wake[EB_FAST_TO_NETWORK]));
 					}
 					else
 					{
-						/*
-						fprintf (stderr, "\n\n*** run_conn write to socket: ");
-						for (uint8_t c = 0; c < res; c++)
-							fprintf (stderr, " %c %02X", (data[c] > 32 && data[c] < 127) ? data[c] : '.', data[c]);
-						fprintf (stderr, "\n\n");
-						*/
 						writeres = write(sock, data, res);
-						//pthread_cond_signal(&(fc->fast_wake[EB_FAST_TO_SERVER]));
 					}
 
 					if (writeres < 0)
@@ -703,8 +696,8 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 					if (mi->fm_type == EB_FAST_MENU_BLANKLINE)
 					
 					{
-						if (fc->menu_current->item->next) 
-						f_printf (fc, "\r\n");
+						if (fc->menu_current->item->next)  /* This is checking if this is a one-item menu */
+							f_printf (fc, "\r\n");
 					}
 					else if (mi->fm_type != EB_FAST_MENU_HEADING)
 					{
@@ -772,6 +765,8 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 	
 				if (i)
 				{
+					/* Enable viewdata if we need it */
+
 					if (i->is_viewdata)
 						eb_fast_send_control (fc, EB_FAST_OP_VIEWDATA_ON);
 	
@@ -925,6 +920,12 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 								eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Serial connection to %s closed", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_serial.fm_device);
 
 							} break;
+						case EB_FAST_MENU_HOMEMENU: /* Back to top level menu */
+							{
+								eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - go to home menu %s", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_submenu.fm_submenu->menu_name);
+								fc->menu_current = fc->menu_home;
+
+							} break;
 						/* Unimplemented functions */
 						case EB_FAST_MENU_SSH: /* Connect over SSH */
 						case EB_FAST_MENU_FSSTOPSTART: /* Fileserver function */
@@ -940,6 +941,9 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 								sleep(3);
 							} break;
 					}
+
+					/* Turn viewdata off if it was turned on */
+
 					if (i->is_viewdata)
 						eb_fast_send_control (fc, EB_FAST_OP_VIEWDATA_OFF);
 	
@@ -1010,7 +1014,7 @@ void *	eb_fast_server_thread(void * fc)
 	me = (struct __eb_fast_client *) fc;
 
 #ifndef FAST_TEST
-	eb_debug (0, 4, "FAST", "%-8s %3d.%3d from %d.%d FAST server thread starting", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn);
+	eb_debug (0, 4, "FAST", "%-8s %3d.%3d from %3d.%3d FAST server thread starting", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn);
 #else
 	eb_debug (0, 4, "FAST", "FAST server thread exiting");
 #endif
@@ -1023,7 +1027,7 @@ void *	eb_fast_server_thread(void * fc)
 	me->fast_exit = 1;
 
 #ifndef FAST_TEST
-	eb_debug (0, 2, "FAST", "%-8s %3d.%3d from %d.%d FAST server disconnecting client", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn);
+	eb_debug (0, 2, "FAST", "%-8s %3d.%3d from %3d.%3d FAST server disconnecting client", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn);
 #else
 	eb_debug (0, 4, "FAST", "FAST server thread exiting");
 #endif
@@ -1471,11 +1475,28 @@ void * eb_fast_start_fast_service (void *data)
 
 void eb_port_a0_handler (struct __econet_packet_aun *p, uint16_t length, void *d)
 {
-	struct __eb_device * device = (struct __eb_device *) d;
+	struct __eb_device * device = (struct __eb_device *) d, * source;
+	struct __econet_packet_aun *ack;
 
 	struct __eb_fast_client * fc;
 
 	uint16_t	data_length = length - 12;
+
+	source = eb_find_station(1, p);
+
+	if (!source) /* We can't talk to whatever it is */
+		return;
+
+	ack = eb_malloc (__FILE__, __LINE__, "FAST", "Allocate ACK packet for *FAST data", 12);
+
+	ack->p.srcstn = p->p.dststn;
+	ack->p.srcnet = p->p.dstnet;
+	ack->p.dststn = p->p.srcstn;
+	ack->p.dstnet = p->p.srcnet;
+	ack->p.seq = p->p.seq;
+	ack->p.aun_ttype = ECONET_AUN_ACK;
+	ack->p.port = p->p.port;
+	ack->p.ctrl = p->p.ctrl;
 
 	if (device->type != EB_DEF_LOCAL || !device->local.fast_menu)
 	{
@@ -1507,12 +1528,22 @@ void eb_port_a0_handler (struct __econet_packet_aun *p, uint16_t length, void *d
 
 	if (!fc) /* Not found */
 	{
-		eb_debug (0, 1, "FAST", "%-8s %3d.%3d Unexpected *FAST data traffic from %d.%d",
+		if (p->p.aun_ttype != ECONET_AUN_ACK && p->p.aun_ttype != ECONET_AUN_NAK)
+			eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d Unexpected *FAST data traffic",
 				eb_type_str(device->type),
 				device->net, device->local.stn,
 				p->p.srcnet, p->p.srcstn);
+
+		ack->p.aun_ttype = ECONET_AUN_NAK;	
+		eb_enqueue_output(source, ack, 0, NULL);
+		eb_free (__FILE__, __LINE__, "FAST", "Free *FAST ACK/NAK packet", ack);
 		return;
 	}
+
+	/* Send ACK */
+
+	eb_enqueue_output(source, ack, 0, NULL);
+	eb_free (__FILE__, __LINE__, "FAST", "Free *FAST ACK/NAK packet", ack);
 
 	pthread_mutex_lock(&(fc->fast_io_mutex[EB_FAST_TO_SERVER]));
 
