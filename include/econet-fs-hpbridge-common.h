@@ -25,3 +25,4 @@ extern uint8_t eb_enqueue_output (struct __eb_device *, struct __econet_packet_a
 extern void eb_add_stats (pthread_mutex_t *, uint64_t *, uint16_t);
 extern void eb_fast_priv_notify (struct __eb_device *, uint8_t, uint8_t, uint8_t);
 
+extern char clock_speed_filename[48];
