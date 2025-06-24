@@ -166,10 +166,57 @@ struct __eb_update_info {
 void eb_exit_cleanup(void)
 {
 
+	struct __eb_device 	*d;
+
+	// Clean up any pipe files we might have around
+	
+	d = devices;
+
+	while (d)
+	{
+		if (d->type == EB_DEF_WIRE || d->type == EB_DEF_NULL)
+		{
+			int stn;
+
+			for (stn = 1; stn < 255; stn++)
+			{
+				struct __eb_device	*target;
+				
+				/* Deliberate assignment in if() below */
+
+				if (
+						(d->type == EB_DEF_WIRE && (d->wire.divert[stn]) && (d->wire.divert[stn]->type == EB_DEF_PIPE) && (target = d->wire.divert[stn]))
+					||	(d->type == EB_DEF_NULL && (d->null.divert[stn]) && (d->null.divert[stn]->type == EB_DEF_PIPE) && (target = d->null.divert[stn]))
+				   )
+				{
+
+					char	fname[1024];
+
+					eb_debug (0, 2, "EXIT", "Exit handler cleaning pipes with base %s", target->pipe.base);
+
+					close(target->pipe.skt_read);
+					if (target->pipe.skt_write != -1) close(target->pipe.skt_write);
+
+					snprintf (fname, 1023, "%s.tobridge", target->pipe.base);
+					unlink(fname);
+
+					snprintf (fname, 1023, "%s.frombridge", target->pipe.base);
+					unlink(fname);
+				}
+			}
+		}
+
+		d = d->next;
+	}
+
 	// Remove any IP addresses / tunnel interfaces we may have created
 	
 	if (clock_speed_stream)
+	{
+		eb_debug (0, 2, "EXIT", "Exit handler cleaning up clock speed file");
 		fclose(clock_speed_stream); /* Get rid of any temp clock data file */
+		unlink(clock_speed_filename);
+	}
 }
 
 void eb_signal_handler (int sig)
@@ -179,13 +226,13 @@ void eb_signal_handler (int sig)
 	{
 
 		case SIGTERM:
+			signal (sig, SIG_DFL);
 			eb_exit_cleanup();
-			signal(SIGTERM, SIG_DFL);
 			raise(SIGTERM);
 			break;
 		case SIGINT:
+			signal (sig, SIG_DFL);
 			eb_exit_cleanup();
-			signal(SIGINT, SIG_DFL);
 			raise(SIGINT);
 			break;
 		case SIGUSR1:
@@ -1326,6 +1373,25 @@ void eb_set_exposures_inactive(uint8_t net)
 	if (count) eb_debug (0, 2, "EXPOSURE", "         %3d     De-activated %d exposures", net, count);
 }
 
+/* Find exposure by local IP address */
+
+struct __eb_aun_exposure * eb_is_exposed_byip (in_addr_t ip)
+{
+	struct __eb_aun_exposure *e;
+
+	e = exposures;
+
+	while (e)
+	{
+		if (e->addr == ntohl(ip)) // Exposure struct stores this in host byte order apparently. No idea why.
+			return e;
+
+		e = e->next;
+	}
+	
+	return e;
+}
+
 /* Determine whether a given econet address has an
    exposure to AUN, and (if it does) return a pointer to its
    exposure device
@@ -2364,6 +2430,7 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 		{
 			//usleep (5 * 1000 * farside); // Delay
 
+			eb_dump_packet (source, EB_PKT_DUMP_PRE_I, reply, 2);
 			eb_enqueue_input (source, reply, 2);
 			pthread_cond_signal(&(source->qwake));
 	
@@ -2922,6 +2989,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 		uint64_t	hostdata;
 		uint8_t		send_broadcast = 1;
 		struct __eb_loop_probe	*probe;
+		struct __eb_aun_exposure *e;
 
 		if (p->p.port == ECONET_BRIDGE_LOOP_PROBE)
 		{
@@ -2985,6 +3053,29 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 			if (p->p.port != ECONET_BRIDGE_LOOP_PROBE || !d->all_nets_pooled)
 				eb_send_broadcast(source, d, p, length);
 			d = d->next;
+		}
+
+		// Now spit it out on the LAN if the source is exposed
+
+		if ((source->type != EB_DEF_AUN) && (e = eb_is_exposed (p->p.srcnet, p->p.srcstn, 1))) // 1 = must be active
+		{
+			struct sockaddr_in	bcast;
+			socklen_t		bcast_size;
+			int			tx;
+
+			bcast.sin_family = AF_INET;
+			bcast.sin_port = htons(32768); // All AUN broadcasts are on 32768
+			bcast.sin_addr.s_addr = 0xFFFFFFFF; // INADDR_BROADCAST;
+			bcast_size = sizeof(struct sockaddr_in);
+			p->p.ctrl &= 0x7F; // Clear high bit
+			if ((tx = sendto (e->socket, &(p->p.aun_ttype), length+8, MSG_DONTWAIT, &bcast, bcast_size)) < 0)
+				eb_debug (0, 1, "BCAST", "BCAST    255.255 from %3d.%3d Transmission error: %s",
+						p->p.srcnet, p->p.srcstn, strerror(errno));
+#if 0
+			else
+				eb_debug (0, 2, "BCAST", "BCAST    255.255 from %3d.%3d Send %d bytes",
+						p->p.srcnet, p->p.srcstn, tx);
+#endif
 		}
 
 	}
@@ -4113,6 +4204,11 @@ struct __eb_device * eb_allocate_dynamic_aun(in_addr_t source_address, uint16_t 
 	if (source_address == INADDR_ANY) /* Reject */
 		return NULL;
 
+	/* Also reject if source_address is one of our own exposures... Unsurprisingly, we seem to receive our own broadcasts. */
+
+	if (eb_is_exposed_byip(source_address))
+		return NULL;
+
 	// If we allocate a dynamic station, send *BYE from it to known FS (need to track them) and then set source_device to the one we allocate so the next IF statement operates
 	// eb_debug (0, 2, "DYNAMIC", "%-8s	  Traffic received from %s:%d - unknown source. Attempting to allocate dynamic host.", e->parent, inet_ntoa(addr.sin_addr), source_port);
 
@@ -4559,6 +4655,11 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 		length += 4; // Top up to extended AUN so that rest of routine is working with 12 byte header
 	}
 	
+	/* If it's one of our own exposures, we've probably had an internally looped broadcast - just dump it */
+
+	if (eb_is_exposed_byip(addr.sin_addr.s_addr))
+		return;
+
 	/* Insert the destination address if this was true AUN rather than 12-byte header on a gateway port */
 
 	if (!is_gateway && is_broadcast_listener)
@@ -5774,6 +5875,13 @@ uint8_t eb_aunpacket_to_aun_queue (struct __eb_device *d, struct __eb_device *de
 
 	exp = eb_is_exposed(p->p.srcnet, p->p.srcstn, 1); /* 1 = must be active */
 
+#if 0
+	if (destdevice->aun->uses_gateway)
+	{
+		fprintf (stderr, "\n\n*** uses-gateway flag set ***\n\n");
+	}
+#endif
+
 	if (exp || (destdevice->aun->uses_gateway /* && TODO - CHECK GATEWAY EXPIRY HERE */)) /* Exposed. If not, packet gets dumped anyway - unless the client talks to us through the gateway, in which case we don't need an exposure for the source */
 	{
 		eb_debug (0, 4, "DESPATCH", "%-8s %3d     Traffic from %3d.%3d to %3d.%3d being put on AUN Output queue", 
@@ -6004,7 +6112,7 @@ static void * eb_device_aun_sender (void *device)
 
 				/* Time out the uses_gateway if need be */
 
-				if (timediffmsec(&(o->destdevice->aun->last_dynamic), &now) > EB_CONFIG_DYNAMIC_EXPIRY) /* last_dynamic gets updated even for non-dynamic hosts, and we use it to time out gateway access */
+				if (timediffmsec(&(o->destdevice->aun->last_dynamic), &now) > (EB_CONFIG_DYNAMIC_EXPIRY * 60 * 1000)) /* last_dynamic gets updated even for non-dynamic hosts, and we use it to time out gateway access */
 					o->destdevice->aun->uses_gateway = 0;
 
 				if (!(exp || o->destdevice->aun->uses_gateway)  || (p->tx++ == EB_CONFIG_AUN_RETRIES)) /* Too many attempts - splice */
@@ -6072,12 +6180,16 @@ static void * eb_device_aun_sender (void *device)
 						{
 							eb_dump_packet (o->destdevice, EB_PKT_DUMP_POST_O, p->p, p->length);
 
-							if (
-								(o->destdevice->aun->uses_gateway && (r = sendto (EB_CONFIG_GATEWAY_SOCKET, &(p->p), p->length + 12, MSG_DONTWAIT, (struct sockaddr *) &dest, sizeof(dest))) < 0) /* +12 on here not +8 because we're sending the 4-byte addressing header too */
-							||	(!(o->destdevice->aun->uses_gateway) && (r = sendto (exp->socket, &(p->p->p.aun_ttype), p->length + 8, MSG_DONTWAIT, (struct sockaddr *) &dest, sizeof(dest))) < 0)
-							)
+							if (o->destdevice->aun->uses_gateway)
+							{
+								fprintf (stderr, "\n\n*** Sending via gateway ***\n\n");
+							      	r = sendto (EB_CONFIG_GATEWAY_SOCKET, &(p->p->p), p->length + 12, MSG_DONTWAIT, (struct sockaddr *) &dest, sizeof(dest)); /* +12 on here not +8 because we're sending the 4-byte addressing header too */
+							}
+						 	else
+								r = sendto (exp->socket, &(p->p->p.aun_ttype), p->length + 8, MSG_DONTWAIT, (struct sockaddr *) &dest, sizeof(dest));
+							if (r < 0)	
 								eb_debug (0, 1, "AUNSEND", "%16s Packet at %p AUN transmission failed: %s", devstring, p->p, strerror(errno));
-							else	eb_debug (0, 4, "AUNSEND", "%8s %3d.%3d Packet at %p successful AUN tx seq = %08X", "", p->p->p.dstnet, p->p->p.dststn, p->p, p->p->p.seq);
+							else	eb_debug (0, 4, "AUNSEND", "%8s %3d.%3d Packet at %p successful AUN tx seq = %08X%s", "", p->p->p.dstnet, p->p->p.dststn, p->p, p->p->p.seq, o->destdevice->aun->uses_gateway ? " (Via gateway)" : "");
 
 
 						}
@@ -7201,6 +7313,12 @@ static void * eb_device_despatcher (void * device)
 
 					packet.p.srcstn = d->pipe.stn;
 					packet.p.srcnet = d->net;
+
+					// Fudge destination network
+					//
+
+					if (packet.p.dstnet == 0)
+						packet.p.dstnet = d->net;
 				}
 			}
 		
@@ -8799,7 +8917,7 @@ static void * eb_device_despatcher (void * device)
 							/* JOB : Probably want to handle requests for port &00 here - we'll need a *list* of functions we need to send them to because it'll be more than one bit of code - but the list will be port ctrl byte, within port &00 - logically only one bit of code can handle each type of immediate. */
 								
 								eb_dump_packet (d, EB_PKT_DUMP_DUMPED, p->p, p->length);
-								eb_debug (0, 1, "BRIDGE", "%-8s %3d.%3d from %3d.%3d Received traffic to port &%02X whcih is not listening", eb_type_str(d->type), d->net, d->local.stn, p->p->p.srcnet, p->p->p.srcstn, p->p->p.port);
+								eb_debug (0, 3, "BRIDGE", "%-8s %3d.%3d from %3d.%3d Received traffic to port &%02X which is not listening", eb_type_str(d->type), d->net, d->local.stn, p->p->p.srcnet, p->p->p.srcstn, p->p->p.port);
 							}
 							/* Else ignore it - it's an immediate we are not interested in or have dealt with above */
 						}
@@ -8809,8 +8927,11 @@ static void * eb_device_despatcher (void * device)
 					{
 						remove = 1;
 
-						if (p->p->p.srcnet == d->net)	p->p->p.srcnet = 0;
-						if (p->p->p.dstnet == d->net)	p->p->p.dstnet = 0;
+						/* I think we're doing this the wrong way round on a write */
+						/* if (p->p->p.srcnet == d->net)	p->p->p.srcnet = 0;
+						if (p->p->p.dstnet == d->net)	p->p->p.dstnet = 0; */
+						if (p->p->p.srcnet == 0) p->p->p.srcnet = d->net;
+						if (p->p->p.dstnet == 0) p->p->p.dstnet = d->net;
 
 						/* Given this is dealt with below the next if(), I think this is a duplicate!
 						if (p->p->p.aun_ttype == ECONET_AUN_DATA)
