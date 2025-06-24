@@ -5875,12 +5875,6 @@ uint8_t eb_aunpacket_to_aun_queue (struct __eb_device *d, struct __eb_device *de
 
 	exp = eb_is_exposed(p->p.srcnet, p->p.srcstn, 1); /* 1 = must be active */
 
-#if 0
-	if (destdevice->aun->uses_gateway)
-	{
-		fprintf (stderr, "\n\n*** uses-gateway flag set ***\n\n");
-	}
-#endif
 
 	if (exp || (destdevice->aun->uses_gateway /* && TODO - CHECK GATEWAY EXPIRY HERE */)) /* Exposed. If not, packet gets dumped anyway - unless the client talks to us through the gateway, in which case we don't need an exposure for the source */
 	{
@@ -6182,7 +6176,6 @@ static void * eb_device_aun_sender (void *device)
 
 							if (o->destdevice->aun->uses_gateway)
 							{
-								fprintf (stderr, "\n\n*** Sending via gateway ***\n\n");
 							      	r = sendto (EB_CONFIG_GATEWAY_SOCKET, &(p->p->p), p->length + 12, MSG_DONTWAIT, (struct sockaddr *) &dest, sizeof(dest)); /* +12 on here not +8 because we're sending the 4-byte addressing header too */
 							}
 						 	else
