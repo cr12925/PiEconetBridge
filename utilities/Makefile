@@ -1,5 +1,4 @@
-#GIT_VERSION := "$(shell git branch) $(shell git rev-parse --short HEAD)"
-GIT_VERSION := "CR Build tree"
+GIT_VERSION := "$(shell git branch) $(shell git rev-parse --short HEAD)"
 CFLAGS=-g -O2 -I../include -I/usr/include/glib-2.0 -I/usr/lib/aarch64-linux-gnu/glib-2.0/include -I/usr/lib/arm-linux-gnueabihf/glib-2.0/include  -I/usr/lib64/glib-2.0/include
 
 econet_hpb_objects := $(patsubst %.c,%.o,$(wildcard econet-hpbridge*.c))
