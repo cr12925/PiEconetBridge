@@ -277,7 +277,7 @@ the bridge software itself, so execute the following commands:
         sudo apt full-upgrade 
         sudo apt install raspberrypi-kernel-headers libexplain51 \
              libexplain-dev libexplain-doc libssl-dev git libglib2.0-dev \
-	     cmake libssh2-dev
+	     cmake libssh2-1-dev libjson-c-dev
 
 
 Then reboot your Pi:
@@ -1558,6 +1558,9 @@ Privileged commands:
 *DEBIT <userid> <kilobytes>
 	- Debit from user quota
 
+*DISABLE (<userid>) <operator>
+	- See *ENABLE
+
 *DISCMASK <USERNAME> <ALL | NONE | xxxx>
 *DISKMASK <USERNAME> <ALL | NONE | xxxx>
 	- Hides disc availability on the server from a particular user.
@@ -1575,37 +1578,168 @@ Privileged commands:
 	  number 15 therefore), you can't hide the ones beyond number 15
           because the bitmask is only 16 bits long.
 
+*ENABLE (<userid>) <operator>
+	
+	- Enable / Disable certain fileserver settings on a per-user
+	  basis. (*DISABLE with same parameters to undo *ENABLE.)
+
+	- Only System users can include the <userid> parameter in 
+ 	  order to set / disable a setting for another user. When
+	  used in that way, these commands only affec the user's
+	  privilege the next time they log in. (When a user
+	  uses the command, they  affect the relevant setting
+	  for the current session only, and only from the 
+	  station from which the command was sent. Thus if a 
+	  user uses *ENABLE ... from station 1.3 and is also
+	  logged in at station 25.9, the setting will only be
+	  changed for the session at 1.3 and only temporarily,
+	  because at next login the user will be given their
+	  default settings again.)
+
+	- These settings which are altered by these commands
+	  only operate when the FS is in MDFS mode. Also, the
+	  commands themselves only exist in MDFS mode. However
+	  the settings they change persist when MDFS mode is
+	  temporarily off. E.g. if you set the LIBRARY option,
+	  and turn off MDFS mode, clients will no longer search
+	  Library on LOAD/OPEN, but if you turn MDFS mode back
+	  on again, whatever per-FS or per-user settings you
+	  had before will come back into operation, because
+	  they are not deleted when MDFS mode is turned off,
+	  or reset when it is turned back on.
+
+	- There are three settings for <operator>
+
+		- LIBRARY - which enables searching the user
+		  library on LOAD/OPENIN
+		- SAVES - which enables saving files < 16
+		  bytes long if a System user has disabled
+		  that globally.
+		- DELETE (or, where no userid is specified,
+		  no operator at all) - enables use of 
+		  wildcards with *DELETE
+
+	- A system user can set the equivalent flags
+	  for an FS globally with *FSCONFIG <+/-> and the
+	  same commands.
+
+	- System users can also add a username before the
+	  operator to set a permanent flag on the user.  E.g.:
+
+    	  *ENABLE BLOGGS SAVES
+
+    	  To unset the override:
+
+    	  *DISABLE BLOGGS SAVES
+
+    	  Note that the latter DOES NOT mean that the user
+    	  has the setting permanently disabled, only that the
+    	  permanent *enable* flag is cleared, so that the user
+    	  will be subject to the FS-wide default.
+
 *FLOG <station>
 	- Force log a station off
 
 *FNLENGTH <length>
 	- Synonym of *FSFNLENGTH
+	- Now replaced by *FSCONFIG FNLENGTH
+
+*FSCONFIG (<+/->)<function>
+	- Sets fileserver-wide parameters as follows. Requires
+	  System privileges.
+
+		FNLENGTH <length> - maximum filename length
+			e.g.	*FSCONFIG FNLENGTH 30
+			No +/- may be supplied
+
+		FSDEFPERM <access> - default file/directory
+			permissions. If <access> starts with "D"
+			then default directory permissions are
+			set:
+			
+			e.g.	*FSCONFIG FSDEFPERM WR/R
+				*FSCONFIG FSDEFPERM DR/R
+
+			No +/- may be supplied
+
+			- Please Note! This all works fine on 8 bit 
+			  clients. However, RISC OS's GUI and Task 
+			  Window both use the FS "Set Object Info"
+	  		  call which, from the GUI, implies WR/R on 
+			  all directories it seems. So this command 
+			  will NOT do what is expected on RISC OS. This 
+	  		  cannot be helped, it seems!
+		
+		ACORNHOME - If set, users will own files below and within
+			their home directory and nowhere else. (In its
+			default configuration, with ACORNHOME *off*,
+			the FS will allow the setting of ownership on
+			individual files and directories irrespective
+			of their location.)
+
+		COLONMAP - If set, will use ':' instead of '.' as the
+		 	separator between a filename and the 'inf'
+			extension where .inf files are being used to
+			store file attributes such as load, exec, 
+			ownership, home directory flags etc.
+			This enables the continued use of inf files
+			where filenames in the filestore contain
+			a '.' in the Unix-environment, which is 
+			translated to '/' in Acorn. Without this
+			set, the effect is that all the .inf files
+			become visible to acorn clients as "xxx/inf".
+
+		MDFS - Turns on MDFS functionality - such as extra
+			FS Operations and commands, and the availability
+			of a read-only MDFS-format password file.
+
+		MDFSINFO - Turns on MDFS extra data provided in
+			response to *INFO.
+
+		ACORNDIR - Turns on the re-writing of permissions
+			on directories so as to appear in the way an
+			Acorn L3 fileserver would. By default, the FS
+			will show all permissions it actually has - 
+			e.g.
+				DIRNAME		DWR/R
+			When this option is set, the FS will report
+			permissions as an L3 would, which, given
+			all directories have WR/R permissions in Acorn's world,
+			would be
+				DIRNAME		D/
+			However, even with this set, if the permissions
+			are other than WR/R, PiFS in human readable
+			returns will show the actual permissions. Thus
+			if the permissions on a directory are in fact
+			(say) R/R rather than WR/R, the FS will
+			produce
+				DIRNAME		DR/R
+
+		PIFSPERMS - reserved for future use. The PiFS presently
+			has its own interpretation of the access byte
+			which differs from L3/L4. There are macros to
+			help the code work out whether to do it's usual
+			interpretation or do what L3/L4 do. However, they have not
+			yet been fully tested, nor deployed everwhere they are
+			needed in the FS. Use this at your peril - the
+			results will be unpredictable.	
+
+		DELETE - overrides *ENABLE for all users end allows them
+			to use wildcards with *DELETE
+
+		LIBRARY - overrides *ENABLE LIBRARY for all users and means
+			that their library will be searched not just for
+			*RUN but also LOAD/OPENIN
+
+		SAVE	- overrides *ENABLE for all users and means
+			that they cannot save files less than 16 bytes
+			long
 
 *FSDEFPERM <access>
-	- Sets fileserver-wide default permissions for new files and those
-	  which have no stored permission on the underlying filesystem.
-	- If the first character of <access> is D, then sets default directory
-	  permission, otherwise default file permission.
-	- All access bytes can be set, though setting H (Hidden, which has a 
-	  synonym P) or L(ocked) may be highly unwise.
-	- Examples:
-		*FSDEFPERM DWR/R
-		*FSDEFPERM DR/R
-		*FSDEFPERM WR/R
-		*FSDEFPERM WR/
-	- Please Note! This all works fine on 8 bit clients. However,
-	  RISC OS's GUI and Task Window both use the FS "Set Object Info"
-	  call which, from the GUI, implies WR/R on all directories it seems.
-	  So this command will NOT do what is expected on RISC OS. This 
-	  cannot be helped, it seems!
+	- Now replaced by *FSCONFIG FSDEFPERM
 
 *FSFNLENGTH <length>
-	- Change maximum filename length in the fileserver to which the command
-	  is addressed. Valid values are 10..80. 
-	- This operates immediately without a restart, and the value you set is
-	  stored persistently in the configuration file for the particular FS
-          upon which it is used so that it is not necessary to re-run the command 
-          on a restart
+	- Now replaced by *FSCONFIG FNLENGTH
 
 *LINK <source> <destination>
 	- Create symlink in the filesystem. <destination> will be the identical
