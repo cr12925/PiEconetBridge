@@ -11,7 +11,7 @@ build-utilities:
 depend:
 	sudo apt update
 	sudo apt full-upgrade
-	sudo apt install raspberrypi-kernel-headers libexplain51 libexplain-dev libexplain-doc libssl-dev libglib2.0-dev cmake libssh2-dev libjson-c-dev
+	sudo apt install raspberrypi-kernel-headers libexplain51 libexplain-dev libexplain-doc libssl-dev libglib2.0-dev cmake libssh2-1-dev libjson-c-dev
 
 install:	all install-module install-utilities
 
