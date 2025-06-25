@@ -89,4 +89,4 @@ econet-trace.o: econet-trace.c ../include/econet-gpio-consumer.h ../include/econ
 econet-poke.o: econet-poke.c econet-pipe.c ../include/econet-gpio-consumer.h
 
 clean:
-	rm -f *.o econet-imm econet-test econet-bridge econet-monitor pipe-eg econet-notify econet-remote eb2 econet-hpbridge econet-ledtest econet-clock econet-trace fsop/*.o
+	rm -f *.o econet-imm econet-test econet-bridge econet-monitor pipe-eg econet-notify econet-remote eb2 econet-hpbridge econet-ledtest econet-clock econet-trace modules/*.o modules/fsop/*.o
