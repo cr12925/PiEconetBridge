@@ -63,9 +63,7 @@ pthread_t	eb_gateway_listener_thread;
 
 /* Clock speed reporting to user stations */
 
-int		clock_speed_file = -1;
-FILE *		clock_speed_stream = NULL;
-char		clock_speed_filename[48] = "/tmp/econet-hpbridge.clock.XXXXXX";
+char		clock_speed_filename[128] = "/tmp/econet-hpbridge.clock";
 
 // Some globals
 
@@ -211,12 +209,8 @@ void eb_exit_cleanup(void)
 
 	// Remove any IP addresses / tunnel interfaces we may have created
 	
-	if (clock_speed_stream)
-	{
-		eb_debug (0, 2, "EXIT", "Exit handler cleaning up clock speed file");
-		fclose(clock_speed_stream); /* Get rid of any temp clock data file */
-		unlink(clock_speed_filename);
-	}
+	eb_debug (0, 2, "EXIT", "Exit handler cleaning up clock speed file");
+	unlink(clock_speed_filename);
 }
 
 void eb_signal_handler (int sig)
@@ -9653,6 +9647,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 	uint16_t	jcount, jlength;
 	struct json_object	*jdiverts, *jstation, *jstation_number, *jprinters, *jfs, *jips, *jpipepath, *jnetclock;
 	char		device[128];
+	FILE		* clock_speed_stream = NULL;
 
 	if (!json_object_object_get_ex(o, "net", &jdiverts)) /* Temp use of jdiverts */
 		eb_debug (1, 0, "JSON", "Econet or virtual device in %s JSON config without a network numbers", (otype == 2) ? "Econet" : "Virtual");
@@ -9684,6 +9679,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 		{
 			double	period, mark;
 
+
 			if (sscanf(json_object_get_string(jnetclock), "%lf/%lf", &period, &mark) != 2)
 				eb_debug (1, 0, "JSON", "Invalid clock specifier for econet device %s", json_object_get_string(jdiverts));
 
@@ -9691,21 +9687,15 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 			/* Record it in the temporary file */
 
-			if (clock_speed_file == -1)  /* Make the file & open it if we need to */
+			if (clock_speed_stream == NULL)  /* Make the file & open it if we need to */
 			{
-				clock_speed_file = mkstemp(clock_speed_filename);
-				if (clock_speed_file != -1)
-				{
-					clock_speed_stream = fdopen(clock_speed_file, "w+");
+				clock_speed_stream = fopen(clock_speed_filename, "w");
+				if (clock_speed_stream)
 					fprintf (clock_speed_stream,"#Interface\tPeriod\tMark\r\n");
-				}
 			}
 
 			if (clock_speed_stream)
-			{
 				fprintf (clock_speed_stream, "%s\t%2.2f\t%2.2f\r\n", device, period, mark);
-				fflush (clock_speed_stream);
-			}
 
 		}
 
@@ -9732,6 +9722,9 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 	}
 	else
 		eb_device_init_virtual(net);
+
+	if (clock_speed_stream)
+		fclose (clock_speed_stream);
 
 	/* Now create virtual servers */
 

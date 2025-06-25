@@ -61,6 +61,9 @@
 /* GLIB 2.0 for Base64 */
 #include <glib.h>
 
+/* SSH2 for Fast handler, and we might use it for something else later */
+#include <libssh2.h>
+
 #include "econet-gpio-consumer.h"
 
 #define DEVINIT_DEBUG(_fmt, ...) if (dumpconfig) eb_debug (0, 0, "CONFIG", "%-16s " _fmt, "Core", __VA_ARGS__)
@@ -468,6 +471,14 @@ struct __eb_fast_client {
 	uint32_t	fast_timeout;
 	pid_t		fast_child; // Process we spawned for login, script, etc.
 	pthread_cond_t	fast_wake[2];
+
+	// SSH2 variables
+	int 		ssh_sock; // Underlying SSH socket
+	const char 	* ssh_fingerprint; // Distant fingerprint
+	char 		* ssh_userauthlist;
+	LIBSSH2_SESSION	* session;
+	LIBSSH2_CHANNEL * channel;
+
 	struct __eb_fast_menu	*menu_home, *menu_current;
 	struct __eb_device	*parent; // Device the user is talking to
 	struct __eb_fast_client	*prev, *next; /* NULL if there isn't a prev or next in the queue */
