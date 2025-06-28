@@ -120,7 +120,8 @@
 #define BRIDGE_UPDATE	0x81
 #define BRIDGE_WHATNET	0x82
 #define BRIDGE_ISNET	0x83
-#define BRIDGE_REQUEST_GW	0x90 /* PiEconetBridge responds to this ctrl byte on broadcasts by replying with the IP address and port number of its AUN gateway, which will handle traffic to any address, and will send all return traffic to the station that uses it back through that same socket rather than any specific exposure. The reply will be to the source, and will be to the specified reply port, ctrl byte &90 (as was the request) and the data portion will be 6 bytes: 4 bytes IPv4 address in network byte order, 2 byte port in network byte order */
+#define BRIDGE_REQUEST_GW	0x90 /* PiEconetBridge responds to this ctrl byte on broadcasts by replying from its gateway address to the client's reply address, with port &9C and ctrl &91. The client then knows where the gateway is, if there is one */
+#define BRIDGE_REPLY_GW		0x91
 
 /*
  * The following are part of the HPB's bridge system

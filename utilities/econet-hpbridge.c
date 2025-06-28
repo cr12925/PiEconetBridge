@@ -2720,92 +2720,7 @@ void * eb_broadcast_listener (void *p)
 		while (count < numaddrs)
 		{
 			if (pfd[count].revents & POLLIN)
-			{
-	
 				eb_aun_receiver (pfd[count].fd, 0, 1, NULL); /* Tell the receiver this is broadcast listener */
-
-#if 0 /* Disused */
-				int length;
-
-				remoteaddr_len = sizeof(struct sockaddr_in);
-
-				length = recvfrom(pfd[count].fd, &(incoming.p.aun_ttype), sizeof(struct __econet_packet_aun), 0, (struct sockaddr *) &remoteaddr, &remoteaddr_len);
-	
-				if (length >= 8) /* Successful receipt of something potentially valid */
-				{
-					in_addr_t	remote_address;
-					uint16_t	remote_port;
-					struct __eb_device 	*source_device;
-
-					remote_address = ntohl(remoteaddr.sin_addr.s_addr);
-					remote_port = ntohs(remoteaddr.sin_port);
-					source_device = eb_find_aun_remote(remote_address, remote_port);
-
-					if (!source_device) // See if we can allocate a dynamic host
-					{
-						source_device = eb_allocate_dynamic_aun (remote_address, remote_port);
-						if (!source_device)
-							eb_debug (0, 2, "AUN", "%-8s         Traffic received from unknown source %s:%d - Unable to allocate dynamic host.", "BCAST", inet_ntoa(remoteaddr.sin_addr), remote_port);
-			
-					}
-
-					if (source_device)
-					{
-						uint8_t	fw_result;
-
-						incoming.p.srcstn = source_device->aun->stn;
-						incoming.p.srcnet = source_device->net;
-						incoming.p.dststn = incoming.p.dstnet = 0xFF; /* Broadcast */
-
-						/* Set high bit on ctrl */
-
-						incoming.p.ctrl |= 0x80;
-												
-						if ((fw_result = eb_firewall(source_device->fw_out, &incoming)) == EB_FW_REJECT) // fw_out because this is traffic coming *from* the AUN device. fw_in is for traffic going *to* it.
-						{
-							eb_dump_packet (source_device, EB_PKT_DUMP_FIREWALLED, &incoming, length - 8); // (Drop the header length)
-						}
-						else
-						{
-							eb_dump_packet (source_device, EB_PKT_DUMP_POST_I, &incoming, length - 8); // (Drop the header length)
-		
-							// Update the last transaction time - we do this whether dynamic or not, because it doesn't matter
-		
-							gettimeofday(&(source_device->aun->last_dynamic), 0);
-
-							/* Respond here to gateway requests - but only if the socket is open, because that means (1) the gateway is configured and (2) the gateway listener has successfully opened the socket and prepared for traffic */
-
-							if (incoming.p.port == BRIDGE_PORT && incoming.p.ctrl == BRIDGE_REQUEST_GW && (EB_CONFIG_GATEWAY_SOCKET != -1))
-							{
-								struct __econet_packet_aun *gw;
-
-								gw = eb_malloc(__FILE__, __LINE__, "BRIDGE", "New gateway reply packet", 18);
-								eb_debug (0, 1, "BRIDGE", "%-8s %3d.%3d Processing gateway request", "GATEWAY", incoming.p.srcnet, incoming.p.srcstn);
-								gw->p.srcstn = 0; /* This is bridge traffic */
-								gw->p.srcnet = 0; /* This doesn't matter - it's not real BeebTraffic! */
-								gw->p.dststn = incoming.p.srcstn; /* We may as well tell the client what it's Econet address is */
-								gw->p.dstnet = incoming.p.dstnet;
-								gw->p.aun_ttype = ECONET_AUN_DATA;
-								gw->p.port = incoming.p.data[0]; /* The reply port the emulator gave us */
-								gw->p.ctrl = 0x10; /* &90 with high bit clear - we're going to write this straight to UDP */
-								gw->p.padding = 0x00; /* This always gets ignored */
-								gw->p.seq = 0x0; /* The Beeb isn't actually going to process this - the emulator will just receive it and store away the gateway address. */
-								memcpy (&(gw->p.data), &(EB_CONFIG_GATEWAY_IP_ADDRESS), 4);
-								memcpy (&(gw->p.data[4]), &(EB_CONFIG_GATEWAY_PORT), 2);
-
-								sendto (EB_CONFIG_GATEWAY_SOCKET, gw, 18, MSG_DONTWAIT, &remoteaddr, remoteaddr_len);
-								eb_free(__FILE__, __LINE__, "BRIDGE", "Free gateway reply packet", gw);
-
-							}
-							else
-								eb_broadcast_handler (source_device, &incoming, length-8);
-						}
-					}
-					else
-						eb_debug (0, 1, "AUN", "BCAST            No source device - this should not happen!");
-				}
-#endif
-			}
 
 			count++;
 		}
@@ -2832,6 +2747,40 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 		if (p->p.ctrl == EB_CONFIG_TRUNK_KEEPALIVE_CTRL)
 		{
 			// This is a keepalive - ignore it. So long as it got marked as a received packet, it's fine
+		}
+		else if (p->p.ctrl == BRIDGE_REQUEST_GW) // AUN client asking where our gateway is
+		{
+			if (EB_CONFIG_GATEWAY_SOCKET != -1) /* We actually *have* a gateway operating */
+			{
+				struct __econet_packet_aun *r;
+				struct sockaddr_in	dest;
+
+				r = eb_malloc (__FILE__, __LINE__, "GATEWAY", "Gateway responder packet", 12);
+
+				r->p.srcnet = eb_bridge_sender_net(source);
+				r->p.srcstn = 0;
+				r->p.dstnet = p->p.srcnet;
+				r->p.dststn = p->p.srcstn;
+				r->p.aun_ttype = ECONET_AUN_DATA;
+				r->p.port = p->p.data[0];
+				r->p.ctrl = BRIDGE_REPLY_GW;
+				r->p.seq = 0x0;
+				r->p.padding = 0x0;
+
+				dest.sin_family = AF_INET;
+				dest.sin_addr.s_addr = htonl(source->aun->addr);
+				dest.sin_port = htons(source->aun->port);
+
+				eb_debug (0, 3, "GATEWAY", "GATEWAY  %3d.%3d from %3d.%3d Responded to gateway request broadcast", p->p.srcnet, p->p.srcstn, r->p.srcnet, r->p.srcstn);
+
+				eb_dump_packet (source, EB_PKT_DUMP_POST_O, r, 0);
+
+				sendto (EB_CONFIG_GATEWAY_SOCKET, r, 12, MSG_DONTWAIT, &dest, sizeof(struct sockaddr_in));
+
+				eb_free(__FILE__, __LINE__, "GATEWAY", "Gateway responder packet", r);
+			}
+			else
+				eb_debug (0, 3, "GATEWAY", "GATEWAY  %3d.%3d              Ignored gateway request broadcast - no gateway configured", p->p.srcnet, p->p.srcstn);
 		}
 		else if (p->p.ctrl >= BRIDGE_WHATNET) // What/IsNet (IsNet is WHATNET+1)
 		{
@@ -4963,206 +4912,6 @@ static void * eb_gateway_listener (void *dummy)
 	{
 		eb_aun_receiver (sock, 1, 0, NULL); /* Tell it it's a gateway listener */
 
-#if 0 /* Disused */
-		int 				length;
-		in_addr_t			source_address;
-		uint16_t			source_port;
-		struct sockaddr_in		addr;
-		socklen_t			addrlen;
-		struct __econet_packet_aun 	incoming, ack, *input_packet;
-		struct __eb_device		*source_device, *destdevice;
-		uint8_t				fw_result;
-
-		if (pfd.events & POLLIN)
-		{
-			/* Traffic */
-
-			/* TODO: We really should consolidate this bit between the broadcast listener, the gateway listener, and the standard AUN listener! */
-			addrlen = sizeof(addr);
-
-			length = recvfrom (sock, &incoming, sizeof(struct __econet_packet_aun), 0, 
-					(struct sockaddr_in *) &addr,
-					&addrlen);
-			
-			source_address = ntohl(addr.sin_addr.s_addr);
-			source_port = ntohs(addr.sin_port);
-			source_device = eb_find_aun_remote(source_address, source_port);
-
-			if (!source_device)
-			{
-				source_device = eb_allocate_dynamic_aun (source_address, source_port);
-				if (!source_device)
-				{
-					eb_debug (0, 2, "AUN", "%-8s         Traffic received from %s:%d - Unable to allocate dynamic AUN host", "GATEWAY", inet_ntoa(addr.sin_addr), source_port);
-				}
-			}
-
-			/* See if we know how to route this traffic */
-
-			destdevice = eb_find_station (2, &incoming);
-
-			/* Yes, this really is a GROTESQUE duplication of code... */
-
-			if (destdevice && source_device) /* We've found an Econet source address, by allocating one if need be, and we've got a destination we know about */
-			{
-				source_device->aun->uses_gateway = 1; /* Flag gateway use */
-
-				eb_add_stats(&(source_device->statsmutex), &(source_device->b_out), length-12); // Traffic stats - this is the remote device generating output
-
-				/* Don't populate destination - the client will have done it */
-
-				incoming.p.srcnet = source_device->net;
-				incoming.p.srcstn = source_device->aun->stn;
-				incoming.p.ctrl |= 0x80;
-
-				if ((fw_result = eb_firewall(source_device->fw_out, &incoming)) == EB_FW_REJECT) // fw_out because this is traffic coming *from* the AUN device. fw_in is for traffic going *to* it.
-				{
-					eb_dump_packet (source_device, EB_PKT_DUMP_FIREWALLED, &incoming, length - 8); // (Drop the header length)
-				}
-				else
-				{
-					eb_dump_packet (source_device, EB_PKT_DUMP_POST_I, &incoming, length - 8); // (Drop the header length)
-	
-					gettimeofday(&(source_device->aun->last_dynamic), 0);
-	
-					if (incoming.p.aun_ttype == ECONET_AUN_ACK || incoming.p.aun_ttype == ECONET_AUN_NAK)
-					{
-						struct __eb_device 	*my_parent;
-						struct __eb_outq	*outq, *outq_parent;
-						uint16_t		combo;
-	
-						my_parent = destdevice;
-	
-						combo = (incoming.p.srcnet << 8) | incoming.p.srcstn; // Source here, because we're doing this from the incoming packet
-	
-						eb_debug (0, 4, "QUEUE", "%-8s %3d.%3d Acquiring lock for incoming search of outq for packet to %3d.%3d P:&%02X C: &%02X Length 0x%04X, combo = 0x%04X, e->parent = %p", eb_type_str(my_parent->type), incoming.p.dstnet, incoming.p.dststn, incoming.p.srcnet, incoming.p.srcstn, incoming.p.port, incoming.p.ctrl, length, combo, my_parent);
-	
-						pthread_mutex_lock (&(my_parent->aun_out_mutex));
-	
-						eb_debug (0, 4, "QUEUE", "%-8s %3d.%3d Locks acquired for incoming search of outq for packet to %3d.%3d P:&%02X C: &%02X Seq: 0x%08X Length 0x%04X, combo = 0x%04X", eb_type_str(my_parent->type), incoming.p.dstnet, incoming.p.dststn, incoming.p.srcnet, incoming.p.srcstn, incoming.p.port, incoming.p.ctrl, incoming.p.seq, length, combo);
-	
-						outq_parent = NULL;
-
-						outq = my_parent->aun_out_head;
-	
-						while (outq && outq->destcombo != combo)
-						{
-							outq_parent = outq;
-							outq = outq->next;
-						}
-	
-						if (outq) // Found correct outq
-						{
-	
-							struct __eb_packetqueue		*parent, *packetq;
-							parent = NULL;
-							packetq = outq->p;
-	
-							while (packetq && (packetq->p->p.aun_ttype != ECONET_AUN_DATA || packetq->p->p.seq != incoming.p.seq))
-							{
-								parent = packetq;
-								packetq = packetq->n;
-							}
-	
-							// If within NAK tolerance, set the last tx time to nil so we get an immediate retransmission
-							if (packetq && (incoming.p.aun_ttype == ECONET_AUN_NAK && packetq->tx <= EB_CONFIG_AUN_NAKTOLERANCE))
-								packetq->last_tx.tv_sec = 0;
-	
-							if (packetq && (incoming.p.aun_ttype == ECONET_AUN_ACK || (incoming.p.aun_ttype == ECONET_AUN_NAK && packetq->tx > EB_CONFIG_AUN_NAKTOLERANCE))) // Found a match - splice out
-							{
-	
-								struct __eb_packetqueue	*this, *this_parent;
-	
-								this = packetq;
-								this_parent = parent;
-	
-								if (this_parent)
-									this_parent->n = this->n;
-								else
-									outq->p = this->n;
-
-								eb_debug (0, 4, "QUEUE", "%-8s %3d.%3d Packet spliced from outq to %3d.%3d P:&%02X C: &%02X Seq: 0x%08X Length 0x%04X, combo = 0x%04X", eb_type_str(my_parent->type), this->p->p.dstnet, this->p->p.dststn, this->p->p.srcnet, this->p->p.srcstn, this->p->p.port, this->p->p.ctrl, this->p->p.seq, this->length, combo);
-
-								eb_free (__FILE__, __LINE__, "GATEWAY", "Free packet after locating packet to splice out because of ACK/NAK", this->p);
-								eb_free (__FILE__, __LINE__, "GATEWAY", "Free packetq after locating packet to splice out because of ACK/NAK", this);
-	
-							}
-	
-							if (!outq->p) // outq emptied - free it and de-splice
-							{
-								if (outq_parent) // This wasn't the first in the queue
-									outq_parent->next = outq->next;
-								else // Was the first in the queue
-								{
-									//my_parent->out = outq->next;
-									my_parent->aun_out_head = outq->next;
-								}
-		
-								eb_free (__FILE__, __LINE__, "AUN-EXP", "Free outq after locating packet to splice out because of ACK/NAK", outq);
-							}
-						}
-
-						pthread_mutex_unlock (&(my_parent->aun_out_mutex));
-	
-						pthread_cond_signal (&(my_parent->qwake));
-
-					}
-
-				}
-	
-				if (fw_result == EB_FW_ACCEPT)
-				{
-					// Prospectively build an ACK - Don't need addressing because this is going out over AUN
-	
-					ack.p.seq	= incoming.p.seq;
-					ack.p.aun_ttype	= ECONET_AUN_ACK;
-					ack.p.port	= incoming.p.port;
-					ack.p.ctrl	= incoming.p.ctrl;
-	
-					// Because this is going on an input queue, we need to malloc it
-	
-					input_packet = eb_malloc(__FILE__, __LINE__, "AUN", "Create incoming packet structure", length + 4); // Extra four bytes
-	
-					if (input_packet) // Only do this if the malloc succeeded
-					{
-						uint8_t		enqueue_result;
-						struct __eb_device	*home_device; // The thing this is an exposure for
-	
-						memcpy (input_packet, &incoming, length + 4);
-	
-						/* See if it's a broadcast, and handle it accordingly */
-
-						if (incoming.p.aun_ttype == ECONET_AUN_BCAST) /* This won't catch IP broadcasts if they're not flagged as AUN Broadcasts, but I can't really see why there would be an IP broadcast that wasn't flagged that way - but we'll see */
-							eb_broadcast_handler (source_device, &incoming, length);
-						else
-						{
-							home_device = destdevice;
-	
-							enqueue_result = 0;
-	
-							if (home_device) enqueue_result = eb_enqueue_input (home_device, input_packet, length - 8); // Only give data length here
-	
-							if (!enqueue_result)
-								ack.p.aun_ttype = ECONET_AUN_NAK; // NAK if we couldn't enqueue the packet
-	
-							/* AUN PROCESS */
-							eb_debug (0, 4, "AUN", "GATEWAY          source_device = %p, type %s, AUN Auto Ack is %s", source_device, eb_type_str(source_device->type), (source_device->config & EB_DEV_CONF_AUTOACK) ? "On" : "Off");
-
-							if ((!enqueue_result) || (incoming.p.aun_ttype == ECONET_AUN_DATA && (source_device->config & EB_DEV_CONF_AUTOACK))) // NAK if we didn't manage to enqueue; ACK if other end if AUTO ACK
-								sendto (sock, &(ack.p.aun_ttype), 8, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
-						}
-	
-					}
-					else	// MAY AS WELL SEND A NAK (even if not auto ack because the other end will never hear of this packet!)
-					{
-						ack.p.aun_ttype = ECONET_AUN_NAK;
-	
-						sendto (sock, &(ack.p.aun_ttype), 8, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
-					}
-				}
-			}
-		}
-#endif
 		/* Reset pollfd struct */
 
 		pfd.fd = sock;
