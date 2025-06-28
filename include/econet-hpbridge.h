@@ -534,7 +534,6 @@ struct __eb_fast_client {
 #define EB_FAST_MENU_TCP	0x01 /* Connect to TCP port */
 #define EB_FAST_MENU_SERIAL	0x02 /* Connect to serial port */
 #define EB_FAST_MENU_SCRIPT	0x03 /* Execute local script */
-#define EB_FAST_MENU_SYSTEM	0x04 /* System *FAST menu */
 #define EB_FAST_MENU_HEADING	0x05 /* Puts a blank line either side and can't be selected */
 #define EB_FAST_MENU_BIN_LOGIN	0x06 /* Pipe to bin login on local host */
 #define EB_FAST_MENU_SUBMENU	0x07 /* Jump to another menu */
@@ -543,15 +542,9 @@ struct __eb_fast_client {
 #define EB_FAST_MENU_HOMEMENU	0x0A /* Return to home menu */
 #define EB_FAST_MENU_DISCONNECT	0x0B /* As it sounds ... */
 #define EB_FAST_MENU_BLANKLINE	0x0C /* As it soudns ... */
-#define EB_FAST_MENU_FSTOGGLEMDFS 0x0D /* MDFS funcs on/off */
-#define EB_FAST_MENU_FSTOGGLEMDFSINFO 0x0E /* MDFS Extended *INFO on/off */
-#define EB_FAST_MENU_FSTOGGLEINFCOLON 0x0F /* Use : instead of . to separate inf suffix */
-#define EB_FAST_MENU_FSTOGGLEPIPERMS 0x10 /* PiFS permissions model */
-#define EB_FAST_MENU_FSTOGGLEACORNDIR 0x11 /* Acorn dir perms display on/off */
-#define EB_FAST_MENU_FSSETNAMELEN 0x12 /* Change fileserver filename length */
-#define EB_FAST_MENU_FSPRINTERS 0x13 /* Display printers */
-#define EB_FAST_MENU_FSDISCS 0x14 /* Display disks */
-#define EB_FAST_MENU_FSINFO 0x15 /* Display FS info */
+#define EB_FAST_MENU_FSTOGGLEOPTIONS 0x0D 
+#define EB_FAST_MENU_FSPRINTERS 0x0E /* Display printers */
+#define EB_FAST_MENU_FSDISCS 0x0F /* Display disks */
 
 /*
  * __eb_fast_menu_item

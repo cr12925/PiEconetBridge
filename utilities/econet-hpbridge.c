@@ -10505,28 +10505,14 @@ int eb_parse_json_config(struct json_object *jc)
 							mtype = EB_FAST_MENU_SCRIPT;
 						else if (!strcasecmp(typestr, "FSSTOPSTART"))
 							mtype = EB_FAST_MENU_FSSTOPSTART;
-						else if (!strcasecmp(typestr, "FSTOGGLEMDFS"))
-							mtype = EB_FAST_MENU_FSTOGGLEMDFS;
-						else if (!strcasecmp(typestr, "FSTOGGLEMDFSINFO"))
-							mtype = EB_FAST_MENU_FSTOGGLEMDFSINFO;
-						else if (!strcasecmp(typestr, "FSTOGGLEINFCOLON"))
-							mtype = EB_FAST_MENU_FSTOGGLEINFCOLON;
-						else if (!strcasecmp(typestr, "FSTOGGLEPIPERMS"))
-							mtype = EB_FAST_MENU_FSTOGGLEPIPERMS;
-						else if (!strcasecmp(typestr, "FSTOGGLEACORNDIR"))
-							mtype = EB_FAST_MENU_FSTOGGLEACORNDIR;
-						else if (!strcasecmp(typestr, "FSSETNAMELEN"))
-							mtype = EB_FAST_MENU_FSSETNAMELEN;
+						else if (!strcasecmp(typestr, "FSTOGGLEOPTIONS"))
+							mtype = EB_FAST_MENU_FSTOGGLEOPTIONS;
 						else if (!strcasecmp(typestr, "FSPRINTERS"))
 							mtype = EB_FAST_MENU_FSPRINTERS;
-						else if (!strcasecmp(typestr, "FSINFO"))
-							mtype = EB_FAST_MENU_FSINFO;
 						else if ((!strcasecmp(typestr, "FSDISCS") || !strcasecmp(typestr, "FSDISKS")))
 							mtype = EB_FAST_MENU_FSDISCS;
 						else if (!strcasecmp(typestr, "LOCALLOGIN") || !strcasecmp(typestr, "LOGIN"))
 							mtype = EB_FAST_MENU_BIN_LOGIN;
-						else if (!strcasecmp(typestr, "SYSTEM"))
-							mtype = EB_FAST_MENU_SYSTEM;
 						else if (!strcasecmp(typestr, "TCP"))
 							mtype = EB_FAST_MENU_TCP;
 						else if (!strcasecmp(typestr, "SERIAL"))

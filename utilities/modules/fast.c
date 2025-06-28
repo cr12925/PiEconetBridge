@@ -1052,7 +1052,7 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 
 		while (!fm_exit)
 		{
-			uint8_t		key;
+			uint8_t		key = 0;
 			uint8_t		priv, priv2;
 			struct		__fs_station *s;
 
@@ -1099,6 +1099,11 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 					{
 						if (fc->menu_current->item->next)  /* This is checking if this is a one-item menu */
 							f_printf (fc, "\r\n");
+					}
+					else if (mi->fm_type == EB_FAST_MENU_FSSTOPSTART && s && fc->menu_current->item->next) /* Only available if part of a menu, and we have a defined fileserver */
+					{
+						f_printf (fc, "%c. %s\r\n", mi->keypress, fsop_is_enabled(s) ? "STOP the fileserver" : "Start the fileserver");
+						valid_keys[vk_count++] = mi->keypress;
 					}
 					else if (mi->fm_type != EB_FAST_MENU_HEADING)
 					{
@@ -1167,6 +1172,53 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 	
 					switch (i->fm_type)
 					{
+						case EB_FAST_MENU_FSSTOPSTART: /* Sort out fileserver */
+							{
+								if (!s)
+								{
+									eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Attempt to toggle fileserver state, but no defined fileserver", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn);
+									break;
+								}
+
+								eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Toggle fileserver state", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn);
+								if (fsop_is_enabled(s)) /* Running, so stop it */
+								{
+									pthread_mutex_lock(&(s->fs_mutex));
+									s->enabled = 0;
+									pthread_mutex_unlock(&(s->fs_mutex));
+									pthread_cond_signal(&(s->fs_condition));
+									f_printf (fc, "\n\r*** Fileserver on %d.%d has shut down \r\n\n", fc->parent->net, fc->parent->local.stn);
+								}
+								else /* Start it */
+								{
+									int r;
+
+									r = fsop_run(s);
+
+									switch (r)
+									{
+										
+										case 0:
+											{
+												f_printf(fc, "\r\n\n*** Fileserver on %d.%d would not start\r\n\n", fc->parent->net, fc->parent->local.stn);
+											} break;
+										case -1:
+											{
+												f_printf(fc, "\r\n\n*** Fileserver on %d.%d was already running\r\n\n", fc->parent->net, fc->parent->local.stn);
+											} break;
+										case 1:
+											{
+												f_printf(fc, "\r\n\n*** Fileserver on %d.%d booted successfully\r\n\n", fc->parent->net, fc->parent->local.stn);
+											} break;
+										default:
+											{
+												f_printf(fc, "\r\n\n*** Fileserver on %d.%d boot returned unknown result\r\n\n", fc->parent->net, fc->parent->local.stn);
+                                                                                	} break;
+                                                                	}
+
+								} 
+							} break;
+
 						case EB_FAST_MENU_SUBMENU: /* Move to submenu */
 							{
 								eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - new menu %s", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_submenu.fm_submenu->menu_name);
@@ -1396,12 +1448,170 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 								}
 
 							} break;
-						/* Unimplemented functions */
-						case EB_FAST_MENU_FSSTOPSTART: /* Fileserver function */
+						case EB_FAST_MENU_FSPRINTERS:
 							{
-								eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Request unimplemented function %02X", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_type);
-								f_printf(fc, "Not yet implemented.\r\n\n");
-								sleep(3);
+								f_printf (fc, "\n\r\n");
+
+								if (!fc->parent->local.printers)
+									f_printf (fc, "No printers defined.");
+								else
+								{
+									struct __eb_printer *p = fc->parent->local.printers;
+									uint8_t	index = 1;
+
+									f_printf (fc, "Printer list:\r\n\n");
+									while (p)
+									{
+										f_printf (fc, "%d. %s (%s)\r\n", index, p->acorn_name, 
+												p->printertype == EB_PRINTER_PARALLEL ? "Parallel" :
+												p->printertype == EB_PRINTER_SERIAL ? "Serial" : 
+												p->printertype == EB_PRINTER_OTHER ? "Other" : "Unknown");
+
+										p = p->next;
+
+									}
+								}
+
+								f_printf (fc, "\r\n\n");
+
+							} break;
+						case EB_FAST_MENU_FSDISCS:
+							{
+								struct __fs_disc	*f;
+
+								if (!s)
+								{
+									eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Request FS disc list, but no FS defined", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn);
+									break;
+								}
+
+								f_printf (fc, "Disc list on %d.%d (Blocksize in []:\r\n\n", fc->parent->net, fc->parent->local.stn);
+
+								f = fc->parent->local.fs.server->discs;
+
+								while (f)
+								{
+									f_printf (fc, "%02d. %s [%d]\r\n", f->index, f->name, f->fs_blocksize);
+									f = f->next;
+								}
+
+								f_printf (fc, "\r\n\n");
+
+							} break;
+						case EB_FAST_MENU_FSTOGGLEOPTIONS:
+							{
+								uint8_t	fstoggle_quit = 0;
+								uint32_t params;
+								uint8_t	fnlength;
+
+								eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Toggle FS Options", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn);
+								pthread_mutex_lock (&(s->fs_mutex));
+								fsop_get_parameters (s, &params, &fnlength);
+								pthread_mutex_unlock (&(s->fs_mutex));
+
+								while (!fstoggle_quit)
+								{
+									int	key = -1;
+
+
+									while (key == -1)
+									{
+										f_printf (fc, "\r\nToggle fileserver options on %d.%d:\r\n\n", fc->parent->net, fc->parent->local.stn);
+#define EB_FAST_FS_TOGGLE_MENU(k,func,desc) f_printf (fc, "  k: "desc" (Cur: %s)\r\n", (params & func) ? "ON": "OFF")
+	
+										EB_FAST_FS_TOGGLE_MENU(A,FS_CONFIG_ACORNHOME,"Acorn home ownership semantics");
+										EB_FAST_FS_TOGGLE_MENU(M,FS_CONFIG_SJFUNC,"MDFS Functionality (general)");
+										EB_FAST_FS_TOGGLE_MENU(I,FS_CONFIG_MDFSINFO,"MDFS Extended *INFO");
+										EB_FAST_FS_TOGGLE_MENU(X,FS_CONFIG_INFCOLON,"Use : separator for .inf files");
+										EB_FAST_FS_TOGGLE_MENU(D,FS_CONFIG_MASKDIRWRR,"Show Acorn-style dir perms");
+										EB_FAST_FS_TOGGLE_MENU(S,FS_CONFIG_LIBRARY,"MDFS Extended search (all users)");
+										EB_FAST_FS_TOGGLE_MENU(T,FS_CONFIG_DISABLE,"Disable short saves (all users)");
+										EB_FAST_FS_TOGGLE_MENU(W,FS_CONFIG_DELETEWILDCARD,"Disable wildcard *DEL. (all users)");
+										EB_FAST_FS_TOGGLE_MENU(Q,FS_CONFIG_QUOTAS,"Quotas enable (all regular users)");
+	
+										f_printf (fc, "  L: Filename length (Cur: %d)\r\n", fnlength);
+
+										f_printf (fc, "\n  Enter to quit to menu\r\n");
+	
+										f_printf (fc, "\nSelect? ");
+										key = eb_fast_getc(fc, fc->fast_timeout);
+	
+									}
+									
+									if (fm_exit) break;
+
+									if (key >= 'a' && key <= 'z') key &= 0xdf; /* Capitalize */
+
+#define EB_FAST_FS_TOGGLE(k,func)	case k: { params ^= func; } break
+
+									if (key == -2)
+										fm_exit = 1;
+									else switch (key)
+									{
+										case 0x0A:
+										case 0x0D:
+										{
+											int	p;
+
+											f_printf (fc, "\nSave (y/n)? ");
+											p = eb_fast_getc(fc, 5000);
+											if (p == -2)
+												fm_exit = 1;
+											else if (p < 0)
+												p = 'N';
+
+											if (p >= 'a' && p <= 'z') p &= 0xDF;
+
+											if (p == 'Y')
+											{
+												pthread_mutex_lock(&s->fs_mutex);
+												fsop_set_parameters(s, params, fnlength);
+												pthread_mutex_unlock(&s->fs_mutex);
+											}
+
+											fstoggle_quit = 1;
+										} break;
+
+										EB_FAST_FS_TOGGLE('A',FS_CONFIG_ACORNHOME);
+										EB_FAST_FS_TOGGLE('M',FS_CONFIG_SJFUNC);
+										EB_FAST_FS_TOGGLE('I',FS_CONFIG_MDFSINFO);
+										EB_FAST_FS_TOGGLE('X',FS_CONFIG_INFCOLON);
+										EB_FAST_FS_TOGGLE('D',FS_CONFIG_MASKDIRWRR);
+										EB_FAST_FS_TOGGLE('S',FS_CONFIG_LIBRARY);
+										EB_FAST_FS_TOGGLE('T',FS_CONFIG_DISABLE);
+										EB_FAST_FS_TOGGLE('W',FS_CONFIG_DELETEWILDCARD);
+										EB_FAST_FS_TOGGLE('Q',FS_CONFIG_QUOTAS);
+
+										case 'L': /* Filename length */
+										{
+											char 	newlen[6];
+											uint8_t	l;
+
+											snprintf (newlen, 5, "%d", s->config->fs_fnamelen);
+
+											f_printf (fc, "New length (cur: %d): ", s->config->fs_fnamelen);
+
+											eb_fast_gets(fc, newlen, 2, 5000, 0);
+
+											l = atoi(newlen);
+
+											if (l >= 10 && l <= 80)
+												fnlength = l;
+											else
+												f_printf (fc, "\r\n\n*** Bad length (max 80, min 10).\r\n\n");
+
+										} break;
+
+										default:
+										{
+											f_printf (fc, "\n*** Bad input.\r\n\n");
+										} break;
+									}
+
+								}
+
+								f_printf (fc, "\r\n\n");
+
 							} break;
 						default:
 							{

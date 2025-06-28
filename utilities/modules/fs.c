@@ -140,6 +140,10 @@ void fsop_get_parameters (struct __fs_station *server, uint32_t *params, uint8_t
 	if (server->config->fs_mdfsinfo)	*params |= FS_CONFIG_MDFSINFO;
 	if (server->config->fs_pifsperms)	*params |= FS_CONFIG_PIFSPERMS;
 	if (server->config->fs_mask_dir_wrr)	*params |= FS_CONFIG_MASKDIRWRR;
+	if (server->config->fs_mdfsextsearch)	*params |= FS_CONFIG_LIBRARY;
+	if (server->config->fs_shortsavesoff)	*params |= FS_CONFIG_DISABLE;
+	if (server->config->fs_deletewildcard)	*params |= FS_CONFIG_DELETEWILDCARD;
+	if (server->config->fs_quotas_enabled) 	*params |= FS_CONFIG_QUOTAS;
 }
 
 uint8_t fsop_write_server_config (struct __fs_station *s)
@@ -171,8 +175,8 @@ void fsop_set_parameters (struct __fs_station *server, uint32_t params, uint8_t 
 	unsigned char		regex[1024];
 	uint8_t			default_dir_perm, default_file_perm;
 
-	default_dir_perm = (params & 0x00ff0000) >> 24;
-	default_file_perm = (params & 0x0000ff00) >> 16;
+	default_dir_perm = (params & 0xff000000) >> 24;
+	default_file_perm = (params & 0x00ff0000) >> 16;
 
 	server->config->fs_acorn_home = (params & FS_CONFIG_ACORNHOME) ? 1 : 0;
 	server->config->fs_sjfunc = (params & FS_CONFIG_SJFUNC) ? 1 : 0;
@@ -182,6 +186,10 @@ void fsop_set_parameters (struct __fs_station *server, uint32_t params, uint8_t 
 	server->config->fs_mdfsinfo = (params & FS_CONFIG_MDFSINFO) ? 1 : 0;
 	server->config->fs_pifsperms = (params & FS_CONFIG_PIFSPERMS) ? 1 : 0;
 	server->config->fs_mask_dir_wrr = (params & FS_CONFIG_MASKDIRWRR) ? 1 : 0;
+	server->config->fs_mdfsextsearch = (params & FS_CONFIG_LIBRARY) ? 1 : 0;
+	server->config->fs_shortsavesoff = (params & FS_CONFIG_DISABLE) ? 1 : 0;
+	server->config->fs_deletewildcard = (params & FS_CONFIG_DELETEWILDCARD) ? 1 : 0;
+	server->config->fs_quotas_enabled = (params & FS_CONFIG_QUOTAS) ? 1 : 0;
 
 	if (fnlength != server->config->fs_fnamelen)
 	{
@@ -195,8 +203,6 @@ void fsop_set_parameters (struct __fs_station *server, uint32_t params, uint8_t 
 
 	server->config->fs_default_dir_perm = default_dir_perm;
 	server->config->fs_default_file_perm = default_file_perm;
-
-	// No longer required - mmaped: fsop_write_server_config(server);
 
 }
 
