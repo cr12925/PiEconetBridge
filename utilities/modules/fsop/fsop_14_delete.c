@@ -113,7 +113,7 @@ int fsop_delete_internal (struct fsop_data *f, unsigned char *path, uint8_t rela
 			{
 				// Update user quota
 
-				if (e->ftype == FS_FTYPE_FILE)
+				if (e->ftype == FS_FTYPE_FILE && FS_CONFIG(f->server, fs_quotas_enabled))
 				{
 					int32_t		amount;
 

@@ -228,18 +228,21 @@ FSOP(0b)
 
 	/* Quota check */
 
-	if ((offset + bytes) > length)
+	if (FS_CONFIG(f->server, fs_quotas_enabled))
 	{
-		int32_t	needed;
-
-		needed = (offset + bytes) - length;
-
-		needed = fsop_diff_blocksize (length, internal_handle->disc, needed); 
-
-		if (!fsop_check_update_user_quota(&(f->server->users[internal_handle->owner]), needed))
+		if ((offset + bytes) > length)
 		{
-			fsop_error (f, 0xFF, "No space");
-			return;
+			int32_t	needed;
+	
+			needed = (offset + bytes) - length;
+	
+			needed = fsop_diff_blocksize (length, internal_handle->disc, needed); 
+	
+			if (!fsop_check_update_user_quota(&(f->server->users[internal_handle->owner]), needed))
+			{
+				fsop_error (f, 0xFF, "No space");
+				return;
+			}
 		}
 
 	}

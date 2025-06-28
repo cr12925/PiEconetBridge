@@ -67,7 +67,8 @@ FSOP_00(SETOWNER)
 	{
 		struct __fs_file *file;
 
-		fsop_update_quota(&(f->server->users[pn.attr.owner]), (-1 * pn.length)); /* Credit the outgoing user*/
+		if (FS_CONFIG(f->server, fs_quotas_enabled))
+			fsop_update_quota(&(f->server->users[pn.attr.owner]), (-1 * pn.length)); /* Credit the outgoing user*/
 		/* We don't deduct from the incoming user in case it bankrupts them */
 		
 		/* See if the file is open and update __fs_file */

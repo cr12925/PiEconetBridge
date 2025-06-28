@@ -193,7 +193,8 @@ struct __fs_config {
 	uint8_t fs_mdfsextsearch; // Whether to search lib on LOAD/OPENIN or not (0 = not) NB: users can change this for themselves temporarily
 	uint8_t fs_shortsavesoff; // 1 means no short saves - ditto re users
 	uint8_t fs_deletewildcard; // 1 means wildcards can be used on *DELETE
-        uint8_t pad[240]; // Spare spare in the config
+	uint8_t fs_quotas_enabled; // 1 means quotas enabled
+        uint8_t pad[239]; // Spare spare in the config
 };
 
 /* __fs_discs - disc information for a particular server */

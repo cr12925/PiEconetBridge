@@ -177,6 +177,8 @@ FSOP_00(FSCONFIG)
 		f->server->config->fs_shortsavesoff = (operator == '-' ? 1 : 0); // Default is short saves ON, so - turns that off by setting 1
 	else if (!strcasecmp("LIBRARY", configitem) && (FS_CONFIG(f->server,fs_sjfunc)))
 		f->server->config->fs_mdfsextsearch = (operator == '+' ? 1 : 0);
+	else if (!strcasecmp("QUOTAS", configitem))
+		f->server->config->fs_quotas_enabled = (operator == '+' ? 1 : 0);
 	else
 	{
 		fsop_error(f, 0xFF, "Bad configuration entry name"); return;

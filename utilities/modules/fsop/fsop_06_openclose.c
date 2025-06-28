@@ -157,7 +157,8 @@ FSOP(06)
 		/* Check quotas if overwriting */
 
 		if (mode == 3 && (p.ftype != FS_FTYPE_NOTFOUND)) /* OPENOUT - i.e. file will become 0 length */
-			fsop_update_quota (&(f->server->users[p.owner]), (-1 * p.length));
+			if (FS_CONFIG(f->server, fs_quotas_enabled))
+				fsop_update_quota (&(f->server->users[p.owner]), (-1 * p.length));
 
 		userhandle = fsop_allocate_user_file_channel(f->active);
 

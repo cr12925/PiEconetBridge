@@ -102,21 +102,24 @@ void fsop_save_internal(struct fsop_data *f, uint8_t is_32bit)
 
 					if (d)
 					{
-						if (p.owner != f->userid)
-							needed = fsop_diff_blocksize (0, d, length);
-						else
-							needed = fsop_diff_blocksize (p.length, d, length);
-						
-						if ((needed > user_free) && (!FS_ACTIVE_SYST(f)))
+						if (FS_CONFIG(f->server, fs_quotas_enabled))
 						{
-							fsop_error (f, 0xFF, "No space");
-							return;
+							if (p.owner != f->userid)
+								needed = fsop_diff_blocksize (0, d, length);
+							else
+								needed = fsop_diff_blocksize (p.length, d, length);
+							
+							if ((needed > user_free) && (!FS_ACTIVE_SYST(f)))
+							{
+								fsop_error (f, 0xFF, "No space");
+								return;
+							}
+	
+							if (p.owner != f->userid)
+								fsop_update_quota(&(f->server->users[p.owner]), (-1 * p.length));
+	
+							fsop_update_quota(&(f->server->users[f->userid]), needed);
 						}
-
-						if (p.owner != f->userid)
-							fsop_update_quota(&(f->server->users[p.owner]), (-1 * p.length));
-
-						fsop_update_quota(&(f->server->users[f->userid]), needed);
 
 					}
 					else

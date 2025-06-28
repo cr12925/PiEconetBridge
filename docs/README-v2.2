@@ -1542,9 +1542,11 @@ Privileged commands:
 
 *CREDIT <userid> <kilobytes>
 	- Add credit to user quota
+	- Note, quotas are not enabled by default. See *FSCONFIG +QUOTA
 
 *DEBIT <userid> <kilobytes>
 	- Debit from user quota
+	- Note, quotas are not enabled by default. See *FSCONFIG +QUOTA
 
 *DISABLE (<userid>) <operator>
 	- See *ENABLE
@@ -1711,6 +1713,15 @@ Privileged commands:
 			yet been fully tested, nor deployed everwhere they are
 			needed in the FS. Use this at your peril - the
 			results will be unpredictable.	
+
+		QUOTAS - Enable or disable user quotas. System users are never
+			 subject to a quota. Note, once you enable quotas, 
+			 it may be that many of your users have no quota and
+			 thus cannot write any files. *CREDIT and *SETFREE
+			 (an Acorn utility) will work before quotas are 
+			 enabled. You are advised to set quotas on all 
+			 appropriate users *before* using this option to 
+			 turn quota enforcement on.
 
 		DELETE - overrides *ENABLE for all users end allows them
 			to use wildcards with *DELETE

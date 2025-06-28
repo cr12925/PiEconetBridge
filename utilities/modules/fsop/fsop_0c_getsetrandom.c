@@ -181,10 +181,13 @@ FSOP(0d)
 
 				/* Check quota here */
 				
-				if (!fsop_check_update_user_quota(&(f->server->users[a->fhandles[handle].handle->owner]), fsop_diff_blocksize(extent, a->fhandles[handle].handle->disc, to_write)))
+				if (FS_CONFIG(f->server, fs_quotas_enabled))
 				{
-					fsop_error (f, 0xFF, "No space");
-					return;
+					if (!fsop_check_update_user_quota(&(f->server->users[a->fhandles[handle].handle->owner]), fsop_diff_blocksize(extent, a->fhandles[handle].handle->disc, to_write)))
+					{
+						fsop_error (f, 0xFF, "No space");
+						return;
+					}
 				}
 
 				while (to_write > 0)

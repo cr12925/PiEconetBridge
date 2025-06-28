@@ -152,10 +152,13 @@ FSOP(09) /* Putbyte */
 	
 	if (ftell(h) == (fs_check_seq(a->fhandles[handle].sequence, ctrl) ? a->fhandles[handle].cursor : a->fhandles[handle].cursor_old))
 	{
-		if (!fsop_check_update_user_quota(&(f->server->users[a->fhandles[handle].handle->owner]), fsop_diff_blocksize (ftell(h), a->fhandles[handle].handle->disc, 1)))
+		if (FS_CONFIG(f->server, fs_quotas_enabled))
 		{
-			fsop_error_ctrl (f, ctrl, 0xFF, "No space");
-			return;
+			if (!fsop_check_update_user_quota(&(f->server->users[a->fhandles[handle].handle->owner]), fsop_diff_blocksize (ftell(h), a->fhandles[handle].handle->disc, 1)))
+			{
+				fsop_error_ctrl (f, ctrl, 0xFF, "No space");
+				return;
+			}
 		}
 	};
 
