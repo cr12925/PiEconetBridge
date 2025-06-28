@@ -27,43 +27,9 @@
    @gazzaD - to whom I am very grateful.
 */
 
-/* Now in fs.h
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <fcntl.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/statvfs.h>
-#include <dirent.h>
-#include <regex.h>
-#include <sys/xattr.h>
-#include <time.h>
-#include <unistd.h>
-#include <errno.h>
-#include <sys/syscall.h>
-#include <sys/sendfile.h>
-#include <ctype.h>
-#include <stdint.h>
-#include <stdarg.h>
-#include <resolv.h>
-#include <sys/socket.h>
-#include <termios.h>
-#if __has_include(<libexplain/ferror.h>)
-	#include <libexplain/ferror.h>
-#else
-	#define __NO_LIBEXPLAIN
-#endif
-
-#include "../include/econet-gpio-consumer.h"
-#ifdef BRIDGE_V2
-	#include <pthread.h>
-	#include <poll.h>
-	#include "../include/econet-hpbridge.h"
-	#include "../include/fs.h"
-#endif
-*/
 #include "fs.h"
+
+extern void * thread_return;
 
 uint8_t fs_set_syst_bridgepriv = 0; // If set to 1 by the HP Bridge, then on initialization, each FS will enable the bridge priv on its SYST user
 short fs_sevenbitbodge; // Whether to use the spare 3 bits in the day byte for extra year information
@@ -3917,22 +3883,21 @@ void fsop_shutdown (struct __fs_station *s)
 
 	fs_debug_full (0, 1, s, 0, 0, "FS", "Waiting for FS Backup thread to quit");
 
-	sleep (1);
-
 	{
 		uint8_t	count = 0;
 
 		while (count < 10)
 		{
 			uint8_t	dead;
+
+			sleep(1);
+
 			pthread_mutex_lock(&(s->fs_backup_mutex));
 			dead = s->backup->i_have_died;
 			pthread_mutex_unlock(&(s->fs_backup_mutex));
 
 			if (dead)
 				break;
-			else
-				sleep(1);
 
 			count++;
 		}
@@ -3957,7 +3922,7 @@ void fsop_shutdown (struct __fs_station *s)
 
 	munmap(s->config, 256);
 
-	fs_debug_full (0, 1, s, 0, 0, "Server has shut down");
+	fs_debug_full (0, 1, s, 0, 0, "             Server has shut down");
 
 	return;
 
@@ -5414,27 +5379,17 @@ void *fsop_thread(void *p)
 
 		if (!s->enabled)
 		{
-			uint8_t	net, stn;
-
-			net = s->net;
-			stn = s->stn;
-
 			fs_debug_full (0, 1, s, 0, 0, "             Shutting down on request");
 			
 			fsop_shutdown(s);
 
-			//s->fs_device->local.fs.server = NULL; /* Don't do this - once initialized, it's used to start the server up again */
-
-			eb_debug (0, 1, "FS", "%-8s %3d.%3d Shut down completed", "FS", net, stn);
-
-			// pthread_mutex_unlock(&(s->fs_mutex));
+			fs_debug_full (0, 1, s, 0, 0, "             Shutdown completed");
 
 			/* Note, don't free the __fs_station - that stays around while the bridge is running. 
 			 * Otherwise we can't tell if enabled is set or not! 
 			 */
 
-			pthread_exit(NULL);
-
+			break;
 		}
 
 		/* Handle work on the workqueue here - which will include ACK & NAK for load_queue traffic triggers */
@@ -5544,6 +5499,7 @@ void *fsop_thread(void *p)
 		}
 	}
 
+	pthread_exit(thread_return);
 }
 
 /*

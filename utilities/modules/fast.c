@@ -1211,13 +1211,16 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 								}
 
 								eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Toggle fileserver state", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn);
+								f_printf (fc, "\r\n\nNot yet implemented\r\n\n");
+								break;
+
 								if (fsop_is_enabled(s)) /* Running, so stop it */
 								{
 									pthread_mutex_lock(&(s->fs_mutex));
 									s->enabled = 0;
 									pthread_mutex_unlock(&(s->fs_mutex));
 									pthread_cond_signal(&(s->fs_condition));
-									f_printf (fc, "\n\r*** Fileserver on %d.%d has shut down \r\n\n", fc->parent->net, fc->parent->local.stn);
+									f_printf (fc, "\n\r*** Fileserver on %d.%d has been instructed to shut down \r\n\n", fc->parent->net, fc->parent->local.stn);
 								}
 								else /* Start it */
 								{
@@ -1498,11 +1501,15 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 												p->printertype == EB_PRINTER_OTHER ? "Other" : "Unknown");
 
 										p = p->next;
+										index++;
 
 									}
 								}
 
-								f_printf (fc, "\r\n\n");
+								f_printf (fc, "\r\n\nPress a key...");
+								key = eb_fast_getc(fc, 5000);
+
+								if (key == -2) break;
 
 							} break;
 						case EB_FAST_MENU_FSDISCS:
@@ -1515,7 +1522,7 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 									break;
 								}
 
-								f_printf (fc, "Disc list on %d.%d (Blocksize in []:\r\n\n", fc->parent->net, fc->parent->local.stn);
+								f_printf (fc, "Disc list on %d.%d (Blocksize in [bytes]):\r\n\n", fc->parent->net, fc->parent->local.stn);
 
 								f = fc->parent->local.fs.server->discs;
 
@@ -1524,6 +1531,11 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 									f_printf (fc, "%02d. %s [%d]\r\n", f->index, f->name, f->fs_blocksize);
 									f = f->next;
 								}
+
+								f_printf (fc, "\r\n\nPress a key...");
+								key = eb_fast_getc(fc, 5000);
+
+								if (key == -2) break;
 
 								f_printf (fc, "\r\n\n");
 
@@ -1547,17 +1559,17 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 									while (key == -1)
 									{
 										f_printf (fc, "\r\nToggle fileserver options on %d.%d:\r\n\n", fc->parent->net, fc->parent->local.stn);
-#define EB_FAST_FS_TOGGLE_MENU(k,func,desc) f_printf (fc, "  k: "desc" (Cur: %s)\r\n", (params & func) ? "ON": "OFF")
+#define EB_FAST_FS_TOGGLE_MENU(k,func,desc) f_printf (fc, "  " k": "desc" (Cur: %s)\r\n", (params & func) ? "ON": "OFF")
 	
-										EB_FAST_FS_TOGGLE_MENU(A,FS_CONFIG_ACORNHOME,"Acorn home ownership semantics");
-										EB_FAST_FS_TOGGLE_MENU(M,FS_CONFIG_SJFUNC,"MDFS Functionality (general)");
-										EB_FAST_FS_TOGGLE_MENU(I,FS_CONFIG_MDFSINFO,"MDFS Extended *INFO");
-										EB_FAST_FS_TOGGLE_MENU(X,FS_CONFIG_INFCOLON,"Use : separator for .inf files");
-										EB_FAST_FS_TOGGLE_MENU(D,FS_CONFIG_MASKDIRWRR,"Show Acorn-style dir perms");
-										EB_FAST_FS_TOGGLE_MENU(S,FS_CONFIG_LIBRARY,"MDFS Extended search (all users)");
-										EB_FAST_FS_TOGGLE_MENU(T,FS_CONFIG_DISABLE,"Disable short saves (all users)");
-										EB_FAST_FS_TOGGLE_MENU(W,FS_CONFIG_DELETEWILDCARD,"Disable wildcard *DEL. (all users)");
-										EB_FAST_FS_TOGGLE_MENU(Q,FS_CONFIG_QUOTAS,"Quotas enable (all regular users)");
+										EB_FAST_FS_TOGGLE_MENU("A",FS_CONFIG_ACORNHOME,"Acorn home ownership semantics");
+										EB_FAST_FS_TOGGLE_MENU("M",FS_CONFIG_SJFUNC,"MDFS Functionality (general)");
+										EB_FAST_FS_TOGGLE_MENU("I",FS_CONFIG_MDFSINFO,"MDFS Extended *INFO");
+										EB_FAST_FS_TOGGLE_MENU("X",FS_CONFIG_INFCOLON,"Use : separator for .inf files");
+										EB_FAST_FS_TOGGLE_MENU("D",FS_CONFIG_MASKDIRWRR,"Show Acorn-style dir perms");
+										EB_FAST_FS_TOGGLE_MENU("S",FS_CONFIG_LIBRARY,"MDFS Extended search (all users)");
+										EB_FAST_FS_TOGGLE_MENU("T",FS_CONFIG_DISABLE,"Disable short saves (all users)");
+										EB_FAST_FS_TOGGLE_MENU("W",FS_CONFIG_DELETEWILDCARD,"Disable wildcard *DEL. (all users)");
+										EB_FAST_FS_TOGGLE_MENU("Q",FS_CONFIG_QUOTAS,"Quotas enable (all regular users)");
 	
 										f_printf (fc, "  L: Filename length (Cur: %d)\r\n", fnlength);
 
@@ -1583,7 +1595,7 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 										{
 											int	p;
 
-											f_printf (fc, "\nSave (y/n)? ");
+											f_printf (fc, "\r\n\nSave (y/n)? ");
 											p = eb_fast_getc(fc, 5000);
 											if (p == -2)
 												fm_exit = 1;
@@ -2282,10 +2294,11 @@ void eb_port_a0_handler (struct __econet_packet_aun *p, uint16_t length, void *d
 
 	pthread_mutex_unlock(&(fc->fast_io_mutex[EB_FAST_TO_SERVER]));
 
-	eb_fast_send_control(fc, EB_FAST_OP_DATARQ); /* Ask client for more data */
-
 	//EB_FAST_WAKE_SERVER(fc); /* Wake up the IO thread */
 	pthread_cond_signal(&(fc->fast_wake[EB_FAST_TO_NETWORK]));
 	pthread_cond_signal(&(fc->fast_wake[EB_FAST_TO_SERVER]));
+
+	eb_fast_send_control(fc, EB_FAST_OP_DATARQ); /* Ask client for more data */
+
 }
 

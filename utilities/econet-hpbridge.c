@@ -37,6 +37,10 @@ extern short fs_sevenbitbodge;
 extern short normalize_debug;
 extern uint8_t fs_set_syst_bridgepriv;
 
+/* Test thread return */
+
+void *thread_return = NULL;
+
 /* Fast menus */
 
 struct __eb_fast_menu	*fast_menus = NULL;
@@ -6006,35 +6010,6 @@ static void * eb_device_despatcher (void * device)
 
 			ECONET_INIT_STATIONS(d->local.fast_priv_stns); // Clear the privileged station bitmap
 
-/* OLD code
-			// Initialize *FAST handler - but only if we're a fileserver
-
-			if (d->local.fs.rootpath)
-			{
-				d->local.fastbit = 0;
-				d->local.fast_input_ctrl = 0;
-				if (pthread_mutex_init(&(d->local.fast_io_mutex), NULL) == -1)
-					eb_debug (1, 0, "FAST", "Cannot initialize IO mutex");
-	
-				d->local.fast_thread_alive = 0;
-				d->local.fast_reset = 0;
-				d->local.fast_client_net = d->local.fast_client_stn = 0;
-				d->local.fast_client_ready = 0;
-				if (pthread_cond_init (&(d->local.fast_wake), NULL) == -1)
-					eb_debug (1, 0, "FAST", "Failed to initialize fast_wake pthread_cond");
-	
-				if (socketpair(AF_UNIX, SOCK_STREAM, 0, d->local.fast_to_handler) || socketpair(AF_UNIX, SOCK_STREAM, 0, d->local.fast_to_despatch))
-					eb_debug (1, 0, "FAST", "Cannot create socketpairs for *FAST handler and IO");
-				
-				if (pthread_create(&(d->local.fast_handler), NULL, eb_fast_handler, d))
-					eb_debug(1, 0, "DESPATCH", "Cannot start *FAST handler thread for station %d.%d", d->net, d->local.stn);
-				pthread_detach(d->local.fast_handler);
-	
-				if (pthread_create(&(d->local.fast_io_handler), NULL, eb_fast_io_handler, d))
-					eb_debug(1, 0, "DESPATCH", "Cannot start *FAST IO handler thread for station %d.%d", d->net, d->local.stn);
-				pthread_detach(d->local.fast_io_handler);
-			}
-*/
 			// Initialize the notify list & mutex
 
 			d->local.notify = NULL;
@@ -13832,13 +13807,6 @@ int main (int argc, char **argv)
 		int e;
 
 		eb_debug (0, 2, "MAIN", "%-8s %7d Starting multitrunk handler thread for %s", eb_type_str(p->type), p->multitrunk.port, p->multitrunk.mt_name);
-
-		/*
-		if (p->multitrunk.mt_type == MT_SERVER)
-			e = pthread_create(&(p->me), NULL, eb_multitrunk_server_device, p);
-		else
-			e = pthread_create(&(p->me), NULL, eb_multitrunk_client_device, p);
-		*/
 
 		/* All multitrunks will listen on a port unless the port isn't defined (i.e. client connections outbound only */
 
