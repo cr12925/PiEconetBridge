@@ -476,8 +476,8 @@ struct __eb_fast_client {
 	int 		ssh_sock; // Underlying SSH socket
 	const char 	* ssh_fingerprint; // Distant fingerprint
 	char 		* ssh_userauthlist;
-	LIBSSH2_SESSION	* session;
-	LIBSSH2_CHANNEL * channel;
+	LIBSSH2_SESSION	* ssh_session;
+	LIBSSH2_CHANNEL * ssh_channel;
 
 	struct __eb_fast_menu	*menu_home, *menu_current;
 	struct __eb_device	*parent; // Device the user is talking to

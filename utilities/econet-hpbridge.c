@@ -5347,7 +5347,7 @@ void eb_fast_priv_notify(struct __eb_device *d, uint8_t net, uint8_t stn, uint8_
 	}
 }
 
-/* OLD CODE
+#if 0
 
 // Print FS disc names in order (for *FAST handler)
 
@@ -5792,7 +5792,7 @@ fast_handler_reset:
 	return NULL;
 
 }
-*/ /* End of old FAST code */
+#endif /* End of old FAST code */
 
 /* 
  * Notify logger for local emulation devices
@@ -8389,6 +8389,13 @@ static void * eb_device_despatcher (void * device)
 						{
 							uint8_t		fast_function = p->p->p.data[4];
 
+							eb_debug (0, 3, "FAST", "FAST     %3d.%3d from %3d.%3d Received *FAST out of band code %02X",
+									p->p->p.dstnet,
+									p->p->p.dststn,
+									p->p->p.srcnet,
+									p->p->p.srcstn,
+									fast_function);
+
 							switch (fast_function)
 							{
 								case EB_FAST_OP_LOGON:
@@ -10580,7 +10587,9 @@ int eb_parse_json_config(struct json_object *jc)
 							case EB_FAST_MENU_SSH:
 							{
 								char 		*host, *username = NULL;
-								uint16_t	port = 0;
+								char		*password = NULL;
+								char		*privkey = NULL, *pubkey = NULL;
+								uint16_t	port = 22;
 								
 								if (json_object_object_get_ex(jmenuitem, "port", &jtmp))
 									port = json_object_get_int(jtmp);
@@ -10588,6 +10597,15 @@ int eb_parse_json_config(struct json_object *jc)
 								if (json_object_object_get_ex(jmenuitem, "user", &jtmp))
 									username = (char *) json_object_get_string(jtmp);
 								
+								if (json_object_object_get_ex(jmenuitem, "password", &jtmp))
+									password = (char *) json_object_get_string(jtmp);
+
+								if (json_object_object_get_ex(jmenuitem, "privkey", &jtmp))
+									privkey = (char *) json_object_get_string(jtmp);
+
+								if (json_object_object_get_ex(jmenuitem, "pubkey", &jtmp))
+									pubkey = (char *) json_object_get_string(jtmp);
+
 								if (json_object_object_get_ex(jmenuitem, "host", &jtmp))
 								{
 									host = (char *) json_object_get_string(jtmp);
@@ -10596,13 +10614,40 @@ int eb_parse_json_config(struct json_object *jc)
 									mi->fm_ssh.fm_port = port;
 								}
 								else
-									eb_debug (1, 0, "JSON", "Menu item %d in menu %s is of type TCP but has no host element.", jitem_count, jmenu_name);
+									host = NULL; // User can choose - potentially unsafe though
 
 								
+								mi->fm_ssh.fm_privkey = mi->fm_ssh.fm_pubkey = mi->fm_ssh.fm_host = mi->fm_ssh.fm_username = mi->fm_ssh.fm_password = NULL;
+								mi->fm_ssh.fm_port = port;
+
+								if (host)
+								{
+									mi->fm_ssh.fm_host = eb_malloc(__FILE__, __LINE__, "JSON", "Space for FAST SSH menu item host", strlen(host)+1);
+									strcpy(mi->fm_ssh.fm_host, host);
+								}
+
 								if (username)
 								{
-									mi->fm_ssh.fm_username = eb_malloc(__FILE__, __LINE__, "JSON", "Space for FAST TCP menu item host", strlen(username)+1);
+									mi->fm_ssh.fm_username = eb_malloc(__FILE__, __LINE__, "JSON", "Space for FAST SSH menu item username", strlen(username)+1);
 									strcpy(mi->fm_ssh.fm_username, username);
+								}
+
+								if (password)
+								{
+									mi->fm_ssh.fm_password = eb_malloc(__FILE__, __LINE__, "JSON", "Space for FAST SSH menu item password", strlen(password)+1);
+									strcpy(mi->fm_ssh.fm_password, password);
+								}
+
+								if (privkey)
+								{
+									mi->fm_ssh.fm_privkey = eb_malloc(__FILE__, __LINE__, "JSON", "Space for FAST SSH menu item private key file", strlen(privkey)+1);
+									strcpy(mi->fm_ssh.fm_privkey, privkey);
+								}
+
+								if (pubkey)
+								{
+									mi->fm_ssh.fm_pubkey = eb_malloc(__FILE__, __LINE__, "JSON", "Space for FAST SSH menu item public key file", strlen(pubkey)+1);
+									strcpy(mi->fm_ssh.fm_pubkey, pubkey);
 								}
 
 							} break;

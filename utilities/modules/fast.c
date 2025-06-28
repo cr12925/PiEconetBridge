@@ -11,6 +11,73 @@
 #define FAST_TEST_DEBUG 1
 */
 
+/* Fast input routines */
+
+int eb_fast_getc(struct __eb_fast_client *fc, uint32_t timeout)
+{
+
+	struct pollfd	p;
+	int		pollreturn;
+	uint8_t		key;
+
+	p.fd = fc->fc_socket[EB_FAST_TO_SERVER][0];
+	p.revents = 0;
+	p.events = POLLIN | POLLHUP;
+
+	pollreturn = poll(&p, 1, fc->fast_timeout);
+
+	if (pollreturn)
+	{
+		read(fc->fc_socket[EB_FAST_TO_SERVER][0], &key, 1);
+		return key;
+	}
+	else if (p.revents & POLLHUP)
+		return -2; /* Hang up */
+	else	return -1; /* Timeout */
+}
+
+/* Input string of max length with timeout */
+int eb_fast_gets(struct __eb_fast_client *fc, char *ptr, uint8_t maxlen, uint32_t chartimeout, uint8_t is_password)
+{
+	int k;
+	uint8_t int_ptr = 0;
+
+	int_ptr = strlen(ptr);
+
+	if (int_ptr > 0) /* String not empty */
+		f_printf(fc, ptr);
+	
+	while (1)
+	{
+		k = eb_fast_getc(fc, chartimeout);
+
+		if (k < 0) /* Disconnect or timeout */
+			break;
+
+		if ((k == 0x7F || k == 0x08)) /* Delete or left cursor */
+		{
+			if (int_ptr > 0) /* Inside the other if() so that a delete at start of input does nothing */
+			{
+				f_printf(fc, "%c%c%c", 0x08, ' ', 0x08);
+				int_ptr--;
+			}
+		}
+		else if (k == 0x0D || k == 0x0A) /* End of line possibilities */
+			break;
+		else if (k < ' ' || k > 0x7f) /* Invalid */
+		{ }
+		else if (k > 0 && int_ptr < maxlen)
+		{
+			*(ptr + int_ptr++) = k;
+			*(ptr + int_ptr) = '\0';
+			f_printf(fc, "%c", (is_password) ? '*' : k);
+		}
+
+	}
+
+	return k;
+}
+
 /* Fileserver interaction functions */
 
 // Print FS disc names in order (for *FAST handler)
@@ -129,7 +196,13 @@ void eb_fast_flag_datarq (struct __eb_device * device, uint8_t net, uint8_t stn)
 		fc->fast_client_ready = 1;
 		pthread_mutex_unlock(&(fc->fast_io_mutex[EB_FAST_TO_NETWORK]));
 		pthread_cond_signal(&(fc->fast_wake[EB_FAST_TO_NETWORK]));
+		pthread_cond_signal(&(fc->fast_wake[EB_FAST_TO_SERVER]));
 	}
+	else
+		eb_debug (0, 1, "FAST", "FAST     %3d.%3d from %3d.%3d *FAST data request from unknown client",
+				device->net,
+				device->local.stn,
+				net, stn);
 }
 
 struct __eb_fast_client * eb_fast_mkclient (struct __eb_device *device, uint8_t net, uint8_t stn)
@@ -498,6 +571,316 @@ void eb_fast_bin_login(struct __eb_fast_client *fc, struct __eb_fast_menu_item *
 	//tcsetattr (STDIN_FILENO, TCSANOW, &login_t);
 }
 
+#define EB_FAST_SSH_CONNECT_OK 0
+#define EB_FAST_SSH_CONNECT_CANNOTRESOLVE 1
+#define EB_FAST_SSH_CONNECT_NOSOCKET 2
+#define EB_FAST_SSH_CONNECT_FAILED 3
+#define EB_FAST_SSH_CONNECT_INITFAILED 4
+#define EB_FAST_SSH_CONNECT_ESTABLISHFAILED 5
+#define EB_FAST_SSH_CONNECT_AUTHFAIL_PW 6
+#define EB_FAST_SSH_CONNECT_AUTHFAIL_KEYBOARD 7
+#define EB_FAST_SSH_CONNECT_AUTHFAIL_PUBKEY 8
+#define EB_FAST_SSH_CONNECT_AUTHFAIL_NOMETHODS 9
+#define EB_FAST_SSH_CONNECT_CONNECTFAIL_CREATESESSION 10
+#define EB_FAST_SSH_CONNECT_PTYFAIL 11
+#define EB_FAST_SSH_CONNECT_SHELLFAIL 12
+#define EB_FAST_SSH_CONNECT_UNKNOWNERROR 255
+
+/* Establish SSH connection */
+
+uint8_t eb_fast_ssh_connect(struct __eb_fast_client *fc, struct __eb_fast_menu_item *i)
+{
+
+	int	rc, c, auth_pw = 0;
+	LIBSSH2_SESSION *session = NULL;
+	struct addrinfo *addr, hints, *rp;
+	char	service[10];
+	char	host_int[128], username_int[21], password_int[21];
+	uint16_t	port = i->fm_ssh.fm_port;
+	char	*host = i->fm_ssh.fm_host;
+	char	*username = i->fm_ssh.fm_username;
+	char	*password = i->fm_ssh.fm_password;
+	char 	*pubkeyfile = i->fm_ssh.fm_pubkey;
+	char	*privkeyfile = i->fm_ssh.fm_privkey;
+	uint8_t	ret = 255;
+
+	memset (host_int, 0, sizeof(host_int));
+	memset (username_int, 0, sizeof(username_int));
+	memset (password_int, 0, sizeof(password_int));
+
+	snprintf (service, 6, "%d", port);
+
+	if (!host)
+	{
+		f_printf (fc, "Host: ");
+		eb_fast_gets(fc, host_int, 127, fc->fast_timeout, 0);
+		f_printf (fc, "\n\r");
+	}
+	else	strncpy(host_int, host, 127);
+
+	if (!username)
+	{
+		f_printf (fc, "Username: ");
+		eb_fast_gets(fc, username_int, 20, fc->fast_timeout, 0);
+		f_printf (fc, "\n\r");
+	}
+	else	strncpy(username_int, username, 20);
+
+	if (!password)
+	{
+		f_printf (fc, "Password: ");
+		eb_fast_gets(fc, password_int, 20, fc->fast_timeout, 1);
+		f_printf (fc, "\n\r");
+	}
+	else	strncpy(password_int, password, 20);
+
+	/* Needs updating for name resolution & IPV6 */
+
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_DGRAM;
+	hints.ai_flags = AI_PASSIVE;
+	hints.ai_protocol = 0;
+	hints.ai_addr = NULL;
+	hints.ai_next = NULL;
+
+	if (getaddrinfo(host_int, service, &hints, &addr) < 0)
+		return EB_FAST_SSH_CONNECT_CANNOTRESOLVE;
+
+	rp = addr;
+
+	while (rp)
+	{
+    		fc->ssh_sock = socket(AF_INET, SOCK_STREAM, 0);
+    		if(fc->ssh_sock < 0) 
+		{
+        		rc = 1;
+			freeaddrinfo(addr);
+			return EB_FAST_SSH_CONNECT_NOSOCKET;
+    		}
+
+		if (connect(fc->ssh_sock, rp->ai_addr, rp->ai_addrlen) == 0)
+			break;
+
+		close(fc->ssh_sock);
+
+		rp = rp->ai_next;
+ 
+	}
+
+	freeaddrinfo(addr);
+
+	if (!rp)
+	{
+		close (fc->ssh_sock);
+		return EB_FAST_SSH_CONNECT_FAILED;
+	}
+ 
+	if (!host)
+		f_printf (fc, "Connecting to: %s\n\r", host_int);
+
+    	/* Create a session instance and start it up. This will trade welcome
+     	* banners, exchange keys, and setup crypto, compression, and MAC layers
+     	*/ 
+
+    	fc->ssh_session = libssh2_session_init();
+
+    	if(!fc->ssh_session) 
+	{
+		ret = EB_FAST_SSH_CONNECT_INITFAILED;
+        	goto shutdown;
+    	}
+ 
+    	/* Enable all debugging when libssh2 was built with debugging enabled */ 
+    	libssh2_trace(fc->ssh_session, ~0);
+
+    	rc = libssh2_session_handshake(fc->ssh_session, fc->ssh_sock);
+	
+    	if(rc) 
+	{
+		ret = EB_FAST_SSH_CONNECT_ESTABLISHFAILED;
+        	goto shutdown;
+    	}
+	 
+    	rc = 1;
+	 
+    	/* At this point we have not yet authenticated.  The first thing to do
+     	* is check the hostkey's fingerprint against our known hosts Your app
+     	* may have it hard coded, may go to a file, may present it to the
+     	* user, that's your call
+     	*/ 
+
+    	fc->ssh_fingerprint = libssh2_hostkey_hash(fc->ssh_session, LIBSSH2_HOSTKEY_HASH_SHA1);
+	
+    	f_printf(fc, "Fingerprint: ");
+
+    	for (c = 0; c < 20; c++) 
+        	f_printf(fc, "%02X ", (unsigned char)fc->ssh_fingerprint[c]);
+
+    	f_printf(fc, "\n\r");
+	 
+    	/* check what authentication methods are available */ 
+
+    	fc->ssh_userauthlist = libssh2_userauth_list(fc->ssh_session, username_int, (unsigned int)strlen(username_int));
+	
+    	if(fc->ssh_userauthlist) 
+	{
+        	f_printf(fc, "Authentication methods: %s\n\r", fc->ssh_userauthlist);
+
+        	if(strstr(fc->ssh_userauthlist, "password")) auth_pw |= 1;
+
+        	if(strstr(fc->ssh_userauthlist, "keyboard-interactive")) auth_pw |= 2;
+
+        	if(strstr(fc->ssh_userauthlist, "publickey")) auth_pw |= 4;
+	 
+        	if (auth_pw & 1) /* Password authentication */
+		{
+            		if(libssh2_userauth_password(fc->ssh_session, username_int, password_int) != 0) 
+			{
+				ret = EB_FAST_SSH_CONNECT_AUTHFAIL_PW;
+                		goto shutdown;
+            		}
+            	}
+#if 0
+        else if (auth_pw & 2) {
+            /* Or via keyboard-interactive */ 
+            if(libssh2_userauth_keyboard_interactive(fc->ssh_session, username, &kbd_callback) ) {
+                fprintf(stderr,
+                        "Authentication by keyboard-interactive failed.\n");
+		ret = EB_FAST_SSH_CONNECT_AUTHFAIL_KEYBOARD;
+                goto shutdown;
+            }
+        }
+#endif
+        	else if (auth_pw & 4 && pubkeyfile && privkeyfile) 
+		{
+            		size_t fn1sz, fn2sz;
+            		char *fn1, *fn2;
+            		char const *h = getenv("HOME");
+
+            		if(!h || !*h)
+                		h = ".";
+
+            		fn1sz = strlen(h) + strlen(pubkeyfile) + 2;
+            		fn2sz = strlen(h) + strlen(privkeyfile) + 2;
+
+            		fn1 = eb_malloc(__FILE__, __LINE__, "FAST", "SSH public key file", fn1sz);
+            		fn2 = eb_malloc(__FILE__, __LINE__, "FAST", "SSH private key file", fn2sz);
+
+			if (!fn1 || !fn2)
+				eb_debug (1, 0, "FAST", "Out of memory allocating SSH key file");
+
+            /* Avoid false positives */ 
+#if defined(__GNUC__) && __GNUC__ >= 7
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wformat-truncation=1"
+#endif
+            		snprintf(fn1, fn1sz, "%s/%s", h, pubkeyfile);
+            		snprintf(fn2, fn2sz, "%s/%s", h, privkeyfile);
+#if defined(__GNUC__) && __GNUC__ >= 7
+#pragma GCC diagnostic pop
+#endif
+ 
+            		if(libssh2_userauth_publickey_fromfile(fc->ssh_session, username, fn1, fn2, password)) 
+	    		{
+                		f_printf(fc, "Authentication by public key failed.\n\r");
+				eb_free (__FILE__, __LINE__, "FAST", "Free public key file", fn1);
+				eb_free (__FILE__, __LINE__, "FAST", "Free private key file", fn1);
+				ret = EB_FAST_SSH_CONNECT_AUTHFAIL_PUBKEY;
+                		goto shutdown;
+            		}
+
+			eb_free (__FILE__, __LINE__, "FAST", "Free public key file", fn1);
+			eb_free (__FILE__, __LINE__, "FAST", "Free private key file", fn1);
+		}
+        }
+        else 
+	{
+            f_printf(fc, "No supported authentication methods found.\n\r");
+	    ret = 9;
+            goto shutdown;
+        }
+ 
+    /* Request a session channel on which to run a shell */ 
+
+    	fc->ssh_channel = libssh2_channel_open_session(fc->ssh_session);
+
+    	if(!fc->ssh_channel) 
+	{
+		ret = EB_FAST_SSH_CONNECT_CONNECTFAIL_CREATESESSION;
+        	goto shutdown;
+    	}
+ 
+    	libssh2_channel_setenv(fc->ssh_channel, "PIECONETBRIDGE", "yes");
+ 
+    /* Request a terminal with 'vanilla' terminal emulation
+     * See /etc/termcap for more options. This is useful when opening
+     * an interactive shell.
+     */ 
+
+    	if (libssh2_channel_request_pty(fc->ssh_channel, "vanilla")) 
+	{
+		ret = EB_FAST_SSH_CONNECT_PTYFAIL;
+		goto shutdown;
+	}
+ 
+#if 0
+    if(libssh2_channel_exec(channel, "/bin/sh")) {
+
+         fprintf(stderr, "Unable to request command on channel\n");
+         goto shutdown;
+#endif
+
+        /* Instead of just running a single command with libssh2_channel_exec,
+         * a shell can be opened on the channel instead, for interactive use.
+         * You usually want a pty allocated first in that case (see above). */ 
+
+        if(libssh2_channel_shell(fc->ssh_channel)) 
+	{
+	    ret = EB_FAST_SSH_CONNECT_SHELLFAIL;
+	    goto shutdown;
+        }
+ 
+	/* Set non-blocking */
+	libssh2_channel_set_blocking(fc->ssh_channel, 0);
+
+	return EB_FAST_SSH_CONNECT_OK;
+ 
+shutdown:
+ 
+    	if(session) 
+	{
+        	libssh2_session_disconnect(session, "Normal Shutdown");
+        	libssh2_session_free(session);
+    	}
+ 
+    	if(fc->ssh_sock != LIBSSH2_INVALID_SOCKET) 
+	{
+        	shutdown(fc->ssh_sock, 2);
+		close(fc->ssh_sock);
+    	}
+ 
+    	libssh2_exit();
+
+	return ret;
+
+}
+
+char * eb_fast_ssh_strerr(uint8_t res)
+{
+	return
+		res == EB_FAST_SSH_CONNECT_OK ? "Successful connection" :
+		res == EB_FAST_SSH_CONNECT_CANNOTRESOLVE ? "Host unknown" :
+		res == EB_FAST_SSH_CONNECT_NOSOCKET ? "Cannot open socket" :
+		res == EB_FAST_SSH_CONNECT_FAILED ? "Cannot connect SSH" :
+		res == EB_FAST_SSH_CONNECT_INITFAILED ? "Cannot initialize SSH" :
+		res == EB_FAST_SSH_CONNECT_AUTHFAIL_PW ? "Password authentication failed" :
+		res == EB_FAST_SSH_CONNECT_AUTHFAIL_KEYBOARD ? "Keyboard interactive authentication failed" :
+		res == EB_FAST_SSH_CONNECT_AUTHFAIL_PUBKEY ? "Public key authentication failed":
+		res == EB_FAST_SSH_CONNECT_AUTHFAIL_NOMETHODS ? "No available authentication methods" :
+		res == EB_FAST_SSH_CONNECT_CONNECTFAIL_CREATESESSION ? "Could not create SSH session" :
+		res == EB_FAST_SSH_CONNECT_PTYFAIL ? "Could not create PTY" :
+		res == EB_FAST_SSH_CONNECT_SHELLFAIL ? "Could not create shell" : "Unknown error";
+}
 /* Mediate traffic between sock -> fc->fc_socket[EB_FAST_TO_NETWORK][1]   and fc->fc_socket[EB_FAST_TO_SERVER][0] -> sock */
 
 void eb_fast_run_connection (struct __eb_fast_client *fc, int sock, uint8_t is_ssh)
@@ -509,16 +892,19 @@ void eb_fast_run_connection (struct __eb_fast_client *fc, int sock, uint8_t is_s
 	fcntl(fc->fc_socket[EB_FAST_TO_SERVER][0], F_SETFL, fcntl(fc->fc_socket[EB_FAST_TO_SERVER][0], F_GETFL) | O_NONBLOCK);
 	fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) | O_NONBLOCK);
 
-	p[0].fd = sock;
-	p[0].revents = 0;
-	p[0].events = POLLIN | POLLHUP;
-
-	p[1].fd = fc->fc_socket[EB_FAST_TO_SERVER][0];
-	p[1].revents = 0;
-	p[1].events = POLLIN | POLLHUP;
-
-	while ((pollres = poll(p, 2, -1)))
+	while (1)
 	{
+
+		p[0].fd = sock;
+		p[0].revents = 0;
+		p[0].events = POLLIN | POLLHUP;
+	
+		p[1].fd = fc->fc_socket[EB_FAST_TO_SERVER][0];
+		p[1].revents = 0;
+		p[1].events = POLLIN | POLLHUP;
+
+		pollres = poll (p, 2, 500);
+
 		if (pollres < 0)
 		{	
 			eb_debug (0, 2, "FAST", "%-8s %3d.%3d from %3d.%3d FAST server error in run connection (%s)", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, strerror(errno));
@@ -542,37 +928,56 @@ void eb_fast_run_connection (struct __eb_fast_client *fc, int sock, uint8_t is_s
 			if (p[count].events & POLLIN)
 			{
 				char 	data[128];
-				int	res;
+				char	data_ssh_stderr[128];
+				int	res = 0, res_ssh_stderr = 0;
 		
 				if (count == 0)
 				{
-					res = read(sock, data, 128);
+					if (is_ssh)
+					{
+						res = libssh2_channel_read(fc->ssh_channel, data, 128);
+						res_ssh_stderr = libssh2_channel_read_stderr(fc->ssh_channel, data_ssh_stderr, 128-res);
+					}
+					else
+						res = read(sock, data, 128);
 				}
 				else
 					res = read(fc->fc_socket[EB_FAST_TO_SERVER][0], data, 128);
 	
-				if (res > 0)
+				if (res > 0 || (is_ssh && res_ssh_stderr > 0))
 				{
-					int	writeres;
+					int	writeres = 0, writeres_ssh_stderr = 0;
 
 					if (count == 0)
 					{
-						writeres = write(fc->fc_socket[EB_FAST_TO_NETWORK][1], data, res);
+						if (res > 0)
+							writeres = write(fc->fc_socket[EB_FAST_TO_NETWORK][1], data, res);
+
+						if (res_ssh_stderr > 0)
+							writeres_ssh_stderr = write(fc->fc_socket[EB_FAST_TO_NETWORK][1], data_ssh_stderr, res_ssh_stderr);
+
 						pthread_cond_signal(&(fc->fast_wake[EB_FAST_TO_NETWORK]));
+						pthread_cond_signal(&(fc->fast_wake[EB_FAST_TO_SERVER])); /* In case this helps it look for more stuff from the other end */
 					}
 					else
 					{
-						writeres = write(sock, data, res);
+						if (is_ssh)
+							writeres = libssh2_channel_write(fc->ssh_channel, data, res);
+						else
+						{
+							writeres = write(sock, data, res);
+							fprintf (stderr, "\n\n*** Wrote %d bytes to destination (result %d)\n\n", res, writeres);
+						}
 					}
 
-					if (writeres < 0)
+					if (writeres < 0 || writeres_ssh_stderr < 0)
 						eb_debug (0, 2, "FAST", "%-8s %3d.%3d from %3d.%3d FAST server encoutered error writing to %s (%s)", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, (count == 0 ? "Econet" : "distant"), strerror(errno));
 				}
 				else if (res < 0 && errno == EWOULDBLOCK)
 				{
 					/* do nothing */
 				}
-				else if (res < 0)
+				else if (res < 0 || res_ssh_stderr < 0)
 				{	
 					eb_debug (0, 2, "FAST", "%-8s %3d.%3d from %3d.%3d FAST server encoutered error reading %s (%s)", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, (count == 0 ? "distant" : "Econet"), strerror(errno));
 					return;
@@ -580,19 +985,15 @@ void eb_fast_run_connection (struct __eb_fast_client *fc, int sock, uint8_t is_s
 			}
 		}
 			
-		p[0].fd = sock;
-		p[0].revents = 0;
-		p[0].events = POLLIN | POLLHUP;
-	
-		p[1].fd = fc->fc_socket[EB_FAST_TO_SERVER][0];
-		p[1].revents = 0;
-		p[1].events = POLLIN | POLLHUP;
+		if (is_ssh && libssh2_channel_eof(fc->ssh_channel))
+			break;
 
 	}
 
 	fcntl(fc->fc_socket[EB_FAST_TO_SERVER][0], F_SETFL, fcntl(fc->fc_socket[EB_FAST_TO_SERVER][0], F_GETFL) & ~O_NONBLOCK);
 	fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) & ~O_NONBLOCK);
 
+	return;
 }
 
 /* Repeatedly display menu until quit */
@@ -714,25 +1115,19 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 	
 			if (fc->menu_current->item->next) 
 			{
-				struct pollfd p;
-				int pollreturn;
+				int		k; 
 
 				f_printf (fc, "\r\nSelect? ");
 
-				p.fd = fc->fc_socket[EB_FAST_TO_SERVER][0];
-				p.revents = 0;
-				p.events = POLLIN | POLLHUP;
+				k = eb_fast_getc(fc, fc->fast_timeout);
 
-				pollreturn = poll(&p, 1, fc->fast_timeout);
-
-				if (pollreturn)
-					read(fc->fc_socket[EB_FAST_TO_SERVER][0], &key, 1);
-				else /* Timeout */
+				if (k == -2) /* Disconnect */
 				{
 					eb_fast_send_control(fc, EB_FAST_OP_DISCONNECT);
 					fm_exit = 1;
 				}
-
+				else if (k > 0) /* Key, not timeout */
+					key = k;
 			}
 			else
 			{
@@ -879,6 +1274,10 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 
 								tcgetattr(conn, &t);
 								
+								/* Echo etc. */
+
+								t.c_lflag &= ~(ISIG | ICANON | ECHO);
+
 								/* Parity */
 
 								t.c_cflag &= ~ (PARENB | PARODD); /* None is the default */
@@ -902,9 +1301,45 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 								if (i->fm_serial.fm_stopbits == 2)
 									t.c_cflag |= CSTOPB;
 
+								t.c_oflag = 0; // No remap
+								t.c_cc[VMIN] = 0; // No block
+								t.c_cc[VTIME] = 5; // 0.5s timeout
+
+								t.c_cflag &= ~CRTSCTS; // Disable RTS/CTS
+
 								/* Baud rate */
 
-								cfsetspeed(&t, i->fm_serial.fm_speed);
+								switch (i->fm_serial.fm_speed) {
+									case 1200:
+										cfsetspeed(&t, B1200);
+										break;
+									case 2400:
+										cfsetspeed(&t, B2400);
+										break;
+									case 4800:
+										cfsetspeed(&t, B4800);
+										break;
+									case 9600:
+										cfsetspeed(&t, B9600);
+										break;
+									case 19200:
+										cfsetspeed(&t, B19200);
+										break;
+									case 38400:
+										cfsetspeed(&t, B38400);
+										break;
+									case 57600:
+										cfsetspeed(&t, B57600);
+										break;
+									case 115200:
+										cfsetspeed(&t, B115200);
+										break;
+									case 230400:
+										cfsetspeed(&t, B230400);
+										break;
+									default: cfsetspeed(&t, B1200); /* Default */
+										 break;
+								} 
 
 								tcsetattr(conn, TCSANOW, &t);
 
@@ -915,6 +1350,7 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 
 								eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Serial connection to %s opened %s", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_serial.fm_device, connstring);
 
+								f_printf (fc, "Connected to %s\n\r", i->fm_serial.fm_device);
 								eb_fast_run_connection (fc, conn, 0);
 
 								eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Serial connection to %s closed", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_serial.fm_device);
@@ -926,8 +1362,41 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 								fc->menu_current = fc->menu_home;
 
 							} break;
-						/* Unimplemented functions */
 						case EB_FAST_MENU_SSH: /* Connect over SSH */
+							{
+								uint8_t res;
+								if (!(res = eb_fast_ssh_connect(fc, i)))
+								{
+									eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - SSH connection to %s",
+											eb_type_str(fc->parent->type),
+											fc->parent->net,
+											fc->parent->local.stn,
+											fc->net, 
+											fc->stn,
+											i->fm_ssh.fm_host);
+									eb_fast_run_connection (fc, fc->ssh_sock, 1);
+									libssh2_channel_close(fc->ssh_channel);
+									if (fc->ssh_channel)
+									{
+										libssh2_channel_free(fc->ssh_channel);
+										fc->ssh_channel = NULL;
+									}
+								}
+								else
+								{
+									eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - FAILED SSH connection to %s (%s)",
+											eb_type_str(fc->parent->type),
+											fc->parent->net,
+											fc->parent->local.stn,
+											fc->net, 
+											fc->stn,
+											i->fm_ssh.fm_host,
+											eb_fast_ssh_strerr(res));
+									f_printf (fc, "\n\rUnable to connect: %s\n\r\n", eb_fast_ssh_strerr(res));
+								}
+
+							} break;
+						/* Unimplemented functions */
 						case EB_FAST_MENU_FSSTOPSTART: /* Fileserver function */
 							{
 								eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Request unimplemented function %02X", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_type);
@@ -1080,9 +1549,12 @@ void * eb_fast_io_handler_to_network (void * fc)
 		gettimeofday(&now, 0);
 		last_tx.tv_sec = last_tx.tv_usec = 0;
 
-		if (!(me->pt_len[EB_FAST_TO_NETWORK] > 0 && me->fast_client_ready && timediffmsec(&last_tx, &now) < EB_FAST_OUTPUTWAIT) && pthread_cond_timedwait (&(me->fast_wake[EB_FAST_TO_NETWORK]), &(me->fast_io_mutex[EB_FAST_TO_NETWORK]), &t) < 0) /* Wait if (i) nothing waiting to send to net, or client not ready, or last transmission was less than OUTPUTWAIT ms ago (to minimize number of small packets) */
-		{
-			eb_debug (1, 0, "FAST", "Fatal error doing timewait on fast_wake[TO_NETWORK]");
+		if (!(me->pt_len[EB_FAST_TO_NETWORK] > 0 && me->fast_client_ready))
+		{	
+			if (pthread_cond_timedwait(&(me->fast_wake[EB_FAST_TO_NETWORK]), &(me->fast_io_mutex[EB_FAST_TO_NETWORK]), &t) < 0)
+			{
+				eb_debug (1, 0, "FAST", "Fatal error doing timewait on fast_wake[TO_NETWORK]");
+			}
 		}
 
 		if (me->fast_exit) /* quit */
@@ -1572,6 +2044,8 @@ void eb_port_a0_handler (struct __econet_packet_aun *p, uint16_t length, void *d
 
 	eb_fast_send_control(fc, EB_FAST_OP_DATARQ); /* Ask client for more data */
 
-	EB_FAST_WAKE_SERVER(fc); /* Wake up the IO thread */
+	//EB_FAST_WAKE_SERVER(fc); /* Wake up the IO thread */
+	pthread_cond_signal(&(fc->fast_wake[EB_FAST_TO_NETWORK]));
+	pthread_cond_signal(&(fc->fast_wake[EB_FAST_TO_SERVER]));
 }
 
