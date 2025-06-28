@@ -883,18 +883,39 @@ char * eb_fast_ssh_strerr(uint8_t res)
 }
 /* Mediate traffic between sock -> fc->fc_socket[EB_FAST_TO_NETWORK][1]   and fc->fc_socket[EB_FAST_TO_SERVER][0] -> sock */
 
-void eb_fast_run_connection (struct __eb_fast_client *fc, int sock, uint8_t is_ssh)
+void eb_fast_run_connection (struct __eb_fast_client *fc, int sock, uint8_t type)
 {
 
 	struct pollfd	p[2];
 	int	pollres;
+	uint8_t	is_ssh = 0, is_serial = 0, is_tcp = 0;
+	uint8_t quit = 0;
 
 	fcntl(fc->fc_socket[EB_FAST_TO_SERVER][0], F_SETFL, fcntl(fc->fc_socket[EB_FAST_TO_SERVER][0], F_GETFL) | O_NONBLOCK);
 	fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) | O_NONBLOCK);
 
-	while (1)
+	switch (type)
+	{
+		case 0:
+			is_tcp = 1;
+			break;
+		case 1:
+			is_ssh = 1;
+			break;
+		case 2:
+			is_serial = 1;
+			break;
+	}
+
+	while (!quit)
 	{
 
+		char 	data[128];
+		char	data_ssh_stderr[128];
+		int	res, res_ssh_stderr;
+		
+		res = res_ssh_stderr = 0;
+		
 		p[0].fd = sock;
 		p[0].revents = 0;
 		p[0].events = POLLIN | POLLHUP;
@@ -927,10 +948,6 @@ void eb_fast_run_connection (struct __eb_fast_client *fc, int sock, uint8_t is_s
 		{
 			if (p[count].events & POLLIN)
 			{
-				char 	data[128];
-				char	data_ssh_stderr[128];
-				int	res = 0, res_ssh_stderr = 0;
-		
 				if (count == 0)
 				{
 					if (is_ssh)
@@ -953,7 +970,7 @@ void eb_fast_run_connection (struct __eb_fast_client *fc, int sock, uint8_t is_s
 						if (res > 0)
 							writeres = write(fc->fc_socket[EB_FAST_TO_NETWORK][1], data, res);
 
-						if (res_ssh_stderr > 0)
+						if (count == 0 && res_ssh_stderr > 0)
 							writeres_ssh_stderr = write(fc->fc_socket[EB_FAST_TO_NETWORK][1], data_ssh_stderr, res_ssh_stderr);
 
 						pthread_cond_signal(&(fc->fast_wake[EB_FAST_TO_NETWORK]));
@@ -966,7 +983,6 @@ void eb_fast_run_connection (struct __eb_fast_client *fc, int sock, uint8_t is_s
 						else
 						{
 							writeres = write(sock, data, res);
-							fprintf (stderr, "\n\n*** Wrote %d bytes to destination (result %d)\n\n", res, writeres);
 						}
 					}
 
@@ -977,14 +993,28 @@ void eb_fast_run_connection (struct __eb_fast_client *fc, int sock, uint8_t is_s
 				{
 					/* do nothing */
 				}
-				else if (res < 0 || res_ssh_stderr < 0)
+				else if (res < 0 || (count == 0 &&  res_ssh_stderr < 0))
 				{	
 					eb_debug (0, 2, "FAST", "%-8s %3d.%3d from %3d.%3d FAST server encoutered error reading %s (%s)", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, (count == 0 ? "distant" : "Econet"), strerror(errno));
 					return;
 				}
 			}
+
+			if (count == 1 && is_serial && res > 0)
+			{
+				/* Look for Ctrl-@ to disconnect */
+	
+				uint8_t	c;
+	
+				for (c = 0; c < res; c++)
+					if (data[c] == 0x00) /* ctrl-@ */
+						quit = 1;
+	
+			}
+
 		}
 			
+
 		if (is_ssh && libssh2_channel_eof(fc->ssh_channel))
 			break;
 
@@ -1402,8 +1432,8 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 
 								eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Serial connection to %s opened %s", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_serial.fm_device, connstring);
 
-								f_printf (fc, "Connected to %s\n\r", i->fm_serial.fm_device);
-								eb_fast_run_connection (fc, conn, 0);
+								f_printf (fc, "Connected to %s (%d baud)\n\r(Ctrl-@ to disconnect)\n\r\n", i->fm_serial.fm_device, i->fm_serial.fm_speed);
+								eb_fast_run_connection (fc, conn, 2);
 
 								eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Serial connection to %s closed", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_serial.fm_device);
 
