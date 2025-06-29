@@ -888,7 +888,7 @@ void eb_fast_run_connection (struct __eb_fast_client *fc, int sock, uint8_t type
 
 	struct pollfd	p[2];
 	int	pollres;
-	uint8_t	is_ssh = 0, is_serial = 0, is_tcp = 0;
+	uint8_t	is_ssh = 0, is_serial = 0;
 	uint8_t quit = 0;
 
 	fcntl(fc->fc_socket[EB_FAST_TO_SERVER][0], F_SETFL, fcntl(fc->fc_socket[EB_FAST_TO_SERVER][0], F_GETFL) | O_NONBLOCK);
@@ -896,9 +896,6 @@ void eb_fast_run_connection (struct __eb_fast_client *fc, int sock, uint8_t type
 
 	switch (type)
 	{
-		case 0:
-			is_tcp = 1;
-			break;
 		case 1:
 			is_ssh = 1;
 			break;
