@@ -62,6 +62,9 @@ setuid:		install-module install-hp-utilities
 	-sudo chmod u+s /usr/local/sbin/econet-hpbridge
 	-sudo systemctl start econet-hpbridge
 
+setcap:	install-hp-utilities
+	-sudo setcap CAP_NET_RAW=ep /usr/local/sbin/econet-hpbridge
+
 clean:
 	cd module ; make clean
 	cd utilities ; make clean
