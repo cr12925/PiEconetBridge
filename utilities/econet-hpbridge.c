@@ -3815,7 +3815,8 @@ uint8_t eb_firewall_inner (struct __eb_fw_chain *chain, struct __econet_packet_a
 
 	}
 
-	eb_debug (0, 3, "FW", "FW       %3d.%3d from %3d.%3d eb_firewall_inner processing chain %s returned %s: P:&%02X, C:&%02X, Seq:&%08X", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, chain->fw_chain_name, (result == EB_FW_ACCEPT ? "ACCEPT" : (result == EB_FW_REJECT ? "REJECT" : "NO MATCH")), p->p.port, p->p.ctrl, p->p.seq);
+	if (!EB_CONFIG_DISABLE_FW_DEBUG)
+		eb_debug (0, 3, "FW", "FW       %3d.%3d from %3d.%3d eb_firewall_inner processing chain %s returned %s: P:&%02X, C:&%02X, Seq:&%08X", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, chain->fw_chain_name, (result == EB_FW_ACCEPT ? "ACCEPT" : (result == EB_FW_REJECT ? "REJECT" : "NO MATCH")), p->p.port, p->p.ctrl, p->p.seq);
 
 	return result;
 
@@ -3838,7 +3839,7 @@ uint8_t eb_firewall (struct __eb_fw_chain *chain, struct __econet_packet_aun *p)
 	if (result == EB_FW_NOMATCH)
 		result = chain->fw_default;
 
-	if (result == EB_FW_REJECT)
+	if (result == EB_FW_REJECT && !(EB_CONFIG_DISABLE_FW_DEBUG))
 		eb_debug (0, 2, "FW", "FW       %3d.%3d from %3d.%3d Firewall chain %s dropped traffic: P:&%02X, C:&%02X, Seq:&%08X (default = %02X)", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, chain->fw_chain_name, p->p.port, p->p.ctrl, p->p.seq, chain->fw_default);
 
 	return result;
@@ -10992,6 +10993,11 @@ int eb_parse_json_config(struct json_object *jc)
                         if (strchr(opt, 'O'))        EB_CONFIG_PKT_DUMP_OPTS |= EB_PKT_DUMP_POST_O;
 		}
  
+		json_object_object_get_ex(jgen, "disable-fw-debug", &j);
+
+		if (j && json_object_get_boolean(j))
+			EB_CONFIG_DISABLE_FW_DEBUG = 1;
+
 		json_object_object_get_ex(jgen, "aun-gateway", &j);
 
 		if (j)
@@ -12868,6 +12874,7 @@ int main (int argc, char **argv)
 	EB_CONFIG_GATEWAY_IP_ADDRESS = 0; // 0 = Disabled
 	EB_CONFIG_GATEWAY_PORT = 0; // Just initialize
 	EB_CONFIG_GATEWAY_SOCKET = -1; // Rogue - means not open
+	EB_CONFIG_DISABLE_FW_DEBUG = 0; // Enable FW debug by default
 
 	strcpy (config_path, "/etc/econet-gpio/econet-hpbridge.cfg");
 #ifdef EB_JSONCONFIG
@@ -12937,6 +12944,7 @@ int main (int argc, char **argv)
 #else
 		{"XXXX-json-config-write-disabled", 		0,	0},
 #endif
+		{"disable-fw-debug",	0,			0,	0},	
 		{0, 			0,			0,	0 }
 	};
 
@@ -13144,6 +13152,7 @@ int main (int argc, char **argv)
 					case 28:	EB_CONFIG_NOBRIDGEANNOUNCEDEBUG = 1; EB_CONFIG_NOKEEPALIVEDEBUG = 1; break;
 					case 29:	EB_CONFIG_FS_STATS_PORT = atoi(optarg); break;
 					//case 30:	strncpy(jsonconfigout_path, optarg, 255); break;
+					case 31:	EB_CONFIG_DISABLE_FW_DEBUG = 1; break;
 				}
 			} break;
 			//case 'c':	strncpy(config_path, optarg, 255); break;

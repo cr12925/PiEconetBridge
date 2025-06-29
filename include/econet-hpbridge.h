@@ -1064,6 +1064,7 @@ struct __eb_config {
 	in_addr_t	gateway_address; // Set if the AUN-extended gateway is enabled (for BeebEm, initially) - stored in network byte order
 	uint16_t	gateway_port; // UDP port number of gateway, in network byte order
 	int		gateway_socket; // UDP Socket on which we operate the gateway
+	uint8_t		disable_fw_debug; // Turns off FW debug
 };
 
 /* Global debug vars */
@@ -1125,6 +1126,7 @@ struct __eb_config {
 #define EB_CONFIG_GATEWAY_IP_ADDRESS	(config.gateway_address)
 #define EB_CONFIG_GATEWAY_PORT		(config.gateway_port)
 #define EB_CONFIG_GATEWAY_SOCKET	(config.gateway_socket)
+#define EB_CONFIG_DISABLE_FW_DEBUG	(config.disable_fw_debug)
 
 // Printer status
 
