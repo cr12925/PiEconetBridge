@@ -37,8 +37,12 @@
 #include <unistd.h>
 #include <poll.h>
 #include <netinet/in.h>
+#include <netinet/ip.h>
 #include <netinet/tcp.h>
+#include <netinet/udp.h>
+#include <netinet/ether.h>
 #include <arpa/inet.h>
+#include <net/if.h>
 #include <netdb.h>
 #include <errno.h>
 #include <endian.h>
@@ -51,8 +55,11 @@
 #include <getopt.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
+#include <linux/if_packet.h>
 #include <signal.h>
 #include <termios.h>
+#include <ifaddrs.h>
+
 
 #include <openssl/evp.h>
 #include <openssl/aes.h>
@@ -136,6 +143,7 @@
 /* Some port numbers - others are defined below */
 
 #define EB_PORT_REMOTE			0x93
+
 /* Defined in the fs-bridge-common header #define EB_PORT_FS		0x99 */
 #define EB_PORT_TRACE			0x9B
 #define EB_PORT_BRIDGE			0x9C
@@ -152,17 +160,26 @@
 #define EB_PORT_PS_DATA			0xD1
 #define EB_PORT_IP			0xD2
 
-/* Broadcast receiver addresses */
+/* Broadcast interfaces.
+ *
+ * We need to know where they are because
+ * people (quite sensibly) put virtual addresses 
+ * on their loopback interface for the purposes
+ * of exposing to AUN the various devices they
+ * can see on the network. However, /dev/lo cannot
+ * broadcast, so those exposures cannot send
+ * local network AUN broadcast traffic. Instead
+ * what we do is collate a list of interfaces that
+ * *can* broadcast, and when we need to send a
+ * broadcast UDP datagram, we construct it at the 
+ * IP layer, calculate the UDP checksum etc.
+ * and dump it straight on the interface ourselves.
+ * We do this whether the exposure is on a 
+ * broadcast interface or not, because it
+ * makes no difference.
+ */
 
-/* Disused
-struct __eb_bcast_address_list {
-	in_addr_t	address;
-	uint8_t		masklen;
-	struct __eb_bcast_address_list 	*next;
-};
-
-extern struct __eb_bcast_address_list * eb_bcast_addresses;
-*/
+struct ifaddrs	*eb_interface_list;
 
 /* 
  * struct containing the data elements of 
@@ -324,6 +341,7 @@ struct __eb_aun_exposure {
 	in_addr_t		addr; // Local address of hostname of exposure
 	int			port; // Local port we are listening on
 	uint8_t			active; // 0 = inactive; 1 = permanently active (exposed host is permanently defined); 2 = temporarily active (exposed host is known over a bridge and may be removed) - see #defines above
+	uint8_t			broadcastable; // 1 means this exposure is on an interface we can broadcast on
 	pthread_mutex_t		statsmutex; // Lock on the stats values - they are written to and read by different threads
 	uint64_t		b_in, b_out; // Interface exposure state
 	pthread_mutex_t		exposure_mutex; // Used when the socket int is being updated by the starter thread, or when the active flag is being altered/read
@@ -895,6 +913,10 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			struct __eb_notify	*notify; // List of stuff received via *notify to a local server
 			pthread_mutex_t		notify_mutex; // Mutex to lock the notify list
 			pthread_t		notify_thread; // Notify watcher thread for this device
+
+			// Teletext server
+			char 			*teletext_root; // Root dir (which can be part of PiFS storage) containing one dir per "channel" (e.g. "1", "2", etc.) and then files named with 3 digit page numbers thereunder - e.g. "100".
+			uint8_t			teletext_active; // 0 - means the server stops responding to requests and does not broadcast. 1 is the opposite.
 
 		} local;
 

@@ -60,10 +60,11 @@ pthread_mutex_t	loopdetect_mutex;
 void *		eb_loopdetect_thread(void *);
 
 /* Broadcast handling */
-struct __eb_bcast_address_list *eb_bcast_addresses = NULL; /* Initialize - none to start with */
+//struct __eb_bcast_address_list *eb_bcast_addresses = NULL; /* Initialize - none to start with */
 void eb_broadcast_handler (struct __eb_device *, struct __econet_packet_aun *, uint16_t);
 pthread_t	eb_bcast_listener_thread;
 pthread_t	eb_gateway_listener_thread;
+int		eb_broadcast_socket = -1; /* If we open a packet socket, this will change, so test for -1 tells us whether we can broadcast other than on the interface */
 
 /* Clock speed reporting to user stations */
 
@@ -1218,6 +1219,7 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_FAST, NULL, NULL); /* *FAST */
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_FINDSERVER, NULL, NULL); /* FindServer */
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_IP, NULL, NULL); /* IP/Econet */
+			EB_PORT_SET(existing, reserved_ports, EB_PORT_TELETEXT_S_CMD, NULL, NULL); /* Teletext commands from clients */
 
 			/* Include the FAST data handler */
 			EB_PORT_SET(existing, ports, EB_PORT_FAST, eb_port_a0_handler, existing);
@@ -2667,9 +2669,7 @@ void * eb_broadcast_listener (void *p)
 
 	uint16_t	numaddrs = 0;
 	struct pollfd	*pfd_initial, *pfd;
-	struct sockaddr_in	localaddr;//, remoteaddr;
-	//socklen_t	remoteaddr_len;
-	//struct __econet_packet_aun incoming;
+	struct sockaddr_in	localaddr;
 	int	broadcast = 1;
 
 	eb_debug (0, 1, "BCAST", "AUN              AUN Broadcast listener starting");
@@ -2763,7 +2763,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 				r->p.dststn = p->p.srcstn;
 				r->p.aun_ttype = ECONET_AUN_DATA;
 				r->p.port = p->p.data[0];
-				r->p.ctrl = BRIDGE_REPLY_GW;
+				r->p.ctrl = BRIDGE_REPLY_GW & 0x7f;
 				r->p.seq = 0x0;
 				r->p.padding = 0x0;
 
@@ -3010,19 +3010,28 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 			socklen_t		bcast_size;
 			int			tx;
 
-			bcast.sin_family = AF_INET;
-			bcast.sin_port = htons(32768); // All AUN broadcasts are on 32768
-			bcast.sin_addr.s_addr = 0xFFFFFFFF; // INADDR_BROADCAST;
-			bcast_size = sizeof(struct sockaddr_in);
-			p->p.ctrl &= 0x7F; // Clear high bit
-			if ((tx = sendto (e->socket, &(p->p.aun_ttype), length+8, MSG_DONTWAIT, &bcast, bcast_size)) < 0)
-				eb_debug (0, 1, "BCAST", "BCAST    255.255 from %3d.%3d Transmission error: %s",
-						p->p.srcnet, p->p.srcstn, strerror(errno));
+			if (e->broadcastable) /* Source IP address is on an interface we can broadcast on */
+			{
+				bcast.sin_family = AF_INET;
+				bcast.sin_port = htons(32768); // All AUN broadcasts are on destination port 32768
+				bcast.sin_addr.s_addr = 0xFFFFFFFF; // INADDR_BROADCAST;
+				bcast_size = sizeof(struct sockaddr_in);
+				p->p.ctrl &= 0x7F; // Clear high bit
+				if ((tx = sendto (e->socket, &(p->p.aun_ttype), length+8, MSG_DONTWAIT, &bcast, bcast_size)) < 0)
+					eb_debug (0, 1, "BCAST", "BCAST    255.255 from %3d.%3d Transmission error: %s",
+							p->p.srcnet, p->p.srcstn, strerror(errno));
 #if 0
-			else
-				eb_debug (0, 2, "BCAST", "BCAST    255.255 from %3d.%3d Send %d bytes",
-						p->p.srcnet, p->p.srcstn, tx);
+				else
+					eb_debug (0, 2, "BCAST", "BCAST    255.255 from %3d.%3d Send %d bytes",
+							p->p.srcnet, p->p.srcstn, tx);
 #endif
+			}
+			else
+			{
+				/* TO DO - Fudge up a raw IP packet, when we've managed to get the thing to open a packet socket,
+				 * and spit the broadcast out of every interface we can broadcast on.
+				 */
+			}
 		}
 
 	}
@@ -4083,6 +4092,7 @@ void eb_setup_aun_listener_socket (void * exposure)
 	struct __eb_aun_exposure	*e;	// This exposure
 	struct addrinfo		hints;
 	struct sockaddr_in	service;
+	struct ifaddrs		*a;
 
 	char 			portname[6];
 
@@ -4117,14 +4127,76 @@ void eb_setup_aun_listener_socket (void * exposure)
 	if (bind(e->socket, (struct sockaddr *) &service, sizeof(service)) != 0)
 		eb_debug (1, 0, "LISTEN", "%-8s         Unable to bind AUN listener socket station %d.%d (%s)", "AUN", e->net, e->stn, strerror(errno));
 
+	/* See if this interface can broadcast and flag it if so */
+
+	e->broadcastable = 0;
+
+	a = eb_interface_list;
+
+#define IFA_FLAGS_REQD	(IFF_UP | IFF_BROADCAST | IFF_RUNNING)
+
+	while (a)
+	{
+#if 0
+		fprintf (stderr, "Searching for %d.%d.%d.%d, intf=%s, a = %p, %s, %s, %s, %s\n",
+					(e->addr & 0xff000000) >> 24,
+					(e->addr & 0x00ff0000) >> 16,
+					(e->addr & 0x0000ff00) >> 8,
+					(e->addr & 0xff),
+					a->ifa_name,
+					a, 
+					(a->ifa_addr && a->ifa_addr->sa_family == AF_INET) ? "IPv4" : "Not IPv4",
+					(a->ifa_flags & IFF_UP) ? "UP" : "DOWN",
+		       			(a->ifa_flags & IFF_RUNNING) ? "RUNNING" : "NOT RUNNING",
+					(a->ifa_flags & IFF_BROADCAST) ? "BROADCASTABLE" : "Not broadcastable"	);
+#endif
+
+		/* Find IPv4 interfaces which are UP, RUNNING and have a valid BROADCAST address */
+
+		if (a->ifa_addr && a->ifa_addr->sa_family == AF_INET && (a->ifa_flags & IFA_FLAGS_REQD) == IFA_FLAGS_REQD)
+		{
+			in_addr_t	interface_address, interface_mask;
+
+			if (a->ifa_addr && a->ifa_netmask)
+			{
+				interface_address = ((struct sockaddr_in *) a->ifa_addr)->sin_addr.s_addr;
+				interface_mask = ((struct sockaddr_in *) a->ifa_netmask)->sin_addr.s_addr;
+
+#if 0
+				if (((e->addr & 0xff000000) >> 24) != 172)
+					fprintf (stderr, "Seeing if %d.%d.%d.%d is broadcastable on %s, (addr is %p, netmask is %p), %08X : %08X/%08X\n",
+					(e->addr & 0xff000000) >> 24,
+					(e->addr & 0x00ff0000) >> 16,
+					(e->addr & 0x0000ff00) >> 8,
+					(e->addr & 0xff),
+					a->ifa_name, 
+					a->ifa_addr,
+					a->ifa_netmask,
+					htonl(e->addr),
+					interface_address,
+					interface_mask);
+#endif
+
+				if (	(htonl(e->addr) & interface_mask) == (interface_address & interface_mask)	)
+					break; /* Found - our address is on a broadcastable network */
+			}
+		}
+
+		a = a->ifa_next;
+	}
+
+	if (a) /* Found one */
+		e->broadcastable = 1;
+
 	if (e->addr)
-		eb_debug (0, 3, "LISTEN", "%-8s %3d.%3d Listener started on %d.%d.%d.%d:%d (fd %d)", "AUN", e->net, e->stn, 
+		eb_debug (0, 3, "LISTEN", "%-8s %3d.%3d Listener started on %d.%d.%d.%d:%d (fd %d) (broadcastable: %s)", "AUN", e->net, e->stn, 
 			(e->addr & 0xff000000) >> 24,
 			(e->addr & 0xff0000) >> 16,
 			(e->addr & 0xff00) >> 8,
 			(e->addr & 0xff),
 			e->port,
-			e->socket);
+			e->socket,
+			e->broadcastable ? "yes" : "no");
 	else
 		eb_debug (0, 3, "LISTEN", "%-8s %3d.%3d Listener started on *:%d (fd %d)", "AUN", e->net, e->stn, 
 			e->port,
@@ -4136,6 +4208,8 @@ void eb_setup_aun_listener_socket (void * exposure)
 		eb_debug (1, 0, "LISTEN", "%-8s         Unable to set broadcast option on socket for station %d.%d (%s)", "AUN", e->net, e->stn, strerror(errno));	
 
 	// No return - it'll kill the process if it can't listen
+	
+
 }
 
 /* Allocate a dynamic station device if one is available, return
@@ -13622,6 +13696,35 @@ int main (int argc, char **argv)
 		}
 	}
 
+	/* If we have any exposures, see if we can open a raw broadcast socket */
+
+	if (exposures)
+	{
+		if (getifaddrs(&eb_interface_list) == -1)
+			eb_debug (0, 1, "BCAST", "BCAST            Unable to get list of broadcastable interfaces - AUN broadcasts disabled");
+		else
+		{
+			
+			eb_broadcast_socket = socket(AF_PACKET, SOCK_RAW, IPPROTO_RAW);
+
+			if (eb_broadcast_socket == -1)
+			{
+				if (errno == EACCES) /* No cap_net_raw - try setuid */
+				{
+					if (seteuid(0)) /* Try as root */
+					{
+						eb_broadcast_socket = socket(AF_PACKET, SOCK_RAW, IPPROTO_RAW);
+						seteuid(getuid());
+					}
+				}
+			}
+	
+			if (eb_broadcast_socket == -1) /* Success */
+				eb_debug (0, 1, "BCAST", "BCAST            Unable to open raw socket for broadcast - AUN broadcasts disabled (%s)", strerror(errno));
+		}
+
+	}
+
 	{ // Start stats threads
 		
 		int err;
@@ -13686,7 +13789,7 @@ int main (int argc, char **argv)
 	{
 		int err;
 
-		if ((err = pthread_create(&eb_bcast_listener_thread, NULL,  eb_broadcast_listener, eb_bcast_addresses)))
+		if ((err = pthread_create(&eb_bcast_listener_thread, NULL,  eb_broadcast_listener, NULL)))
 			eb_debug (1, 0, "MAIN", "Thread creation for broadcast listener failed: %s", strerror(err));
 
 		eb_thread_started();
