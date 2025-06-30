@@ -60,11 +60,12 @@ pthread_mutex_t	loopdetect_mutex;
 void *		eb_loopdetect_thread(void *);
 
 /* Broadcast handling */
-//struct __eb_bcast_address_list *eb_bcast_addresses = NULL; /* Initialize - none to start with */
 void eb_broadcast_handler (struct __eb_device *, struct __econet_packet_aun *, uint16_t);
 pthread_t	eb_bcast_listener_thread;
 pthread_t	eb_gateway_listener_thread;
 int		eb_broadcast_socket = -1; /* If we open a packet socket, this will change, so test for -1 tells us whether we can broadcast other than on the interface */
+struct ifaddrs	*eb_interface_list;
+
 
 /* Clock speed reporting to user stations */
 
@@ -3026,12 +3027,87 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 							p->p.srcnet, p->p.srcstn, tx);
 #endif
 			}
-			else
+#if 0 /* Disabled in public dev version for now */
+			else if (eb_broadcast_socket != -1) /* We can do local broadcasts */
 			{
-				/* TO DO - Fudge up a raw IP packet, when we've managed to get the thing to open a packet socket,
-				 * and spit the broadcast out of every interface we can broadcast on.
-				 */
+				struct ifreq		if_idx, if_mac;
+				struct ether_header 	*eh;
+				struct iphdr		*iph;
+				struct udphdr		*udph;
+				struct sockaddr_ll	socket_addr;
+				struct ifaddrs		*a = eb_interface_list;
+				uint8_t			*buffer;
+				uint8_t			*packetdata;
+				uint16_t		bufflen;
+
+				bufflen = sizeof(struct ether_header) + sizeof(struct iphdr) + sizeof(struct udphdr) + length + 8;
+				buffer = eb_malloc(__FILE__, __LINE__, "BCAST", "New RAW broadcast packet", bufflen);
+
+				eh = (struct ether_header *) buffer;
+				iph = (struct iphdr *) (buffer + sizeof(struct ether_header));
+				udph = (struct udphdr *) (buffer + sizeof(struct ether_header) + sizeof(struct iphdr));
+				packetdata = (buffer + sizeof(struct ether_header) + sizeof(struct iphdr) + sizeof(struct udphdr));
+
+				memcpy (packetdata, &(p->p.aun_ttype), length + 8);
+				memset (eh, 0, sizeof(struct ether_header));
+				memset (iph, 0, sizeof(struct iphdr));
+				memset (udph, 0, sizeof(struct udphdr));
+
+				eh->ether_type = htons(ETH_P_IP);
+				memset (&(eh->ether_dhost[0]), 0xFF, 6); /* Global broadcast */
+				/* Source address gets filled in per interface */
+
+				/* Construct IP header */
+
+				iph->ihl = 5;
+				iph->version = 4;
+				iph->tos = 16; /* Low delay */
+				iph->id = htons(54321); /* WHAT IS THIS? */
+				iph->ttl = 1;
+				iph->protocol = IPPROTO_UDP; /* 17 */
+				iph->saddr = htonl(e->addr);
+				iph->daddr = INADDR_BROADCAST;
+				iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct udphdr) + length + 8);
+
+				/* TO DO - IP header Checksum */
+
+				/* Construct UDP header */
+
+				udph->source = htons(e->port);
+				udph->dest = htons(32768); /* All AUN broadcasts are to 32768 */
+				udph->check = 0; 
+				udph->len = htons(length + 8 + sizeof(struct udphdr));
+
+				socket_addr.sll_halen = ETH_ALEN;
+				socket_addr.sll_family = AF_PACKET;
+				socket_addr.sll_protocol = htons(ETH_P_IP);
+				
+				/* Still to fill in : sll_hatype (ARP type), sll_pkttype (?) */
+
+				memset (&(socket_addr.sll_addr[0]), 0xFF, 6); /* Broadcast */
+
+				while (a)
+				{
+					if (a->ifa_name && a->ifa_addr && a->ifa_netmask)
+					{
+						if (a->ifa_addr->sa_family == AF_INET && (a->ifa_flags & (IFF_UP && IFF_RUNNING && IFF_BROADCAST)) == (IFF_UP && IFF_RUNNING && IFF_BROADCAST))
+						{
+							/* TO DO -
+							 * Get the interface index and put it in socket_addr.
+							 * Get the source MAC address for the interface and put it in ether header
+							 * Send packet. 
+							 */
+
+							sendto(eb_broadcast_socket, buffer, bufflen, 0, (struct sockaddr *) &socket_addr, sizeof (struct sockaddr_ll)); /* We're not that bothered if it works or not... */
+						}
+					}
+
+					a = a->ifa_next;
+				}
+
+				eb_free (__FILE__, __LINE__, "BCAST", "Free RAW broadcast packet", buffer);
 			}
+#endif
 		}
 
 	}
