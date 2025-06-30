@@ -179,7 +179,7 @@
  * makes no difference.
  */
 
-struct ifaddrs	*eb_interface_list;
+extern struct ifaddrs	*eb_interface_list;
 
 /* 
  * struct containing the data elements of 
