@@ -2432,13 +2432,51 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 			//usleep (5 * 1000 * farside); // Delay
 
 			eb_dump_packet (source, EB_PKT_DUMP_PRE_I, reply, 2);
-			eb_enqueue_input (source, reply, 2);
-			pthread_cond_signal(&(source->qwake));
+
+			if (source->type != EB_DEF_AUN)
+			{
+				eb_enqueue_input (source, reply, 2);
+				pthread_cond_signal(&(source->qwake));
+			}
+			else if (source->aun->uses_gateway)
+			{
+				if (EB_CONFIG_GATEWAY_SOCKET != -1)
+				{
+					/* Spit out of gateway and eb_free() */
 	
-			if (ctrl == BRIDGE_WHATNET)
-				gettimeofday(&(source->wire.last_bridge_whatnet[stn]), NULL);
-			else
-				gettimeofday(&(source->wire.last_bridge_isnet[stn]), NULL);
+					struct sockaddr_in	dest;
+					int r;
+	
+					dest.sin_family = AF_INET;
+					dest.sin_port = htons(source->aun->port);
+					dest.sin_addr.s_addr = htonl(source->aun->addr);
+	
+					r = sendto (EB_CONFIG_GATEWAY_SOCKET, reply, 14, MSG_DONTWAIT, (struct sockaddr *) &dest, sizeof(struct sockaddr_in));
+	
+					if (r < 0)
+						eb_debug (0, 1, "BRIDGE", "%-8s %3d     Failed tx of What/IsNet reply from %3d.%3d to %3d.%3d (%s)", eb_type_str(source->type), source->net, farside, 0, net, stn, strerror(errno));
+	
+				}
+
+				eb_free(__FILE__, __LINE__, "BRIDGE", "Free What/IsNet reply being sent to AUN station", reply);
+
+				/* NB, we do not attempt to send these What/IsNet replies to AUN unless 
+				 * it is an AUN station using our gateway. That's because the What/IsNet
+				 * replies come from a bridge internal address (X.0), which is not exposed
+				 * and which no AUN machine will expect traffic from. If it's an AUN
+				 * box using our gateway, then we don't need an exposure - we can
+				 * just blat it out (literally) into the ether with the right
+				 * addressing on it - as above. 
+				 */
+			}
+	
+			if (source->type == EB_DEF_WIRE)
+			{
+				if (ctrl == BRIDGE_WHATNET)
+					gettimeofday(&(source->wire.last_bridge_whatnet[stn]), NULL);
+				else
+					gettimeofday(&(source->wire.last_bridge_isnet[stn]), NULL);
+			}
 
 			eb_debug (0, 2, "BRIDGE", "%-8s %3d     What/IsNet reply from %3d.%3d to %3d.%3d", eb_type_str(source->type), source->net, farside, 0, net, stn);
 		}
