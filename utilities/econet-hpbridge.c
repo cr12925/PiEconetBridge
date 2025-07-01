@@ -2787,7 +2787,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 		{
 			// This is a keepalive - ignore it. So long as it got marked as a received packet, it's fine
 		}
-		else if (p->p.ctrl == BRIDGE_REQUEST_GW) // AUN client asking where our gateway is
+		else if (source->type == EB_DEF_AUN && p->p.ctrl == BRIDGE_REQUEST_GW) // AUN client asking where our gateway is
 		{
 			if (EB_CONFIG_GATEWAY_SOCKET != -1) /* We actually *have* a gateway operating */
 			{
@@ -2821,6 +2821,8 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 				sendto (EB_CONFIG_GATEWAY_SOCKET, r, 12, MSG_DONTWAIT, &dest, sizeof(struct sockaddr_in));
 
 				eb_free(__FILE__, __LINE__, "GATEWAY", "Gateway responder packet", r);
+
+				return;
 			}
 			else
 				eb_debug (0, 3, "GATEWAY", "GATEWAY  %3d.%3d              Ignored gateway request broadcast - no gateway configured", p->p.srcnet, p->p.srcstn);
@@ -2831,7 +2833,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 				eb_bridge_whatis_net (source, p->p.srcnet, p->p.srcstn, p->p.ctrl, p->p.data[6], p->p.data[7]);
 
 		}
-		else if ((p->p.ctrl & 0xFE) == BRIDGE_RESET) // Incoming reset or update
+		else if ((source->type == EB_DEF_TRUNK || source->type == EB_DEF_WIRE) && (p->p.ctrl & 0xFE) == BRIDGE_RESET) // Incoming reset or update
 		{
 
 			uint8_t		data_count, netlist_changed = 1; /* Starting assumption is the netlist will change, just in case */
