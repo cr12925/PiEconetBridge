@@ -4800,6 +4800,14 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 	if (eb_is_exposed_byip(addr.sin_addr.s_addr))
 		return;
 
+	/* If it's an unknown AUN type, ditch it */
+
+	if (incoming.p.aun_ttype > ECONET_AUN_MAXTYPE)
+	{
+		eb_debug (0, 3, "AUN", "%-8s         Traffic received from %s:%d - Unknown AUN packet type - dumped", "AUN", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+		return;
+	}
+
 	/* Insert the destination address if this was true AUN rather than 12-byte header on a gateway port */
 
 	if (!is_gateway && is_broadcast_listener)
@@ -4856,6 +4864,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 		incoming.p.ctrl |= 0x80;
 
 		/* See if we will accept this traffic from this source - dump it if not */
+
 
 		if ((fw_result = eb_firewall(source_device->fw_out, &incoming)) == EB_FW_REJECT) // fw_out because this is traffic coming *from* the AUN device. fw_in is for traffic going *to* it.
 		{
