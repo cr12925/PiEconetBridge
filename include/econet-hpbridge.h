@@ -369,6 +369,7 @@ struct __eb_aun_remote {
 	uint8_t		is_dynamic; // 1 = Available for dynamic use.
 	struct timeval	last_dynamic; // Last time we saw traffic on a dynamic host. If > 1 hour, dump it & reuse. Set to 0 on init so they get used.
 	uint8_t		uses_gateway; // 1 if all traffic via the magic AUN gateway
+	uint8_t		gateway_compatible; // 1 if we have responded to a gateway locator broadcast. This means we can send WhatNet/IsNet responses (which come from X.0, which are not exposed - so we can't send them to ordinary AUN clients that don't use the gateway BUT at the time an emulated Beeb sends a WhtNet query on reset, it hasn't sent any traffic through the gateway to cause "uses_gateway" to get set AND if we were to send gateway-format traffic to a non-gateway-aware client, it'll have four extra bytes the client will be confused by.
 	struct __eb_aun_remote	*next;
 };
 

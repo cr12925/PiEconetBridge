@@ -2438,7 +2438,7 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 				eb_enqueue_input (source, reply, 2);
 				pthread_cond_signal(&(source->qwake));
 			}
-			else if (source->aun->uses_gateway)
+			else if (source->aun->gateway_compatible)
 			{
 				if (EB_CONFIG_GATEWAY_SOCKET != -1)
 				{
@@ -2813,6 +2813,10 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 				eb_debug (0, 3, "GATEWAY", "GATEWAY  %3d.%3d from %3d.%3d Responded to gateway request broadcast", p->p.srcnet, p->p.srcstn, r->p.srcnet, r->p.srcstn);
 
 				eb_dump_packet (source, EB_PKT_DUMP_POST_O, r, 0);
+
+				/* Set source as gateway-compatiable so that WhatNet/IsNet replies can be sent - but only when traffic is received on the gw does it set uses_gateway, because that forces all reply traffic to be sent via the gw */
+
+				source->aun->gateway_compatible = 1;
 
 				sendto (EB_CONFIG_GATEWAY_SOCKET, r, 12, MSG_DONTWAIT, &dest, sizeof(struct sockaddr_in));
 
@@ -5597,7 +5601,7 @@ static void * eb_device_aun_sender (void *device)
 				/* Time out the uses_gateway if need be */
 
 				if (timediffmsec(&(o->destdevice->aun->last_dynamic), &now) > (EB_CONFIG_DYNAMIC_EXPIRY * 60 * 1000)) /* last_dynamic gets updated even for non-dynamic hosts, and we use it to time out gateway access */
-					o->destdevice->aun->uses_gateway = 0;
+					o->destdevice->aun->uses_gateway = o->destdevice->aun->gateway_compatible = 0;
 
 				if (!(exp || o->destdevice->aun->uses_gateway)  || (p->tx++ == EB_CONFIG_AUN_RETRIES)) /* Too many attempts - splice */
 				{
@@ -14483,7 +14487,7 @@ static void * eb_statistics (void *nothing)
 
 						switch (divert->type)
 						{
-							case EB_DEF_AUN:	stn = divert->aun->stn; if (divert->aun->port == -1) sprintf (info, "Inactive"); else sprintf(info, "%d.%d.%d.%d:%d", (divert->aun->addr & 0xff000000) >> 24, (divert->aun->addr & 0x00ff0000) >> 16, (divert->aun->addr & 0x0000ff00) >> 8, (divert->aun->addr & 0x000000ff), divert->aun->port); break;
+							case EB_DEF_AUN:	stn = divert->aun->stn; if (divert->aun->port == -1) sprintf (info, "Inactive"); else sprintf(info, "%d.%d.%d.%d:%d%s", (divert->aun->addr & 0xff000000) >> 24, (divert->aun->addr & 0x00ff0000) >> 16, (divert->aun->addr & 0x0000ff00) >> 8, (divert->aun->addr & 0x000000ff), divert->aun->port, ((divert->aun->gateway_compatible && !divert->aun->uses_gateway) ? "(GW primed)" : (divert->aun->uses_gateway ? "(GW Active)" : ""))); break;
 							case EB_DEF_LOCAL:	stn = divert->local.stn; sprintf(info, "%c%c%c", ((divert->local.printers) ? 'P' : ' '),
 								(fsop_is_enabled(divert->local.fs.server) ? 'F' : ' '),
 								((divert->local.ip.tunif[0] != '\0') ? 'I' : ' ')); break;
