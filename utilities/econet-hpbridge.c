@@ -1080,6 +1080,12 @@ struct __eb_device * eb_device_init (uint8_t net, uint16_t type, uint8_t config)
 		p->index = interface_index++;
 		p->im = NULL; /* No interface group by default */
 
+		/* 20250702 */
+		if (type == EB_DEF_WIRE)
+			memset(&(p->wire.divert), 0, sizeof(p->wire.divert));
+		else if (type == EB_DEF_NULL)
+			memset(&(p->null.divert), 0, sizeof(p->null.divert));
+
 		if (pthread_mutex_init(&(p->qmutex_in), NULL) == -1)
 			eb_debug (1, 0, "CONFIG", "Cannot initialize queue mutex inbound for net %d", net);
 
@@ -1192,6 +1198,7 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 	if (!existing) /* Need a new device */
 	{
 		existing = eb_device_init (0, newtype, 0);
+
 		if (type == EB_WIRE)
 			n->wire.divert[stn] = existing;
 		else	n->null.divert[stn] = existing;
@@ -1480,7 +1487,7 @@ struct __eb_device * eb_find_station_internal (uint8_t net, uint8_t stn)
 
 		old_result = result;
 
-		if (result->type == EB_DEF_NULL)
+		if (result->type == EB_DEF_NULL && result->null.divert[stn])
 			result = result->null.divert[stn]; // Which will be NULL if the station doesn't exist
 		else if (result->type == EB_DEF_WIRE && result->wire.divert[stn]) // Only if there's actually a divert on a wire
 			result = result->wire.divert[stn];
@@ -4846,6 +4853,16 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 	if (!is_broadcast_listener)
 		destdevice = eb_find_station (2, &incoming);
 	else	destdevice = NULL;
+
+	if (destdevice && destdevice->type == EB_DEF_AUN) /* This would be AUN going to AUN - dump it. We don't route that. */
+	{
+		eb_debug (0, 3, "AUN", "%-8s %3d.%3d from %3d.%3d Dropping local AUN to local AUN traffic",
+				incoming.p.dstnet,
+				incoming.p.dststn,
+				incoming.p.srcnet,
+				incoming.p.srcstn);
+		return;
+	}
 
 	/* So long as we know where it's going and where it's come from, we can process it, otherwise we drop it */
 
