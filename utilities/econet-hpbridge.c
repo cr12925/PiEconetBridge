@@ -65,6 +65,7 @@ pthread_t	eb_bcast_listener_thread;
 pthread_t	eb_gateway_listener_thread;
 int		eb_broadcast_socket = -1; /* If we open a packet socket, this will change, so test for -1 tells us whether we can broadcast other than on the interface */
 struct ifaddrs	*eb_interface_list;
+pthread_mutex_t	eb_interface_list_mutex = PTHREAD_MUTEX_INITIALIZER; /* Whilst this mutex is used to lock eb_interface_list, in practice the latter does not change at the moment. This is here so that we can have a thread listening for interface updates, which refreshes the interface list [other threads cannot reach (beery goodness)] */
 
 
 /* Clock speed reporting to user stations */
@@ -3078,18 +3079,21 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 							p->p.srcnet, p->p.srcstn, tx);
 #endif
 			}
-#if 0 /* Disabled in public dev version for now */
 			else if (eb_broadcast_socket != -1) /* We can do local broadcasts */
 			{
-				struct ifreq		if_idx, if_mac;
+#if 0 /* Disabled */
 				struct ether_header 	*eh;
 				struct iphdr		*iph;
 				struct udphdr		*udph;
 				struct sockaddr_ll	socket_addr;
-				struct ifaddrs		*a = eb_interface_list;
+				struct ifaddrs		*a;
 				uint8_t			*buffer;
 				uint8_t			*packetdata;
 				uint16_t		bufflen;
+				uint32_t		checksum;
+
+				pthread_mutex_lock (&eb_interface_list_mutex);
+				a = eb_interface_list;
 
 				bufflen = sizeof(struct ether_header) + sizeof(struct iphdr) + sizeof(struct udphdr) + length + 8;
 				buffer = eb_malloc(__FILE__, __LINE__, "BCAST", "New RAW broadcast packet", bufflen);
@@ -3115,12 +3119,24 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 				iph->tos = 16; /* Low delay */
 				iph->id = htons(54321); /* WHAT IS THIS? */
 				iph->ttl = 1;
+				iph->frag_off = 0;
 				iph->protocol = IPPROTO_UDP; /* 17 */
 				iph->saddr = htonl(e->addr);
 				iph->daddr = INADDR_BROADCAST;
 				iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct udphdr) + length + 8);
+				iph->check = 0;
 
-				/* TO DO - IP header Checksum */
+				/* IP header Checksum */
+
+				checksum = 0;
+
+				for (uint8_t ipc = sizeof(struct iphdr); ipc > 1; ipc -= 2)
+					checksum += * (uint16_t *) (iph + ipc);
+
+				while (checksum >> 16)
+					checksum = (checksum & 0xFFFF) + (checksum >> 16);
+
+				iph->check = (~checksum & 0xFFFF);
 
 				/* Construct UDP header */
 
@@ -3128,13 +3144,14 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 				udph->dest = htons(32768); /* All AUN broadcasts are to 32768 */
 				udph->check = 0; 
 				udph->len = htons(length + 8 + sizeof(struct udphdr));
+				udph->check = 0; /* Optional checksum, but we might do it later */
 
 				socket_addr.sll_halen = ETH_ALEN;
 				socket_addr.sll_family = AF_PACKET;
 				socket_addr.sll_protocol = htons(ETH_P_IP);
+				socket_addr.sll_hatype = ARPHRD_ETHER;
+				socket_addr.sll_pkttype = PACKET_HOST;
 				
-				/* Still to fill in : sll_hatype (ARP type), sll_pkttype (?) */
-
 				memset (&(socket_addr.sll_addr[0]), 0xFF, 6); /* Broadcast */
 
 				while (a)
@@ -3143,22 +3160,25 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 					{
 						if (a->ifa_addr->sa_family == AF_INET && (a->ifa_flags & (IFF_UP && IFF_RUNNING && IFF_BROADCAST)) == (IFF_UP && IFF_RUNNING && IFF_BROADCAST))
 						{
-							/* TO DO -
-							 * Get the interface index and put it in socket_addr.
-							 * Get the source MAC address for the interface and put it in ether header
-							 * Send packet. 
-							 */
 
-							sendto(eb_broadcast_socket, buffer, bufflen, 0, (struct sockaddr *) &socket_addr, sizeof (struct sockaddr_ll)); /* We're not that bothered if it works or not... */
+							if ((socket_addr.sll_ifindex = if_nametoindex(a->ifa_name)) != 0) /* We got an index */
+							{
+								eb_debug (0, 3, "BCAST", "BCAST    255.255 from %3d.%3d Transmit on %s (if_index %d)",
+									p->p.srcnet, p->p.srcstn, a->ifa_name, socket_addr.sll_ifindex);
+								sendto(eb_broadcast_socket, buffer, bufflen, 0, (struct sockaddr *) &socket_addr, sizeof (struct sockaddr_ll)); /* We're not that bothered if it works or not... */
+							}
 						}
 					}
 
 					a = a->ifa_next;
 				}
 
+
+				pthread_mutex_unlock(&eb_interface_list_mutex);
+				
 				eb_free (__FILE__, __LINE__, "BCAST", "Free RAW broadcast packet", buffer);
-			}
 #endif
+			}
 		}
 
 	}
@@ -4259,6 +4279,7 @@ void eb_setup_aun_listener_socket (void * exposure)
 
 	e->broadcastable = 0;
 
+	pthread_mutex_lock(&eb_interface_list_mutex);
 	a = eb_interface_list;
 
 #define IFA_FLAGS_REQD	(IFF_UP | IFF_BROADCAST | IFF_RUNNING)
@@ -4315,6 +4336,8 @@ void eb_setup_aun_listener_socket (void * exposure)
 
 	if (a) /* Found one */
 		e->broadcastable = 1;
+
+	pthread_mutex_unlock(&eb_interface_list_mutex);
 
 	if (e->addr)
 		eb_debug (0, 3, "LISTEN", "%-8s %3d.%3d Listener started on %d.%d.%d.%d:%d (fd %d) (broadcastable: %s)", "AUN", e->net, e->stn, 
@@ -4857,6 +4880,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 	if (destdevice && destdevice->type == EB_DEF_AUN) /* This would be AUN going to AUN - dump it. We don't route that. */
 	{
 		eb_debug (0, 3, "AUN", "%-8s %3d.%3d from %3d.%3d Dropping local AUN to local AUN traffic",
+				"AUN",
 				incoming.p.dstnet,
 				incoming.p.dststn,
 				incoming.p.srcnet,
@@ -13855,6 +13879,7 @@ int main (int argc, char **argv)
 
 	if (exposures)
 	{
+		pthread_mutex_lock(&eb_interface_list_mutex);
 		if (getifaddrs(&eb_interface_list) == -1)
 			eb_debug (0, 1, "BCAST", "BCAST            Unable to get list of broadcastable interfaces - AUN broadcasts disabled");
 		else
@@ -13877,6 +13902,7 @@ int main (int argc, char **argv)
 			if (eb_broadcast_socket == -1) /* Success */
 				eb_debug (0, 1, "BCAST", "BCAST            Unable to open raw socket for broadcast - AUN broadcasts disabled (%s)", strerror(errno));
 		}
+		pthread_mutex_unlock(&eb_interface_list_mutex);
 
 	}
 
