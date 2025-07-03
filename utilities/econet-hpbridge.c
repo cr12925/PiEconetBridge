@@ -67,6 +67,8 @@ int		eb_broadcast_socket = -1; /* If we open a packet socket, this will change, 
 struct ifaddrs	*eb_interface_list;
 pthread_mutex_t	eb_interface_list_mutex = PTHREAD_MUTEX_INITIALIZER; /* Whilst this mutex is used to lock eb_interface_list, in practice the latter does not change at the moment. This is here so that we can have a thread listening for interface updates, which refreshes the interface list [other threads cannot reach (beery goodness)] */
 
+char		eb_broadcast_interface_list[512];
+char		eb_tunnel_interface_list[512];
 
 /* Clock speed reporting to user stations */
 
@@ -3081,9 +3083,9 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 			}
 			else if (eb_broadcast_socket != -1) /* We can do local broadcasts */
 			{
-#if 0 /* Disabled */
 				struct ether_header 	*eh;
 				struct iphdr		*iph;
+				uint16_t 		*iph_bytes;
 				struct udphdr		*udph;
 				struct sockaddr_ll	socket_addr;
 				struct ifaddrs		*a;
@@ -3100,6 +3102,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 
 				eh = (struct ether_header *) buffer;
 				iph = (struct iphdr *) (buffer + sizeof(struct ether_header));
+				iph_bytes = (uint16_t *) (buffer + sizeof(struct ether_header));
 				udph = (struct udphdr *) (buffer + sizeof(struct ether_header) + sizeof(struct iphdr));
 				packetdata = (buffer + sizeof(struct ether_header) + sizeof(struct iphdr) + sizeof(struct udphdr));
 
@@ -3110,6 +3113,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 
 				eh->ether_type = htons(ETH_P_IP);
 				memset (&(eh->ether_dhost[0]), 0xFF, 6); /* Global broadcast */
+
 				/* Source address gets filled in per interface */
 
 				/* Construct IP header */
@@ -3130,13 +3134,13 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 
 				checksum = 0;
 
-				for (uint8_t ipc = sizeof(struct iphdr); ipc > 1; ipc -= 2)
-					checksum += * (uint16_t *) (iph + ipc);
+				for (uint8_t ipc = 0; ipc < sizeof(struct iphdr)/2; ipc++)
+					checksum += *(iph_bytes + ipc);
 
-				while (checksum >> 16)
-					checksum = (checksum & 0xFFFF) + (checksum >> 16);
-
-				iph->check = (~checksum & 0xFFFF);
+				checksum = (checksum & 0xFFFF) + (checksum >> 16);
+				checksum += (checksum >> 16);
+				
+				iph->check = (~checksum) & 0xFFFF;
 
 				/* Construct UDP header */
 
@@ -3158,10 +3162,16 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 				{
 					if (a->ifa_name && a->ifa_addr && a->ifa_netmask)
 					{
-						if (a->ifa_addr->sa_family == AF_INET && (a->ifa_flags & (IFF_UP && IFF_RUNNING && IFF_BROADCAST)) == (IFF_UP && IFF_RUNNING && IFF_BROADCAST))
+						if (a->ifa_addr->sa_family == AF_INET && (a->ifa_flags & (IFF_UP && IFF_RUNNING && IFF_BROADCAST)) == (IFF_UP && IFF_RUNNING && IFF_BROADCAST) && !(a->ifa_flags & IFF_LOOPBACK))
 						{
+							char colon_ifname[128];
 
-							if ((socket_addr.sll_ifindex = if_nametoindex(a->ifa_name)) != 0) /* We got an index */
+							snprintf (colon_ifname, 127, ":%s:", a->ifa_name);
+
+							/* Now make sure it isn't one of our own IP tunnel interfaces, becuase that causes all manner of mayhem */
+							/* And if we have set a limited list of interfaces in JSON, make sure it's one of them */
+
+							if (!strstr(eb_tunnel_interface_list, colon_ifname) && (strstr(eb_broadcast_interface_list, colon_ifname) || (strlen(eb_broadcast_interface_list) == 0)) &&  (socket_addr.sll_ifindex = if_nametoindex(a->ifa_name)) != 0) /* We got an index */
 							{
 								eb_debug (0, 3, "BCAST", "BCAST    255.255 from %3d.%3d Transmit on %s (if_index %d)",
 									p->p.srcnet, p->p.srcstn, a->ifa_name, socket_addr.sll_ifindex);
@@ -3173,11 +3183,9 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 					a = a->ifa_next;
 				}
 
-
 				pthread_mutex_unlock(&eb_interface_list_mutex);
 				
 				eb_free (__FILE__, __LINE__, "BCAST", "Free RAW broadcast packet", buffer);
-#endif
 			}
 		}
 
@@ -9379,6 +9387,12 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 					while (masklen-- > 0)
 						mask_host = (mask_host >> 1) | 0x80000000;
 
+					if (strlen(eb_tunnel_interface_list) == 0)
+						strcat(eb_tunnel_interface_list, ":");
+	
+					strcat(eb_tunnel_interface_list, json_object_get_string(jipinterface));
+					strcat(eb_tunnel_interface_list, ":");
+
 					eb_device_init_ip (net, stn, (char *) json_object_get_string(jipinterface), ip_host, mask_host);
 
 					icount++;	
@@ -11326,6 +11340,9 @@ int eb_readconfig(char *f, char *json)
 	struct addrinfo	hints;
 #endif
 
+	strcpy (eb_broadcast_interface_list, "");
+	strcpy (eb_tunnel_interface_list, "");
+
 #ifdef EB_JSONCONFIG
 	jc = json_object_new_object();
 	*jcparam = jc;
@@ -11842,6 +11859,12 @@ int eb_readconfig(char *f, char *json)
 				while (masklen-- > 0)
 					mask_host = (mask_host >> 1) | 0x80000000;
 				
+				if (strlen(eb_tunnel_interface_list) == 0)
+					strcat(eb_tunnel_interface_list, ":");
+
+				strcat(eb_tunnel_interface_list, tunif);
+				strcat(eb_tunnel_interface_list, ":");
+
 				eb_device_init_ip (net, stn, tunif, ip_host, mask_host);
 #else
 				jipaddr = json_object_new_object();
