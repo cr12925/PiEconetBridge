@@ -1236,6 +1236,12 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 			EB_PORT_SET(existing, ports, EB_PORT_FAST, eb_port_a0_handler, existing);
 			existing->local.fast_menu = NULL;
 
+			/* Initialize teletext */
+
+			existing->local.teletext_root = NULL;
+			existing->local.teletext_active = 0;
+			existing->local.teletext_queue = NULL;
+
 			/* And the FINDSERVER handler */
 			EB_PORT_SET(existing, ports, EB_PORT_FINDSERVER, eb_handle_findserver_traffic, existing);
 
@@ -6010,6 +6016,9 @@ static void * eb_device_despatcher (void * device)
 				
 			}
 
+			if (d->local.teletext_root)
+				teletext_init(d);
+
 			ECONET_INIT_STATIONS(d->local.fast_priv_stns); // Clear the privileged station bitmap
 
 			// Initialize the notify list & mutex
@@ -9184,6 +9193,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 	uint8_t		net, stn;
 	uint16_t	jcount, jlength;
 	struct json_object	*jdiverts, *jstation, *jstation_number, *jprinters, *jfs, *jips, *jpipepath, *jnetclock;
+	struct json_object	*jteletextdir;
 	char		device[128];
 	FILE		* clock_speed_stream = NULL;
 
@@ -9285,6 +9295,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 			json_object_object_get_ex(jstation, "printers", &jprinters);
 			json_object_object_get_ex(jstation, "ipservers", &jips);
+			json_object_object_get_ex(jstation, "teletext-dir", &jteletextdir);
 
 			/* Printers */
 
@@ -9398,6 +9409,11 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 					icount++;	
 				}
 			}
+
+			/* Teletext server */
+
+			if (jteletextdir)
+				eb_device_init_teletext(net, stn,  json_object_get_string(jteletextdir));
 
 			if (json_object_object_get_ex(jstation, "fileserver-path", &jfs))
 			{

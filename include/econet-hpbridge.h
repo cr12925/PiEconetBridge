@@ -160,6 +160,15 @@
 #define EB_PORT_PS_DATA			0xD1
 #define EB_PORT_IP			0xD2
 
+/* Teletext queue entry */
+
+struct __eb_teletext_queue {
+	uint8_t		net, stn;
+	uint8_t		channel;
+	unsigned char	page[4];
+	struct __eb_teletext_queue	*prev, *next;
+};
+
 /* Broadcast interfaces.
  *
  * We need to know where they are because
@@ -180,6 +189,7 @@
  */
 
 extern struct ifaddrs	*eb_interface_list;
+extern pthread_mutex_t		eb_interface_list_mutex;
 
 /* 
  * struct containing the data elements of 
@@ -917,7 +927,11 @@ struct __eb_device { // Structure holding information about a "physical" device 
 
 			// Teletext server
 			char 			*teletext_root; // Root dir (which can be part of PiFS storage) containing one dir per "channel" (e.g. "1", "2", etc.) and then files named with 3 digit page numbers thereunder - e.g. "100".
+			struct __eb_teletext_queue	*teletext_queue; // Queue of station requests
 			uint8_t			teletext_active; // 0 - means the server stops responding to requests and does not broadcast. 1 is the opposite.
+			pthread_mutex_t		teletext_queue_mutex; /* Locks the queu as between the data receiver thread and the server thread */
+			pthread_cond_t		teletext_queue_cond; /* Wake condition when a request comes in when the queue is empty */
+			pthread_t		teletext_thread;
 
 		} local;
 
@@ -1356,6 +1370,11 @@ extern void eb_fast_send_control (struct __eb_fast_client *, uint8_t);
 extern void eb_fast_send_data (struct __eb_fast_client *, uint8_t *, uint16_t);
 extern void * eb_fast_start_fast_service (void *);
 extern void eb_port_a0_handler (struct __econet_packet_aun *, uint16_t, void *);
+
+/* Teletext extern */
+
+extern void teletext_init (struct __eb_device *);
+extern uint8_t eb_device_init_teletext (uint8_t, uint8_t, const char *);
 
 /* JSON */
 
