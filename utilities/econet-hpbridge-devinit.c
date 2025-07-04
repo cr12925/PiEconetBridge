@@ -283,6 +283,31 @@ uint8_t eb_device_init_virtual (uint8_t net)
 
 }
 
+/* eb_device_init_teletext
+ *
+ * Set up teletext server
+ */
+
+uint8_t eb_device_init_teletext (uint8_t net, uint8_t stn, const char *dir)
+{
+
+	struct __eb_device	*existing;
+
+	existing = eb_new_local (net, stn, EB_DEF_LOCAL);
+
+	if (!existing)  eb_debug (1, 0, "CONFIG", "Unable to create *FAST server on %d.%d", net, stn);
+
+	if (existing->local.teletext_root)
+		eb_debug (1, 0, "CONFIG", "Cannot create teletext server on %d.%d - already configured", net, stn);
+
+	existing->local.teletext_root = eb_malloc(__FILE__, __LINE__, "TELETEXT", "New teletext root part", strlen(dir)+1);
+	strcpy(existing->local.teletext_root, dir);
+	existing->local.teletext_active = 1;
+
+	return 1;
+
+}
+
 /* eb_device_init_fast
  *
  * Simply puts the menu pointer into the structure
@@ -608,6 +633,7 @@ uint8_t eb_device_init_aun_host (uint8_t net, uint8_t stn, in_addr_t address, ui
 	d->fw_out = fw_out;
 
 	e->uses_gateway = 0;
+	e->gateway_compatible = 0;
 
 	aun_remotes = e;
 
