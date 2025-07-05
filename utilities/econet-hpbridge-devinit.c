@@ -302,7 +302,6 @@ uint8_t eb_device_init_teletext (uint8_t net, uint8_t stn, const char *dir)
 
 	existing->local.teletext_root = eb_malloc(__FILE__, __LINE__, "TELETEXT", "New teletext root part", strlen(dir)+1);
 	strcpy(existing->local.teletext_root, dir);
-	existing->local.teletext_active = 1;
 
 	return 1;
 

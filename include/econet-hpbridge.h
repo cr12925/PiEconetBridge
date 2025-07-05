@@ -932,6 +932,11 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			pthread_mutex_t		teletext_queue_mutex; /* Locks the queu as between the data receiver thread and the server thread */
 			pthread_cond_t		teletext_queue_cond; /* Wake condition when a request comes in when the queue is empty */
 			pthread_t		teletext_thread;
+			struct dirent		**teletext_channels[10]; /* Files matching [1-9][0-9]{2} in each channel dir */
+			int16_t			teletext_channel_entries[10]; /* Number of valid entries per channel in teletext_channels. This is signed because it stores the return val from scandir */
+			int16_t			teletext_channel_topbit[10]; /* Which bit number in teletext_broadcast is the last one for this channel */
+			int16_t			teletext_channel_startbit[10]; /* First bit number in teletext_broadcast which is part of this channel */
+			uint32_t		teletext_broadcast[320]; /* Bitfield of broadcast frames - see teletext.c in eb_teletext_server */
 
 		} local;
 
@@ -1385,6 +1390,10 @@ uint8_t eb_readconfig_json(char *);
 extern uint16_t		threads_started, threads_ready;
 
 extern pthread_mutex_t		threadcount_mutex; // Locks the thread counter
+
+/* Broadcast handler extern */
+
+void eb_broadcast_handler (struct __eb_device *, struct __econet_packet_aun *, uint16_t);
 
 #define eb_thread_started() { pthread_mutex_lock(&threadcount_mutex); threads_started++; pthread_mutex_unlock(&threadcount_mutex); }
 #define eb_thread_ready() { pthread_mutex_lock(&threadcount_mutex); threads_ready++; pthread_mutex_unlock(&threadcount_mutex); }

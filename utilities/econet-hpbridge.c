@@ -786,6 +786,16 @@ struct __eb_pool_host *eb_find_make_pool_host (struct __eb_device *source,
 	eb_set_single_wire_host(new_net, new_stn);
 
 	pthread_mutex_unlock(&(pool->updatemutex));
+
+	if (!host->is_static)
+	{
+		eb_debug (0, 1, "POOL", "Pool     %3d.%3d Allocated for %3d.%3d on device %s %d",
+			host->net, host->stn, host->s_net, host->s_stn, eb_type_str(host->source->type),
+				(	host->source->type == EB_DEF_TRUNK ? host->source->trunk.local_port : 
+					host->source->type == EB_DEF_WIRE ? host->source->net : 0
+				));
+	}
+
 	*err = 0;
 	return host;
 }
@@ -1233,7 +1243,9 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_TELETEXT_S_CMD, NULL, NULL); /* Teletext commands from clients */
 
 			/* Include the FAST data handler */
+
 			EB_PORT_SET(existing, ports, EB_PORT_FAST, eb_port_a0_handler, existing);
+
 			existing->local.fast_menu = NULL;
 
 			/* Initialize teletext */
@@ -2727,7 +2739,7 @@ void * eb_broadcast_listener (void *p)
 	struct sockaddr_in	localaddr;
 	int	broadcast = 1;
 
-	eb_debug (0, 1, "BCAST", "AUN              AUN Broadcast listener starting");
+	eb_debug (0, 2, "BCAST", "AUN              AUN Broadcast listener starting");
 
 	numaddrs = 1;
 
@@ -3181,7 +3193,9 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 							{
 								eb_debug (0, 3, "BCAST", "BCAST    255.255 from %3d.%3d Transmit on %s (if_index %d)",
 									p->p.srcnet, p->p.srcstn, a->ifa_name, socket_addr.sll_ifindex);
-								sendto(eb_broadcast_socket, buffer, bufflen, 0, (struct sockaddr *) &socket_addr, sizeof (struct sockaddr_ll)); /* We're not that bothered if it works or not... */
+								if (sendto(eb_broadcast_socket, buffer, bufflen, 0, (struct sockaddr *) &socket_addr, sizeof (struct sockaddr_ll)) < 0)
+									eb_debug (0, 2, "BCAST", "BCAST    255.255 from %3d.%3d Transmit on %s (if_index %d) FAILED: %s",
+										p->p.srcnet, p->p.srcstn, a->ifa_name, socket_addr.sll_ifindex, strerror(errno));
 							}
 						}
 					}
@@ -6123,7 +6137,7 @@ static void * eb_device_despatcher (void * device)
 
 				if (d->trunk.mt_type == MT_CLIENT) /* Multitrunk child and it's a client */
 				{
-					eb_debug (0, 1, "DESPATCH", "M-Trunk  %7d Starting multitrunk client handler to %s:%d", d->trunk.local_port, d->trunk.hostname, d->trunk.remote_port);
+					eb_debug (0, 2, "DESPATCH", "M-Trunk  %7d Starting multitrunk client handler to %s:%d", d->trunk.local_port, d->trunk.hostname, d->trunk.remote_port);
 
 					d->trunk.is_dynamic = 0; // All MT Clients have known remote endpoints
 
@@ -14047,7 +14061,7 @@ int main (int argc, char **argv)
 	pthread_mutex_unlock (&threadcount_mutex);
 
 	if (!EB_CONFIG_TRUNK_LOOPDETECT_DISABLE)
-		eb_debug (0, 1, "BRIDGE", "%-8s         Bridge loop detection identifier 0x%08X", "Core", EB_CONFIG_TRUNK_LOOPDETECT_ID);
+		eb_debug (0, 3, "BRIDGE", "%-8s         Bridge loop detection identifier 0x%08X", "Core", EB_CONFIG_TRUNK_LOOPDETECT_ID);
 	
 
 	eb_debug (0, 1, "MAIN", "%-8s         Engine room to bridge: %d engines at full chat. Wait for traffic.", "Core", threads_ready);
@@ -14581,9 +14595,12 @@ static void * eb_statistics (void *nothing)
 						switch (divert->type)
 						{
 							case EB_DEF_AUN:	stn = divert->aun->stn; if (divert->aun->port == -1) sprintf (info, "Inactive"); else sprintf(info, "%d.%d.%d.%d:%d%s", (divert->aun->addr & 0xff000000) >> 24, (divert->aun->addr & 0x00ff0000) >> 16, (divert->aun->addr & 0x0000ff00) >> 8, (divert->aun->addr & 0x000000ff), divert->aun->port, ((divert->aun->gateway_compatible && !divert->aun->uses_gateway) ? "(GW primed)" : (divert->aun->uses_gateway ? "(GW Active)" : ""))); break;
-							case EB_DEF_LOCAL:	stn = divert->local.stn; sprintf(info, "%c%c%c", ((divert->local.printers) ? 'P' : ' '),
+							case EB_DEF_LOCAL:	stn = divert->local.stn; sprintf(info, "%c%c%c%c%c", ((divert->local.printers) ? 'P' : ' '),
 								(fsop_is_enabled(divert->local.fs.server) ? 'F' : ' '),
-								((divert->local.ip.tunif[0] != '\0') ? 'I' : ' ')); break;
+								((divert->local.ip.tunif[0] != '\0') ? 'I' : ' '),
+								(divert->local.teletext_root ? 'T' : ' '),
+								(divert->local.fast_menu ? 'M' : ' ')
+								); break;
 							case EB_DEF_PIPE:	stn = divert->pipe.stn; sprintf(info, "%s", divert->pipe.base); break;
 							default:		stn = 0; break;
 						}

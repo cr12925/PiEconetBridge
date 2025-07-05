@@ -107,6 +107,19 @@ void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, 
 
 		}
 
+		if (d->local.teletext_active) // Teletext server
+		{
+			strcpy (server_type, "TELETEXT");	
+
+			if (!strcasecmp(findserver_type, "TELETEXT") || !strcasecmp(findserver_type, "        "))
+			{
+				reply->p.data[1] = EB_PORT_TELETEXT_S_REPLY;
+				memcpy (&(reply->p.data[3]), server_type, 8);
+				eb_raw_send (d, reply, my_length);
+			}
+
+		}
+
 		eb_free (__FILE__, __LINE__, "FINDSRVR", "Freeing FindServer reply packet", reply);
 
 	}

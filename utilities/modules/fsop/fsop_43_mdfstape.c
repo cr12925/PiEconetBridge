@@ -868,7 +868,7 @@ void * fsop_backup_thread (void * p)
 
 		if (next_event == 0) /* No job, indefinite sleep */
 		{
-			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler has no work - sleeping");
+			fs_debug_full (0, 2, s, 0, 0, "Tape backup scheduler has no work - sleeping");
 			pthread_cond_wait(&(s->fs_backup_cond), &(s->fs_backup_mutex));
 		}
 		else if (next_event > now) /* Job, but it's in the future */
@@ -879,7 +879,7 @@ void * fsop_backup_thread (void * p)
 			clock_gettime(CLOCK_REALTIME, &t);
 			localtime_r (&next_event, &until); 
 
-			fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler sleeping until %02d/%02d/%04d %02d:%02d:%02d (%d secs)",
+			fs_debug_full (0, 2, s, 0, 0, "Tape backup scheduler sleeping until %02d/%02d/%04d %02d:%02d:%02d (%d secs)",
 					until.tm_mday, until.tm_mon, until.tm_year+1900,
 					until.tm_hour, until.tm_min, until.tm_sec,
 					(next_event - now));
