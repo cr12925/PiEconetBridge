@@ -478,7 +478,9 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 				if (!eb_teletext_page_exists(d, p->p.data[0], &p->p.data[1]))
 				{
 					reply->p.data[0] = EB_TELETEXT_ERR_BADPAGE;
-					eb_raw_send (d, reply, 1);
+					reply->p.data[1] = 0;
+					sprintf (&(reply->p.data[2]), "Page not found%c", 0x0D);
+					eb_raw_send (d, reply, 2 + 15);
 					break;
 				}
 
@@ -562,7 +564,10 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 					eb_free (__FILE__, __LINE__, "TELETEXT", "Free request struct", q);
 				}
 
-				eb_raw_send (d, reply, 1);
+				reply->p.data[0] = 0;
+				reply->p.data[1] = 0;
+
+				eb_raw_send (d, reply, 2);
 
 			} break;
 		case EB_TELETEXT_CTRL_MAXUSERS:
