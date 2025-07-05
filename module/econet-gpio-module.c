@@ -4282,7 +4282,11 @@ static int econet_probe (struct platform_device *pdev)
  *
  */
 
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(6,4,0)
 static int econet_remove(struct platform_device *pdev)
+#else
+void econet_remove(struct platform_device *pdev)
+#endif
 {
 
 	/* Turn off the read/write LEDs */
@@ -4369,7 +4373,9 @@ static int econet_remove(struct platform_device *pdev)
 	 *
 	 */
 
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(6,4,0)
 	return 0;
+#endif
 
 }
 
