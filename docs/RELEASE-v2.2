@@ -20,7 +20,7 @@ MIGRATING FROM 2.1 to 2.2
 
 You will need to install some additional libraries before compilation:
 
-	sudo apt install libglib2.0-dev cmake libssh2-dev libjson-c-dev
+	sudo apt install libglib2.0-dev cmake libssh2-1-dev libjson-c-dev
 
 Build & install v2.2
 
@@ -200,6 +200,36 @@ RELEASE NOTES FOR V2.2
 
 - Read users from FS now will not show a non-privileged
   user where the privileged users are logged on.
+
+- AUN broadcasts will now be sent to the local LAN
+  (but not to AUN clients on distant subnets via routers,
+  since Acorn's systems don't do that either). Where an
+  exposed host needs to broadcast, and its exposure is
+  on the loopback, the bridge will construct a bespoke
+  ethernet frame using a packet socket. This requires
+  either setuid root or (better) cap_net_raw, which the
+  installer will try to set. If your filesystem does not
+  support xattrs (which is where Linux stores capabilities),
+  then this won't work.
+
+- The bridge also listens for AUN broadcasts on the LAN and
+  will process them accordingly, allocating the source 
+  of the traffic a dynamic AUN host if dynamic AUN is
+  enabled. (TO DO: stop it doing so in case there are
+  two or more bridges on the LAN and there are 
+  broadcasts from AUN exposures on them - this is likely
+  to cause mayhem!)
+
+- Bridge now implements a special AUN-extended gateway
+  for emulators (though at the time of writing BeebEm is
+  the only implementation) to avoid having to configure
+  the emulator with all your AUN hosts / networks.
+  Once a client uses the gateway, the bridge will send ALL
+  AUN traffic for that client (except broadcasts) through
+  the gateway, though it will still handle traffic it
+  receives on ordinary exposures if it turns up.
+
+- Teletext server now implemented.
 
 KNOWN ISSUES
 ------------
