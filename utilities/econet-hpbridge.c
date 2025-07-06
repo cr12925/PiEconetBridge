@@ -4890,7 +4890,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 
 	/* If it's not a known source, see if we can allocate a dynamic address */
 
-	if (!source_device)
+	if (!source_device && (incoming.p.port == EB_PORT_BRIDGE || !is_broadcast_listener)) /* We'll allocate stations if it's a bridge broadcast, but otherwise if it's broadcast traffic we don't, so that broadcasts from other AUN exposures on the same LAN don't cause a station to be allocated */
 	{
 		source_device = eb_allocate_dynamic_aun (source_address, source_port);
 		if (!source_device)
