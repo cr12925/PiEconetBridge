@@ -234,6 +234,7 @@ void eb_signal_handler (int sig)
 			raise(SIGTERM);
 			break;
 		case SIGINT:
+			fprintf (stdout, "\n");
 			signal (sig, SIG_DFL);
 			eb_exit_cleanup();
 			raise(SIGINT);
