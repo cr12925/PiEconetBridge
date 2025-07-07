@@ -2556,18 +2556,30 @@ void eb_send_broadcast_diverted (struct __eb_device *s, struct __eb_device *d, s
 
 	e = eb_is_exposed (p->p.srcnet, p->p.srcstn, 1);
 
+	/*
+	 * 20250707
+	 *
+	 * Reports of hundreds of lines of broadcasts (e.g. from teletext server). 
+	 * Broadcast to AUN is handled in the main broadcast handler - either by
+	 * sending the broadcast out of the exposure socket, or creating our own
+	 * ether frame if the exposure is on loopback. Looks to me like this
+	 * pair of routines would also pick up AUN stations and is likely to be
+	 * sending them broadcasts too, in addition to the LAN broadcast, so 
+	 * lets try turning that bit off.
+	 */
+
 	if (d->type == EB_DEF_NULL)
 	{
 		for (count = 1; count < 255; count++)
 			if ((dev = d->null.divert[count]))
-				if ((dev->type == EB_DEF_AUN && e) || (dev->type != EB_DEF_AUN && ((dev->type != EB_DEF_PIPE) || (dev->pipe.skt_write != -1))))
+				if (/* 20250707 Attempt stop broadcast floods (dev->type == EB_DEF_AUN && e) || */ (dev->type != EB_DEF_AUN && ((dev->type != EB_DEF_PIPE) || (dev->pipe.skt_write != -1))))
 					eb_send_broadcast(s, dev, p, length);
 	}
 	else if (d->type == EB_DEF_WIRE)
 	{
 		for (count = 1; count < 255; count++)
 			if ((dev = d->wire.divert[count]))
-				if ((dev->type == EB_DEF_AUN && e) || (dev->type != EB_DEF_AUN && ((dev->type != EB_DEF_PIPE) || (dev->pipe.skt_write != -1))))
+				if (/* 20250707 Attempt stop broadcast floods (dev->type == EB_DEF_AUN && e) || */ (dev->type != EB_DEF_AUN && ((dev->type != EB_DEF_PIPE) || (dev->pipe.skt_write != -1))))
 					eb_send_broadcast(s, dev, p, length);
 	}
 
