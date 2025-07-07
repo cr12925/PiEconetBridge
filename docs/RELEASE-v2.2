@@ -248,7 +248,7 @@ Support for this was removed in 2.2 to facilitate the tape
 system believe it or not. I will try and come up with a way
 of doing this 'en masse' for users.
 
-Roadmap to v2.2
+Roadmap to v2.3
 ---------------
 
 - Possible kernel change so that 4-way handshakes do not complete with a final
@@ -256,27 +256,20 @@ Roadmap to v2.2
   will generate 'Net error' at the local site if the distant machine is not
   there, rather than 'Not listening', but the latter cannot be generated without
   collecting the data phase of the 4-way handshake, which is needed to build the
-  AUN type packets used for AUN stations / trunks.
+  AUN type packets used for AUN stations / trunks. This is partially implemented
+  in 2.2 but it was unsuccessful and has been disabled.
 
 - Improve MDFS password file functionality, hopefully including writing to it.
 
-- Trunk ports which support multiple endpoints, and IPv6. (Existing trunk
-  ports will not be IPv6 enabled, only the ones which support multiple
-  remote endpoints.)
-
-- Handle AUN broadcasts received as IP broadcasts, and transmit same to local
-  hosts. Redistribute AUN broadcasts to distant AUN hosts as a unicast packet.
+- Redistribute AUN broadcasts to distant AUN hosts as a unicast packet.
 
 - Dynamic AUN stations to use pool addresses instead of specific network
 
-- JSON-based configuration & converter from existing to JSON. Intended to
-  enable configuration by a web app.
+- Web configuration interface, if it hasn't made it into 2.2
 
 - Pipe-based 'tap' interface into the bridge (read only) which relays
   all or selected traffic to a pipe in AUN-extended format. (Will never
   catch all wire traffic - only that which goes through the bridge.)
-
-- Implement signals for increasing / decreasing debug (SIGUSR1/2?)
 
 - Add facilities for E permission in FS (execute only)
 
