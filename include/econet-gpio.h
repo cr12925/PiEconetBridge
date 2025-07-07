@@ -72,7 +72,7 @@
 /* Function declarations */
 
 static int econet_probe(struct platform_device *);
-#if LINUX_VERSION_CODE <= KERNEL_VERSION(6,12,25)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,12,20)
 static int econet_remove(struct platform_device *);
 #else
 void econet_remove(struct platform_device *);

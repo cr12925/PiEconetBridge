@@ -4282,7 +4282,7 @@ static int econet_probe (struct platform_device *pdev)
  *
  */
 
-#if LINUX_VERSION_CODE <= KERNEL_VERSION(6,12,25)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,12,20)
 static int econet_remove(struct platform_device *pdev)
 #else
 void econet_remove(struct platform_device *pdev)
@@ -4373,7 +4373,7 @@ void econet_remove(struct platform_device *pdev)
 	 *
 	 */
 
-#if LINUX_VERSION_CODE <= KERNEL_VERSION(6,12,25)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,12,20)
 	return 0;
 #endif
 
