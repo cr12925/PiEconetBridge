@@ -3146,7 +3146,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 
 			while (remotes)
 			{
-				if (remotes->port != -1 && remotes->uses_gateway == 1 && remotes->is_net_local == 0) /* not as well, 2 means don't bother sending broadcasts over the gateway */
+				if (remotes->port != -1 && remotes->uses_gateway == 1 /* && remotes->is_net_local == 0 */) /* not as well, 2 means don't bother sending broadcasts over the gateway */
 				{
 					/* Temp use of bcast struct */
 
@@ -4977,6 +4977,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 		if (!source_device)
 		{
 			eb_debug (0, 2, "AUN", "%-8s         Traffic received from %s:%d - Unable to allocate dynamic AUN host", "GATEWAY", inet_ntoa(addr.sin_addr), source_port);
+			return;
 		}
 	}
 
@@ -4996,6 +4997,8 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 				incoming.p.srcstn);
 		return;
 	}
+
+//	fprintf (stderr, "\n\n*** is_broadcast_listener = %d, destdevice = %p, source_device = %p\n\n", is_broadcast_listener, destdevice, source_device);
 
 	/* So long as we know where it's going and where it's come from, we can process it, otherwise we drop it */
 
@@ -5207,7 +5210,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 		}
 	}
 	else
-			eb_debug (0, 2, "AUN", "%-8s         Traffic received from %s:%d type %02X data length %04X - either source or destination unidentified/unroutable", "GATEWAY", inet_ntoa(addr.sin_addr), source_port, incoming.p.aun_ttype, length-12);
+		eb_debug (0, 2, "AUN", "%-8s %3d.%3d from %3d.%3d Traffic received from %s:%d type %02X data length %04X - either source or destination unidentified/unroutable", "GATEWAY", incoming.p.dstnet, incoming.p.dststn, incoming.p.srcnet, incoming.p.srcstn, inet_ntoa(addr.sin_addr), source_port, incoming.p.aun_ttype, length-12);
 }
 
 /*
@@ -9880,6 +9883,7 @@ int eb_parse_json_config(struct json_object *jc)
 						fw_entry = eb_malloc (__FILE__, __LINE__, "JSON", "New firewall chain entry", sizeof(struct __eb_fw));
 						memset (fw_entry, 0x00, sizeof(struct __eb_fw)); // 0x00 is the wildcard value, but we need to set next to NULL
 						fw_entry->action = EB_FW_ACCEPT;
+						fw_entry->log = 1; /* Default is to log */
 						fw_entry->next = NULL;
 
 						if (json_object_object_get_ex(jentry, "source-net", &jint))
@@ -9894,6 +9898,13 @@ int eb_parse_json_config(struct json_object *jc)
 						if (json_object_object_get_ex(jentry, "destination-stn", &jint))
 							fw_entry->dststn = json_object_get_int(jint);
 						
+						if (json_object_object_get_ex(jentry, "log", &jint))
+						{
+							if (json_object_get_bool(&jint))
+								fw_entry->log = 1;
+							else	fw_entry->log = 0;
+						}
+							
 						if (json_object_object_get_ex(jentry, "port", &jint))
 						{
 							fw_entry->port = json_object_get_int(jint);
