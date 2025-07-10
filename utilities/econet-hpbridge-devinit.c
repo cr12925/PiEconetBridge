@@ -632,6 +632,7 @@ uint8_t eb_device_init_aun_host (uint8_t net, uint8_t stn, in_addr_t address, ui
 	d->fw_out = fw_out;
 
 	e->uses_gateway = 0;
+	e->is_net_local = eb_is_net_local(htonl(address));
 	e->gateway_compatible = 0;
 
 	aun_remotes = e;

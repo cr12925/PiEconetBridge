@@ -29,6 +29,9 @@
 #include "json.h"
 #endif
 
+/* For interface-finding logic */
+#define IFA_FLAGS_REQD	(IFF_UP | IFF_BROADCAST | IFF_RUNNING)
+
 extern int h_errno;
 
 extern uint8_t fs_get_maxdiscs();
@@ -436,6 +439,44 @@ void * eb_malloc (char *file, int line, char *module, char *purpose, size_t size
 	return r;
 
 }
+
+/* Work out whether a given ip & subnet is network local to us 
+ * parameters to be in network byte order
+ */
+
+uint8_t	eb_is_net_local (in_addr_t addr)
+{
+
+	struct ifaddrs 	*a;
+
+	pthread_mutex_lock (&(eb_interface_list_mutex));
+
+	a = eb_interface_list;
+
+	while (a)
+	{
+		if (a->ifa_addr && a->ifa_addr->sa_family == AF_INET && (a->ifa_flags & IFA_FLAGS_REQD) == IFA_FLAGS_REQD)
+		{
+			in_addr_t	interface_address, interface_mask;
+
+			if (a->ifa_addr && a->ifa_netmask)
+			{
+				interface_address = ((struct sockaddr_in *) a->ifa_addr)->sin_addr.s_addr;
+				interface_mask = ((struct sockaddr_in *) a->ifa_netmask)->sin_addr.s_addr;
+
+				if ((addr & interface_mask) == (interface_address & interface_mask))
+					break; /* Found - our address is on a broadcastable network */
+			}
+		}
+
+		a = a->ifa_next;
+	}
+
+	pthread_mutex_unlock (&(eb_interface_list_mutex));
+
+	return !!a; /* I.e. if a == NULL, return 0 because we didn't find a match, else return 1. */
+}
+
 /* gets the pointer pointed to by a network[] item. These never get free'd so they
  * will always be valid - they just might not be the entry in network[] that they
  * were when you found them
@@ -2552,9 +2593,11 @@ void eb_send_broadcast_diverted (struct __eb_device *s, struct __eb_device *d, s
 
 	struct __eb_device	*dev;
 	uint8_t			count;
+#if 0
 	struct __eb_aun_exposure	*e;
 
 	e = eb_is_exposed (p->p.srcnet, p->p.srcstn, 1);
+#endif
 
 	/*
 	 * 20250707
@@ -3088,13 +3131,38 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 			d = d->next;
 		}
 
-		// Now spit it out on the LAN if the source is exposed
+		// Now spit it out on the LAN if the source is exposed, and via gateways (the AUN clients using gateways are supposed to ignore a gatewayed broadcast if they are subnet local to the gateway, and use the subnet broadcast instead - to avoid duplicates - though we optimize this by not bothering with gateway broadcasts if we have discovered a client is network local by *receiving* a broadcast from it)
 
 		if ((source->type != EB_DEF_AUN) && (e = eb_is_exposed (p->p.srcnet, p->p.srcstn, 1))) // 1 = must be active
 		{
 			struct sockaddr_in	bcast;
 			socklen_t		bcast_size;
 			int			tx;
+			struct __eb_aun_remote	* remotes;
+
+			/* First, gatewayed traffic */
+
+			remotes = aun_remotes;
+
+			while (remotes)
+			{
+				if (remotes->port != -1 && remotes->uses_gateway == 1 && remotes->is_net_local == 0) /* not as well, 2 means don't bother sending broadcasts over the gateway */
+				{
+					/* Temp use of bcast struct */
+
+					bcast.sin_family = AF_INET;
+					bcast.sin_port = htons(remotes->port);
+					bcast.sin_addr.s_addr = htonl(remotes->addr);
+					bcast_size = sizeof(struct sockaddr_in);
+					p->p.ctrl &= 0x7f;
+					if ((tx = sendto (EB_CONFIG_GATEWAY_SOCKET, p, length+12, MSG_DONTWAIT, &bcast, bcast_size)) < 0)
+						eb_debug (0, 1, "BCAST", "BCAST    255.255 from %3d.%3d via gateway : Transmission error: %s",
+								p->p.srcnet, p->p.srcstn, strerror(errno));
+				}
+
+				remotes = remotes->next;
+			}
+
 
 			if (e->broadcastable) /* Source IP address is on an interface we can broadcast on */
 			{
@@ -4323,8 +4391,6 @@ void eb_setup_aun_listener_socket (void * exposure)
 	pthread_mutex_lock(&eb_interface_list_mutex);
 	a = eb_interface_list;
 
-#define IFA_FLAGS_REQD	(IFF_UP | IFF_BROADCAST | IFF_RUNNING)
-
 	while (a)
 	{
 #if 0
@@ -4448,6 +4514,8 @@ struct __eb_device * eb_allocate_dynamic_aun(in_addr_t source_address, uint16_t 
 			gettimeofday(&(station->last_dynamic), 0);
 			station->port = source_port;
 			station->addr = source_address;
+			station->uses_gateway = 0;
+			station->is_net_local = eb_is_net_local(htonl(source_address));
 
 			eb_debug (0, 2, "DYNAMIC", "%-8s %3d.%3d Traffic received from unknown source %d.%d.%d.%d:%d - Allocated dynamic host.", eb_type_str(station->eb_device->type), station->eb_device->net, station->stn, 
 				(source_address & 0xFF000000) >> 24,
@@ -4933,8 +5001,28 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 
 	if ((is_broadcast_listener || destdevice) && source_device) /* We've found an Econet source address, by allocating one if need be, and we've got a destination we know about */
 	{
-		if (is_gateway)
+		if (is_gateway && source_device->aun->uses_gateway == 0) /* Only set to 1 if it is 0, because uses_gateway==2 means uses gateway & don't send broadcasts that way */
 			source_device->aun->uses_gateway = 1; /* Flag gateway use if appropriate, so that return traffic goes that way */
+
+		if (is_gateway && source_device->aun->is_net_local && incoming.p.aun_ttype == ECONET_AUN_BCAST) /* Drop broadcasts that arrive at the gateway if we know the remote AUN host is subnet local to us - we get them from LAN broadcasts instead */
+		{
+			eb_debug (0, 4, "AUN", "%-8s %3d.%3d from %3d.%3d Dropping AUN broadcast traffic received via gateway from local subnet AUN client - this is not a problem",
+				"AUN",
+				incoming.p.dstnet,
+				incoming.p.dststn,
+				incoming.p.srcnet,
+				incoming.p.srcstn);
+			return;
+		}
+
+		if (is_broadcast_listener) /* Flag this AUN client as network local and stop sending any broadcasts via the gateway */
+		{
+			source_device->aun->is_net_local = 1;
+			if (source_device->aun->uses_gateway == 1)
+				source_device->aun->uses_gateway = 2;
+		}
+
+		/* NB, we don't need to worry about formally ignoring broadcasts from distant AUN clients, because it's impossible to receive them... */
 
 		eb_add_stats(&(source_device->statsmutex), &(source_device->b_out), length-12); // Traffic stats - this is the remote device generating output
 
@@ -5694,7 +5782,7 @@ static void * eb_device_aun_sender (void *device)
 				/* Time out the uses_gateway if need be */
 
 				if (timediffmsec(&(o->destdevice->aun->last_dynamic), &now) > (EB_CONFIG_DYNAMIC_EXPIRY * 60 * 1000)) /* last_dynamic gets updated even for non-dynamic hosts, and we use it to time out gateway access */
-					o->destdevice->aun->uses_gateway = o->destdevice->aun->gateway_compatible = 0;
+					o->destdevice->aun->uses_gateway = o->destdevice->aun->gateway_compatible = o->destdevice->aun->is_net_local = 0;
 
 				if (!(exp || o->destdevice->aun->uses_gateway)  || (p->tx++ == EB_CONFIG_AUN_RETRIES)) /* Too many attempts - splice */
 				{

@@ -190,6 +190,7 @@ struct __eb_teletext_queue {
 
 extern struct ifaddrs	*eb_interface_list;
 extern pthread_mutex_t		eb_interface_list_mutex;
+uint8_t	eb_is_net_local(in_addr_t);
 
 /* 
  * struct containing the data elements of 
@@ -378,7 +379,8 @@ struct __eb_aun_remote {
 	uint64_t	b_in, b_out; // Traffic stats
 	uint8_t		is_dynamic; // 1 = Available for dynamic use.
 	struct timeval	last_dynamic; // Last time we saw traffic on a dynamic host. If > 1 hour, dump it & reuse. Set to 0 on init so they get used.
-	uint8_t		uses_gateway; // 1 if all traffic via the magic AUN gateway
+	uint8_t		uses_gateway; // 1 if all traffic via the magic AUN gateway; 2 if all traffic except broadcasts uses the gateway (set to 2 if we receive a LAN broadcast from this host)
+	uint8_t		is_net_local; // 1 means we have identified this station to be subnet local to us, which means we'll ignore broadcasts we receive from it via the gateway, if it's using the gateway.
 	uint8_t		gateway_compatible; // 1 if we have responded to a gateway locator broadcast. This means we can send WhatNet/IsNet responses (which come from X.0, which are not exposed - so we can't send them to ordinary AUN clients that don't use the gateway BUT at the time an emulated Beeb sends a WhtNet query on reset, it hasn't sent any traffic through the gateway to cause "uses_gateway" to get set AND if we were to send gateway-format traffic to a non-gateway-aware client, it'll have four extra bytes the client will be confused by.
 	struct __eb_aun_remote	*next;
 };
