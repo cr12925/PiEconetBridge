@@ -9900,7 +9900,7 @@ int eb_parse_json_config(struct json_object *jc)
 						
 						if (json_object_object_get_ex(jentry, "log", &jint))
 						{
-							if (json_object_get_bool(&jint))
+							if (json_object_get_boolean(jint))
 								fw_entry->log = 1;
 							else	fw_entry->log = 0;
 						}
