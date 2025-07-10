@@ -259,6 +259,7 @@ struct __eb_fw { // Firewall entry - any value which is &FF is the wildcard
 	uint8_t srcnet, srcstn, dstnet, dststn;
 	uint8_t port;
 	uint8_t action;
+	uint8_t	log; /* Not yet implemented. 0 means no, 1 means yes */
 	uint8_t imm_ctrl; /* Immediate ctrl value to filter */
 	uint8_t osproc; /* Immediate OSPROC number to filter */
 	struct __eb_fw_chain 	*fw_subchain;
