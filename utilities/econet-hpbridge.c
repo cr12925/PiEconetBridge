@@ -3146,7 +3146,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 
 			while (remotes)
 			{
-				if (remotes->port != -1 && remotes->uses_gateway == 1 /* && remotes->is_net_local == 0 */) /* not as well, 2 means don't bother sending broadcasts over the gateway */
+				if (remotes->port != -1 && remotes->uses_gateway /* == 1 && remotes->is_net_local == 0 */) /* not as well, 2 means don't bother sending broadcasts over the gateway */
 				{
 					/* Temp use of bcast struct */
 
@@ -5002,7 +5002,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 
 	/* So long as we know where it's going and where it's come from, we can process it, otherwise we drop it */
 
-	if ((is_broadcast_listener || destdevice) && source_device) /* We've found an Econet source address, by allocating one if need be, and we've got a destination we know about */
+	if ((is_broadcast_listener || (is_gateway && incoming.p.aun_ttype == ECONET_AUN_BCAST) || destdevice) && source_device) /* We've found an Econet source address, by allocating one if need be, and we've got a destination we know about */
 	{
 		if (is_gateway && source_device->aun->uses_gateway == 0) /* Only set to 1 if it is 0, because uses_gateway==2 means uses gateway & don't send broadcasts that way */
 			source_device->aun->uses_gateway = 1; /* Flag gateway use if appropriate, so that return traffic goes that way */
