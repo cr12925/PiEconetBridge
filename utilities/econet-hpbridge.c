@@ -3596,7 +3596,8 @@ uint16_t eb_raw_send (struct __eb_device *d, struct __econet_packet_aun *p, uint
         copy->p.seq = eb_get_local_seq(d);
         copy->p.padding = 0x00;
 
-        //if (copy->p.dstnet == 0)    copy->p.dstnet = copy->p.srcnet;
+        if (copy->p.dstnet == 0)    copy->p.dstnet = d->net;
+        if (copy->p.srcnet == 0)    copy->p.srcnet = d->net;
 
 	if (p->p.dstnet == 0xFF && p->p.dststn == 0xFF) /* Broadcast */
 		eb_broadcast_handler (d, copy, len);
@@ -7865,8 +7866,9 @@ static void * eb_device_despatcher (void * device)
 						remove = 1;
 
 						/* 20250713 Don't do this. Local devices should see a canonical stn.net tuple */
-						//if (p->p->p.srcnet == d->net)	p->p->p.srcnet = 0;
-						//if (p->p->p.dstnet == d->net)	p->p->p.dstnet = 0;
+						/* No, this was right - an FS (for example) in 1.X needs to see traffic from 1.X as 0.X */
+						if (p->p->p.srcnet == d->net)	p->p->p.srcnet = 0;
+						if (p->p->p.dstnet == d->net)	p->p->p.dstnet = 0;
 
 						eb_add_stats (&(d->statsmutex), &(d->b_in), p->length);
 
@@ -8605,10 +8607,11 @@ static void * eb_device_despatcher (void * device)
 						remove = 1;
 
 						/* I think we're doing this the wrong way round on a write */
-						/* if (p->p->p.srcnet == d->net)	p->p->p.srcnet = 0;
-						if (p->p->p.dstnet == d->net)	p->p->p.dstnet = 0; */
-						if (p->p->p.srcnet == 0) p->p->p.srcnet = d->net;
-						if (p->p->p.dstnet == 0) p->p->p.dstnet = d->net;
+						/* No, that was correct. */
+						if (p->p->p.srcnet == d->net)	p->p->p.srcnet = 0;
+						if (p->p->p.dstnet == d->net)	p->p->p.dstnet = 0; 
+						/* if (p->p->p.srcnet == 0) p->p->p.srcnet = d->net;
+						if (p->p->p.dstnet == 0) p->p->p.dstnet = d->net; */
 
 						/* Given this is dealt with below the next if(), I think this is a duplicate!
 						if (p->p->p.aun_ttype == ECONET_AUN_DATA)
