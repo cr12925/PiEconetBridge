@@ -3596,7 +3596,7 @@ uint16_t eb_raw_send (struct __eb_device *d, struct __econet_packet_aun *p, uint
         copy->p.seq = eb_get_local_seq(d);
         copy->p.padding = 0x00;
 
-        if (copy->p.dstnet == 0)    copy->p.dstnet = copy->p.srcnet;
+        //if (copy->p.dstnet == 0)    copy->p.dstnet = copy->p.srcnet;
 
 	if (p->p.dstnet == 0xFF && p->p.dststn == 0xFF) /* Broadcast */
 		eb_broadcast_handler (d, copy, len);
@@ -3605,6 +3605,7 @@ uint16_t eb_raw_send (struct __eb_device *d, struct __econet_packet_aun *p, uint
                 if (destdevice->type == EB_DEF_AUN)
                 {
                         /* Put on AUN output queue */
+
                         if (eb_aunpacket_to_aun_queue(d, destdevice, copy, len))
                         {
                                 eb_add_stats (&(d->statsmutex), &(d->b_out), len);
@@ -4987,6 +4988,9 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 		destdevice = eb_find_station (2, &incoming);
 	else	destdevice = NULL;
 
+	if (is_gateway && incoming.p.dststn == 0) /* ACKs / other traffic to bridge devices */
+		return;
+
 	if (destdevice && destdevice->type == EB_DEF_AUN) /* This would be AUN going to AUN - dump it. We don't route that. */
 	{
 		eb_debug (0, 3, "AUN", "%-8s %3d.%3d from %3d.%3d Dropping local AUN to local AUN traffic",
@@ -5005,7 +5009,10 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 	if ((is_broadcast_listener || (is_gateway && incoming.p.aun_ttype == ECONET_AUN_BCAST) || destdevice) && source_device) /* We've found an Econet source address, by allocating one if need be, and we've got a destination we know about */
 	{
 		if (is_gateway && source_device->aun->uses_gateway == 0) /* Only set to 1 if it is 0, because uses_gateway==2 means uses gateway & don't send broadcasts that way */
+		{
 			source_device->aun->uses_gateway = 1; /* Flag gateway use if appropriate, so that return traffic goes that way */
+			source_device->aun->gateway_compatible = 1; /* In case the client doesn't probe with a broadcast */
+		}
 
 		if (is_gateway && source_device->aun->is_net_local && incoming.p.aun_ttype == ECONET_AUN_BCAST) /* Drop broadcasts that arrive at the gateway if we know the remote AUN host is subnet local to us - we get them from LAN broadcasts instead */
 		{
@@ -6492,7 +6499,7 @@ static void * eb_device_despatcher (void * device)
 
 		// To receive traffic after a poll(), must be not local, or if it is local then it's an IP gateway. Otherwise there should be no traffic arriving at all from a local, because the FS and PS put their stuff straight into the queues! // NB the while below is guarded by the if on this line, but not indented
 
-		if (!(d->type == EB_DEF_WIRE && wire_null) && (d->type != EB_DEF_POOL) && ((d->type != EB_DEF_LOCAL) || (d->local.ip.tunif[0] != '\0'))) while (poll(&p, 1, 0) && (p.revents & POLLIN)) // A 0-time poll() apparently works
+		if (!(d->type == EB_DEF_WIRE && wire_null) && /* 20250713 */ d->type != EB_DEF_NULL  && (d->type != EB_DEF_POOL) && ((d->type != EB_DEF_LOCAL) || (d->local.ip.tunif[0] != '\0'))) while (poll(&p, 1, 0) && (p.revents & POLLIN)) // A 0-time poll() apparently works
 		{
 
 			uint8_t		packetreceived = 0; // Default state. Trunk serial receiver sets to 0 unless a whole packet has arrived
@@ -6741,7 +6748,18 @@ static void * eb_device_despatcher (void * device)
 				if (d->type == EB_DEF_WIRE)
 				{
 					length = read (l_socket, &packet, ECONET_MAX_PACKET_SIZE);
-					if (length >= 12) { eb_update_lastrx(d); packetreceived = 1; }
+					if (length >= 12) { 
+
+						eb_update_lastrx(d); packetreceived = 1; 
+
+						/* 20250713 */
+
+						if (packet.p.srcnet == 0)
+							packet.p.srcnet = d->net;
+
+						if (packet.p.dstnet == 0)
+							packet.p.dstnet = d->net;
+					}
 				}
 
 				/* See if this was received on an interface group and we need to ignore it */
@@ -6935,7 +6953,7 @@ static void * eb_device_despatcher (void * device)
 */
 				
 			}
-			else // Pipe, so read packet length first
+			else if (d->type == EB_DEF_PIPE) // Pipe, so read packet length first
 			{
 				int 		pipelength = 0;
 				uint8_t 	c;
@@ -7001,13 +7019,15 @@ static void * eb_device_despatcher (void * device)
 					dump_traffic = 1;
 				}
 
-				if (!dump_traffic) eb_dump_packet (d, EB_PKT_DUMP_PRE_I, &packet, length - 12);
-
 				if (!dump_traffic && d->type != EB_DEF_TRUNK) // Fill in network numbers if need be
 				{
 					if (packet.p.srcnet == 0)	packet.p.srcnet = d->net;
 					if (packet.p.dstnet == 0)	packet.p.dstnet = d->net;
 				}	
+
+				/* 20250713 Next line moved to here from just before the if (!dump_traffic && d->type != EB_DEF_TRUNK) above */
+
+				if (!dump_traffic) eb_dump_packet (d, EB_PKT_DUMP_PRE_I, &packet, length - 12);
 
 				// Apply pool nat to wire & trunk devices
 
@@ -9311,7 +9331,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 	uint8_t		net, stn;
 	uint16_t	jcount, jlength;
 	struct json_object	*jdiverts, *jstation, *jstation_number, *jprinters, *jfs, *jips, *jpipepath, *jnetclock;
-	struct json_object	*jteletextdir;
+	struct json_object	*jteletextdir, *jteletexthdr;
 	char		device[128];
 	FILE		* clock_speed_stream = NULL;
 
@@ -9414,6 +9434,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 			json_object_object_get_ex(jstation, "printers", &jprinters);
 			json_object_object_get_ex(jstation, "ipservers", &jips);
 			json_object_object_get_ex(jstation, "teletext-dir", &jteletextdir);
+			json_object_object_get_ex(jstation, "teletext-header-broadcast", &jteletexthdr);
 
 			/* Printers */
 
@@ -9531,7 +9552,13 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 			/* Teletext server */
 
 			if (jteletextdir)
-				eb_device_init_teletext(net, stn,  json_object_get_string(jteletextdir));
+			{
+				uint8_t		teletext_hdr_broadcast = 0;
+
+				teletext_hdr_broadcast = json_object_get_boolean(jteletexthdr);
+
+				eb_device_init_teletext(net, stn,  json_object_get_string(jteletextdir), teletext_hdr_broadcast);
+			}
 
 			if (json_object_object_get_ex(jstation, "fileserver-path", &jfs))
 			{

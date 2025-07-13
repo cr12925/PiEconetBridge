@@ -148,7 +148,7 @@ uint16_t eb_teletext_rescan (struct __eb_device *d)
 
 	}
 
-	eb_debug (0, 2, "TELETEXT", "Local    %3d.%3d Rescanned %s - total pages found %d", d->net, d->local.stn, d->local.teletext_root, total_pages);
+	eb_debug (0, 3, "TELETEXT", "Local    %3d.%3d Rescanned %s - total pages found %d", d->net, d->local.stn, d->local.teletext_root, total_pages);
 
 	return total_pages;
 }
@@ -275,7 +275,7 @@ void * eb_teletext_server (void *i)
 	
 			directory_pointer = d->local.teletext_channels[channel][page];
 	
-			eb_debug (0, 2, "TELETEXT", "Local    %3d.%3d Broadcasting channel %c page %s (master index %d)", d->net, d->local.stn, channel + '1', directory_pointer->d_name, next_page);
+			// eb_debug (0, 2, "TELETEXT", "Local    %3d.%3d Broadcasting channel %c page %s (master index %d)", d->net, d->local.stn, channel + '1', directory_pointer->d_name, next_page);
 	
 			p->p.srcstn = d->local.stn;
 			p->p.srcnet = d->net;
@@ -287,7 +287,8 @@ void * eb_teletext_server (void *i)
 			p->p.data[0] = channel + '1';
 			memcpy (&(p->p.data[1]), directory_pointer->d_name, 3);
 	
-			eb_broadcast_handler(d, p, 4);
+			if (d->local.teletext_hdr_broadcast)
+				eb_broadcast_handler(d, p, 4);
 	
 			/* Flag that page as having been broadcast */
 
@@ -297,8 +298,6 @@ void * eb_teletext_server (void *i)
 
 			d->local.teletext_broadcast[word_bit] |= bit_bit;
 
-			//fprintf (stderr, "\n\n*** broadcast[%d] = 0x%08X (bit_bit = %08X)\n", word_bit, d->local.teletext_broadcast[word_bit], bit_bit);
-			
 			/* Process queue */
 
 			q = d->local.teletext_queue;
@@ -330,9 +329,11 @@ void * eb_teletext_server (void *i)
 					close(f);
 					p->p.data[0x3FE] = p->p.data[0x3FF] = 0x00; /* Sub page number - not implemented for now */
 
+					usleep (1000000);
+
 					eb_raw_send (d, p, 0x400);
 
-					eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Send channel %c page %s to %3d.%3d", d->net, d->local.stn, q->channel + '1', q->page, q->net, q->stn);
+					eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Send channel %c page %s to %3d.%3d", d->net, d->local.stn, q->channel, q->page, q->net, q->stn);
 				}
 
 				if (qprev)
@@ -433,6 +434,9 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 
 	struct __econet_packet_aun	*reply;
 
+	//if (p->p.srcnet == 0)
+		//p->p.srcnet = d->net;
+
 	reply = eb_malloc(__FILE__, __LINE__, "TELETEXT", "Reply packet", 12 + 18); // Max data length given
 
 	reply->p.srcstn = d->local.stn;
@@ -516,6 +520,7 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 				q->net = p->p.srcnet;
 				q->stn = p->p.srcstn;
 				q->channel = p->p.data[0];
+				q->ctrl = p->p.ctrl;
 				memcpy (q->page, &(p->p.data[1]), 3);
 
 				reply->p.data[0] = 0x00;

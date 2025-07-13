@@ -405,7 +405,7 @@ void eb_mt_process_admin_packet (struct mt_client *me, uint8_t *cipherpacket, ch
 	{
 		case EB_MT_CMD_VERS:
 			me->mt_remote_version = *(cipherpacket + 2);
-			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Multitrunk protocol version %02d from %s:%d", me->trunk->trunk.local_port, me->mt_remote_version, remotehost, remoteport);
+			eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d Multitrunk protocol version %02d from %s:%d", me->trunk->trunk.local_port, me->mt_remote_version, remotehost, remoteport);
 			break;
 		default:
 			eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d Unknown multitrunk admin command %02X from %s:%d", me->trunk->trunk.local_port, *(cipherpacket), remotehost, remoteport);
@@ -721,7 +721,7 @@ void * eb_multitrunk_handler_thread (void * input)
 	if (!(tcpproto = getprotobyname("tcp")))
 		eb_debug (1, 0, "M-TRUNK", "M-Trunk  %7d Cannot get tcp protocol number!", me->trunk ? me->trunk->trunk.local_port : me->multitrunk_parent->multitrunk.port);
 
-	eb_debug (0, 1, "M-TRUNK", "M-Trunk  %7d New connection with remote at %s(%s):%d - sock fd %d", me->trunk ? me->trunk->trunk.local_port : me->multitrunk_parent->multitrunk.port, remotehost, remoteip, remoteport, me->socket);
+	eb_debug (0, 2, "M-TRUNK", "M-Trunk  %7d New connection with remote at %s(%s):%d - sock fd %d", me->trunk ? me->trunk->trunk.local_port : me->multitrunk_parent->multitrunk.port, remotehost, remoteip, remoteport, me->socket);
 
 	/* me->trunk won't be set at this point. */
 	//if (me->trunk->trunk.mt_type == MT_SERVER) /* Update endpoint address in trunk */

@@ -165,6 +165,7 @@
 struct __eb_teletext_queue {
 	uint8_t		net, stn;
 	uint8_t		channel;
+	uint8_t		ctrl; /* Ctrl byte from source */
 	unsigned char	page[4];
 	struct __eb_teletext_queue	*prev, *next;
 };
@@ -930,6 +931,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 
 			// Teletext server
 			char 			*teletext_root; // Root dir (which can be part of PiFS storage) containing one dir per "channel" (e.g. "1", "2", etc.) and then files named with 3 digit page numbers thereunder - e.g. "100".
+			uint8_t			teletext_hdr_broadcast; // 1 = we do broadcast the current page header, 0 = we don't (we don't think it's necessary to do so and it causes a lot of traffic, so default is not to)
 			struct __eb_teletext_queue	*teletext_queue; // Queue of station requests
 			uint8_t			teletext_active; // 0 - means the server stops responding to requests and does not broadcast. 1 is the opposite.
 			pthread_mutex_t		teletext_queue_mutex; /* Locks the queu as between the data receiver thread and the server thread */
@@ -1382,7 +1384,7 @@ extern void eb_port_a0_handler (struct __econet_packet_aun *, uint16_t, void *);
 /* Teletext extern */
 
 extern void teletext_init (struct __eb_device *);
-extern uint8_t eb_device_init_teletext (uint8_t, uint8_t, const char *);
+extern uint8_t eb_device_init_teletext (uint8_t, uint8_t, const char *, uint8_t);
 
 /* JSON */
 
