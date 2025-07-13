@@ -3601,7 +3601,7 @@ uint16_t eb_raw_send (struct __eb_device *d, struct __econet_packet_aun *p, uint
 
 	if (p->p.dstnet == 0xFF && p->p.dststn == 0xFF) /* Broadcast */
 		eb_broadcast_handler (d, copy, len);
-	else if ((destdevice = eb_find_station(2, p)))
+	else if ((destdevice = eb_find_station(2, copy)))
         {
                 if (destdevice->type == EB_DEF_AUN)
                 {
