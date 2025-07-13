@@ -329,8 +329,6 @@ void * eb_teletext_server (void *i)
 					close(f);
 					p->p.data[0x3FE] = p->p.data[0x3FF] = 0x00; /* Sub page number - not implemented for now */
 
-					usleep (1000000);
-
 					eb_raw_send (d, p, 0x400);
 
 					eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Send channel %c page %s to %3d.%3d", d->net, d->local.stn, q->channel, q->page, q->net, q->stn);
