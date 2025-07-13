@@ -460,7 +460,7 @@ FSOP_00(LOGIN)
 
 			FS_LIST_MAKENEW(struct __fs_active,f->server->actives,1,a,"FS","Login making new active struct");
 
-			a->net = (f->net == 0 ? f->server->net : f->net);
+			a->net = f->net;
 			a->stn = f->stn;
 			a->printer = 0xff; // No current printer selected
 			a->userid = counter;

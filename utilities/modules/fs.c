@@ -916,7 +916,7 @@ int raw_fs_send (struct __fs_station *s, struct __econet_packet_aun *p, int len)
 
 	struct __eb_device	*destdevice;
 
-        if (p->p.dstnet == 0)    p->p.dstnet = p->p.srcnet;
+        if (p->p.dstnet == 0)    p->p.dstnet = s->net;
 
 	if ((destdevice = eb_find_station(2, p)))
 	{
@@ -4051,7 +4051,7 @@ struct __fs_active * fsop_stn_logged_in(struct __fs_station *s, uint8_t net, uin
 
 	while (a && !found)
 	{
-		if (a->net == (net == 0 ? s->net : net)
+		if (a->net == net
 			&&  a->stn == stn)
 			return a;
 		else
@@ -4375,7 +4375,7 @@ void fsop_bulk_dequeue (struct __fs_station *s, uint8_t net, uint8_t stn, uint32
 	struct __fs_active	*a;
 	struct __fs_active_load_queue	*alq;
 
-	a = fsop_find_active(s, net == 0 ? s->net : net, stn);
+	a = fsop_find_active(s, net, stn);
 
 	if (!a) /* No user! */
 		return;
