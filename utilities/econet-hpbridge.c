@@ -4982,6 +4982,14 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 		}
 	}
 
+	if (source_device)
+	{
+		/* Populate source address */
+
+		incoming.p.srcnet = source_device->net;
+		incoming.p.srcstn = source_device->aun->stn;
+	}
+
 	/* See if we know how to route this traffic to its destination */
 
 	if (!is_broadcast_listener)
@@ -5035,11 +5043,6 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 		/* NB, we don't need to worry about formally ignoring broadcasts from distant AUN clients, because it's impossible to receive them... */
 
 		eb_add_stats(&(source_device->statsmutex), &(source_device->b_out), length-12); // Traffic stats - this is the remote device generating output
-
-		/* Populate source address */
-
-		incoming.p.srcnet = source_device->net;
-		incoming.p.srcstn = source_device->aun->stn;
 
 		/* Set high bit on ctrl because it's cleared in AUN on the network */
 
@@ -7861,8 +7864,9 @@ static void * eb_device_despatcher (void * device)
 
 						remove = 1;
 
-						if (p->p->p.srcnet == d->net)	p->p->p.srcnet = 0;
-						if (p->p->p.dstnet == d->net)	p->p->p.dstnet = 0;
+						/* 20250713 Don't do this. Local devices should see a canonical stn.net tuple */
+						//if (p->p->p.srcnet == d->net)	p->p->p.srcnet = 0;
+						//if (p->p->p.dstnet == d->net)	p->p->p.dstnet = 0;
 
 						eb_add_stats (&(d->statsmutex), &(d->b_in), p->length);
 
@@ -7871,8 +7875,9 @@ static void * eb_device_despatcher (void * device)
 							struct __eb_device	*ackdevice;
 							struct __econet_packet_aun 	*ap;
 
-							if (ack.p.dstnet == 0)
-								ack.p.dstnet = d->net;
+							/* 20250713 This shouldn't be needed either! */
+							//if (ack.p.dstnet == 0)
+								//ack.p.dstnet = d->net;
 
 							ap = eb_malloc(__FILE__, __LINE__, "ACK", "New ACK packet to return to sender", 12);
 							memcpy (ap, &ack, 12);
