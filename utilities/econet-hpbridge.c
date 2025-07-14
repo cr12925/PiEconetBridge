@@ -3315,6 +3315,11 @@ uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_au
 	struct __econet_packet_aun	*p;
 	uint8_t			result = 1;
 
+	/* 20250713 Fixup */
+
+	packet->p.dstnet = (packet->p.dstnet == 0 ? source->net : packet->p.dstnet);
+	packet->p.srcnet = (packet->p.srcnet == 0 ? source->net : packet->p.srcnet);
+
 	// First off, if this is a broadcast then divert it to the broadcast handler - output queues do not handle
  	// Broadcast traffic. This should be OK because the broadcast handler does not attempt to re-transmit back
 	// to source, so it shouldn't try and acquire the same input mutex that the sender might presently have
@@ -3335,8 +3340,6 @@ uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_au
 	// Sanity check: we should never be sending to stn 0 (they're bridge devices which won't talk to us anyway)
 	if (packet->p.dststn == 0)
 		return 0;
-
-	packet->p.dstnet = (packet->p.dstnet == 0 ? source->net : packet->p.dstnet);
 
 	destcombo = (packet->p.dstnet << 8) + packet->p.dststn;
 
@@ -3674,6 +3677,9 @@ void eb_send_ack (struct __eb_device *d, struct __econet_packet_aun *p, uint8_t 
    just gets used in this function. So internally generated traffic onto an input queue
    (typically only bridge replies) needs to have specifically malloc()'d packets.
 
+NB: On entry to this function, the source & destination networks must be fully canonicalised.
+   There should be no net-0 in packets entering here.
+
    returns 1 for success, 0 for failure (e.g. can't find destination station, not listening)
 */
 
@@ -3684,6 +3690,23 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 	struct __eb_packetqueue		*q;
 	struct __eb_device		*source;
 	// struct __eb_device		*source_parent = NULL; // Used to signal a parent device if the source is AUN. Prevents double locking the outbound queue mutex
+
+	if (packet->p.srcnet == 0 || packet->p.dstnet == 0)
+	{
+		eb_debug (0, 1, "BRIDGE", "%-8s %3d.%3d from %3d.%3d Packet DROPPED because source or destination net was 0 on entry to eb_enqueue_input() :  port &%02X ctrl &%02X length &%04X seq 0x%08lX",
+			eb_type_str(dest->type),
+			packet->p.dstnet,
+			packet->p.dststn,
+			packet->p.srcnet,
+			packet->p.srcstn,
+			packet->p.port,
+			packet->p.ctrl,
+			length,
+			packet->p.seq
+		);
+		eb_free (__FILE__, __LINE__, "Q-IN", "Freeing inbound packet after source or destination network was impermissibly 0 on entry to eb_enqueue_input()", packet);
+		return 0;
+	}
 
 	if (!(source = eb_find_station(1, packet)))
 	{
@@ -4035,6 +4058,7 @@ uint8_t eb_firewall_inner (struct __eb_fw_chain *chain, struct __econet_packet_a
 
 	f = chain->fw_chain_start;
 
+	//fprintf (stderr, "\n\n**Running FW chain %s\n\n", chain->fw_chain_name);
 	while (f)
 	{
 		// Note - the bridge firewall entries are bidirectional! - NOT ANY MORE!
@@ -4065,6 +4089,7 @@ uint8_t eb_firewall_inner (struct __eb_fw_chain *chain, struct __econet_packet_a
 			else
 			{
 				result = f->action;
+
 				break;
 			}
 		}
@@ -4073,8 +4098,8 @@ uint8_t eb_firewall_inner (struct __eb_fw_chain *chain, struct __econet_packet_a
 
 	}
 
-	if (!EB_CONFIG_DISABLE_FW_DEBUG)
-		eb_debug (0, 3, "FW", "FW       %3d.%3d from %3d.%3d eb_firewall_inner processing chain %s returned %s: P:&%02X, C:&%02X, Seq:&%08X", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, chain->fw_chain_name, (result == EB_FW_ACCEPT ? "ACCEPT" : (result == EB_FW_REJECT ? "REJECT" : "NO MATCH")), p->p.port, p->p.ctrl, p->p.seq);
+	if (f && f->log && !EB_CONFIG_DISABLE_FW_DEBUG && result != EB_FW_NOMATCH) /* Produce log entry */
+		eb_debug (0, 1, "FW", "FW       %3d.%3d from %3d.%3d FW (%s) %s: P:&%02X, C:&%02X, Seq:&%08X", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, chain->fw_chain_name, (result == EB_FW_ACCEPT ? "ACCEPT" : (result == EB_FW_REJECT ? "REJECT" : "NO MATCH")), p->p.port, p->p.ctrl, p->p.seq);
 
 	return result;
 
@@ -4989,6 +5014,10 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 
 		incoming.p.srcnet = source_device->net;
 		incoming.p.srcstn = source_device->aun->stn;
+
+		if (is_gateway && incoming.p.dstnet == 0) /* Net 0 should never be sent via the gateway, but we can deal with it */
+			incoming.p.dstnet = source_device->net;
+
 	}
 
 	/* See if we know how to route this traffic to its destination */
@@ -5050,7 +5079,6 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 		incoming.p.ctrl |= 0x80;
 
 		/* See if we will accept this traffic from this source - dump it if not */
-
 
 		if ((fw_result = eb_firewall(source_device->fw_out, &incoming)) == EB_FW_REJECT) // fw_out because this is traffic coming *from* the AUN device. fw_in is for traffic going *to* it.
 		{
@@ -5790,6 +5818,16 @@ static void * eb_device_aun_sender (void *device)
 				gettimeofday (&now, 0);
 
 				p_next = p->n;
+
+				if (p->p->p.srcnet == 0) /* Warn */
+					eb_debug (0, 1, "AUNSEND", "AUN      %3d.%3d from %3d.%3d Port &%02X Ctrl &%02X Length &%04X WARNING: source network is 0 and it ought not to be!",
+							p->p->p.dstnet,
+							p->p->p.dststn,
+							p->p->p.srcnet,
+							p->p->p.srcstn,
+							p->p->p.port,
+							p->p->p.ctrl,
+							p->length);
 
 				exp = eb_is_exposed (p->p->p.srcnet, p->p->p.srcstn, 1); /* 1 = must be active */
 
@@ -7013,6 +7051,14 @@ static void * eb_device_despatcher (void * device)
 						dump_traffic = 1;
 				}
 
+				/* This network correction moved above firewall implementation 20250714 */
+
+				if (!dump_traffic && d->type != EB_DEF_TRUNK) // Fill in network numbers if need be
+				{
+					if (packet.p.srcnet == 0)	packet.p.srcnet = d->net;
+					if (packet.p.dstnet == 0)	packet.p.dstnet = d->net;
+				}	
+
 				/* Apply inbound firewall. Note that eb_firewall() returns an EB_FW_ACCEPT if the chain
 				 * it is given is NULL
 				 */
@@ -7022,12 +7068,6 @@ static void * eb_device_despatcher (void * device)
 					eb_dump_packet (d, EB_PKT_DUMP_FIREWALLED, &packet, length);
 					dump_traffic = 1;
 				}
-
-				if (!dump_traffic && d->type != EB_DEF_TRUNK) // Fill in network numbers if need be
-				{
-					if (packet.p.srcnet == 0)	packet.p.srcnet = d->net;
-					if (packet.p.dstnet == 0)	packet.p.dstnet = d->net;
-				}	
 
 				/* 20250713 Next line moved to here from just before the if (!dump_traffic && d->type != EB_DEF_TRUNK) above */
 
@@ -7500,7 +7540,9 @@ static void * eb_device_despatcher (void * device)
 			{
 				remove = 0;
 	
-				/* Apply inbound firewall - this is traffic going to the device */
+				/* Apply outbound firewall - this is traffic going to the device */
+
+				/* Note that eb_enqueue_input insists on having canonical network numbers, so this should always be OK from a net number perspective */
 
 				if ((eb_firewall(d->fw_out, p->p) == EB_FW_REJECT))
 				{

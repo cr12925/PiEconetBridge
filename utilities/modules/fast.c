@@ -1172,7 +1172,7 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 				key &= 0xDF; /* To caps */
 			}
 
-			if (fm_exit)
+			if (fm_exit && fc->menu_current->item->next) /* Only quit here if not a single-item menu */
 				continue; /* Causes loop exit */
 
 			if (strchr(valid_keys, key))
