@@ -211,7 +211,6 @@ void eb_ipgw_incoming_ip(struct __eb_device *d)
 
 				eb_raw_send (d, outgoing, length);
 
-
 				eb_free(__FILE__, __LINE__, "IPGW", "Freeing incoming IP/AUN packet after transmission on out queue", outgoing);
 			}
 			else // No ARP entry - send ARP query and put the packet on a queue
@@ -283,12 +282,11 @@ void eb_handle_ipgw_traffic (struct __econet_packet_aun *p, uint16_t len, void *
 	if (!(d->local.ip.tunif[0])) /* No IPGW here! */
 		return;
 
-
 	/* Accept DATA, or BROADCAST if it's ctrl A1 (ARP request) */
 
 	if (!((p->p.aun_ttype == ECONET_AUN_DATA) || (p->p.aun_ttype == ECONET_AUN_BCAST && p->p.ctrl == 0xA1)))
 		return;
-						
+	
 	if (p->p.aun_ttype == ECONET_AUN_DATA)
 		eb_send_ack (d, p, ECONET_AUN_ACK);
 
@@ -303,7 +301,7 @@ void eb_handle_ipgw_traffic (struct __econet_packet_aun *p, uint16_t len, void *
 		{
 			// Well, first we can update our ARP cache since we have just discovered a station (potentially)
 
-			eb_ipgw_set_arp (d, src_ip, (p->p.srcnet == 0 ? d->net : p->p.srcnet), p->p.srcstn);
+			eb_ipgw_set_arp (d, src_ip, p->p.srcnet, p->p.srcstn);
 
 			if (ntohl(dst_ip) == d->local.ip.addresses->ip)
 			{
@@ -327,7 +325,7 @@ void eb_handle_ipgw_traffic (struct __econet_packet_aun *p, uint16_t len, void *
 				eb_debug (0, 3, "IPGW", "%-8s %3d.%3d Attempting to send ARP reply to %3d.%3d for our address",
 					eb_type_str(d->type), d->net, d->local.stn, arp_reply->p.dstnet, arp_reply->p.dststn);
 
-				eb_raw_send (d, p, 8);
+				eb_raw_send (d, arp_reply, 8);
 
 				/* Free it - eb_raw_send copies the packet */
 
@@ -340,13 +338,15 @@ void eb_handle_ipgw_traffic (struct __econet_packet_aun *p, uint16_t len, void *
 
 		case 0xA2: // Incoming ARP reply
 		{
-			eb_ipgw_set_arp (d, src_ip, (p->p.srcnet == 0 ? d->net : p->p.srcnet), p->p.srcstn);
+			eb_ipgw_set_arp (d, src_ip, p->p.srcnet, p->p.srcstn);
 			eb_ipgw_transmit (d, src_ip);
 
 		} break;
 	
 		case 0x81: // Incoming IP traffic
 		{
+			/* Set ARP just in case this is traffic to us that the client already had an ARP entry for. */
+			eb_ipgw_set_arp (d, src_ip, p->p.srcnet, p->p.srcstn);
 			write(d->local.ip.socket, (char *) &(p->p.data), len);
 		} break;
 	}

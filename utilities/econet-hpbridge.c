@@ -3592,11 +3592,13 @@ uint16_t eb_raw_send (struct __eb_device *d, struct __econet_packet_aun *p, uint
         struct __econet_packet_aun      *copy;
         struct __eb_device      *destdevice;
 
-        copy = eb_malloc(__FILE__, __LINE__, "PS", "Copy output packet going on input queue", len+12);
+        copy = eb_malloc(__FILE__, __LINE__, "CORE", "Copy output packet going on input queue", len+12);
 
         memcpy(copy, p, len+12);
 
-        copy->p.seq = eb_get_local_seq(d);
+	if (copy->p.aun_ttype != ECONET_AUN_ACK && copy->p.aun_ttype != ECONET_AUN_NAK && copy->p.aun_ttype != ECONET_AUN_IMMREP)
+        	copy->p.seq = eb_get_local_seq(d);
+
         copy->p.padding = 0x00;
 
         if (copy->p.dstnet == 0)    copy->p.dstnet = d->net;
@@ -3617,7 +3619,7 @@ uint16_t eb_raw_send (struct __eb_device *d, struct __econet_packet_aun *p, uint
                         }
                         else /* Went wrong */
                         {
-                                eb_free(__FILE__, __LINE__, "PS", "PROBLEM: Freeing AUN packet after failed tx to AUN queue", p);
+                                eb_free(__FILE__, __LINE__, "CORE", "PROBLEM: Freeing AUN packet after failed tx to AUN queue", p);
                                 return 0;
                         }
                 }
@@ -3660,12 +3662,11 @@ void eb_send_ack (struct __eb_device *d, struct __econet_packet_aun *p, uint8_t 
 	ack->p.ctrl = p->p.ctrl;
 	ack->p.padding = 0x00;
 
-	eb_raw_send (d, p, 0);
+	eb_raw_send (d, ack, 0);
 
 	/* Free it - no longer needed because eb_raw_send copies it */
 
 	eb_free (__FILE__, __LINE__, "TRAFFIC", "Free ACK packet", ack); 
-	
 
 }
 
@@ -4058,7 +4059,6 @@ uint8_t eb_firewall_inner (struct __eb_fw_chain *chain, struct __econet_packet_a
 
 	f = chain->fw_chain_start;
 
-	//fprintf (stderr, "\n\n**Running FW chain %s\n\n", chain->fw_chain_name);
 	while (f)
 	{
 		// Note - the bridge firewall entries are bidirectional! - NOT ANY MORE!
