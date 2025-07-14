@@ -5181,6 +5181,12 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 
 				pthread_cond_signal (&(my_parent->qwake));
 
+				/* Wake up the AUN thread */
+
+				/* Added 20250714  - part of tyrying to hold back too much AUN Data going to BeebEm until BeebEm has ACKed the last packet */
+				pthread_cond_signal(&(my_parent->aun_out_cond));
+
+
 			}
 
 		}
@@ -5803,6 +5809,8 @@ static void * eb_device_aun_sender (void *device)
 
 		while (o)
 		{
+			uint8_t		done_a_tx = 0; /* 20250714 */
+
 			o_next = o->next;
 
 			p = o->p;
@@ -5810,7 +5818,7 @@ static void * eb_device_aun_sender (void *device)
 			
 			eb_debug (0, 4, "AUNSEND", "%16s Looking at outq %p to send traffic, packetqueue head is %p", devstring, o, p);
 
-			while (p)
+			while (p && !done_a_tx)
 			{
 				struct __eb_aun_exposure	*exp;
 
@@ -5872,6 +5880,13 @@ static void * eb_device_aun_sender (void *device)
 				{
 					/* Send it! */
 
+					/* TO DO - Whilst proper AUN machines should cope with more than one data packet without an ACK from the
+					 * AUN machine in between, BeebEm doesn't seem to like it much. What we need to do is to transmit one packet to
+					 * each destination and no more. If we get an ACK, the AUN receiver will take the packet off the queue. Otherwise,
+					 * we retransmit it. So somewhere in here, we need to stop going down the AUN output packets until the head of the
+					 * queue for each destination has either (i) exceeded max retries, or (ii) been removed from the queue because it got ACKed.
+					 */
+
 					struct sockaddr_in	dest;
 
 					gettimeofday(&(p->last_tx), 0);
@@ -5917,9 +5932,14 @@ static void * eb_device_aun_sender (void *device)
 						}
 							if (p->p->p.aun_ttype != ECONET_AUN_DATA) // && p->p->p.aun_ttype != ECONET_AUN_IMM) // Everything else only gets a single shot tx
 								p->tx = EB_CONFIG_AUN_RETRIES; /* Cheat by flagging max retries */
+
 					}
 					else
 						eb_debug (0, 4, "AUNSEND", "%16s Looking at outq %p, packet %p - NOT Sending ACK/NAK/INK", devstring, o, p);
+
+					/* 20250714 - try to fix *NOTIFY to BeebEm by holding back tx of more AUN DATA until the previous packet has timed out or been ACKed */
+					if (p->p->p.aun_ttype == ECONET_AUN_DATA) /* If we need to wait for an ACK, stop here */
+						done_a_tx = 1;  /* Not really a tx - might just have been deciding we were too early to retransmit... */
 
 
 					p_parent = p;
@@ -5931,11 +5951,16 @@ static void * eb_device_aun_sender (void *device)
 
 					if ((EB_CONFIG_AUN_RETX - timediff) < min_sleep)	min_sleep = (EB_CONFIG_AUN_RETX - timediff); /* Shorten our snooze because this packet needs to go sooner */
 
+					/* 20250714 - try to fix *NOTIFY to BeebEm by holding back tx of more AUN DATA until the previous packet has timed out or been ACKed */
+					if (p->p->p.aun_ttype == ECONET_AUN_DATA) /* If we need to wait for an ACK, stop here */
+						done_a_tx = 1;  /* Not really a tx - might just have been deciding we were too early to retransmit... */
+
 					p_parent = p;
 
 				}
 
 				p = p_next;
+
 			}
 
 			if (o->p) /* Packets remain */
