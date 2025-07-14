@@ -78,7 +78,7 @@ FSOP(21)
 		username[un_len] = 0x0D; // Acorn termination
 
 		FS_CPUT8(a->stn);
-		FS_CPUT8(a->net);
+		FS_CPUT8((a->net == f->server->net ? 0 : a->net));
 		FS_CPUT8(1); /* Task number again... */
 		FS_CPUTD(username, un_len+1);
 	}
@@ -144,7 +144,7 @@ FSOP(22)
 	}
 
 	FS_PUTR8(3, a->stn);
-	FS_PUTR8(4, a->net);
+	FS_PUTR8(4, (a->net == f->server->net ? 0 : a->net));
 	FS_PUTR8(5, 1); /* What IS a task number? */
 
 	FS_TXR(6);
@@ -254,7 +254,7 @@ FSOP(24)
 			{
 				if (a->userid == uid)
 				{
-					net = a->net;
+					net = (a->net == f->server->net ? 0 : a->net);
 					stn = a->stn;
 					break;
 				}

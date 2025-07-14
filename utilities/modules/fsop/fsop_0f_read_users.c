@@ -91,7 +91,7 @@ FSOP(0f)
 			deliver_count++;
 
 			sprintf((char * ) &(r.p.data[ptr]), "%c%c%-s%c%c",
-				a->stn, a->net,
+				a->stn, (a->net == f->server->net ? 0 : a->net),
 				username, (char) 0x0D,
 				((f->server->users[a->userid].priv & FS_PRIV_SYSTEM) ? 1 : 0) 
 			);

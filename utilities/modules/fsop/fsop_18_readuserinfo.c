@@ -48,7 +48,7 @@ FSOP(18)
                         else    reply.p.data[2] = 0;
 
                         reply.p.data[3] = a->stn;
-                        reply.p.data[4] = a->net;
+                        reply.p.data[4] = (a->net == f->server->net ? 0 : a->net);
 
                         fsop_aun_send(&reply, 5, f);
 			return;
