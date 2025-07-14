@@ -7909,8 +7909,10 @@ static void * eb_device_despatcher (void * device)
 
 						/* 20250713 Don't do this. Local devices should see a canonical stn.net tuple */
 						/* No, this was right - an FS (for example) in 1.X needs to see traffic from 1.X as 0.X */
-						if (p->p->p.srcnet == d->net)	p->p->p.srcnet = 0;
-						if (p->p->p.dstnet == d->net)	p->p->p.dstnet = 0;
+						/* 20250714 No, this screws up stuff that needs to find a client station object */
+						/* Things like the FW can sort out what's 0 for themselves */
+						//if (p->p->p.srcnet == d->net)	p->p->p.srcnet = 0;
+						//if (p->p->p.dstnet == d->net)	p->p->p.dstnet = 0;
 
 						eb_add_stats (&(d->statsmutex), &(d->b_in), p->length);
 

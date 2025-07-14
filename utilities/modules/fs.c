@@ -4580,6 +4580,11 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t len, void 
 	FILE 	*h;
 	uint16_t	datalen = (len - 12);
 
+	/* If source is our sender net, convert to 0 */
+
+	if (p->p.srcnet == s->net)
+		p->p.srcnet = 0;
+
 	r.p.ptype = ECONET_AUN_DATA;
 	r.p.data[0] = r.p.data[1] = 0;
 
@@ -4906,7 +4911,7 @@ void fsop_port99 (struct __fs_station *s, struct __econet_packet_aun *packet, ui
 
 	/* Set up 'param' */
 
-	fsop_param.net = packet->p.srcnet;
+	fsop_param.net = (packet->p.srcnet == s->net ? 0 : packet->p.srcnet); /* Translater sender net to 0 if local */
 	fsop_param.stn = packet->p.srcstn;
 	fsop_param.active = active;
 	fsop_param.user = active ? &(s->users[active->userid]) : NULL;
