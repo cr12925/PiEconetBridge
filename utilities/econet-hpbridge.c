@@ -4122,8 +4122,10 @@ uint8_t eb_firewall (struct __eb_fw_chain *chain, struct __econet_packet_aun *p)
 	if (result == EB_FW_NOMATCH)
 		result = chain->fw_default;
 
+	/* Logging now done elsewhere
 	if (result == EB_FW_REJECT && !(EB_CONFIG_DISABLE_FW_DEBUG))
 		eb_debug (0, 2, "FW", "FW       %3d.%3d from %3d.%3d Firewall chain %s dropped traffic: P:&%02X, C:&%02X, Seq:&%08X (default = %02X)", p->p.dstnet, p->p.dststn, p->p.srcnet, p->p.srcstn, chain->fw_chain_name, p->p.port, p->p.ctrl, p->p.seq, chain->fw_default);
+		*/
 
 	return result;
 }
@@ -9962,7 +9964,7 @@ int eb_parse_json_config(struct json_object *jc)
 						fw_entry = eb_malloc (__FILE__, __LINE__, "JSON", "New firewall chain entry", sizeof(struct __eb_fw));
 						memset (fw_entry, 0x00, sizeof(struct __eb_fw)); // 0x00 is the wildcard value, but we need to set next to NULL
 						fw_entry->action = EB_FW_ACCEPT;
-						fw_entry->log = 1; /* Default is to log */
+						fw_entry->log = 0; /* Default is not to log */
 						fw_entry->next = NULL;
 
 						if (json_object_object_get_ex(jentry, "source-net", &jint))
