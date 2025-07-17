@@ -7630,6 +7630,7 @@ static void * eb_device_despatcher (void * device)
 						remove = 1; /* Remove if the trunk isn't usable and this isn't a trunk keepalive, which we'll always send. */
 				}
 
+
 				if (!remove) switch (d->type)
 				{
 					case EB_DEF_TRUNK:
