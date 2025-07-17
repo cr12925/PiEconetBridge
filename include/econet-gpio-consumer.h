@@ -127,6 +127,7 @@ struct __econet_packet_plain {
 #define ECONET_AUN_INK 0x07 // econet-hpbridge only: This is an "Immediate NAK". It's sent by a wire device which gets a 'Not listening' when it tried to send a 2-way immediate. Assuming it gets back to the source machine, if the source machine was also a wire when it will enable to source device to drop its flag fill early. This is also sent by a bridge where a destination device just doesn't exist and what was transmitted was an immediate. Aim is to drop flag fill on the local network quickly where there is going to be no reply, so that utilities like !Machines and *STATIONS can progress more quickly without the timeout
 
 #define ECONET_AUN_MAXTYPE	ECONET_AUN_INK
+#define ECONET_AUN_BEEBEM_PROBE	0xFF	// Used by dev BeebEm to negotiate / announce local Econet addresses in their emulator. Defined here to pick it up and allow sane logging / ability not to log "Unknown AUN" error
 
 /* Data structure for passing AUN packets userspace<->kernel via /dev/econet-gpio, and within the kernel
  * NB: This does NOT match what they look like on the wire, even within the UDP data portion because the

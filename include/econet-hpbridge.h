@@ -1090,6 +1090,7 @@ struct __eb_config {
 	uint16_t	gateway_port; // UDP port number of gateway, in network byte order
 	int		gateway_socket; // UDP Socket on which we operate the gateway
 	uint8_t		disable_fw_debug; // Turns off FW debug
+	uint8_t		disable_beebem_probe_log; // Turns off logging of BeebEm probes
 };
 
 /* Global debug vars */
@@ -1152,6 +1153,7 @@ struct __eb_config {
 #define EB_CONFIG_GATEWAY_PORT		(config.gateway_port)
 #define EB_CONFIG_GATEWAY_SOCKET	(config.gateway_socket)
 #define EB_CONFIG_DISABLE_FW_DEBUG	(config.disable_fw_debug)
+#define EB_CONFIG_DISABLE_BEEBEM_PROBE_LOG	(config.disable_beebem_probe_log)
 
 // Printer status
 

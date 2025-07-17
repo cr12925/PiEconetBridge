@@ -4974,7 +4974,10 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 
 	if (incoming.p.aun_ttype > ECONET_AUN_MAXTYPE)
 	{
-		eb_debug (0, 3, "AUN", "%-8s         Traffic received from %s:%d - Unknown AUN packet type - dumped", "AUN", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+		if (!EB_CONFIG_DISABLE_BEEBEM_PROBE_LOG && incoming.p.aun_ttype == ECONET_AUN_BEEBEM_PROBE)
+			eb_debug (0, 3, "AUN", "BEEBEM           BeebEm address probe from %s:%d", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+		else
+			eb_debug (0, 3, "AUN", "%-8s         Traffic received from %s:%d - Unknown AUN packet type - dumped", "AUN", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
 		return;
 	}
 
@@ -11430,6 +11433,11 @@ int eb_parse_json_config(struct json_object *jc)
 		if (j && json_object_get_boolean(j))
 			EB_CONFIG_DISABLE_FW_DEBUG = 1;
 
+		json_object_object_get_ex(jgen, "disable-beebem-probe-log", &j);
+
+		if (j && json_object_get_boolean(j))
+			EB_CONFIG_DISABLE_BEEBEM_PROBE_LOG = 1;
+
 		json_object_object_get_ex(jgen, "aun-gateway", &j);
 
 		if (j)
@@ -13316,6 +13324,7 @@ int main (int argc, char **argv)
 	EB_CONFIG_GATEWAY_PORT = 0; // Just initialize
 	EB_CONFIG_GATEWAY_SOCKET = -1; // Rogue - means not open
 	EB_CONFIG_DISABLE_FW_DEBUG = 0; // Enable FW debug by default
+	EB_CONFIG_DISABLE_BEEBEM_PROBE_LOG = 0; // Log BeebEm Address probe packets (but not as error)
 
 	strcpy (config_path, "/etc/econet-gpio/econet-hpbridge.cfg");
 #ifdef EB_JSONCONFIG
