@@ -7756,6 +7756,15 @@ static void * eb_device_despatcher (void * device)
 
 							eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
 						}
+						else
+						{
+							if (!ap)
+								eb_debug (0, 1, "DESPATCH", "Trunk            Packet not sent to %s:%d - packet copy failed", d->trunk.hostname, d->trunk.remote_port);
+							else 
+								eb_debug (0, 1, "DESPATCH", "Trunk            Packet not sent to %s:%d - d->trunk.remote_host = %s, d->trunk.mt_parent = %s, mtc = %s", d->trunk.hostname, d->trunk.remote_port, (d->trunk.remote_host ? "Valid" : "INVALID"), (d->trunk.mt_parent ? "Valid" : "INVALID"), (mtc ? "Valid" : "INVALID"));
+
+
+						}
 
 						if (!d->trunk.mt_parent && ap && !(d->trunk.remote_host))
 							eb_debug (0, 3, "DESPATCH", "Trunk    %7d Packet transmission failed - dynamic (or unresolved static) remote endpoint not established", d->trunk.local_port); 
