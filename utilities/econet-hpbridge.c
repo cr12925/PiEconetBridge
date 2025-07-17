@@ -13407,7 +13407,7 @@ int main (int argc, char **argv)
 	 * wrong.
 	 */
 
-	while ((opt = getopt_long(argc, argv, "hc:d:eln:p:svyz", long_options, &long_index)) != -1)	
+	while ((opt = getopt_long(argc, argv, "hc:d:ej:ln:p:svyz", long_options, &long_index)) != -1)	
 	{
 		switch (opt)
 		{
@@ -13522,6 +13522,9 @@ int main (int argc, char **argv)
 	
 	config_stat_res = stat(config_path, &config_stat);
 	json_stat_res = stat(jsonconfig_path, &json_stat);
+
+	if (strcmp(jsonconfig_path, "/etc/econet-gpio/econet-hpbridge.json") && json_stat_res) /* JSON differs so has been manually set, but isn't there */
+		eb_debug (1, 0, "CONFIG", "Cannot open %s", jsonconfig_path);
 
 	if (!config_stat_res) /* Stat succeeded */
 		if ((config_stat.st_mode & S_IFMT) != S_IFREG) 
