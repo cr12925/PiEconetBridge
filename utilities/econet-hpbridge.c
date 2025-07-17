@@ -1801,7 +1801,9 @@ uint8_t eb_bridge_sender_net (struct __eb_device *destnet)
 		)
 			filtered = 1;
 
-		if (networks[count] && (networks[count] != destnet) && (networks[count]->net != destnet->net) && !filtered)
+		/* 20250717 - Allow us to use a net from an opposing trunk, which won't have a ->net variable set, so that if all we have is a pair of trunks which both have ->net == 0 this will still select an opposing network number */
+
+		if (networks[count] && (networks[count] != destnet) && ((networks[count]->type == EB_DEF_TRUNK) || (networks[count]->net != destnet->net)) && !filtered)
 			result = count;
 		else	count++;
 		
@@ -1920,7 +1922,7 @@ static void * eb_bridge_update_watcher (void *device)
 		if (!sender_net) // No bridge sender net available!
 		{
 			/* Go around again */
-			eb_debug (0,2, "BRIDGE", "%-8s   %7d Unable to find sender net. Not sending bridge update.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.local_port);
+			eb_debug (0,2, "BRIDGE", "%-8s %7d Unable to find sender net. Not sending bridge update.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.local_port);
 			continue;
 		}
 
