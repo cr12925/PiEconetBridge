@@ -4072,6 +4072,7 @@ uint8_t eb_firewall_inner (struct __eb_fw_chain *chain, struct __econet_packet_a
 			&&	(f->port   == 0x00 || f->port   == p->p.port || (f->port == 0xFF && p->p.port == 0)) /* if you configure port 0xff in the FW entry, it will match port 0 in the packet */
 			&&	(f->imm_ctrl == 0x00 || (p->p.port == 0x00 && p->p.ctrl == f->imm_ctrl))
 			&&	(f->osproc == 0x00 || (p->p.port == 0x00 && p->p.ctrl == EB_FW_IMM_OSPROC && ((f->osproc == 0xFE /* Rogue for 0 */ && p->p.data[0] == 0x00) || (p->p.data[0] == f->osproc))))
+			&&	(f->port  == 0x00 || (f->port == 0xB1 && !memcmp(&(p->p.data[3]), f->servertype, 8)))
 			)
 		)
 		{
@@ -10011,6 +10012,7 @@ int eb_parse_json_config(struct json_object *jc)
 						memset (fw_entry, 0x00, sizeof(struct __eb_fw)); // 0x00 is the wildcard value, but we need to set next to NULL
 						fw_entry->action = EB_FW_ACCEPT;
 						fw_entry->log = 0; /* Default is not to log */
+						memset(fw_entry->servertype, 0, sizeof(fw_entry->servertype)); /* Empty this string */
 						fw_entry->next = NULL;
 
 						if (json_object_object_get_ex(jentry, "source-net", &jint))
@@ -10085,6 +10087,25 @@ int eb_parse_json_config(struct json_object *jc)
 								eb_debug (1, 0, "JSON", "Incorrect parameter for 'osproc': %s", op);
 						}
 
+						if (json_object_object_get_ex(jentry, "server-type", &jint))
+						{
+							const char *st;
+							uint8_t	count;
+
+							st = json_object_get_string(jint);
+
+							if (strlen(st) > 8)
+								eb_debug (1, 0, "JSON", "Invalid server type in firewall - too long: %s (max 8 characters)", st);
+
+							strncpy(fw_entry->servertype, st, 8);
+
+							for (count = strlen(st); count < 8; count++)
+								fw_entry->servertype[count] = 0x20; // Space pad
+
+							fw_entry->servertype[8] = 0x00; // Null terminate
+
+						}
+
 						fw_entry->fw_subchain = NULL;
 
 						if ((json_object_object_get_ex(jentry, "accept", &jpolicy)))
@@ -10108,14 +10129,15 @@ int eb_parse_json_config(struct json_object *jc)
 						fw_entry_last = fw_entry;
 
 						/*
-						fprintf (stderr, "FW ENTRY CREATED: %d.%d to %d.%d port %d imm %d osproc %d\n",
+						fprintf (stderr, "FW ENTRY CREATED: %d.%d to %d.%d port %d imm %d osproc %d server-type %s\n",
 								fw_entry->srcnet,
 								fw_entry->srcstn,
 								fw_entry->dstnet,
 								fw_entry->dststn,
 								fw_entry->port,
 								fw_entry->imm_ctrl,
-								fw_entry->osproc);
+								fw_entry->osproc,
+								fw_entry->servertype);
 								*/
 						ecount++;
 					}
@@ -13999,6 +14021,8 @@ int main (int argc, char **argv)
 								break;
 						}
 					}
+					else if (f->servertype[0])
+						snprintf (immstr, 127, " (Server tyoe '%-8s')", f->servertype);
 					else if (f->osproc != 0)
 					{
 						switch (f->osproc)

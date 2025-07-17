@@ -263,6 +263,7 @@ struct __eb_fw { // Firewall entry - any value which is &FF is the wildcard
 	uint8_t	log; /* Not yet implemented. 0 means no, 1 means yes */
 	uint8_t imm_ctrl; /* Immediate ctrl value to filter */
 	uint8_t osproc; /* Immediate OSPROC number to filter */
+	char    servertype[9]; /* 8-character server type string to match */
 	struct __eb_fw_chain 	*fw_subchain;
 	struct __eb_fw *next;
 };
