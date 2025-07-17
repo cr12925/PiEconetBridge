@@ -7715,6 +7715,9 @@ static void * eb_device_despatcher (void * device)
 									d->trunk.encrypted_length += tmp_len;
 	
 									result = sendto (d->trunk.socket, (unsigned char *) &(d->trunk.cipherpacket), TRUNK_CIPHER_DATA + d->trunk.encrypted_length, MSG_DONTWAIT, d->trunk.remote_host->ai_addr, d->trunk.remote_host->ai_addrlen);
+									if (result < 0)
+										eb_debug (0, 1, "DESPATCH", "Trunk   %7d Encrypted trunk sendto() failed to %s:%d (%s)", d->trunk.local_port, d->trunk.remote_host, d->trunk.remote_port, strerror(errno));
+
 									eb_debug (0, 4, "DESPATCH", "Trunk            Encryption succeeded: cleartext length %04x, encrypted length %04x", (p->length + 12 + 2), d->trunk.encrypted_length);
 								}	
 	
@@ -7756,7 +7759,7 @@ static void * eb_device_despatcher (void * device)
 
 							eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
 						}
-						else
+						else if (d->trunk.hostname) /* Only produce this if it's not a dynamic trunk, because obv we can't send things to a dynamic trunk that's down */
 						{
 							if (!ap)
 								eb_debug (0, 1, "DESPATCH", "Trunk            Packet not sent to %s:%d - packet copy failed", d->trunk.hostname, d->trunk.remote_port);
