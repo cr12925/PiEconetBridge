@@ -5394,11 +5394,14 @@ static void * eb_trunk_keepalive (void * device)
 
 		// Send packet on trunk
 
-		eb_enqueue_input (d, p, 0);
-		pthread_cond_signal(&(d->qwake));
-
-
-		if (!EB_CONFIG_NOKEEPALIVEDEBUG) eb_debug (0, 3, "BRIDGE", "%-8s %7d Trunk keepalive sent", eb_type_str(d->type), d->trunk.local_port);
+		if (p->p.srcnet != 0)
+		{
+			eb_enqueue_input (d, p, 0);
+			pthread_cond_signal(&(d->qwake));
+			if (!EB_CONFIG_NOKEEPALIVEDEBUG) eb_debug (0, 3, "BRIDGE", "%-8s %7d Trunk keepalive sent", eb_type_str(d->type), d->trunk.local_port);
+		}
+		else
+			eb_debug (0, 3, "BRIDGE", "%-8s %7d Trunk keepalive not sent - no sender net available", eb_type_str(d->type), d->trunk.local_port);
 
 		// Check last_rx to see if dead
 
