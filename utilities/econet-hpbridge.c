@@ -5006,7 +5006,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 
 	/* If it's not a known source, see if we can allocate a dynamic address */
 
-	if (!source_device && (incoming.p.port == EB_PORT_BRIDGE || !is_broadcast_listener)) /* We'll allocate stations if it's a bridge broadcast, but otherwise if it's broadcast traffic we don't, so that broadcasts from other AUN exposures on the same LAN don't cause a station to be allocated */
+	if (!source_device && (incoming.p.port == EB_PORT_BRIDGE || !is_broadcast_listener || (is_broadcast_listener && (incoming.p.port == 0x99 || incoming.p.port == 0xb0)))) /* We'll allocate stations if it's a bridge broadcast, but otherwise if it's broadcast traffic we don't, so that broadcasts from other AUN exposures on the same LAN don't cause a station to be allocated. We'll allocate on broadcasts if it's a fileserver or findserver broadcast, but only them. */
 	{
 		source_device = eb_allocate_dynamic_aun (source_address, source_port);
 		if (!source_device)
@@ -5048,7 +5048,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 		return;
 	}
 
-//	fprintf (stderr, "\n\n*** is_broadcast_listener = %d, destdevice = %p, source_device = %p\n\n", is_broadcast_listener, destdevice, source_device);
+	fprintf (stderr, "\n\n*** is_broadcast_listener = %d, destdevice = %p, source_device = %p\n\n", is_broadcast_listener, destdevice, source_device);
 
 	/* So long as we know where it's going and where it's come from, we can process it, otherwise we drop it */
 
@@ -13606,7 +13606,7 @@ int main (int argc, char **argv)
 
 	optind = 1; /* Reset option processing */
 
-	while ((opt = getopt_long(argc, argv, "hc:d:eln:p:sz", long_options, &long_index)) != -1)	
+	while ((opt = getopt_long(argc, argv, "hc:d:ej:ln:p:sz", long_options, &long_index)) != -1)	
 	{
 		switch (opt)
 		{
@@ -13691,7 +13691,7 @@ int main (int argc, char **argv)
 
 		fprintf (stderr, "Net Type            Info\n");
 
-		if (!p)	eb_debug (1, 0, "CONFIG", "No networks found.");
+		//if (!p)	eb_debug (1, 0, "CONFIG", "No networks found.");
 
 		//fprintf (stderr, "Packet dump options flags 0x%02X\n", EB_CONFIG_PKT_DUMP_OPTS);
 
