@@ -5048,7 +5048,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 		return;
 	}
 
-	fprintf (stderr, "\n\n*** is_broadcast_listener = %d, destdevice = %p, source_device = %p\n\n", is_broadcast_listener, destdevice, source_device);
+	//fprintf (stderr, "\n\n*** is_broadcast_listener = %d, destdevice = %p, source_device = %p\n\n", is_broadcast_listener, destdevice, source_device);
 
 	/* So long as we know where it's going and where it's come from, we can process it, otherwise we drop it */
 
