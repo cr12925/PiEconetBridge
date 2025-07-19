@@ -4072,7 +4072,7 @@ uint8_t eb_firewall_inner (struct __eb_fw_chain *chain, struct __econet_packet_a
 			&&	(f->port   == 0x00 || f->port   == p->p.port || (f->port == 0xFF && p->p.port == 0)) /* if you configure port 0xff in the FW entry, it will match port 0 in the packet */
 			&&	(f->imm_ctrl == 0x00 || (p->p.port == 0x00 && p->p.ctrl == f->imm_ctrl))
 			&&	(f->osproc == 0x00 || (p->p.port == 0x00 && p->p.ctrl == EB_FW_IMM_OSPROC && ((f->osproc == 0xFE /* Rogue for 0 */ && p->p.data[0] == 0x00) || (p->p.data[0] == f->osproc))))
-			&&	(f->port  == 0x00 || (f->port == 0xB1 && !memcmp(&(p->p.data[3]), f->servertype, 8)))
+			&&	(f->servertype[0] == 0x00 || (p->p.port == 0xB1 && !memcmp(&(p->p.data[3]), f->servertype, 8)))
 			)
 		)
 		{
