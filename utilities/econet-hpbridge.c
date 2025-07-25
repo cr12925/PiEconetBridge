@@ -7986,7 +7986,7 @@ static void * eb_device_despatcher (void * device)
 							{
 								if (ackdevice->type == EB_DEF_AUN)
 								{
-									if (eb_aunpacket_to_aun_queue(d, ackdevice, ap, 12))
+									if (eb_aunpacket_to_aun_queue(d, ackdevice, ap, 0)) /* Was 12 length, but this is an ACK */
 										eb_add_stats(&(d->statsmutex), &(d->b_out), 12);
 									else
 										eb_free(__FILE__, __LINE__, "ACK", "Free ACK packet on failure to send to AUN", ap);
