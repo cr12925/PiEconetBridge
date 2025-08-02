@@ -32,7 +32,11 @@
 #include <errno.h>
 #include <endian.h>
 #include <regex.h>
+#include <time.h>
 #include "../include/econet-gpio-consumer.h"
+
+struct timespec start;
+uint8_t timestamps = 0;
 
 int read_wire (int);
 int write_wire (short, short, short, short, short, short, char *, int);
@@ -101,33 +105,57 @@ void dump_eco_pkt(int len, struct __econet_packet_wire *a)
 {
 
 	int count = 0;
-	char bytestream[3*21];
-	char dumpstream[21];
+	char bytestream[5*24];
+	struct timespec 	t;
+
+	clock_gettime(CLOCK_MONOTONIC, &t);
+
+	if (t.tv_nsec < start.tv_nsec)
+	{
+		t.tv_sec--;
+		t.tv_nsec = (1000000000 - (start.tv_nsec - t.tv_nsec));
+	}
+	else
+		t.tv_nsec -= start.tv_nsec;
+
+	t.tv_sec -= start.tv_sec;
 
 	if (dumpmode_brief)
 	{
-		fprintf(stderr, "ECO->:");
-		if (a->p.dststn != 0xff) fprintf(stderr, "to %3d.%3d ", a->p.dstnet, a->p.dststn);
-		else fprintf(stderr, "BROADCAST  ");
-		fprintf (stderr,"from %3d.%3d ", a->p.srcnet, a->p.srcstn);
-		fprintf (stderr, " size %04x ", len);
+		if (timestamps) fprintf (stderr, "%02dd:%02dh:%02dm:%02ds.%08d ",
+				(t.tv_sec / (24 * 60 * 60)),
+				(t.tv_sec % (24 * 60 * 60)) / 3600,
+				(t.tv_sec % (3600)) / 60,
+				(t.tv_sec % 60),
+				t.tv_nsec);
+
+		fprintf (stderr,"%3d.%3d -> ", a->p.srcnet, a->p.srcstn);
+		if (a->p.dststn != 0xff) fprintf(stderr, "%3d.%3d ", a->p.dstnet, a->p.dststn);
+		else fprintf(stderr, "B'CAST  ");
+		fprintf (stderr, " len %04x : ", len);
 
 		if (len > 4)
 		{
 			for (count = 4; count < ((len > 24) ? 24 : len); count++)
 			{
-				sprintf(&(bytestream[3*(count-4)]), "%02x ", a->data[count]);
-				sprintf(&(dumpstream[count-4]), "%c", (a->data[count] < 127 && a->data[count] >= 32) ? a->data[count] : '.');
+				sprintf(&(bytestream[5*(count-4)]), "%02x %c ", a->data[count],
+					(a->data[count] < 'z' && a->data[count] > ' ') ? a->data[count] : '.');
 			}
-			bytestream[3*21] = 0;
-			dumpstream[21] = 0;
-			fprintf(stderr, "%-60s %-20s", bytestream, dumpstream);	
+			bytestream[5*((len > 24) ? 24 : len)] = 0;
+			fprintf(stderr, "%-s", bytestream);	
 		}
 	
 		fprintf (stderr, "\n");
 	}
 	else
 	{
+		if (timestamps) fprintf (stderr, "%02dd:%02dh:%02dm:%02ds.%08d\n",
+				(t.tv_sec / (24 * 60 * 60)),
+				(t.tv_sec % (24 * 60 * 60)) / 3600,
+				(t.tv_sec % (3600)) / 60,
+				(t.tv_sec % 60),
+				t.tv_nsec);
+
 		fprintf (stderr, "%08x --- PACKET ---\n", len);
 
 		fprintf (stderr, "         DST Net/Stn 0x%02x/0x%02x\n", a->p.dstnet, a->p.dststn);
@@ -153,6 +181,7 @@ Options:\n\
 \n\
 \t-b\tDo brief packet dumps\n\
 \t-h\tPrint this help message\n\
+\t-t\tAdd timestamps to packets\n\
 \n\
 \nNote: If not running as root, you must make /dev/econet-gpio\
 \nGlobally read/writeable - e.g. sudo chmod a+rw /dev/econet-gpio\
@@ -170,7 +199,9 @@ void main(int argc, char **argv)
 	
 	struct pollfd p;
 
-	while ((opt = getopt(argc, argv, "bh")) != -1)
+	clock_gettime(CLOCK_MONOTONIC, &start);
+
+	while ((opt = getopt(argc, argv, "bht")) != -1)
 	{
 		switch (opt) {
 			case 'b': /* Brief Dump mode */
@@ -178,6 +209,8 @@ void main(int argc, char **argv)
 				break;
 			case 'h':	
 				econet_usage(argv[0]); break;
+			case 't':
+				timestamps = 1; break;
 		}
 	}
 
