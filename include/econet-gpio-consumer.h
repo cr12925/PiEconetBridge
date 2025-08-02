@@ -222,6 +222,7 @@ struct __econet_packet_pipe {
 #define ECONETGPIO_IOC_READGENTLE	_IO(ECONETGPIO_MAGIC, 14) /* Set module to read mode without a full cleardown */
 #define ECONETGPIO_IOC_RESILIENTACK	_IO(ECONETGPIO_MAGIC, 15) /* Send final ACK to client station on wire because we received an ACK from the distant station the client was sending a 4-way to - moves kernel module out of EA_PENDINGFINALACK */
 #define ECONETGPIO_IOC_RESILIENCEMODE	_IOW(ECONETGPIO_MAGIC, 16, uint8_t) /* Change in/out of resilient mode - 0 = off, 1 = on */
+#define ECONETGPIO_IOC_TWOBYTEMODE	_IOW(ECONETGPIO_MAGIC, 17, uint8_t) /* 0 = 1 byte per IRQ, 1 = 2 bytes per IRQ to/from the ADLC */
 
 /* The following are for debugging and testing only, and only with interrupts off */
 #define ECONETGPIO_IOC_SETA		_IOW(ECONETGPIO_MAGIC, 100, int) /* bit0 is A0, bit1 is A1 */
