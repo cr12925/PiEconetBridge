@@ -168,6 +168,7 @@ struct __econet_data {
 	unsigned char extralogs; // If 1, extra dmesg logging happens (e.g. collisions, rx aborts, etc.)
 	unsigned long peribase; // Peripheral base address
 	u8 resilience; // 0 = off; 1 = in AUN mode, will just flag fill after receipt of data from station when reading a 4-way instead of sending final ACK. (Not implemented yet.) Userspace will use ioctl() to signal the ACK has arrived and that the wire ACK can then be sent. In this mode, userspace will have set a thread going which waits for a timeout, checks to see if the kernel is still in EA_R_PENDINGFINALACK and if it is then puts it back into read mode. This will generate net error on the sending wire station, which is the best we can do if destination station fails to respond (perhaps over trunk) when the module has to convert 4-way traffic to AUN.
+	u8 twobytemode; // 0 = 1 byte per IRQ; 1 = 2 bytes per IRQ like a Beeb does.
 	struct clk		*gpio4clk;
 	struct pwm_device	*gpio18pwm;
 };

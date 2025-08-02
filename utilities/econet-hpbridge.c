@@ -4335,7 +4335,7 @@ stn, readerfile);
 				d->pipe.skt_write = open (pipewriter, O_WRONLY | O_NONBLOCK | O_SYNC);
 
 				if (d->pipe.skt_write == -1)
-					eb_debug (0, 1, "LISTEN", "Pipe     %3d.%3d Failed to open writer socket %s: %s", d->net, d->pipe.stn, pipewriter, strerror(errno));
+					eb_debug (0, 1, "LISTEN", "Pipe     %3d.%3d Failed to open writer socket %s: %s (eUID = %d)", d->net, d->pipe.stn, pipewriter, strerror(errno), geteuid());
 				else /* Successfully opened when the pipe client arrived - put it in the listen map on the wire */
 				{
 					eb_set_single_wire_host (d->net, d->pipe.stn);
@@ -6179,7 +6179,12 @@ static void * eb_device_despatcher (void * device)
 			// No, don't - it's not working yet
 			//ioctl(d->wire.socket, ECONETGPIO_IOC_RESILIENCEMODE, d->wire.resilience);
 
-			eb_debug (0, 2, "DESPATCH", "%-8s %3d     Econet device %s opened successfully (fd %d)", "Wire", d->net, (EB_CONFIG_LOCAL ? "/dev/null" : d->wire.device), d->wire.socket);	
+			// Enable two byte mode if selected
+
+			if (d->wire.twobytemode)
+				ioctl(d->wire.socket, ECONETGPIO_IOC_TWOBYTEMODE, d->wire.twobytemode);
+
+			eb_debug (0, 2, "DESPATCH", "%-8s %3d     Econet device %s opened successfully (fd %d), two byte mode %s", "Wire", d->net, (EB_CONFIG_LOCAL ? "/dev/null" : d->wire.device), d->wire.socket, d->wire.twobytemode ? "ON" : "off");	
 
 		} break;
 
@@ -9461,6 +9466,9 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 		if (json_object_object_get_ex(o, "resilience", &jfw)) // jfw being used temporarily
 			networks[net]->wire.resilience = (json_object_get_boolean(jfw) ? 1 : 0);
+
+		if (json_object_object_get_ex(o, "two-byte-mode", &jfw)) // jfw being used temporarily
+			networks[net]->wire.twobytemode = (json_object_get_boolean(jfw) ? 1 : 0);
 
 		if (json_object_object_get_ex(o, "net-clock", &jnetclock))
 		{

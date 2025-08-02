@@ -48,11 +48,10 @@ FSOP(08) /* Getbyte */
 	fl = a->fhandles[handle].handle;
 	h = fl->handle;
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d Get byte on channel %02x, cursor %04lX, ctrl seq is %s (stored: %02X, received: %02X)", "", f->net, f->stn, handle, a->fhandles[handle].cursor,
-			fs_check_seq(a->fhandles[handle].sequence, ctrl) ? "OK" : "WRONG", a->fhandles[handle].sequence, ctrl);
-
 	if (a->fhandles[handle].is_dir) // Directory handle
 	{
+		fs_debug (0, 2, "%12sfrom %3d.%3d Get byte on channel %02x, cursor %04lX, ctrl seq is %s (stored: %02X, received: %02X) - but attempt to read from directory - refused", "", f->net, f->stn, handle, a->fhandles[handle].cursor,
+			fs_check_seq(a->fhandles[handle].sequence, ctrl) ? "OK" : "WRONG", a->fhandles[handle].sequence, ctrl);
 		r.p.ctrl = ctrl;
 		r.p.data[2] = 0xfe; // Always flag EOF
 		r.p.data[3] = 0xc0;
@@ -61,6 +60,9 @@ FSOP(08) /* Getbyte */
 
 		return;
 	}
+
+	fs_debug (0, 2, "%12sfrom %3d.%3d Get byte on channel %02x, cursor %04lX, ctrl seq is %s (stored: %02X, received: %02X)", "", f->net, f->stn, handle, a->fhandles[handle].cursor,
+			fs_check_seq(a->fhandles[handle].sequence, ctrl) ? "OK" : "WRONG", a->fhandles[handle].sequence, ctrl);
 
 	if (fstat(fileno(h), &statbuf)) // Non-zero = error
 	{
@@ -85,7 +87,7 @@ FSOP(08) /* Getbyte */
 
 	a->fhandles[handle].cursor_old = ftell(h);
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d Get byte on channel %02x, cursor %04lX, file length = %04lX, seek to %04lX", "", f->net, f->stn, handle, a->fhandles[handle].cursor, ftell(h));
+	fs_debug (0, 2, "%12sfrom %3d.%3d Get byte on channel %02x, cursor %04lX, file length = %04lX, seek to %04lX", "", f->net, f->stn, handle, a->fhandles[handle].cursor, statbuf.st_size, ftell(h));
 
 	b = fgetc(h);
 
@@ -103,7 +105,7 @@ FSOP(08) /* Getbyte */
 	a->fhandles[handle].sequence = (ctrl & 0x01);
 
 	r.p.ctrl = ctrl;
-	r.p.data[2] = (feof(h) ? 0xfe : b);
+	r.p.data[2] = (a->fhandles[handle].pasteof ? 0xfe : b);
 	r.p.data[3] = result;
 
 	fsop_aun_send(&r, 4, f);

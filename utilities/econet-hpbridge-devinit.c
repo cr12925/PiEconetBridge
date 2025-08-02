@@ -71,6 +71,8 @@ uint8_t	eb_device_init_wire (uint8_t net, char * device, struct __eb_fw_chain *f
 
 	p->wire.period = p->wire.mark = 0;
 
+	p->wire.twobytemode = 0; /* Default 0ff */
+
 	p->wire.pool = NULL;
 	memset(&(p->wire.use_pool), 0, sizeof(p->wire.use_pool));
 

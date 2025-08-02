@@ -890,6 +890,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			struct timeval	last_bridge_whatnet[256]; // This and the corresponding _isnet array tell us when we last successfully sent a reply to such a query to a station on this wire.
 			struct timeval  last_bridge_isnet[256];
 			uint8_t		resilience; // 0 = off, 1 = on
+			uint8_t		twobytemode; // 0 = off, 1 = on
 
 			// Pool nat config
 			uint8_t			use_pool[255];

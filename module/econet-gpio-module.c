@@ -1015,7 +1015,7 @@ void econet_finish_tx(void)
 
 	econet_set_chipstate(EM_WRITE_WAIT);
 
-	econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_TXLAST | ECONET_GPIO_C2_FC | ECONET_GPIO_C2_FLAGIDLE | ECONET_GPIO_C2_PSE); // No RX status reset
+	econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_TXLAST | ECONET_GPIO_C2_FC | ECONET_GPIO_C2_FLAGIDLE | ECONET_GPIO_C2_PSE | ((econet_data && econet_data->twobytemode) ? ECONET_GPIO_C2_2BYTES : 0)); // No RX status reset
 
 #ifdef ECONET_GPIO_DEBUG_TX
 	econet_get_sr();
@@ -1054,7 +1054,6 @@ void econet_irq_write(void)
 	   TX set up - see econet_set_write_mode() */
 
 	char tdra_flag;
-	int loopcount = 0;
 
 	// Added 25.07.21 - Mark transmission even if not successful otherwise the reset timer gets stuck
 	
@@ -1086,7 +1085,7 @@ void econet_irq_write(void)
 	{
 		// Something to transmit
 
-		int byte_counter;
+		u8 byte_counter;
 		int tdra_counter;
 
 		byte_counter = 0;
@@ -1099,13 +1098,13 @@ void econet_irq_write(void)
 		 *
 		 */
 
-		while (byte_counter < 1)
+		while (byte_counter < (econet_data->twobytemode ? 2 : 1)) /* Don't need to check length because the routine returns on packet completion, even if after only 1 byte */
 		{
+
+			if (byte_counter > 0) sr1 = econet_read_sr(1); /* Re-read SR if this is not first loop */
 
 			// Check TDRA available.
 	
-			loopcount++;
-
 			if (sr1 & ECONET_GPIO_S1_UNDERRUN) // Underrun
 			{
 				printk (KERN_INFO "econet-gpio: econet_irq_write(): TX Underrun at byte %02x - abort transmission\n", econet_pkt_tx.ptr);
@@ -1134,7 +1133,7 @@ void econet_irq_write(void)
 			tdra_flag = (sr1  & ECONET_GPIO_S1_TDRA);
 
 #ifdef ECONET_GPIO_DEBUG_TX
-			printk (KERN_INFO "econet-gpio: econet_irq_write(): Loop % 2d - TDRA FLAG IS %s. SR1 = 0x%02x, SR2 = 0x%02x\n", loopcount, (sr1 & ECONET_GPIO_S1_TDRA) ? "SET" : "UNSET", sr1, (sr2 = econet_read_sr(2)));
+			printk (KERN_INFO "econet-gpio: econet_irq_write(): TDRA FLAG IS %s. SR1 = 0x%02x, SR2 = 0x%02x\n", (sr1 & ECONET_GPIO_S1_TDRA) ? "SET" : "UNSET", sr1, (sr2 = econet_read_sr(2)));
 
 #endif 
 			tdra_counter = 0;
@@ -1144,14 +1143,15 @@ void econet_irq_write(void)
 			 *
 			 */
 
-			while (tdra_counter++ < 5 && (!tdra_flag)) // Clear down and see if it becomes available
+			while (tdra_counter++ < 10 && (!tdra_flag)) // Clear down and see if it becomes available - Loop extended to 10 20250802
 			{
 				// Next line reinstated 20211024 to see if it helps
 
 				econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_CLR_TX_STATUS |
-					ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE);
+					ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE | ((econet_data && econet_data->twobytemode) ? ECONET_GPIO_C2_2BYTES : 0));
 
 				udelay(10); // Shorter delay - 20240325 was 20us
+				
 
 				tdra_flag = ((sr1 = econet_read_sr(1)) & ECONET_GPIO_S1_TDRA); // Only read SR1. (get_sr now always reads both, but we aren't fussed about sr2 here)
 			}
@@ -1172,12 +1172,12 @@ void econet_irq_write(void)
 
 				if (sr1 & ECONET_GPIO_S1_CTS) // Collision?
 				{
-					if (econet_data->extralogs) printk (KERN_INFO "econet-gpio: econet_irq_write(): /CTS - Collision? TDRA unavailable on IRQ - SR1 - 0x%02X, SR2 = 0x%02X, ptr = %d, loopcount = %d - abort tx\n", sr1, (sr2 = econet_read_sr(2)), econet_pkt_tx.ptr, loopcount);
+					if (econet_data->extralogs) printk (KERN_INFO "econet-gpio: econet_irq_write(): /CTS - Collision? TDRA unavailable on IRQ - SR1 - 0x%02X, SR2 = 0x%02X, ptr = %d - abort tx\n", sr1, (sr2 = econet_read_sr(2)), econet_pkt_tx.ptr);
 					econet_aun_setidle_txstatus(ECONET_TX_COLLISION);
 				}
 				else	
 				{
-					if (econet_data->extralogs) printk (KERN_INFO "econet-gpio: econet_irq_write(): TDRA not available on IRQ - SR1 = 0x%02x, SR2 = 0x%02x, ptr = %d, loopcount = %d - abort transmission\n", sr1, (sr2 = econet_read_sr(2)), econet_pkt_tx.ptr, loopcount);
+					if (econet_data->extralogs) printk (KERN_INFO "econet-gpio: econet_irq_write(): TDRA not available on IRQ - SR1 = 0x%02x, SR2 = 0x%02x, ptr = %d - abort transmission\n", sr1, (sr2 = econet_read_sr(2)), econet_pkt_tx.ptr);
 					econet_aun_setidle_txstatus(ECONET_TX_TDRAFULL);
 				}
 
@@ -1211,28 +1211,8 @@ void econet_irq_write(void)
 				econet_pkt_tx.length = 0;
 				return;
 			}
-			else
-			{
-
-				/* As at 20240325, it was thought this was unnecessary because
-				 * TDRA availability flag is self-resetting. Not doing this appears
-				 * to have had no impact on performance at all.
-				 *
-				 * The top version also resets RX status, which appears to be wholly
-				 * unnecessary either way.
-				 *
-				 */
-
-				/* RX & TX Reset version
-				econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_CLR_TX_STATUS |
-					ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE);
-				*/
-				
-				/* TX-only reset version
-				econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_CLR_TX_STATUS |
-					ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE); 
-				*/
-			}
+	
+			/* No need to do any resets or anything, the TDRA flag is self resetting */
 
 			byte_counter++;
 
@@ -1280,9 +1260,6 @@ void econet_irq_read(void)
 
 	unsigned char d;
 	unsigned short old_ptr;
-
-//recv_more:
-
 
 	old_ptr = econet_pkt_rx.ptr;
 
@@ -2311,7 +2288,19 @@ irqreturn_t econet_irq(int irq, void *ident)
 	 */
 
 	else if (chip_state == EM_READ || (sr2 & (ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_AP)) || (sr1 & ECONET_GPIO_S1_RDA))
+	{
 		econet_irq_read();
+
+		if ((!(sr2 & ECONET_GPIO_S2_VALID)) && econet_data->twobytemode) /* If twobyte mode & that wasn't the end of frame */
+		{
+			sr1 = econet_read_sr(1);
+			sr2 = econet_read_sr(2);
+
+			if (sr1 & ECONET_GPIO_S1_RDA) /* More data available - collect it */
+				econet_irq_read();
+
+		}
+	}
 
 	/*
 	 * Sometimes we get odd IRQs when idle or in EM_IDLEINIT.
@@ -3520,6 +3509,12 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 		 *
 		 */
 
+		case ECONETGPIO_IOC_TWOBYTEMODE:
+			{
+				econet_data->twobytemode = (arg & 0x01); 
+				if (econet_data->extralogs) printk (KERN_INFO "econet-gpio: Two byte transfer mode set\n");
+			} break;
+
 		default:
 			return -ENOTTY;
 	}
@@ -3607,6 +3602,7 @@ static int econet_probe (struct platform_device *pdev)
 	{
 		printk (KERN_INFO "econet-gpio: No device tree entry found. Abort.\n");
 		kfree(econet_data);
+		econet_data = NULL;
 		return -ENODEV;
 	}
 
@@ -3621,6 +3617,7 @@ static int econet_probe (struct platform_device *pdev)
 	{
 		printk (KERN_INFO "econet-gpio: No version found in device tree. Abort.\n");
 		kfree(econet_data);
+		econet_data = NULL;
 		return -ENODEV;
 	}
 
@@ -3640,6 +3637,7 @@ static int econet_probe (struct platform_device *pdev)
 	{
 		printk (KERN_ERR "econet-gpio: Hardware version incompatible with this module. Please compile module in old mode.\n");
 		kfree(econet_data);
+		econet_data = NULL;
 		return -ENODEV;
 	}
 #endif
@@ -4331,6 +4329,7 @@ void econet_remove(struct platform_device *pdev)
 		 */
 
 		kfree(econet_data);
+		econet_data = NULL;
 
 	}
 

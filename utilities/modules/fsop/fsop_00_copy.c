@@ -92,12 +92,15 @@ FSOP_00(COPY)
 		return;
 	}
 
+	/* This is wrong - can copy to non-existent new file */
+	/*
 	if (p_dst.ftype == FS_FTYPE_NOTFOUND)
 	{
 		fsop_error(f, 0xFF, "Destination not found");
 		fs_free_wildcard_list(&p_src);
 		return;
 	}
+	*/
 
 	if (to_copy > 1 && p_dst.ftype != FS_FTYPE_DIR)
 	{
