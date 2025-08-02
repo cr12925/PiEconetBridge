@@ -122,7 +122,7 @@ void dump_eco_pkt(int len, struct __econet_packet_wire *a)
 
 	if (dumpmode_brief)
 	{
-		if (timestamps) fprintf (stderr, "%02dd:%02dh:%02dm:%02ds.%08d ",
+		if (timestamps) fprintf (stderr, "%02dd:%02dh:%02dm:%02ds.%09d ",
 				(t.tv_sec / (24 * 60 * 60)),
 				(t.tv_sec % (24 * 60 * 60)) / 3600,
 				(t.tv_sec % (3600)) / 60,
@@ -149,7 +149,7 @@ void dump_eco_pkt(int len, struct __econet_packet_wire *a)
 	}
 	else
 	{
-		if (timestamps) fprintf (stderr, "%02dd:%02dh:%02dm:%02ds.%08d\n",
+		if (timestamps) fprintf (stderr, "%02dd:%02dh:%02dm:%02ds.%09d\n",
 				(t.tv_sec / (24 * 60 * 60)),
 				(t.tv_sec % (24 * 60 * 60)) / 3600,
 				(t.tv_sec % (3600)) / 60,
