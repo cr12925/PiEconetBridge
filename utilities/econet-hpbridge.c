@@ -8652,21 +8652,19 @@ static void * eb_device_despatcher (void * device)
 
 							eb_debug (0, 3, "BRIDGE", "%-8s %3d.%3d Looking for handler for port &%02X (ports list says 0x%02X)", eb_type_str(d->type), d->net, d->local.stn,p->p->p.port, (EB_PORT_ISSET(d,ports,p->p->p.port)));
 
+							/* Is it an ACK? If so, if we have a fileserver we must send a copy there, because the ACKs only have the port number in that they're acknowledging data sent to, so because we don't track which data came from which server type, and because fileservers use the ACKs to work out when to send more data on Load/GBPB transactions, they need all the ACKs... */
+
+							if ((p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK) && (d->local.fs.server && fsop_is_enabled(d->local.fs.server) && EB_PORT_ISSET(d,ports,0x99)))
+							{
+								eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
+								(d->local.port_funcs[0x99])(p->p, p->length + 12, d->local.port_param[0x99]);
+							}
+
 							if (EB_PORT_ISSET(d,ports,p->p->p.port))
 							{
 								eb_debug (0, 3, "BRIDGE", "%-8s %3d.%3d Found handler for port &%02X, traffic type %02X, length %04X", eb_type_str(d->type), d->net, d->local.stn,p->p->p.port, p->p->p.aun_ttype, p->length);
 								eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
 								(d->local.port_funcs[p->p->p.port])(p->p, p->length + 12, d->local.port_param[p->p->p.port]);
-							}
-							else if (p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK) /* Query whether this actually ever gets called given the above? */
-							{
-								/* Send ACK & NAK to fileserver, if active */
-
-								if (fsop_is_enabled(d->local.fs.server) && EB_PORT_ISSET(d,ports,0x99))
-								{
-									eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
-									(d->local.port_funcs[0x99])(p->p, p->length + 12, d->local.port_param[0x99]);
-								}
 							}
 							else if (p->p->p.aun_ttype == ECONET_AUN_IMMREP && d->local.fs.server)
 							{
