@@ -30,7 +30,7 @@ install-module:	install-mkgroup build-module
 install-utilities:	install-mkgroup build-utilities
 	[ -e /etc/econet-gpio ] || sudo mkdir -p /etc/econet-gpio
 	[ -e /etc/econet-gpio/printers ] || sudo cp -r printers /etc/econet-gpio
-	[ -e /home/`whoami`/econetfs ] || (mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00 && mkdir -p /home/`whoami`/econetfs/1STORAGE)
+	[ -e /home/`whoami`/econetfs ] || (mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00 && mkdir -p /home/`whoami`/econetfs/1STORAGE ; mkdir -p /home/`whoami`/econetfs/Tapes ; mkdir -p /home/`whoami`/econetfs/TapeDrives )
 	-[ -e /home/`whoami`/econetfs/0PIBRIDGE-00 ] && mkdir -p /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM && cp FS/PIFSTOOL /home/`whoami`/econetfs/0PIBRIDGE-00/SYSTEM/PIFSTOOL 
 	[ -e /etc/econet-gpio/pserv.sh ] || sudo cp config/pserv.sh /etc/econet-gpio
 	[ -e /etc/econet-gpio/tapes.sh ] || sudo cp config/tapes.sh /etc/econet-gpio
@@ -46,7 +46,7 @@ install-utilities:	install-mkgroup build-utilities
 	utilities/config-mangle econet-hpbridge-EconetFS.json
 	utilities/config-mangle econet-hpbridge-EconetFSTrunk.json
 	utilities/config-mangle systemd/econet-hpbridge.service
-	[ -e /etc/econet-gpio/econet-hpbridge.cfg ] || (sudo cp config/econet-hpbridge.cfg-EconetPlusFileserver.local /etc/econet-gpio/econet-hpbridge.cfg ; sudo chown `whoami` /etc/econet-gpio/econet-hpbridge.cfg )
+	[ -e /etc/econet-gpio/econet-hpbridge.json ] || (sudo cp config/econet-hpbridge-EconetFSTrunk.local /etc/econet-gpio/econet-hpbridge.json ; sudo chown `whoami` /etc/econet-gpio/econet-hpbridge.json )
 	[ -e /etc/systemd/system/econet-hpbridge.service ] || sudo cp systemd/econet-hpbridge.service.local /etc/systemd/system/econet-hpbridge.service
 	sudo cp BEEBMEM /etc/econet-gpio
 	-sudo systemctl daemon-reload
