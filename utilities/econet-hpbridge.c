@@ -40,6 +40,8 @@ extern short fs_sevenbitbodge;
 extern short normalize_debug;
 extern uint8_t fs_set_syst_bridgepriv;
 
+uint8_t		eb_mfr = 0xee, eb_mtype = 0xee;
+
 /* Test thread return */
 
 void *thread_return = NULL;
@@ -8228,9 +8230,9 @@ static void * eb_device_despatcher (void * device)
 						{
 							// Deal with machinetype queries here
 							ack.p.aun_ttype = ECONET_AUN_IMMREP;
-							ack.p.data[0] = ack.p.data[1] = 0xee;
-							ack.p.data[2] = (EB_VERSION & 0x0f) << 4;
-							ack.p.data[3] = (EB_VERSION & 0xf0) >> 4;
+							ack.p.data[0] = eb_mfr; ack.p.data[1] = eb_mtype;
+							ack.p.data[2] = (EB_VERSION & 0xff00) >> 8;
+							ack.p.data[3] = (EB_VERSION & 0xff);
 
 							eb_enqueue_output (d, &ack, 4, NULL);
 							new_output = 1;
@@ -13301,6 +13303,58 @@ int main (int argc, char **argv)
 		exit (EXIT_FAILURE);
 	}
 
+	/* Sort out manufacturer and machine type */
+
+	{
+
+		FILE 	*model;
+		struct utsname 	u;
+
+		model = fopen ("/proc/device-tree/model", "r");
+
+		eb_mfr = 0xEC;
+		eb_mtype = 0xEC;
+
+		if (model)
+		{
+			char	buffer[128];
+
+			memset (buffer, 0, 128);
+			fread (buffer, 128, 1, model);
+
+			if (strstr(buffer, "Raspberry Pi 3"))
+			{
+				eb_mfr = 0xEE;
+				eb_mtype = 0xED;
+			}
+			else if (strstr(buffer, "Raspberry Pi 4"))
+			{
+				eb_mfr = 0xEE;
+				eb_mtype = 0xEE;
+			}
+			else if (strstr(buffer, "Raspberry Pi 5"))
+			{
+				eb_mfr = 0xEE;
+				eb_mtype = 0xEF; 
+			}
+
+			fclose(model);
+		}
+
+		if (eb_mtype == 0xEC)
+		{
+			if (!uname(&u))
+			{
+				if (!strcmp(u.machine, "aarch64") || !strstr(u.machine, "arm"))
+					eb_mtype = 0xEC;
+				else
+					eb_mtype = 0xEB;
+			}
+			else	eb_mtype = 0xEA;
+		}
+
+	}
+
 	/* Set up some initial config
 	*/
 
@@ -13534,6 +13588,17 @@ int main (int argc, char **argv)
 			fprintf (stderr, "Cannot open debug output file %s. Quitting.", debug_path);
 	}
 	
+	/* Display machine type information */
+
+	eb_debug (0, 0, "CORE", "Identified a %s %s",
+			(eb_mfr == 0xEC) ? "Generic" 
+		:	(eb_mfr == 0xEE) ? "Raspberry Pi" : "Unknown",
+			(eb_mtype == 0xEF) ? "5"
+		:	(eb_mtype == 0xEE) ? "4"
+		:	(eb_mtype == 0xED) ? "3"
+		:	(eb_mtype == 0xEC) ? "ARM" 
+		: 	(eb_mtype == 0xEB) ? "Non-ARM" : "Unknown architecture");
+
 	if (max_fds.rlim_cur != 0) // User changed it
 		setrlimit (RLIMIT_NOFILE, &max_fds);
 
