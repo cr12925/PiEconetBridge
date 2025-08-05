@@ -8,10 +8,13 @@ build-module:
 build-utilities:
 	cd utilities ; make
 
+kernel-depend:
+	sudo apt update
+	sudo apt install raspberrypi-kernel-headers
+	
 depend:
 	sudo apt update
-	sudo apt full-upgrade
-	sudo apt install raspberrypi-kernel-headers libexplain51 libexplain-dev libexplain-doc libssl-dev libglib2.0-dev cmake libssh2-1-dev libjson-c-dev
+	sudo apt install libexplain51 libexplain-dev libexplain-doc libssl-dev libglib2.0-dev cmake libssh2-1-dev libjson-c-dev
 
 install:	all install-module install-utilities
 
@@ -38,10 +41,10 @@ install-utilities:	install-mkgroup build-utilities
 	sudo cp utilities/econet-imm utilities/econet-ipgw utilities/econet-notify utilities/econet-remote utilities/econet-fslist utilities/econet-trace utilities/econet-servers utilities/econet-isnets /usr/local/bin
 	sudo cp utilities/remove_xattr utilities/xattr_to_dotfile /usr/local/bin
 	sudo cp utilities/unix2beeb /usr/local/bin
-	utilities/config-mangle config/econet-hpbridge.cfg-EconetPlusFileserver
-	utilities/config-mangle config/econet-hpbridge.cfg-EconetFSPlusAcornAUN
-	utilities/config-mangle config/econet-hpbridge.cfg-EconetPlusFileserverAndTrunk
-	utilities/config-mangle config/econet-hpbridge.cfg-EconetFSPlusDynamicAUN
+	utilities/config-mangle econet-hpbridge-EconetFSAcornAUN.json
+	utilities/config-mangle econet-hpbridge-EconetFSDynamicAUN.json
+	utilities/config-mangle econet-hpbridge-EconetFS.json
+	utilities/config-mangle econet-hpbridge-EconetFSTrunk.json
 	utilities/config-mangle systemd/econet-hpbridge.service
 	[ -e /etc/econet-gpio/econet-hpbridge.cfg ] || (sudo cp config/econet-hpbridge.cfg-EconetPlusFileserver.local /etc/econet-gpio/econet-hpbridge.cfg ; sudo chown `whoami` /etc/econet-gpio/econet-hpbridge.cfg )
 	[ -e /etc/systemd/system/econet-hpbridge.service ] || sudo cp systemd/econet-hpbridge.service.local /etc/systemd/system/econet-hpbridge.service
