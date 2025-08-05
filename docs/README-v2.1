@@ -223,7 +223,9 @@ install the desktop. As part of that process:
 
   PiOS Bookworm seems to have developed a "feature" whereby you install
   a 32-bit OS but it boots as a 64-bit OS. (i.e. shows 'v8' on 'uname -a'
-  rather than 'v7l'.
+  rather than 'v7l'. Either that, or it's just the kernel that's 64
+  bit, but either way, worth turning it off if you want a system that's
+  completely 32 bit.
 
 - Don't plug a monitor in when in production use - something upsets the 
   signal timings to the HAT. Probably clock-related.
@@ -333,6 +335,10 @@ The choices are these:
 	You have a version 2 hardware HAT *with* an EEPROM
 		AND you can and are happy to write to it
 		--> Use option B.
+
+        You have a version 2 hardware HAT with the latest EEPROM
+                contents (supplied after about June 2024
+                probably), you don't need to do anything.
 
 ***     A. Version 1 boards.
 
