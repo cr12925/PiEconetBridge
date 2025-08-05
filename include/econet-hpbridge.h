@@ -76,7 +76,7 @@
 #define DEVINIT_DEBUG(_fmt, ...) if (dumpconfig) eb_debug (0, 0, "CONFIG", "%-16s " _fmt, "Core", __VA_ARGS__)
 
 // Server version number advertised
-#define EB_VERSION	0x22 // i.e. 2.2
+#define EB_VERSION	0x22 // our version 2.2
 #define EB_SERVERID	"Pi HP Bridge"
 
 #define EB_TRUNK 	0x01
