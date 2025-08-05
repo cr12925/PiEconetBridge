@@ -41,10 +41,10 @@ install-utilities:	install-mkgroup build-utilities
 	sudo cp utilities/econet-imm utilities/econet-ipgw utilities/econet-notify utilities/econet-remote utilities/econet-fslist utilities/econet-trace utilities/econet-servers utilities/econet-isnets /usr/local/bin
 	sudo cp utilities/remove_xattr utilities/xattr_to_dotfile /usr/local/bin
 	sudo cp utilities/unix2beeb /usr/local/bin
-	utilities/config-mangle econet-hpbridge-EconetFSAcornAUN.json
-	utilities/config-mangle econet-hpbridge-EconetFSDynamicAUN.json
-	utilities/config-mangle econet-hpbridge-EconetFS.json
-	utilities/config-mangle econet-hpbridge-EconetFSTrunk.json
+	utilities/config-mangle config/econet-hpbridge-EconetFSAcornAUN.json
+	utilities/config-mangle config/econet-hpbridge-EconetFSDynamicAUN.json
+	utilities/config-mangle config/econet-hpbridge-EconetFS.json
+	utilities/config-mangle config/econet-hpbridge-EconetFSTrunk.json
 	utilities/config-mangle systemd/econet-hpbridge.service
 	[ -e /etc/econet-gpio/econet-hpbridge.json ] || (sudo cp config/econet-hpbridge-EconetFSTrunk.local /etc/econet-gpio/econet-hpbridge.json ; sudo chown `whoami` /etc/econet-gpio/econet-hpbridge.json )
 	[ -e /etc/systemd/system/econet-hpbridge.service ] || sudo cp systemd/econet-hpbridge.service.local /etc/systemd/system/econet-hpbridge.service
