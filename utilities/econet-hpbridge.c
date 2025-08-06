@@ -40,7 +40,7 @@ extern short fs_sevenbitbodge;
 extern short normalize_debug;
 extern uint8_t fs_set_syst_bridgepriv;
 
-uint8_t		eb_mfr = 0xee, eb_mtype = 0xee;
+uint8_t		eb_mfr = 0x00, eb_mtype = 0x00;
 
 /* Test thread return */
 
@@ -13310,10 +13310,9 @@ int main (int argc, char **argv)
 		FILE 	*model;
 		struct utsname 	u;
 
-		model = fopen ("/proc/device-tree/model", "r");
+		eb_mfr = 0xEC; /* Generic  - Change to RPi below if recognized */
 
-		eb_mfr = 0xEC;
-		eb_mtype = 0xEC;
+		model = fopen ("/proc/device-tree/model", "r");
 
 		if (model)
 		{
@@ -13325,7 +13324,7 @@ int main (int argc, char **argv)
 			if (strstr(buffer, "Raspberry Pi 3"))
 			{
 				eb_mfr = 0xEE;
-				eb_mtype = 0xED;
+				eb_mtype = 0xEF;
 			}
 			else if (strstr(buffer, "Raspberry Pi 4"))
 			{
@@ -13335,22 +13334,22 @@ int main (int argc, char **argv)
 			else if (strstr(buffer, "Raspberry Pi 5"))
 			{
 				eb_mfr = 0xEE;
-				eb_mtype = 0xEF; 
+				eb_mtype = 0xED; 
+			}
+			else if (strstr(buffer, "Raspberry Pi"))
+			{
+				eb_mfr = 0xEE;
+				eb_mtype = 0xE1; /* Unknown ARM */
 			}
 
 			fclose(model);
 		}
 
-		if (eb_mtype == 0xEC)
+		if (eb_mtype == 0x00) /* As yet uninitialized */
 		{
-			if (!uname(&u))
-			{
-				if (!strcmp(u.machine, "aarch64") || !strstr(u.machine, "arm"))
-					eb_mtype = 0xEC;
-				else
-					eb_mtype = 0xEB;
-			}
-			else	eb_mtype = 0xEA;
+			if (!uname(&u) && (!strcmp(u.machine, "aarch64") || !strstr(u.machine, "arm")))
+					eb_mtype = 0xE1;
+			else	eb_mtype = 0xE0;
 		}
 
 	}
