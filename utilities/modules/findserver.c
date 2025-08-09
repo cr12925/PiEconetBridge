@@ -53,7 +53,7 @@ void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, 
 		reply->p.seq = eb_get_local_seq(d);
 			
 		reply->p.data[0] = 0;
-		reply->p.data[2] = EB_VERSION;
+		reply->p.data[2] = EB_VERSION & 0xFF;
 		strcpy ((char *) &(reply->p.data[12]), EB_SERVERID);
 		reply->p.data[11] = strlen(EB_SERVERID);
 

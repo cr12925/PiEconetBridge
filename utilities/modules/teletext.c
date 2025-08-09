@@ -456,7 +456,7 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 				unsigned char	verstring[64];
 
 				eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Request server version", d->net, d->local.stn);
-				snprintf (verstring, 63, "Pi Econet Bridge Teletext Server %d.%02d%c",
+				snprintf (verstring, 63, "Pi Econet HP Bridge Teletext Server %d.%02d%c",
 						(EB_VERSION & 0xf0) >> 4,
 						EB_VERSION & 0x0f,
 						0x0D);

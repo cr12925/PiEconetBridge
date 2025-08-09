@@ -7901,9 +7901,10 @@ static void * eb_device_despatcher (void * device)
 											eb_debug (0, 2, "DESPATCH", "Wire     %3d.%3d from %3d.%3d P:&%02X C:&%02X Not listening for packet length 0x%04X seq 0x%08X", tx.p.dstnet, tx.p.dststn, tx.p.srcnet, tx.p.srcstn, tx.p.port, tx.p.ctrl, p->length, tx.p.seq);
 										else
 											eb_debug (0, 4, "DESPATCH", "%-8s %3d     Attempt to transmit packet to %d.%d from %d.%d at %p FAILED with error 0x%02X (%s) - attempt %d - errors %d (not listening %d/%d), kernel tx ptr = 0x%02X, aun_state = 0x%02X", eb_type_str(d->type), d->net, tx.p.dstnet, tx.p.dststn, tx.p.srcnet, tx.p.srcstn, p, err, econet_strtxerr(err), p->tx, p->errors, p->notlistening, EB_CONFIG_WIRE_MAX_NOTLISTENING, (aunstate >> 16), aunstate & 0xff);
+
 										wire_output_pending++;
 
-										if (p->notlistening > /* 3 */ EB_CONFIG_WIRE_MAX_NOTLISTENING && (err == ECONET_TX_NECOUTEZPAS))
+										if (p->notlistening > EB_CONFIG_WIRE_MAX_NOTLISTENING && (err == ECONET_TX_NECOUTEZPAS))
 										{
 											remove = 1; // Dump it - lots of errors on this - TODO - Suspect this line is wrong too.
 											// Send NAK if DAT packet got not listening, or our internal-special "INK" for an immediate not listening - so a source can tell that's what happened
@@ -7920,7 +7921,6 @@ static void * eb_device_despatcher (void * device)
 												eb_enqueue_output (d, &ack, 0, NULL);
 												new_output = 1;
 											}
-											
 										}
 									}
 								}

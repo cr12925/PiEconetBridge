@@ -2115,7 +2115,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 				switch (aun_state)
 				{
 					case EA_W_WRITEBCAST:
-						//econet_set_tx_status(ECONET_TX_NOTSTART);
 						econet_aun_setidle_txstatus(ECONET_TX_NOTSTART);
 						break;
 					case EA_W_READFIRSTACK:
@@ -2666,6 +2665,9 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	if (econet_data->aun_mode && (aunstate != EA_IDLE) && (txstatus >= ECONET_TX_DATAPROGRESS) && ((ktime_get_ns() - econet_data->aun_last_writefd) >= ECONET_4WAY_TIMEOUT)) // The >= catches data progress, in progress, waiting to start
 	{
+		uint8_t	chipstate = econet_get_chipstate();
+
+		printk (KERN_INFO "econet-gpio: econet_writefd(): 4-way timeout expired. SR1=0x%02X, SR2=0x%02X, Chip State %d, TX status %d, AUN State %d, tx_ptr = %04X, rx_ptr = %04X\n", sr1, sr2, chipstate, txstatus, aunstate, econet_pkt_tx.ptr, econet_pkt_rx.ptr);
 		econet_set_tx_status(ECONET_TX_SUCCESS);
 		econet_set_aunstate(EA_IDLE); 
 		econet_set_chipstate(EM_IDLE);
@@ -2853,6 +2855,10 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	 */
 
 	econet_irq_mode(1);
+
+	/* Set out status so that userspace knows we've got a packet but haven't started sending it yet */
+
+	econet_set_tx_status(ECONET_TX_AWAITSTART);
 
 	/* 
 	 * Wait a while so that hopefully an IRQ has 

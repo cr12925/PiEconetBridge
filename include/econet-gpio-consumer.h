@@ -243,6 +243,7 @@ struct __econet_packet_pipe {
 #define ECONET_GPIO_RST_CLR 1
 
 #define ECONET_TX_SUCCESS 0
+#define ECONET_TX_AWAITSTART 1 /* Module has a packet from userspace, but hasn't started sending it yet */
 #define ECONET_TX_BUSY 0x10
 #define ECONET_TX_JAMMED 0x40
 #define ECONET_TX_HANDSHAKEFAIL 0x41
