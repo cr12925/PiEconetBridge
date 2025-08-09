@@ -4408,10 +4408,6 @@ void fsop_bulk_dequeue (struct __fs_station *s, uint8_t net, uint8_t stn, uint32
 
 		reply->p.data[0] = reply->p.data[1] = 0x00;
 
-		/* 20250809 - Sometimes, it would appear, RISC OS is not listening for the close packets, possibly the interim acknowledges too. Insert short delay here. */
-
-		usleep (1000);
-
 		if (alq->queue_type == FS_ENQUEUE_LOAD)
 		{
 			fsop_close_interlock(s, alq->internal_handle, alq->mode);
