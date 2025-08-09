@@ -1284,7 +1284,10 @@ void econet_irq_read(void)
 	 *
 	 */
 
-	if (!(sr2 & ECONET_GPIO_S2_VALID) && (sr2 & (ECONET_GPIO_S2_RX_ABORT | ECONET_GPIO_S2_OVERRUN | ECONET_GPIO_S2_ERR)))
+	if (	(sr2 & (ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_ERR)) /* Valid frame but bad checksum - these can go together apparently */
+	||	((sr2 & (ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_RX_ABORT)) == ECONET_GPIO_S2_RX_ABORT) /* Abort without Valid. The pair together ought not to happen - but we've seen them on Pi3 (but not 4!) and if we get both we'll assume valid && !abort */
+	||	(sr2 & ECONET_GPIO_S2_OVERRUN) /* Overrun condition, whatever state we're in */
+	)
 	{
 		if (sr2 & ECONET_GPIO_S2_RX_ABORT) // Abort flag set
 			printk (KERN_INFO "econet-gpio: econet_irq_read(): RX Abort received at ptr = 0x%02x (SR1 = 0x%02X, SR1 = 0x%02X)\n", econet_pkt_rx.ptr, sr1, sr2);
