@@ -1302,10 +1302,13 @@ void econet_irq_read(void)
 
 	/* 
 	 * First check sr2 for errors.
+	 * On some platforms (Pi3) we saw RX Abort + FValid at same time. This change prefers the valid flag.
+	 * CRC ERR is exclusive to Valid, so this change is fine. And if there's an overrun it can't be a valid 
+	 * frame, so this is ok.
 	 *
 	 */
 
-	if (sr2 & (ECONET_GPIO_S2_RX_ABORT | ECONET_GPIO_S2_OVERRUN | ECONET_GPIO_S2_ERR)) 
+	if (!(sr2 & ECONET_GPIO_S2_VALID) && (sr2 & (ECONET_GPIO_S2_RX_ABORT | ECONET_GPIO_S2_OVERRUN | ECONET_GPIO_S2_ERR))) 
 	{
 		if (sr2 & ECONET_GPIO_S2_RX_ABORT) // Abort flag set
 			printk (KERN_INFO "econet-gpio: econet_irq_read(): RX Abort received at ptr = 0x%02x (SR1 = 0x%02X, SR1 = 0x%02X)\n", econet_pkt_rx.ptr, sr1, sr2);
