@@ -255,6 +255,9 @@ struct __econet_packet_pipe {
 #define ECONET_TX_NOCOPY 0x53 // Coulndn't copy from userspace
 #define ECONET_TX_NOTSTART 0x54 // TX start timed out - we never got a result back from the IRQ routine
 #define ECONET_TX_COLLISION 0x55 // CTS went high during transmit - try again
+#define ECONET_OVERRUN 0x56 /* Overrun whilst receiving - may be used to signal overrun during receive on part of a 4-way */
+#define ECONET_CRCERROR 0x57 /* CRC Error - may also arise during receive phases of a 4-way */
+#define ECONET_RXABORT 0x58 /* RX Abort received - may also arise during receive phases of a 4-way */
 #define ECONET_TX_INVALID 0xfc // Attempt to transmit packet which cannot go on a wire - e.g. ACK, NAK, INK
 #define ECONET_TX_DATAPROGRESS 0xfd // Flags the fact that we got an ack to the Scout
 #define ECONET_TX_INPROGRESS 0xfe

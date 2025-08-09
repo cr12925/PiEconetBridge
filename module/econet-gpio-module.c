@@ -1287,11 +1287,20 @@ void econet_irq_read(void)
 	if (!(sr2 & ECONET_GPIO_S2_VALID) && (sr2 & (ECONET_GPIO_S2_ERR | ECONET_GPIO_S2_RX_ABORT | ECONET_GPIO_S2_OVERRUN)))
 	{
 		if (sr2 & ECONET_GPIO_S2_RX_ABORT) // Abort flag set
+		{
 			printk (KERN_INFO "econet-gpio: econet_irq_read(): RX Abort received at ptr = 0x%02x (SR1 = 0x%02X, SR1 = 0x%02X)\n", econet_pkt_rx.ptr, sr1, sr2);
+			econet_set_tx_status(ECONET_RXABORT);
+		}
 		else if (sr2 & ECONET_GPIO_S2_OVERRUN) // Receiver overrun
+		{
 			printk (KERN_INFO "econet-gpio: econet_irq_read(): RX Overrun at ptr = 0x%02x (SR1 = 0x%02X, SR2 = 0x%02X)\n", econet_pkt_rx.ptr, sr1, sr2);
+			econet_set_tx_status(ECONET_OVERRUN);
+		}
 		else if (sr2 & ECONET_GPIO_S2_ERR) // Checksum error
+		{
 			printk (KERN_INFO "econet-gpio: CRC Error (SR1 = 0x%02X, SR2 = 0x%02X)\n", sr1, sr2);
+			econet_set_tx_status(ECONET_CRCERROR);
+		}
 
 		/* 
 		 * If CRC error, that suggests something is badly wrong. 

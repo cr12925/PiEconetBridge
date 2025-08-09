@@ -302,6 +302,9 @@ char * econet_strtxerr(int e)
 		case ECONET_TX_NOCOPY: return (char *)"Could not copy packet from userspace";
 		case ECONET_TX_NOTSTART: return (char *)"Transmission never begun";
 		case ECONET_TX_COLLISION: return (char *)"Collision during transmission";
+		case ECONET_OVERRUN: return (char *)"RX Overrun";
+		case ECONET_CRCERROR: return (char *)"RX CRC Error";
+		case ECONET_RXABORT: return (char *)"RX Abort received during transaction";
 		case ECONET_TX_INPROGRESS: return (char *)"Transmission in progress";
 		default: return (char *)"Unknown error";
 	}	
