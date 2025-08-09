@@ -291,6 +291,7 @@ char * econet_strtxerr(int e)
 	switch (((e < 0) ? -1 : 1)* e)
 	{
 		case ECONET_TX_SUCCESS: return (char *)"No error"; 
+		case ECONET_TX_AWAITSTART: return (char *)"Packet written to kernel but tx not yet begun";
 		case ECONET_TX_BUSY: return (char *)"Module busy";
 		case ECONET_TX_JAMMED: return (char *)"Line jammed";
 		case ECONET_TX_HANDSHAKEFAIL: return (char *)"Handshake failure";

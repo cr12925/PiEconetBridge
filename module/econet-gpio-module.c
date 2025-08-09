@@ -2784,6 +2784,10 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		return  -1;
 	}
 
+	/* Set our status so that userspace knows we've got a packet but haven't started sending it yet */
+
+	econet_set_tx_status(ECONET_TX_AWAITSTART);
+
 	/* 
 	 * If in AUN mode, 
 	 *
@@ -2840,7 +2844,6 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	else 
 	{
-
 		/* Consider unlocking the IRQ after going into write mode? */
 
 		spin_unlock(&econet_irqstate_spin);
@@ -2855,10 +2858,6 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	 */
 
 	econet_irq_mode(1);
-
-	/* Set out status so that userspace knows we've got a packet but haven't started sending it yet */
-
-	econet_set_tx_status(ECONET_TX_AWAITSTART);
 
 	/* 
 	 * Wait a while so that hopefully an IRQ has 
