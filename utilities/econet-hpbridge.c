@@ -2819,10 +2819,9 @@ void * eb_broadcast_listener (void *p)
 	if (setsockopt(pfd_initial[0].fd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(int)) != 0)
 		eb_debug (0, 1, "BCAST", "AUN              Unable to set SO_BROADCAST on broadcast listener socket - broadcasts may not work: %s", strerror(errno));
 
-	/* Query if we need this - we shouldn't be reusing the broadcast socket surely
+	/* Query if we need this - we shouldn't be reusing the broadcast socket surely - No, we do, otherwise the non-broadcastable binds to loopback fail */
 	if (setsockopt(pfd_initial[0].fd, SOL_SOCKET, SO_REUSEADDR, &broadcast, sizeof(int)) != 0)
 		eb_debug (0, 1, "BCAST", "AUN              Unable to set SO_REUSEADDR on broadcast listener socket - broadcasts may not work: %s", strerror(errno));
-	*/
 
 	if (setsockopt(pfd_initial[0].fd, SOL_SOCKET, SO_REUSEPORT, &broadcast, sizeof(int)) != 0)
 		eb_debug (0, 1, "BCAST", "AUN              Unable to set SO_REUSEPORT on broadcast listener socket - broadcasts may not work: %s", strerror(errno));
@@ -4415,7 +4414,9 @@ void eb_setup_aun_listener_socket (void * exposure)
 	if (e->socket == -1)
 		eb_debug (1, 0, "LISTEN", "%-8s         Unable to open AUN listener socket for station %d.%d on port %d (%s)", "AUN", e->net, e->stn, e->port, strerror(errno));
 
-	// 20250812 test - re listening for broadcast and AUN on same socket: setsockopt(e->socket, SOL_SOCKET, SO_REUSEADDR, &broadcast, sizeof(int));
+	/* We need this even though broadcast listener might use same port as a listener on another IP - because otherwise those other listeners (e.g. an exposure on 32768) can't bind */
+
+	setsockopt(e->socket, SOL_SOCKET, SO_REUSEADDR, &broadcast, sizeof(int));
 
 	service.sin_family = AF_INET;
 	service.sin_addr.s_addr = htonl(e->addr);
