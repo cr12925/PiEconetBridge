@@ -1,6 +1,5 @@
 GIT_VERSION := "$(shell git branch) $(shell git rev-parse --short HEAD)"
 CFLAGS=-g -O2 -I../include $(shell pkg-config --cflags glib-2.0) 
-#-I/usr/include/glib-2.0 -I/usr/lib/aarch64-linux-gnu/glib-2.0/include -I/usr/lib/arm-linux-gnueabihf/glib-2.0/include  -I/usr/lib64/glib-2.0/include
 
 econet_hpb_objects := $(patsubst %.c,%.o,$(wildcard econet-hpbridge*.c))
 econet_hpb_modules := $(patsubst %.c,%.o,$(wildcard modules/*.c))
@@ -9,10 +8,16 @@ libs := -lpthread -lssl -lcrypto -ljson-c -lglib-2.0 -lssh2
 
 all:	econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers econet-poke econet-isnets unix2beeb
 
+pre-build:
+	rm -f modules/fsop/fsop_00_bridge.o # Otherwise it doesn't update GIT_VERSION
+
 unix2beeb:	unix2beeb.c
 	cc $(CFLAGS) -Wall -Wno-pointer-sign unix2beeb.c -o unix2beeb
 
-econet-hpbridge:	Makefile $(fsop_objects) $(econet_hpb_objects) $(econet_hpb_modules)
+econet-hpbridge:	pre-build
+	@$(MAKE) real-hpb-build
+	
+real-hpb-build: Makefile $(fsop_objects) $(econet_hpb_objects) $(econet_hpb_modules)
 	if [ -f .noexplain ]; then cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) $(econet_hpb_modules) $(fsop_objects) $(libs); else cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) $(econet_hpb_modules) $(fsop_objects) $(libs) -lexplain; fi
 	-chgrp econet econet-hpbridge
 	-sudo setcap CAP_NET_RAW=ep ${CURDIR}/econet-hpbridge
