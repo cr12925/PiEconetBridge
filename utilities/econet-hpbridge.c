@@ -9800,6 +9800,8 @@ void eb_json_pool_assignment (struct json_object *j, uint8_t objtype)
 	*/
 	uint16_t		dcount = 0, dlength;
 
+	if (!j) return;
+
 	dlength = json_object_array_length(j);
 
 	while (dcount < dlength)
