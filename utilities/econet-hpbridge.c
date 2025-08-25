@@ -148,7 +148,7 @@ void eb_set_single_wire_host (uint8_t, uint8_t);
 void eb_clr_single_wire_host (uint8_t, uint8_t);
 void eb_setclr_single_wire_host (uint8_t, uint8_t, uint8_t);
 void eb_clear_zero_hosts (struct __eb_device *);
-uint8_t eb_firewall (struct __eb_fw_chain *, struct __econet_packet_aun *);
+uint8_t eb_firewall (struct __eb_fw_chain *, struct __econet_packet_aun *, uint16_t);
 void eb_reset_tables(void);
 // void eb_debug (uint8_t, uint8_t, char *, char *, ...);
 uint32_t eb_get_local_seq (struct __eb_device *);
@@ -3743,7 +3743,7 @@ uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *
 		return 0;
 	}
 
-	if (eb_firewall(bridge_fw, packet) != EB_FW_ACCEPT)
+	if (eb_firewall(bridge_fw, packet, length) != EB_FW_ACCEPT)
 	{
 		eb_dump_packet (dest, EB_PKT_DUMP_DUMPED, packet, length);
 		eb_free (__FILE__, __LINE__, "Q-IN", "Freeing inbound packet after packet firewalled", packet);
@@ -4051,10 +4051,11 @@ uint8_t eb_ipgw_transmit (struct __eb_device *d, uint32_t addr)
 /* Implement a firewall chain on a packet traversing the bridge, and recursively call subchains.
  * Don't apply policy
    Used by the bridge transfer routines immediately prior to eb_enqueue_input()
+   length is data length
    Returns EB_FW_ACCEPT or EB_FW_REJECT, or EB_FW_NOMATCH if not matched. Defaults to the defined default.
 */
 
-uint8_t eb_firewall_inner (struct __eb_fw_chain *chain, struct __econet_packet_aun *p)
+uint8_t eb_firewall_inner (struct __eb_fw_chain *chain, struct __econet_packet_aun *p, uint16_t length)
 {
 
 	uint8_t		result;
@@ -4078,8 +4079,8 @@ uint8_t eb_firewall_inner (struct __eb_fw_chain *chain, struct __econet_packet_a
 			&&	(f->dstnet == 0x00 || f->dstnet == p->p.dstnet)
 			&&	(f->port   == 0x00 || f->port   == p->p.port || (f->port == 0xFF && p->p.port == 0)) /* if you configure port 0xff in the FW entry, it will match port 0 in the packet */
 			&&	(f->imm_ctrl == 0x00 || (p->p.port == 0x00 && p->p.ctrl == f->imm_ctrl))
-			&&	(f->osproc == 0x00 || (p->p.port == 0x00 && p->p.ctrl == EB_FW_IMM_OSPROC && ((f->osproc == 0xFE /* Rogue for 0 */ && p->p.data[0] == 0x00) || (p->p.data[0] == f->osproc))))
-			&&	(f->servertype[0] == 0x00 || (p->p.port == 0xB1 && !memcmp(&(p->p.data[3]), f->servertype, 8)))
+			&&	(f->osproc == 0x00 || (length >= 1 && p->p.port == 0x00 && p->p.ctrl == EB_FW_IMM_OSPROC && ((f->osproc == 0xFE /* Rogue for 0 */ && p->p.data[0] == 0x00) || (p->p.data[0] == f->osproc))))
+			&&	(f->servertype[0] == 0x00 || (length >= 11 && p->p.port == 0xB1 && !memcmp(&(p->p.data[3]), f->servertype, 8)))
 			)
 		)
 		{
@@ -4087,7 +4088,7 @@ uint8_t eb_firewall_inner (struct __eb_fw_chain *chain, struct __econet_packet_a
 			{
 				uint8_t inner_result;
 
-				inner_result = eb_firewall_inner(f->fw_subchain, p);
+				inner_result = eb_firewall_inner(f->fw_subchain, p, length);
 
 				if (inner_result != EB_FW_NOMATCH)
 				{
@@ -4117,9 +4118,10 @@ uint8_t eb_firewall_inner (struct __eb_fw_chain *chain, struct __econet_packet_a
 
 /* eb_firewall
  * Wrapper which applies default on a chain
+ * length is data length
  */
 
-uint8_t eb_firewall (struct __eb_fw_chain *chain, struct __econet_packet_aun *p)
+uint8_t eb_firewall (struct __eb_fw_chain *chain, struct __econet_packet_aun *p, uint16_t length)
 {
 
 	uint8_t	result;
@@ -4127,7 +4129,7 @@ uint8_t eb_firewall (struct __eb_fw_chain *chain, struct __econet_packet_aun *p)
 	if (!chain)
 		return EB_FW_ACCEPT;
 
-	result = eb_firewall_inner(chain, p);
+	result = eb_firewall_inner(chain, p, length);
 
 	if (result == EB_FW_NOMATCH)
 		result = chain->fw_default;
@@ -4633,7 +4635,7 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 				incoming.p.srcstn = source_device->aun->stn;
 				incoming.p.ctrl |= 0x80;
 
-				if ((fw_result = eb_firewall(source_device->fw_out, &incoming)) == EB_FW_REJECT) // fw_out because this is traffic coming *from* the AUN device. fw_in is for traffic going *to* it.
+				if ((fw_result = eb_firewall(source_device->fw_out, &incoming, length-12)) == EB_FW_REJECT) // fw_out because this is traffic coming *from* the AUN device. fw_in is for traffic going *to* it.
 				{
 					eb_dump_packet (e->parent, EB_PKT_DUMP_FIREWALLED, &incoming, length - 8); // (Drop the header length)
 				}
@@ -5097,7 +5099,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 
 		/* See if we will accept this traffic from this source - dump it if not */
 
-		if ((fw_result = eb_firewall(source_device->fw_out, &incoming)) == EB_FW_REJECT) // fw_out because this is traffic coming *from* the AUN device. fw_in is for traffic going *to* it.
+		if ((fw_result = eb_firewall(source_device->fw_out, &incoming, length-12)) == EB_FW_REJECT) // fw_out because this is traffic coming *from* the AUN device. fw_in is for traffic going *to* it.
 		{
 			eb_dump_packet (source_device, EB_PKT_DUMP_FIREWALLED, &incoming, length - 12); // (Drop the header length)
 		}
@@ -5928,7 +5930,7 @@ static void * eb_device_aun_sender (void *device)
 
 
 						eb_add_stats(&(o->destdevice->statsmutex), &(o->destdevice->b_in), p->length);
-						if (eb_firewall(o->destdevice->fw_in, p->p) == EB_FW_REJECT)
+						if (eb_firewall(o->destdevice->fw_in, p->p, p->length) == EB_FW_REJECT)
 						{
 							eb_dump_packet (o->destdevice, EB_PKT_DUMP_FIREWALLED, p->p, p->length);
 						}
@@ -7113,7 +7115,7 @@ static void * eb_device_despatcher (void * device)
 				 * it is given is NULL
 				 */
 
-				if (eb_firewall (d->fw_in, &packet) == EB_FW_REJECT) 
+				if (eb_firewall (d->fw_in, &packet, length) == EB_FW_REJECT) 
 				{
 					eb_dump_packet (d, EB_PKT_DUMP_FIREWALLED, &packet, length);
 					dump_traffic = 1;
@@ -7594,7 +7596,7 @@ static void * eb_device_despatcher (void * device)
 
 				/* Note that eb_enqueue_input insists on having canonical network numbers, so this should always be OK from a net number perspective */
 
-				if ((eb_firewall(d->fw_out, p->p) == EB_FW_REJECT))
+				if ((eb_firewall(d->fw_out, p->p, p->length) == EB_FW_REJECT))
 				{
 					eb_dump_packet (d, EB_PKT_DUMP_FIREWALLED, p->p, p->length);
 					remove = 1;
