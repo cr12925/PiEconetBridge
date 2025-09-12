@@ -1043,8 +1043,13 @@ unsigned char * fsop_machine_type_str (uint16_t t)
 		case 0x1040: return "JGH Spectrum"; break;
 		case 0x1041: return "JGH Amstrad CPC"; break;
 		case 0x5050: return "PB Internet Gateway"; break;
+		case 0xEC00: return "Generic unknown"; break;
+		case 0xEC01: return "Generic ARM"; break;
 		case 0xEEE0: return "Pycoclient"; break;
-		case 0xEEEE: return "Raspberry Pi Econet Bridge"; break;
+		case 0xEEE1: return "Raspberry Pi (unknown)"; break;
+		case 0xEEED: return "Raspberry Pi 5"; break;
+		case 0xEEEE: return "Raspberry Pi 4"; break;
+		case 0xEEEF: return "Raspberry Pi 3"; break;
 		case 0xFFF8: return "SJ GP Server"; break;
 		case 0xFFF9: return "SJ 80386 Unix"; break;
 		case 0xFFFA: return "SCSI Interface"; break;
