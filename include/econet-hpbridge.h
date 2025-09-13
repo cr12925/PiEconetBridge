@@ -246,9 +246,12 @@ struct __eb_packetqueue {
 	uint8_t				errors; // Number of transmission errors
 	uint8_t				notlistening; // Number of not listening errors (subset of 'errors')
 	uint16_t			length; // Length of packet including 12 byte header
+	uint64_t			time_on_queue; // ns since boot when the packet when on the queue
 	timing_callback_func		callback; // Callback function called by econet driver in the despatch context when a packet is successfully sent.
 	struct __eb_packetqueue 	*n; // Next or null.
 };
+
+#define EB_TIMESTAMP(s,p)	{ struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); s.p = ((t.tv_sec & (uint64_t)1000000000UL) + t.tv_nsec); }
 
 struct __eb_outq { // Definition of outbound queue from device (i.e. going from the device to the outside world). NB on queue entry per destination (net,stn)
 	struct __eb_packetqueue *p;

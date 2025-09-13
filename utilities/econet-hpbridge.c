@@ -3849,6 +3849,10 @@ uint8_t eb_enqueue_input_with_callback (struct __eb_device *dest, struct __econe
 	}
 	else
 	{
+		struct timespec t;
+
+		clock_gettime(CLOCK_MONOTONIC, &t);
+
 		pthread_mutex_lock (&(dest->qmutex_in));
 
 		q->p = packet;
@@ -3858,7 +3862,8 @@ uint8_t eb_enqueue_input_with_callback (struct __eb_device *dest, struct __econe
 		q->notlistening = 0;
 		q->n = NULL;
 		q->length = length;
-		
+		q->time_on_queue = ((t.tv_sec * (int64_t)1000000000UL) + t.tv_nsec);
+				
 		pthread_mutex_lock (&(dest->priority_mutex));
 
 		// Trunk NAT (outbound) here - TODO
@@ -7567,7 +7572,7 @@ static void * eb_device_despatcher (void * device)
 			struct __eb_packetqueue		*p, *parent; // Current packet being processed
 			uint8_t				remove; // Whether to splice current packet off in q at end of loop
 			int32_t				count;
-
+			struct __econet_packet_timings pt;
 
 			if (d->type == EB_DEF_PIPE || d->type == EB_DEF_LOCAL)
 				eb_debug (0, 4, "DESPATCH", "%-8s %3d.%3d Despatcher thread acquiring qmutex_in for input queue traversal", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE ? d->pipe.stn : d->local.stn));
@@ -7605,6 +7610,16 @@ static void * eb_device_despatcher (void * device)
 
 			while (p)
 			{
+				memset (&pt, 0, sizeof(struct __econet_packet_timings));
+
+				if (d->type != EB_DEF_WIRE)
+					EB_TIMESTAMP (pt,packet_from_user);
+
+				// And then on non-wire interfaces, we'll just fill in final_ack_end and use the callback, if need be, because these are all nanoseconds from boot in the kernel module and thus all relative - so any callback function is only ever doing subtractions
+				// The time the packet went on the queue is inserted by eb_queue_input.
+
+				pt.time_on_queue = p->time_on_queue;
+
 				remove = 0;
 	
 				/* Apply outbound firewall - this is traffic going to the device */
@@ -7671,6 +7686,8 @@ static void * eb_device_despatcher (void * device)
 						struct __econet_packet_aun *ap;
 						struct mt_client *mtc;
 
+						EB_TIMESTAMP(pt,scout_start);
+					
 						ap = eb_malloc(__FILE__, __LINE__, "DESPATCH", "Trunk send packet copy", p->length+12 + 6);
 
 						if (!(d->trunk.is_dynamic) && !(d->trunk.remote_host)) // We have an unresolved static trunk
@@ -7783,6 +7800,11 @@ static void * eb_device_despatcher (void * device)
 								}
 							}
 
+							if (result != -1)
+							{
+								EB_TIMESTAMP(pt,scout_end);
+								EB_TIMESTAMP(pt,final_ack_end);
+							}
 					
 							eb_free (__FILE__, __LINE__, "DESPATCH", "Trunk send packet copy free", ap);
 							eb_add_stats (&(d->statsmutex), &(d->b_in), p->length);
@@ -7851,7 +7873,6 @@ static void * eb_device_despatcher (void * device)
 								}
 								else if (result == p->length + 12) // Only if we wrote it all correctly!
 								{
-									struct __econet_packet_timings pt;
 
 									eb_debug (0, 4, "DESPATCH", "%-8s %3d     TX started for packet at pq %p, packet at %p", eb_type_str(d->type), d->net, p, p->p);
 
@@ -7909,6 +7930,7 @@ static void * eb_device_despatcher (void * device)
 										/* Collect kernel packet timings */
 
 										ioctl(d->wire.socket, ECONETGPIO_IOC_GETTIMINGS, &pt);
+										/* Shouldn't need to - pt.time_on_queue = p->time_on_queue; */
 
 										/* Temporary */
 
@@ -8006,6 +8028,8 @@ static void * eb_device_despatcher (void * device)
 						// by port number - IPGW first, then PS, then FS gets the rest
 						// Note that Bridge traffic inbound is all broadcast and is filtered at a far earlier stage
 
+						EB_TIMESTAMP(pt,scout_start);
+					
 						// Always remove
 
 						remove = 1;
@@ -8745,12 +8769,16 @@ static void * eb_device_despatcher (void * device)
 							}
 							/* Else ignore it - it's an immediate we are not interested in or have dealt with above */
 						}
+
+						EB_TIMESTAMP(pt,scout_end);
+						EB_TIMESTAMP(pt,final_ack_end);
 					} break;
 
 					case EB_DEF_PIPE:
 					{
 						remove = 1;
 
+						EB_TIMESTAMP(pt,scout_start);
 						/* I think we're doing this the wrong way round on a write */
 						/* No, that was correct. */
 						if (p->p->p.srcnet == d->net)	p->p->p.srcnet = 0;
@@ -8789,6 +8817,9 @@ static void * eb_device_despatcher (void * device)
 							eb_enqueue_output (d, &ack, 0, NULL); // No data on this packet
 							new_output = 1;
 						}
+
+						EB_TIMESTAMP(pt,scout_end);
+						EB_TIMESTAMP(pt,final_ack_end);
 					} break;
 
 					case EB_DEF_POOL: // Find, translate and stick on an output queue
@@ -8867,6 +8898,11 @@ static void * eb_device_despatcher (void * device)
 				{
 					struct __eb_packetqueue 	*n;
 	
+					/* Call the callback function if there is one */
+
+					if (p->callback)
+						(p->callback) (p->p, &pt);
+
 					n = p->n;
 
 					if (parent)
