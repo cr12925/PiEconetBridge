@@ -3598,6 +3598,11 @@ uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_au
 
 uint16_t eb_raw_send (struct __eb_device *d, struct __econet_packet_aun *p, uint16_t len)
 {
+	return eb_raw_send_with_callback (d, p, len, NULL);
+}
+
+uint16_t eb_raw_send_with_callback (struct __eb_device *d, struct __econet_packet_aun *p, uint16_t len, timing_callback_func f)
+{
         struct __econet_packet_aun      *copy;
         struct __eb_device      *destdevice;
 
@@ -3621,7 +3626,7 @@ uint16_t eb_raw_send (struct __eb_device *d, struct __econet_packet_aun *p, uint
                 {
                         /* Put on AUN output queue */
 
-                        if (eb_aunpacket_to_aun_queue(d, destdevice, copy, len))
+                        if (eb_aunpacket_to_aun_queue_with_callback(d, destdevice, copy, len, f))
                         {
                                 eb_add_stats (&(d->statsmutex), &(d->b_out), len);
                                 return len;
@@ -3635,7 +3640,7 @@ uint16_t eb_raw_send (struct __eb_device *d, struct __econet_packet_aun *p, uint
                 else
                 {
                         /* Put it on the real destination device */
-                        eb_enqueue_input(destdevice, copy, len);
+                        eb_enqueue_input_with_callback (destdevice, copy, len, f);
                         pthread_cond_signal(&(destdevice->qwake));
                         return len;
                 }
@@ -3693,9 +3698,14 @@ NB: On entry to this function, the source & destination networks must be fully c
    returns 1 for success, 0 for failure (e.g. can't find destination station, not listening)
 */
 
+
 uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *packet, uint16_t length)
 {
+	return eb_enqueue_input_with_callback(dest, packet, length, NULL); /* No callback in the ordinary case */
+}
 
+uint8_t eb_enqueue_input_with_callback (struct __eb_device *dest, struct __econet_packet_aun *packet, uint16_t length, timing_callback_func t)
+{
 	uint8_t		result = 1;
 	struct __eb_packetqueue		*q;
 	struct __eb_device		*source;
@@ -5608,8 +5618,12 @@ static void * eb_notify_watcher (void * device)
  * 1 - Success
  */
 
-
 uint8_t eb_aunpacket_to_aun_queue (struct __eb_device *d, struct __eb_device *destdevice, struct __econet_packet_aun *p, uint16_t length)
+{
+	return eb_aunpacket_to_aun_queue_with_callback (d, destdevice, p, length, NULL); /* No call back function */
+}
+											    
+uint8_t eb_aunpacket_to_aun_queue_with_callback (struct __eb_device *d, struct __eb_device *destdevice, struct __econet_packet_aun *p, uint16_t length, timing_callback_func f)
 {
 
 	struct __eb_aun_exposure	*exp;
@@ -5668,6 +5682,7 @@ uint8_t eb_aunpacket_to_aun_queue (struct __eb_device *d, struct __eb_device *de
 		pq->errors = 0;
 		pq->length = length;
 		pq->n = NULL;
+		pq->callback = f;
 
 		skip = aun_out->p;
 
@@ -7836,6 +7851,8 @@ static void * eb_device_despatcher (void * device)
 								}
 								else if (result == p->length + 12) // Only if we wrote it all correctly!
 								{
+									struct __econet_packet_timings pt;
+
 									eb_debug (0, 4, "DESPATCH", "%-8s %3d     TX started for packet at pq %p, packet at %p", eb_type_str(d->type), d->net, p, p->p);
 
 									gettimeofday(&now, 0);
@@ -7889,6 +7906,27 @@ static void * eb_device_despatcher (void * device)
 											new_output = 1;
 										}
 		
+										/* Collect kernel packet timings */
+
+										ioctl(d->wire.socket, ECONETGPIO_IOC_GETTIMINGS, &pt);
+
+										/* Temporary */
+
+										/*
+										eb_debug (0, 2, "WIRE", "Packet timings:\npacket_from_user = %llu\nline_seize = %llu\nscout_start = %llu\nscout_end = %llu\nfirst_ack_start = %llu\nfirst_ack_end = %llu\ndata_start = %llu\ndata_end = %llu\nfinal_ack_start = %llu\nfinal_ack_end = %llu\n",
+												pt.packet_from_user,
+												pt.line_seize,
+												pt.scout_start,
+												pt.scout_end,
+												pt.first_ack_start,
+												pt.first_ack_end,
+												pt.data_start,
+												pt.data_end,
+												pt.final_ack_start,
+												pt.final_ack_end
+											 );
+											 */
+
 										eb_dump_packet (d, EB_PKT_DUMP_POST_O, &tx, p->length);
 					
 										// This was not very effective. It caused the load to balance a bit, but there were lots of 'No reply's. if (p->n && p->n->p->p.dststn == p->p->p.dststn && p->n->p->p.dstnet == p->p->p.dstnet) usleep (10000); // Try and give someone else a chance to transmit if we have a traffic queue - 10ms

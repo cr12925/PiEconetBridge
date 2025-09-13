@@ -197,6 +197,29 @@ struct __econet_packet_pipe {
 			unsigned char data[ECONET_MAX_PACKET_SIZE-9];
 };
 
+#ifdef ECONETGPIO_KERNEL
+	#define 	__econet_u64	u64
+#else
+	#define		__econet_u64	uint64_t
+#endif
+
+/* Structure to hold timings for phases of 4-way transmissions. If you are in raw mode (i.e. not doing 4-way at all) then only the first 4 and the last will hold valid data.
+ * Likewise if you transmit a broadcast or a 2-way immediate. (Some immedaites are 4-way).
+ * All times are in ns from boot.
+ */
+struct __econet_packet_timings {
+	__econet_u64	packet_from_user; // ns from boot when module received the packet and able to deal. If you got told the module was busy, this will be invalid and probably relates to a different packet.
+	__econet_u64	line_seize; // ns from boot when line successfully seized
+	__econet_u64	scout_start; // ns from boot when scout tx started. Will be 0 if it never did (as with the rest below).
+	__econet_u64	scout_end;
+	__econet_u64	first_ack_start;
+	__econet_u64	first_ack_end;
+	__econet_u64	data_start;
+	__econet_u64	data_end;
+	__econet_u64	final_ack_start;
+	__econet_u64	final_ack_end;
+};
+
 #define ECONETGPIO_READLED	0x02
 #define ECONETGPIO_WRITELED	0x00 // Bit 1 clear
 #define ECONETGPIO_LEDON	0x01 
@@ -223,7 +246,7 @@ struct __econet_packet_pipe {
 #define ECONETGPIO_IOC_RESILIENTACK	_IO(ECONETGPIO_MAGIC, 15) /* Send final ACK to client station on wire because we received an ACK from the distant station the client was sending a 4-way to - moves kernel module out of EA_PENDINGFINALACK */
 #define ECONETGPIO_IOC_RESILIENCEMODE	_IOW(ECONETGPIO_MAGIC, 16, uint8_t) /* Change in/out of resilient mode - 0 = off, 1 = on */
 #define ECONETGPIO_IOC_TWOBYTEMODE	_IOW(ECONETGPIO_MAGIC, 17, uint8_t) /* 0 = 1 byte per IRQ, 1 = 2 bytes per IRQ to/from the ADLC */
-
+#define ECONETGPIO_IOC_GETTIMINGS	_IOR(ECONETGPIO_MAGIC, 18, struct __econet_packet_timings *) /* Retrieve timing data for last packet transmission */
 /* The following are for debugging and testing only, and only with interrupts off */
 #define ECONETGPIO_IOC_SETA		_IOW(ECONETGPIO_MAGIC, 100, int) /* bit0 is A0, bit1 is A1 */
 #define ECONETGPIO_IOC_WRITEMODE	_IOW(ECONETGPIO_MAGIC, 101, int) /* Set / clear R/W and DIR */

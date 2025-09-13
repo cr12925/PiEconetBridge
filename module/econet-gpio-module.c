@@ -921,10 +921,12 @@ void econet_set_write_mode(struct __econet_pkt_buffer *prepared, int length)
 			econet_set_read_mode();
 		}
 
+		ECONET_TX_STAMP(line_seize);
 	}
 	else
 	{
 		// We are already in flagfill
+		ECONET_TX_STAMP(line_seize);
 		econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2); // TIE + RX Reset
 		econet_set_chipstate(EM_WRITE);
 		econet_set_tx_status(ECONET_TX_INPROGRESS);
@@ -1092,6 +1094,26 @@ void econet_irq_write(void)
 
 		econet_set_tx_status(ECONET_TX_INPROGRESS);
 
+		if (econet_pkt_tx.ptr == 0)
+		{
+			if (econet_data->aun_mode)
+			{
+				switch (econet_get_aunstate())
+				{
+					case EA_W_WRITESCOUT:
+					case EA_I_WRITEIMM:
+					case EA_I_WRITEREPLY:
+					case EA_W_WRITEBCAST:
+						ECONET_TX_STAMP(scout_start);
+						break;
+					case EA_W_WRITEDATA:
+						ECONET_TX_STAMP(data_start);
+						break;
+				}
+			}
+			else
+				ECONET_TX_STAMP(scout_start);
+		}
 
 		/* The byte_counter loop is here for when we finally get round to
 		 * implementing 2-byte-per-IRQ reads and writes.
@@ -1686,6 +1708,7 @@ unexpected_scout:
 						else // It was an ACK from where we expected, so line up the data packet	
 						{
 							econet_flagfill();
+							ECONET_TX_STAMP(first_ack_end);
 							if (aun_tx.d.p.port != 0x00 || !(aun_tx.d.p.ctrl >= 0x82 && aun_tx.d.p.ctrl <= 0x85)) // Not one of those 0x85 immediate specials that in fact does a 4-way handshake
 							{
 								memcpy (&(econet_pkt_tx.d.p.ctrl), &(aun_tx.d.p.data), aun_tx.length-12); // Strip off the header - note, ctrl byte is first on the econet wire, and is where the data portion of a data packet starts
@@ -1749,6 +1772,7 @@ unexpected_scout:
 								printk (KERN_INFO "econet-gpio: econet_irq_read(): AUN: Read final ACK from %d.%d, after scout with port %02x, ctrl %02x. Flag transmit success.\n", 
 									econet_pkt_rx.d.p.srcnet, econet_pkt_rx.d.p.srcstn, aun_tx.d.p.port, aun_tx.d.p.ctrl);
 #endif
+							ECONET_TX_STAMP(final_ack_end);
 							econet_set_tx_status(ECONET_TX_SUCCESS);
 						}
 
@@ -1811,7 +1835,6 @@ unexpected_scout:
 							if (!(econet_data->resilience))
 							{
 								econet_set_aunstate(EA_R_WRITEFINALACK);
-
 								econet_set_chipstate(EM_WRITE);
 								econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2);
 							}
@@ -1905,6 +1928,19 @@ unexpected_scout:
 			d = econet_read_fifo(); 
 
 			econet_process_rx(d);
+
+			if (econet_data->aun_mode)
+			{
+				switch (econet_get_aunstate())
+				{
+					case EA_W_READFIRSTACK:
+						ECONET_TX_STAMP(first_ack_start);
+						break;
+					case EA_W_READFINALACK:
+						ECONET_TX_STAMP(final_ack_start);
+						break;
+				}
+			}
 
 	}
 
@@ -2172,6 +2208,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 				// First, the states when we are writing a data packet from userspace
 				case EA_W_WRITESCOUT: // We've just written the Scout successfully
 				{
+					ECONET_TX_STAMP(scout_end);
 					econet_set_aunstate(EA_W_READFIRSTACK);
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "econet-gpio: econet_irq(): AUN: Written Scout to %d.%d, waiting for first ACK\n", aun_tx.d.p.dstnet, aun_tx.d.p.dststn);
@@ -2180,6 +2217,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 				}
 				case EA_W_WRITEDATA: // We've just written the data packet
 				{
+					ECONET_TX_STAMP(data_end);
 					econet_set_aunstate(EA_W_READFINALACK);
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "econet-gpio: econet_irq(): AUN: Written data, waiting for final ACK\n");
@@ -2188,6 +2226,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 				}	
 				case EA_W_WRITEBCAST: // We've successfully put a broadcast on the wire
 				{
+					ECONET_TX_STAMP(scout_end);
 					econet_set_aunstate(EA_IDLE);
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "econet-gpio: econet_irq(): AUN: Written broadcast, signalling packet complete\n");
@@ -2225,6 +2264,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 				case EA_I_WRITEIMM: // We receive an immediate from userspace and have just written it to the wire, so need to wait for the reply
 				{
+					ECONET_TX_STAMP(scout_end);
 					econet_set_aunstate(EA_I_READREPLY);
 					// Because this is an immediate, we need to flag transmit success to the tx user space
 					// 20240606 No, don't do this - we want to detect line idle IRQ
@@ -2237,6 +2277,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 				}
 				case EA_I_WRITEREPLY: // We read an immediate from the wire and have just transmitted the reply
 				{
+					ECONET_TX_STAMP(scout_end);
 					// We don't update tx_status here because the immediate reply will have been generated in-kernel
 					econet_set_tx_status(ECONET_TX_SUCCESS);
 					econet_set_aunstate(EA_IDLE);
@@ -2273,6 +2314,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 			printk (KERN_INFO "econet-gpio: econet_irq(): Returning to IDLEINIT, flagging frame completed\n");
 #endif
 			kfifo_reset(&econet_rx_queue);
+			ECONET_TX_STAMP(scout_end);
 		}
 
 		/*
@@ -2783,6 +2825,9 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		econet_irq_mode(1);
 		return  -1;
 	}
+
+	memset (&(econet_data->pt), 0, sizeof(struct __econet_packet_timings));
+	ECONET_TX_STAMP(packet_from_user);
 
 	/* Set our status so that userspace knows we've got a packet but haven't started sending it yet */
 
@@ -3527,6 +3572,16 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 			{
 				econet_data->twobytemode = (arg & 0x01); 
 				if (econet_data->extralogs) printk (KERN_INFO "econet-gpio: Two byte transfer mode set\n");
+			} break;
+
+		/* 
+		 * Copy packet transmission timings to user space
+		 */
+
+		case ECONETGPIO_IOC_GETTIMINGS:
+			{
+				if (copy_to_user((struct __econet_packet_timings *) arg, &(econet_data->pt), sizeof (struct __econet_packet_timings)))
+					printk (KERN_ERR "econet-gpio: unable to write kernel tx timings in response to ioctl()!");
 			} break;
 
 		default:

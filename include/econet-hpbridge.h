@@ -215,6 +215,30 @@ extern uint64_t	loop_hostdata;
 extern pthread_t	loopdetect_thread;
 extern pthread_mutex_t	loopdetect_mutex;
 
+/* Callback function 
+ *
+ * If set on a packet queue entry, the despatcher will call this
+ * function with a set of timings, but only for packets sent on
+ * Econet. We might extend that later. See the timing struct in
+ * the consumer header. 
+ *
+ * The AUN packet header will point to the packet transmitted so as to identify
+ * it by src/dst/seq/etc.. The callback function MUST NOT attempt to send
+ * traffic, and MUST NOT free either pointer - the calling
+ * function will do the latter. Sending traffic may cause
+ * deadlock given that the despatcher (which calls the callback)
+ * may well have a relevant mutex held at the time it calls
+ * your function! Ideally the piece of code that wants the timing data
+ * should sleep on a condition and be woken by your callback when the
+ * callback has done its work. The sleep should have a time limit which,
+ * if expired, can reasonably be interpreted as meaning a transmission
+ * failure.
+ */
+
+typedef void (*timing_callback_func) (struct __econet_packet_aun *, struct __econet_packet_timings *);
+
+/* General packet queue definition */
+
 struct __eb_packetqueue {
 	struct __econet_packet_aun 	*p;
 	struct timeval 			last_tx; // Last transmission attempt on an input queue (i.e. sending to the destination driver); on an output queue this is when the packet got put on the queue - used to time it out and dump the rest of the queue if need be
@@ -222,6 +246,7 @@ struct __eb_packetqueue {
 	uint8_t				errors; // Number of transmission errors
 	uint8_t				notlistening; // Number of not listening errors (subset of 'errors')
 	uint16_t			length; // Length of packet including 12 byte header
+	timing_callback_func		callback; // Callback function called by econet driver in the despatch context when a packet is successfully sent.
 	struct __eb_packetqueue 	*n; // Next or null.
 };
 
@@ -1278,8 +1303,11 @@ unsigned long timediffmsec(struct timeval *s, struct timeval *d);
 extern struct __eb_device * eb_find_station (uint8_t, struct __econet_packet_aun *);
 extern struct __eb_device * eb_find_station_internal (uint8_t, uint8_t);
 extern uint8_t eb_aunpacket_to_aun_queue(struct __eb_device *, struct __eb_device *, struct __econet_packet_aun *, uint16_t);
+extern uint8_t eb_aunpacket_to_aun_queue_with_callback(struct __eb_device *, struct __eb_device *, struct __econet_packet_aun *, uint16_t, timing_callback_func);
 extern uint8_t eb_enqueue_input (struct __eb_device *, struct __econet_packet_aun *, uint16_t);
+extern uint8_t eb_enqueue_input_with_callback (struct __eb_device *, struct __econet_packet_aun *, uint16_t, timing_callback_func);
 extern uint16_t eb_raw_send (struct __eb_device *, struct __econet_packet_aun *, uint16_t);
+extern uint16_t eb_raw_send_with_callback (struct __eb_device *, struct __econet_packet_aun *, uint16_t, timing_callback_func);
 extern void eb_send_ack (struct __eb_device *, struct __econet_packet_aun *, uint8_t);
 
 /* Debug externs */
