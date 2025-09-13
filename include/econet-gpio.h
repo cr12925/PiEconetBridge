@@ -171,6 +171,7 @@ struct __econet_data {
 	u8 twobytemode; // 0 = 1 byte per IRQ; 1 = 2 bytes per IRQ like a Beeb does.
 	struct clk		*gpio4clk;
 	struct pwm_device	*gpio18pwm;
+	struct __econet_packet_timings	pt; // Packet timing data - gets reset to 0 each time we start a tx
 };
 
 struct __econet_pkt_buffer {
@@ -184,5 +185,7 @@ struct __aun_pkt_buffer {
 	struct __econet_packet_aun d;
 	unsigned int length;
 };
+
+#define ECONET_TX_STAMP(n)	econet_data->pt.n = ktime_get_ns()
 
 #endif
