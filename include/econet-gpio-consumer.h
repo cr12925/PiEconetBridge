@@ -208,6 +208,7 @@ struct __econet_packet_pipe {
  * All times are in ns from boot.
  */
 struct __econet_packet_timings {
+	__econet_u64	time_on_queue; // Inserted by userspace not kernel
 	__econet_u64	packet_from_user; // ns from boot when module received the packet and able to deal. If you got told the module was busy, this will be invalid and probably relates to a different packet.
 	__econet_u64	line_seize; // ns from boot when line successfully seized
 	__econet_u64	scout_start; // ns from boot when scout tx started. Will be 0 if it never did (as with the rest below).
