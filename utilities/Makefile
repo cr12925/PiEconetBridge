@@ -1,5 +1,5 @@
 GIT_VERSION := "$(shell git branch) $(shell git rev-parse --short HEAD)"
-CFLAGS=-g -O2 -I../include $(shell pkg-config --cflags glib-2.0) 
+CFLAGS=-g -O2 -I../include $(shell pkg-config --cflags glib-2.0) -I/usr/include/json-c
 
 econet_hpb_objects := $(patsubst %.c,%.o,$(wildcard econet-hpbridge*.c))
 econet_hpb_modules := $(patsubst %.c,%.o,$(wildcard modules/*.c))
@@ -25,10 +25,10 @@ real-hpb-build: Makefile $(fsop_objects) $(econet_hpb_objects) $(econet_hpb_modu
 $(fsop_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
 	cc $(CFLAGS) -DGIT_VERSION=\"$(GIT_VERSION)\" -I../include -c $< -Wall -Wno-pointer-sign -o $@
 
-$(econet_hpb_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
+$(econet_hpb_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-hpbridge-modules.h
 	cc $(CFLAGS) -DGIT_VERSION=\"$(GIT_VERSION)\" -I/usr/include/json-c -I../include -c $< -Wall -Wno-pointer-sign -o $@
 
-$(econet_hpb_modules): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
+$(econet_hpb_modules): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-hpbridge-modules.h
 	cc $(CFLAGS) -DGIT_VERSION=\"$(GIT_VERSION)\" -I/usr/include/json-c -I../include -c $< -Wall -Wno-pointer-sign -o $@
 
 fast-test.o: Makefile econet-hpbridge-fast.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/fs.h 

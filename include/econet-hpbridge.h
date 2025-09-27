@@ -71,6 +71,10 @@
 /* SSH2 for Fast handler, and we might use it for something else later */
 #include <libssh2.h>
 
+//#ifdef EB_JSONCONFIG
+#include "json.h"
+//#endif
+
 #include "econet-gpio-consumer.h"
 
 #define DEVINIT_DEBUG(_fmt, ...) if (dumpconfig) eb_debug (0, 0, "CONFIG", "%-16s " _fmt, "Core", __VA_ARGS__)
@@ -214,6 +218,67 @@ extern time_t   when_root_id_seen; // Time we saw the root ID above. If this is 
 extern uint64_t	loop_hostdata;
 extern pthread_t	loopdetect_thread;
 extern pthread_mutex_t	loopdetect_mutex;
+
+/* Module infrastructure
+ *
+ * The future plan for the HPB is that it will be extensible by
+ * modules which can be provided by users. The existing FS, PS,
+ * Findserver, IPGW and teletext services are an embryonic form 
+ * of this, but there is no easy means of integration at present.
+ * The following definitions are a work in progress toward
+ * a consistent infrastructure in these regards.
+ */
+
+/* This struct represents a module which has registered itself
+ * with a device.
+ *
+ * Note: traffic handling function is given to EB_PORT macros, and 
+ * is not within this struct: it may differ per port, as it does
+ * with the FS for bulk transfers.
+ *
+ * If any of the four functions below wishes the user to know
+ * what is happening / has gone wrong, it is the module's 
+ * responsibility to call eb_debug. The HPB will at best report
+ * any failure at some high numbered log level (probably 3 or 4)
+ * but will be unable to report *why* a failure has occurred.
+ */
+
+/* void * in the function prototypes are because eb_device is defined below, but needs this struct in its definition... seems a bit chicken and egg - functions should cast that first parameter to (struct __eb_device *) */
+
+struct __eb_device_module {
+	unsigned char	module_name[9]; /* 8 characters, used in findserver */
+	void 		* module_ws; /* Pointer to module workspace */
+	uint8_t		module_started; /* Bridge will set this to 1 or 0 depending on whether module_start() has been called and succeeded, or module_stop() has been successful. */
+	uint8_t		module_autostart; /* init() must set this. 0 = do not auto start (e.g. wait to be started using a *FAST menu or some other way); > 0 = start automatically. */
+	uint8_t (*module_init) (void *, struct json_object *); /* Function to be called to initialize the module - grab ports, workspace, etc. This will only ever be called once per device in the bridge execution flow, and it will be during the config_read phase. */
+	uint8_t (*module_start) (void *, struct __eb_device_module *); /* Function to be called when the device is ready for the module to start working - starts a thread, etc. */
+	uint8_t (*module_stop) (void *, struct __eb_device_module *); /* Function to be called when the device wants the module to stop, but not exit - ie. the module could be restarted later by calling start() again */
+	uint8_t (*module_exit) (void *, struct __eb_device_module *); /* Function to be called when the device wants the module to exit and clean up - release workspace, etc. */
+	pthread_t	module_thread; /* Since most modules will start a thread, this is helpful to have here */
+	pthread_mutex_t	module_mutex; /* Similarly, most modules will want to avoid having two threads in their critical section at once, so helpful to have this here */
+	pthread_cond_t	module_cond; /* For the thread to use */
+	struct __eb_device_module	*next; /* Next module in chain */
+};
+
+/* Struct for building module list in a separate header */
+
+struct __eb_module_table {
+	unsigned char	*module_json_key; /* Key which must exist in a local device's "diverts" key for this module to be active. Address of this key will be passed to module_init. Must be unique. */
+	uint8_t	(*module_init) (void *, struct json_object *); /* init function for a module */
+};
+
+/* Module infrastructure prototypes. Workspace get/put return > 0 for success, 0 for failure. */
+
+/* For each key within the diverts JSON for a virtual station which is listed in the table of __eb_module_tables in the modules header, the bridge will call the associated init() function. That function should then register the module with the bridge using the eb_module_reigster function, and do any other initialization (barring starting the module and its thread, or grabbing ports - which are part of the start() phase) which it needs to do. Thereafter the bridge will call start() or stop() as appropriate - e.g. automatically when the device starts, or on request from a *FAST menu. When the bridge is exiting, it will call the module's exit function. */
+struct __eb_device_module * eb_module_register (void *, unsigned char *, uint32_t); /* Function to register a module. Should be called by its init() function. Parameters:
+										       1. void * pointer to struct __eb_device
+										       2. unsigned char * module name (up to 8 characters; will be truncated oetherwise; must be unique in the virtual server). This will be the string reported by the FindServer module when this module is active on a server.
+										       3. size of private worksapce requested.
+				Will cause the bridge to create an eb_device_module entry for the module in the device's table, and allocate private workspace (size is third parameter) and store the address in the module_ws field. module_started will be set to 0, module_autostart will be 0, all functions will be set to NULL, and the mutex & conditions will be initialized on return. If unsuccessful, will return NULL. Else will return address of the eb_device_module, into which the init() function MUST then populate the function entries and set module_autostart to 1 if that's what's required. (the thread must not be used until start() is called. */
+
+void eb_module_deregister (void *, void *); /* To be called by the module's exit function as its last act before death. Will cause the bridge to free the private workspace, de-link the eb_device_module struct, and free it's storage space. It is the module exit function's responsibility to kill of any threads and free any other workspace it holds, including any it has eb_malloc()ed and holds pointers to within the private workspace. Thereafter, the pointer to eb_device_module will be invalid */
+
+struct __eb_device_module * eb_module_get_data (void *, unsigned char *); /* Get address of this module's struct __eb_device_module; returns NULL if not found. Gives access to all the info above, including address of private workspace */
 
 /* Callback function 
  *
@@ -973,6 +1038,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			int16_t			teletext_channel_startbit[10]; /* First bit number in teletext_broadcast which is part of this channel */
 			uint32_t		teletext_broadcast[320]; /* Bitfield of broadcast frames - see teletext.c in eb_teletext_server */
 
+			struct __eb_device_module	*modules;
 		} local;
 
 		struct __eb_aun_remote *aun; // Address of struct in the list of remote AUN stations, kept in order of s_addr

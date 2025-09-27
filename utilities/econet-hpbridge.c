@@ -24,10 +24,12 @@
 #include "econet-pserv.h"
 #include "econet-fs-hpbridge-common.h"
 #include "fs.h"
+#include "econet-hpbridge-modules.h"
 
-#ifdef EB_JSONCONFIG
-#include "json.h"
-#endif
+// Moved to header
+//#ifdef EB_JSONCONFIG
+//#include "json.h"
+//#endif
 
 /* For interface-finding logic */
 #define IFA_FLAGS_REQD	(IFF_UP | IFF_BROADCAST | IFF_RUNNING)
