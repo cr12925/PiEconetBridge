@@ -26,6 +26,11 @@ void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, 
 
 	struct __eb_device * d = (struct __eb_device *) param;
 
+	struct __eb_device_module *m;
+
+	if (d->type != EB_DEF_LOCAL) /* Only deal with this for local servers */
+		return;
+
 	/* Data & broadcast only */
 
 	if (p->p.aun_ttype != ECONET_AUN_DATA && p->p.aun_ttype != ECONET_AUN_BCAST)
@@ -120,7 +125,32 @@ void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, 
 
 		}
 
-		eb_free (__FILE__, __LINE__, "FINDSRVR", "Freeing FindServer reply packet", reply);
+		pthread_mutex_lock (&(d->local.modules_mutex));
+
+		m = d->local.modules;
+
+		if (!m)
+			eb_debug (0, 2, "FIND", "Local    %3d.%3d No modules to reply for", d->net, d->local.stn);
+
+		while (m)
+		{
+			reply->p.data[1] = 0;
+			memcpy(&(reply->p.data[3]), m->module_name, 8);
+
+			if (m->module_started)
+			{
+				eb_debug (0, 2, "FIND", "Local    %3d.%3d Send findserver reply for '%s' module", d->net, d->local.stn, m->module_name);
+				eb_raw_send (d, reply, my_length);
+			}
+			else
+				eb_debug (0, 2, "FIND", "Local    %3d.%3d No findserver reply for '%s' - module not started", d->net, d->local.stn, m->module_name);
+
+			m = m->next;
+		}
+
+		pthread_mutex_unlock (&(d->local.modules_mutex));
+
+		eb_free (__FILE__, __LINE__, "FIND", "Freeing FindServer reply packet", reply);
 
 	}
 }
