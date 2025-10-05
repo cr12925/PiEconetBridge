@@ -276,7 +276,7 @@ struct __eb_device_module * eb_module_register (void *, unsigned char *, uint32_
 										       3. size of private worksapce requested.
 				Will cause the bridge to create an eb_device_module entry for the module in the device's table, and allocate private workspace (size is third parameter) and store the address in the module_ws field. module_started will be set to 0, module_autostart will be 0, all functions will be set to NULL, and the mutex & conditions will be initialized on return. If unsuccessful, will return NULL. Else will return address of the eb_device_module, into which the init() function MUST then populate the function entries and set module_autostart to 1 if that's what's required. (the thread must not be used until start() is called. */
 
-void eb_module_deregister (void *, void *); /* To be called by the module's exit function as its last act before death. Will cause the bridge to free the private workspace, de-link the eb_device_module struct, and free it's storage space. It is the module exit function's responsibility to kill of any threads and free any other workspace it holds, including any it has eb_malloc()ed and holds pointers to within the private workspace. Thereafter, the pointer to eb_device_module will be invalid */
+void eb_module_deregister (void *, struct __eb_device_module *); /* To be called by the module's exit function as its last act before death. Will cause the bridge to free the private workspace, de-link the eb_device_module struct, and free it's storage space. It is the module exit function's responsibility to kill of any threads and free any other workspace it holds, including any it has eb_malloc()ed and holds pointers to within the private workspace. Thereafter, the pointer to eb_device_module will be invalid */
 
 struct __eb_device_module * eb_module_get_data (void *, unsigned char *); /* Get address of this module's struct __eb_device_module; returns NULL if not found. Gives access to all the info above, including address of private workspace */
 
@@ -300,7 +300,7 @@ struct __eb_device_module * eb_module_get_data (void *, unsigned char *); /* Get
  * failure.
  */
 
-typedef void (*timing_callback_func) (struct __econet_packet_aun *, struct __econet_packet_timings *);
+typedef void (*timing_callback_func) (struct __econet_packet_aun *, struct __econet_packet_timings *, void *);
 
 /* General packet queue definition */
 
@@ -313,6 +313,7 @@ struct __eb_packetqueue {
 	uint16_t			length; // Length of packet including 12 byte header
 	uint64_t			time_on_queue; // ns since boot when the packet when on the queue
 	timing_callback_func		callback; // Callback function called by econet driver in the despatch context when a packet is successfully sent.
+	void *				callback_userdata; // Pointer to user data supplied when call back requested
 	struct __eb_packetqueue 	*n; // Next or null.
 };
 
@@ -1038,7 +1039,9 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			int16_t			teletext_channel_startbit[10]; /* First bit number in teletext_broadcast which is part of this channel */
 			uint32_t		teletext_broadcast[320]; /* Bitfield of broadcast frames - see teletext.c in eb_teletext_server */
 
+			pthread_mutex_t		modules_mutex;
 			struct __eb_device_module	*modules;
+
 		} local;
 
 		struct __eb_aun_remote *aun; // Address of struct in the list of remote AUN stations, kept in order of s_addr
@@ -1372,11 +1375,11 @@ unsigned long timediffmsec(struct timeval *s, struct timeval *d);
 extern struct __eb_device * eb_find_station (uint8_t, struct __econet_packet_aun *);
 extern struct __eb_device * eb_find_station_internal (uint8_t, uint8_t);
 extern uint8_t eb_aunpacket_to_aun_queue(struct __eb_device *, struct __eb_device *, struct __econet_packet_aun *, uint16_t);
-extern uint8_t eb_aunpacket_to_aun_queue_with_callback(struct __eb_device *, struct __eb_device *, struct __econet_packet_aun *, uint16_t, timing_callback_func);
+extern uint8_t eb_aunpacket_to_aun_queue_with_callback(struct __eb_device *, struct __eb_device *, struct __econet_packet_aun *, uint16_t, timing_callback_func, void *);
 extern uint8_t eb_enqueue_input (struct __eb_device *, struct __econet_packet_aun *, uint16_t);
-extern uint8_t eb_enqueue_input_with_callback (struct __eb_device *, struct __econet_packet_aun *, uint16_t, timing_callback_func);
+extern uint8_t eb_enqueue_input_with_callback (struct __eb_device *, struct __econet_packet_aun *, uint16_t, timing_callback_func, void *);
 extern uint16_t eb_raw_send (struct __eb_device *, struct __econet_packet_aun *, uint16_t);
-extern uint16_t eb_raw_send_with_callback (struct __eb_device *, struct __econet_packet_aun *, uint16_t, timing_callback_func);
+extern uint16_t eb_raw_send_with_callback (struct __eb_device *, struct __econet_packet_aun *, uint16_t, timing_callback_func, void *);
 extern void eb_send_ack (struct __eb_device *, struct __econet_packet_aun *, uint8_t);
 
 /* Debug externs */

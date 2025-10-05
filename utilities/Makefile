@@ -1,10 +1,11 @@
 GIT_VERSION := "$(shell git branch) $(shell git rev-parse --short HEAD)"
+EXTRALIBS= # -lsystemd
 CFLAGS=-g -O2 -I../include $(shell pkg-config --cflags glib-2.0) -I/usr/include/json-c
 
 econet_hpb_objects := $(patsubst %.c,%.o,$(wildcard econet-hpbridge*.c))
 econet_hpb_modules := $(patsubst %.c,%.o,$(wildcard modules/*.c))
 fsop_objects := $(patsubst %.c,%.o,$(wildcard modules/fsop/*.c))
-libs := -lpthread -lssl -lcrypto -ljson-c -lglib-2.0 -lssh2
+libs := -lpthread -lssl -lcrypto -ljson-c -lglib-2.0 -lssh2 $(EXTRALIBS)
 
 all:	econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers econet-poke econet-isnets unix2beeb
 

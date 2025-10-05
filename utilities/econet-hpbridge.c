@@ -1167,6 +1167,10 @@ struct __eb_device * eb_device_init (uint8_t net, uint16_t type, uint8_t config)
 		if (pthread_mutex_init(&(p->priority_mutex), NULL) == -1)
 			eb_debug (1, 0, "CONFIG", "Cannot initialize priority mutex for net %d", net);
 
+		if (type == EB_DEF_LOCAL)
+			if (pthread_mutex_init(&(p->local.modules_mutex), NULL) == -1)
+				eb_debug (1, 0, "CONFIG", "Cannot initialize modules mutex for net %d", net);
+
 		p->out = NULL; // Init queues
 		p->in = NULL;
 
@@ -1189,6 +1193,11 @@ struct __eb_device * eb_device_init (uint8_t net, uint16_t type, uint8_t config)
 		// Traffic stats
 		
 		p->b_in = p->b_out = 0; // Traffic stats
+
+		// Modules
+
+		if (type == EB_DEF_LOCAL)
+			p->local.modules = NULL;
 
 		if (pthread_mutex_init(&(p->statsmutex), NULL) == -1)
 			eb_debug (1, 0, "CONFIG", "Cannot initialize stats mutex for net %d", net);
@@ -3600,10 +3609,10 @@ uint8_t eb_enqueue_output (struct __eb_device *source, struct __econet_packet_au
 
 uint16_t eb_raw_send (struct __eb_device *d, struct __econet_packet_aun *p, uint16_t len)
 {
-	return eb_raw_send_with_callback (d, p, len, NULL);
+	return eb_raw_send_with_callback (d, p, len, NULL, NULL);
 }
 
-uint16_t eb_raw_send_with_callback (struct __eb_device *d, struct __econet_packet_aun *p, uint16_t len, timing_callback_func f)
+uint16_t eb_raw_send_with_callback (struct __eb_device *d, struct __econet_packet_aun *p, uint16_t len, timing_callback_func f, void * callback_userdata)
 {
         struct __econet_packet_aun      *copy;
         struct __eb_device      *destdevice;
@@ -3628,7 +3637,7 @@ uint16_t eb_raw_send_with_callback (struct __eb_device *d, struct __econet_packe
                 {
                         /* Put on AUN output queue */
 
-                        if (eb_aunpacket_to_aun_queue_with_callback(d, destdevice, copy, len, f))
+                        if (eb_aunpacket_to_aun_queue_with_callback(d, destdevice, copy, len, f, callback_userdata))
                         {
                                 eb_add_stats (&(d->statsmutex), &(d->b_out), len);
                                 return len;
@@ -3642,7 +3651,7 @@ uint16_t eb_raw_send_with_callback (struct __eb_device *d, struct __econet_packe
                 else
                 {
                         /* Put it on the real destination device */
-                        eb_enqueue_input_with_callback (destdevice, copy, len, f);
+                        eb_enqueue_input_with_callback (destdevice, copy, len, f, callback_userdata);
                         pthread_cond_signal(&(destdevice->qwake));
                         return len;
                 }
@@ -3703,10 +3712,10 @@ NB: On entry to this function, the source & destination networks must be fully c
 
 uint8_t eb_enqueue_input (struct __eb_device *dest, struct __econet_packet_aun *packet, uint16_t length)
 {
-	return eb_enqueue_input_with_callback(dest, packet, length, NULL); /* No callback in the ordinary case */
+	return eb_enqueue_input_with_callback(dest, packet, length, NULL, NULL); /* No callback in the ordinary case */
 }
 
-uint8_t eb_enqueue_input_with_callback (struct __eb_device *dest, struct __econet_packet_aun *packet, uint16_t length, timing_callback_func t)
+uint8_t eb_enqueue_input_with_callback (struct __eb_device *dest, struct __econet_packet_aun *packet, uint16_t length, timing_callback_func t, void * callback_userdata)
 {
 	uint8_t		result = 1;
 	struct __eb_packetqueue		*q;
@@ -3851,9 +3860,9 @@ uint8_t eb_enqueue_input_with_callback (struct __eb_device *dest, struct __econe
 	}
 	else
 	{
-		struct timespec t;
+		struct timespec now;
 
-		clock_gettime(CLOCK_MONOTONIC, &t);
+		clock_gettime(CLOCK_MONOTONIC, &now);
 
 		pthread_mutex_lock (&(dest->qmutex_in));
 
@@ -3864,7 +3873,9 @@ uint8_t eb_enqueue_input_with_callback (struct __eb_device *dest, struct __econe
 		q->notlistening = 0;
 		q->n = NULL;
 		q->length = length;
-		q->time_on_queue = ((t.tv_sec * (int64_t)1000000000UL) + t.tv_nsec);
+		q->time_on_queue = ((now.tv_sec * (int64_t)1000000000UL) + now.tv_nsec);
+		q->callback = t;
+		q->callback_userdata = callback_userdata;
 				
 		pthread_mutex_lock (&(dest->priority_mutex));
 
@@ -5627,10 +5638,10 @@ static void * eb_notify_watcher (void * device)
 
 uint8_t eb_aunpacket_to_aun_queue (struct __eb_device *d, struct __eb_device *destdevice, struct __econet_packet_aun *p, uint16_t length)
 {
-	return eb_aunpacket_to_aun_queue_with_callback (d, destdevice, p, length, NULL); /* No call back function */
+	return eb_aunpacket_to_aun_queue_with_callback (d, destdevice, p, length, NULL, NULL); /* No call back function */
 }
 											    
-uint8_t eb_aunpacket_to_aun_queue_with_callback (struct __eb_device *d, struct __eb_device *destdevice, struct __econet_packet_aun *p, uint16_t length, timing_callback_func f)
+uint8_t eb_aunpacket_to_aun_queue_with_callback (struct __eb_device *d, struct __eb_device *destdevice, struct __econet_packet_aun *p, uint16_t length, timing_callback_func f, void *callback_userdata)
 {
 
 	struct __eb_aun_exposure	*exp;
@@ -5690,6 +5701,7 @@ uint8_t eb_aunpacket_to_aun_queue_with_callback (struct __eb_device *d, struct _
 		pq->length = length;
 		pq->n = NULL;
 		pq->callback = f;
+		pq->callback_userdata = callback_userdata;
 
 		skip = aun_out->p;
 
@@ -6274,6 +6286,35 @@ static void * eb_device_despatcher (void * device)
 			if (pthread_create(&d->local.notify_thread, NULL, eb_notify_watcher, d))
 				eb_debug (1, 0, "DESPATCH", "%-8s %3d.%3d Cannot start notify watcher on this device.", "Local", d->net, d->local.stn);
 		
+			// Start modules if they are set to autostart
+
+			{
+				struct __eb_device_module *m;
+
+				pthread_mutex_lock (&(d->local.modules_mutex));
+
+				m = d->local.modules;
+
+				if (m)
+					eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d Starting modules", "Local", d->net, d->local.stn);
+				else
+					eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d No modules to start", "Local", d->net, d->local.stn);
+
+				while (m)
+				{
+					if (m->module_autostart)
+					{
+						if (!((m->module_start) ((void *) d, m))) /* Failed to start */
+							eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d Module '%s' failed to start", "Local", d->net, d->local.stn, m->module_name);
+						else
+							eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d Module '%s' started by despatcher", "Local", d->net, d->local.stn, m->module_name);
+
+					}
+					m = m->next;
+				}
+
+				pthread_mutex_unlock (&(d->local.modules_mutex));
+			}
 
 
 		} break;
@@ -8903,7 +8944,7 @@ static void * eb_device_despatcher (void * device)
 					/* Call the callback function if there is one */
 
 					if (p->callback)
-						(p->callback) (p->p, &pt);
+						(p->callback) (p->p, &pt, p->callback_userdata);
 
 					n = p->n;
 
@@ -9798,6 +9839,36 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 				menuname = (char *) json_object_get_string(jfastmenu);
 
 				eb_device_init_fast(net, stn, menuname);
+			}
+
+			/* Check for modules */
+
+			{
+				uint16_t	count = 0;
+				struct 		__eb_device *d;
+				struct json_object	*jo;
+
+				while (eb_module_table[count].module_json_key != NULL)
+				{
+					/* Does module's key exist ? */
+
+					if (json_object_object_get_ex(jstation, eb_module_table[count].module_json_key, &jo))
+					{
+						/* Create new local, or get address if exists */
+
+						d = eb_new_local(net, stn, EB_DEF_LOCAL);
+
+						/* Call it's init function */
+
+						if (!((eb_module_table[count].module_init) ((void *) d, jo))) /* Failed to start */
+							eb_debug (0, 0, "DESPATCH", "%-8s %3d.%3d Module with JSON key '%s' failed to initialize", "Local", d->net, d->local.stn, eb_module_table[count].module_json_key);
+						else
+							eb_debug (0, 0, "DESPATCH", "%-8s %3d.%3d Module with JSON key '%s' initialized", "Local", d->net, d->local.stn, eb_module_table[count].module_json_key);
+
+					}
+
+					count++;
+				}
 			}
 
 			{
