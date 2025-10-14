@@ -298,9 +298,11 @@ struct __eb_device_module * eb_module_get_data (void *, unsigned char *); /* Get
  * callback has done its work. The sleep should have a time limit which,
  * if expired, can reasonably be interpreted as meaning a transmission
  * failure.
+ *
+ * First void * is to be cast to a struct __eb_device *; second is user data passed to the packet enqueuer
  */
 
-typedef void (*timing_callback_func) (struct __econet_packet_aun *, struct __econet_packet_timings *, void *);
+typedef void (*timing_callback_func) (struct __econet_packet_aun *, struct __econet_packet_timings *, void *, void *);
 
 /* General packet queue definition */
 
@@ -313,6 +315,7 @@ struct __eb_packetqueue {
 	uint16_t			length; // Length of packet including 12 byte header
 	uint64_t			time_on_queue; // ns since boot when the packet when on the queue
 	timing_callback_func		callback; // Callback function called by econet driver in the despatch context when a packet is successfully sent.
+	void *				source_device; // First void * in the timing func call back - source device of traffic that the callback is from
 	void *				callback_userdata; // Pointer to user data supplied when call back requested
 	struct __eb_packetqueue 	*n; // Next or null.
 };

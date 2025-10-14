@@ -3875,6 +3875,7 @@ uint8_t eb_enqueue_input_with_callback (struct __eb_device *dest, struct __econe
 		q->length = length;
 		q->time_on_queue = ((now.tv_sec * (int64_t)1000000000UL) + now.tv_nsec);
 		q->callback = t;
+		q->source_device = source;
 		q->callback_userdata = callback_userdata;
 				
 		pthread_mutex_lock (&(dest->priority_mutex));
@@ -5702,6 +5703,7 @@ uint8_t eb_aunpacket_to_aun_queue_with_callback (struct __eb_device *d, struct _
 		pq->n = NULL;
 		pq->callback = f;
 		pq->callback_userdata = callback_userdata;
+		pq->source_device = d;
 
 		skip = aun_out->p;
 
@@ -8944,7 +8946,7 @@ static void * eb_device_despatcher (void * device)
 					/* Call the callback function if there is one */
 
 					if (p->callback)
-						(p->callback) (p->p, &pt, p->callback_userdata);
+						(p->callback) (p->p, &pt, p->source_device, p->callback_userdata);
 
 					n = p->n;
 
