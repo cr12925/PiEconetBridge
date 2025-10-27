@@ -115,6 +115,9 @@ FSOP(0a)
 
 	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Get from offset %06lX, file length %06lX, beyond EOF %s", offset, length, (eofreached ? "Yes" : "No"));
 
+	// Update sequence
+	a->fhandles[handle].sequence = (FSOP_CTRL & 0x01);
+
 	// Send acknowledge
 
 	// Set the sequence number so we can trigger on it
