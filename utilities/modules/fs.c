@@ -4876,7 +4876,7 @@ void fsop_write_readable_config(struct __fs_station *s)
 		fprintf (out, "%-25s %-3s\n", "Max filename length", (s->config->fs_fnamelen ? "On" : "Off"));
 		fprintf (out, "%-25s %-3s\n", "Inf files are :inf", (s->config->fs_infcolon ? "On" : "Off"));
 		fprintf (out, "%-25s %-3s\n", "MDFS-style *INFO", (s->config->fs_mdfsinfo ? "On" : "Off"));
-		fprintf (out, "%-25s %-3s\n", "Acornd Directory Display", (s->config->fs_mask_dir_wrr ? "On" : "Off"));
+		fprintf (out, "%-25s %-3s\n", "Acorn Directory Display", (s->config->fs_mask_dir_wrr ? "On" : "Off"));
 
 		fclose(out);
 
