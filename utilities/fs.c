@@ -9769,7 +9769,7 @@ void fs_write_readable_config(int server)
 		fprintf (out, "%-25s %-3s\n", "Inf files are :inf", (fs_config[server].fs_infcolon ? "On" : "Off"));
 		fprintf (out, "%-25s %-3s\n", "> 8 file handles", (fs_config[server].fs_manyhandle ? "On" : "Off"));
 		fprintf (out, "%-25s %-3s\n", "MDFS-style *INFO", (fs_config[server].fs_mdfsinfo ? "On" : "Off"));
-		fprintf (out, "%-25s %-3s\n", "Acornd Directory Display", (fs_config[server].fs_mask_dir_wrr ? "On" : "Off"));
+		fprintf (out, "%-25s %-3s\n", "Acorn Directory Display", (fs_config[server].fs_mask_dir_wrr ? "On" : "Off"));
 
 		fclose(out);
 
