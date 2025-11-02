@@ -179,6 +179,8 @@ FSOP(0d)
 
 				to_write = value - extent;
 
+				fs_debug_full (0, 2, f->server, f->net, f->stn, "Set pointer on channel %02X to %08X which is beyond file extent of %08X, writing %08X null bytes", handle, value, extent, to_write);
+
 				/* Check quota here */
 				
 				if (FS_CONFIG(f->server, fs_quotas_enabled))

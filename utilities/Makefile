@@ -1,4 +1,4 @@
-GIT_VERSION := "$(shell git branch) $(shell git rev-parse --short HEAD)"
+GIT_VERSION := "$(shell git rev-parse --abbrev-ref HEAD) $(shell git rev-parse --short HEAD)"
 EXTRALIBS= # -lsystemd
 CFLAGS=-g -O2 -I../include $(shell pkg-config --cflags glib-2.0) -I/usr/include/json-c
 

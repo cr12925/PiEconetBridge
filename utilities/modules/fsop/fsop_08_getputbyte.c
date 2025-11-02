@@ -19,7 +19,7 @@
 
 uint8_t fs_check_seq(uint8_t a, uint8_t b)
 {
-        return ((a ^ b) & 0x03);
+        return ((a ^ b) & 0x03); // 0x03 because we set the sequence to a rogue of *2* when we don't know what seq the beeb will start with
 }
 
 FSOP(08) /* Getbyte */
