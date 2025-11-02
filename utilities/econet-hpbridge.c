@@ -7985,8 +7985,6 @@ static void * eb_device_despatcher (void * device)
 
 											data_tx_time /=  (p->length + 4); /* data_tx_time now contains ns per byte, accounting for the 4 byte header */
 
-											fprintf (stderr, "\n\n** Data packet took %lldns per byte\n\n", data_tx_time);
-
 											/* 1 kHz would be 1000000ns per bit, I think */
 
 											data_tx_time = 1000000000 / data_tx_time; /* Bytes per second */
