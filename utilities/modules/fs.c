@@ -4855,7 +4855,7 @@ void fsop_write_readable_config(struct __fs_station *s)
 	{
 		struct __fs_disc 	*disc;
 
-		fprintf (out, "Fileserver configuration for station %d.%d\n\n", s->net, s->stn);
+		fprintf (out, "FS configuration for station %d.%d\n\n", s->net, s->stn);
 		fprintf (out, "%-25s %s\n\n", "Root directory", s->directory);
 		fprintf (out, "%-25s %d\n", "Total no. of discs", s->total_discs);
 
