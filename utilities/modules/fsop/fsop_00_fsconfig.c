@@ -38,7 +38,7 @@ FSOP_00(FSCONFIG)
 			FSOP_EXTRACT(f, 1, parameter, 2);
 			length = atoi(parameter);
 
-			if (length < 10 || length > 80)
+			if (length < 10 || length > (ECONET_ABS_MAX_FILENAME_LENGTH - 1))
 			{
 				fsop_error(f, 0xFF, "Bad filename length");
 			}
@@ -51,6 +51,8 @@ FSOP_00(FSCONFIG)
 			fsop_error(f, 0xFF, "Bad filename length");
 			return;
 		}
+
+		fsop_write_readable_config(f->server);
 
 		fsop_reply_ok(f);
 
@@ -135,6 +137,8 @@ FSOP_00(FSCONFIG)
 		else
 			FS_CONF_DEFAULT_FILE_PERM(f->server) = perm;
 
+		fsop_write_readable_config(f->server);
+
 		fsop_reply_ok(f);
 		
 		return;
@@ -183,6 +187,8 @@ FSOP_00(FSCONFIG)
 	{
 		fsop_error(f, 0xFF, "Bad configuration entry name"); return;
 	}
+
+	fsop_write_readable_config(f->server);
 
 	fsop_reply_ok(f);
 }

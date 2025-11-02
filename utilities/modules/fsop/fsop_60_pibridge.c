@@ -162,7 +162,7 @@ FSOP(60)
 
                         fs_debug (0, 2, "%12sfrom %3d.%3d FS PiBridge call arg = 18 - Set FS parameters (0x%04X, filename length %d)", "", f->net, f->stn, params, fnlength);
 
-                        if (fnlength < 10 || fnlength > 79)
+                        if (fnlength < 10 || fnlength > (ECONET_ABS_MAX_FILENAME_LENGTH - 1))
                         {
                                 fsop_error(f, 0xFF, "Bad filename length");
                                 return;
