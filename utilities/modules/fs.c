@@ -4871,12 +4871,19 @@ void fsop_write_readable_config(struct __fs_station *s)
 
 		fprintf (out, "%-25s %-3s\n", "Acorn Home semantics", (s->config->fs_acorn_home ? "On" : "Off"));
 		fprintf (out, "%-25s %-3s\n", "SJ Res'ch functions", (s->config->fs_sjfunc ? "On" : "Off"));
+		if (s->config->fs_sjfunc)
+		{
+			fprintf (out, "%-25s %-3s\n", "MDFS-style *INFO", (s->config->fs_mdfsinfo ? "On" : "Off"));
+			fprintf (out, "%-25s %-3s\n", "Short saves", (s->config->fs_shortsavesoff ? "Off" : "On"));
+			fprintf (out, "%-25s %-3s\n", "Delete wildcards", (s->config->fs_deletewildcard ? "On" : "Off"));
+			fprintf (out, "%-25s %-3s\n", "Extended lib search", (s->config->fs_mdfsextsearch ? "On" : "Off"));
+		}
 		fprintf (out, "%-25s %-3s\n", "Big Chunks", (s->config->fs_bigchunks ? "On" : "Off"));
 		fprintf (out, "%-25s %-4s\n", "10 char pw conversion", (s->config->fs_pwtenchar ? "Done" : "No"));
 		fprintf (out, "%-25s %d\n", "Max filename length", s->config->fs_fnamelen);
 		fprintf (out, "%-25s %-3s\n", "Inf files are :inf", (s->config->fs_infcolon ? "On" : "Off"));
-		fprintf (out, "%-25s %-3s\n", "MDFS-style *INFO", (s->config->fs_mdfsinfo ? "On" : "Off"));
 		fprintf (out, "%-25s %-3s\n", "Acorn Directory Display", (s->config->fs_mask_dir_wrr ? "On" : "Off"));
+		fprintf (out, "%-25s %-3s\n", "Quotas enabled", (s->config->fs_quotas_enabled ? "On" : "Off"));
 
 		fclose(out);
 
