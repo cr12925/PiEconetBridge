@@ -13521,10 +13521,15 @@ int main (int argc, char **argv)
 				eb_mfr = 0xEE;
 				eb_mtype = 0xED; 
 			}
+			else if (strstr(buffer, "Raspberry Pi Zero 2 W"))
+			{
+				eb_mfr = 0xEE;
+				eb_mtype = 0xE2;
+			}
 			else if (strstr(buffer, "Raspberry Pi"))
 			{
 				eb_mfr = 0xEE;
-				eb_mtype = 0xE1; /* Unknown ARM */
+				eb_mtype = 0xE3; /* Unknown ARM */
 			}
 
 			fclose(model);
@@ -13777,9 +13782,11 @@ int main (int argc, char **argv)
 	eb_debug (0, 0, "CORE", "Identified a %s %s",
 			(eb_mfr == 0xEC) ? "Generic" 
 		:	(eb_mfr == 0xEE) ? "Raspberry Pi" : "Unknown",
-			(eb_mtype == 0xEF) ? "3"
-		:	(eb_mtype == 0xEE) ? "4"
-		:	(eb_mtype == 0xED) ? "5"
+			(eb_mtype == 0xEF) ? "Pi 3"
+		:	(eb_mtype == 0xEE) ? "Pi 4"
+		:	(eb_mtype == 0xED) ? "Pi 5"
+		:	(eb_mtype == 0xE2) ? "Pi Zero 2W"
+		:	(eb_mtype == 0xE3) ? "Unknown Pi"
 		:	(eb_mtype == 0xEC) ? "ARM" 
 		: 	(eb_mtype == 0xEB) ? "Non-ARM" : "Unknown architecture");
 
