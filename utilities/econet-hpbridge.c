@@ -13830,7 +13830,7 @@ int main (int argc, char **argv)
 			eb_debug (1, 0, "CONFIG", "JSON Configuration file is not a regular file");
 
 	if (json_stat_res && config_stat_res)
-		eb_debug (1, 0, "CONFIG", "Neither regular nor JSON configuration files was found");
+		eb_debug (78, 0, "CONFIG", "Neither regular nor JSON configuration files was found");
 
 	if (json_stat_res || (json_stat.st_mtime < config_stat.st_mtime)) /* No JSON or stat failed, or legacy config modified more recently, at least in seconds, than JSON config file */
 	{
