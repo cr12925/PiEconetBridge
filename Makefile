@@ -46,7 +46,7 @@ install-utilities:	install-mkgroup build-utilities
 	utilities/config-mangle config/econet-hpbridge-EconetFS.json
 	utilities/config-mangle config/econet-hpbridge-EconetFSTrunk.json
 	utilities/config-mangle systemd/econet-hpbridge.service
-	[ -e /etc/econet-gpio/econet-hpbridge.json ] || (sudo cp config/econet-hpbridge-EconetFSTrunk.json.local /etc/econet-gpio/econet-hpbridge.json ; sudo chown `whoami` /etc/econet-gpio/econet-hpbridge.json )
+	[ -e /etc/econet-gpio/econet-hpbridge.json ] || [ -e /etc/econet-gpio/econet-hpbridge.cfg ] || (sudo cp config/econet-hpbridge-EconetFSTrunk.json.local /etc/econet-gpio/econet-hpbridge.json ; sudo chown `whoami` /etc/econet-gpio/econet-hpbridge.json )
 	[ -e /etc/systemd/system/econet-hpbridge.service ] || sudo cp systemd/econet-hpbridge.service.local /etc/systemd/system/econet-hpbridge.service
 	sudo cp BEEBMEM /etc/econet-gpio
 	-sudo systemctl daemon-reload
