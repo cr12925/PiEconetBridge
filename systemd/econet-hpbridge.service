@@ -15,6 +15,10 @@ AmbientCapabilities=CAP_NET_RAW
 StandardOutput=journal
 StandardError=journal
 RestartPreventExitStatus=SIGKILL 78
+SystemMaxUse=2G
+SystemKeepFree=4G
+MaxRetentionSec=14d
+
 
 [Install]
 WantedBy=multi-user.target
