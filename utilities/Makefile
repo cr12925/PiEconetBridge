@@ -1,5 +1,5 @@
 GIT_VERSION := "$(shell git rev-parse --abbrev-ref HEAD) $(shell git rev-parse --short HEAD)"
-EXTRALIBS= # -lsystemd
+EXTRALIBS=-lsystemd
 CFLAGS=-g -O2 -I../include $(shell pkg-config --cflags glib-2.0) -I/usr/include/json-c
 
 econet_hpb_objects := $(patsubst %.c,%.o,$(wildcard econet-hpbridge*.c))
@@ -21,7 +21,7 @@ econet-hpbridge:	pre-build
 real-hpb-build: Makefile $(fsop_objects) $(econet_hpb_objects) $(econet_hpb_modules)
 	if [ -f .noexplain ]; then cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) $(econet_hpb_modules) $(fsop_objects) $(libs); else cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) $(econet_hpb_modules) $(fsop_objects) $(libs) -lexplain; fi
 	-chgrp econet econet-hpbridge
-	-sudo setcap CAP_NET_RAW=ep ${CURDIR}/econet-hpbridge
+	#-sudo setcap CAP_NET_RAW=ep ${CURDIR}/econet-hpbridge
 
 $(fsop_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
 	cc $(CFLAGS) -DGIT_VERSION=\"$(GIT_VERSION)\" -I../include -c $< -Wall -Wno-pointer-sign -o $@

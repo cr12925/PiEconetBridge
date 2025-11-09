@@ -2,7 +2,7 @@
 Description=Econet High Performance Bridge
 After=network-online.target
 Wants=network-online.target
-ConditionPathExists=/etc/econet-gpio/econet-hpbridge.cfg
+#ConditionPathExists=/etc/econet-gpio/econet-hpbridge.cfg
 
 [Service]
 Type=simple
@@ -11,6 +11,10 @@ Group=__USER__
 Restart=on-failure
 RestartSec=5
 ExecStart=/usr/local/sbin/econet-hpbridge
+AmbientCapabilities=CAP_NET_RAW
+StandardOutput=journal
+StandardError=journal
+RestartPreventExitStatus=SIGKILL 78
 
 [Install]
 WantedBy=multi-user.target

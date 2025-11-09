@@ -383,7 +383,11 @@ void eb_debug_fmt (uint8_t quit, uint8_t level, char *module, char *formatted)
 	fprintf (EB_DEBUG_OUTPUT, "[+%15.6f] %7ld %-8s: %s\n", timediffstart(), syscall(SYS_gettid), module, formatted);
 
 	if (quit)
-		exit (EXIT_FAILURE);
+	{
+		if (quit == 1)
+			exit (EXIT_FAILURE);
+		else	exit (quit);
+	}
 }
 
 /* Format a varargs debug string and send it off to the debug output
@@ -13832,7 +13836,8 @@ int main (int argc, char **argv)
 	{
 		eb_debug (0, 2, "CONFIG", "%16s Reading legacy config %s and converting to JSON internally", "", config_path);
 		if (!eb_readconfig(config_path, jsonconfigout_path, &json_config))
-			exit (EXIT_FAILURE);
+			exit (78); // Flagged in systemd unit file as preventing auto restart
+			//exit (EXIT_FAILURE);
 	}
 	else if (!json_stat_res) /* JSON must exist and (given the if() above) must be newer */
 	{
