@@ -13777,9 +13777,9 @@ int main (int argc, char **argv)
 	eb_debug (0, 0, "CORE", "Identified a %s %s",
 			(eb_mfr == 0xEC) ? "Generic" 
 		:	(eb_mfr == 0xEE) ? "Raspberry Pi" : "Unknown",
-			(eb_mtype == 0xEF) ? "5"
+			(eb_mtype == 0xEF) ? "3"
 		:	(eb_mtype == 0xEE) ? "4"
-		:	(eb_mtype == 0xED) ? "3"
+		:	(eb_mtype == 0xED) ? "5"
 		:	(eb_mtype == 0xEC) ? "ARM" 
 		: 	(eb_mtype == 0xEB) ? "Non-ARM" : "Unknown architecture");
 
