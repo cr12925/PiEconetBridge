@@ -14,7 +14,7 @@ kernel-depend:
 	
 depend:
 	sudo apt update
-	sudo apt install libexplain51 libexplain-dev libexplain-doc libssl-dev libglib2.0-dev cmake libssh2-1-dev libjson-c-dev
+	sudo apt install libexplain51 libexplain-dev libexplain-doc libssl-dev libglib2.0-dev cmake libssh2-1-dev libjson-c-dev libsystemd-dev
 
 install:	all install-module install-utilities
 
