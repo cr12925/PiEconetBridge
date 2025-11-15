@@ -13839,7 +13839,7 @@ int main (int argc, char **argv)
 	if (json_stat_res && config_stat_res)
 		eb_debug (78, 0, "CONFIG", "Neither regular nor JSON configuration files was found");
 
-	if (json_stat_res || (json_stat.st_mtime < config_stat.st_mtime)) /* No JSON or stat failed, or legacy config modified more recently, at least in seconds, than JSON config file */
+	if (json_stat_res || ((!config_stat_res) && (json_stat.st_mtime < config_stat.st_mtime))) /* No JSON or stat failed, or legacy config modified more recently, at least in seconds, than JSON config file */
 	{
 		eb_debug (0, 2, "CONFIG", "%16s Reading legacy config %s and converting to JSON internally", "", config_path);
 		if (!eb_readconfig(config_path, jsonconfigout_path, &json_config))
