@@ -518,8 +518,8 @@ void fs_debug (uint8_t death, uint8_t level, char *fmt, ...)
 
 	va_list 	ap;
 #ifdef BRIDGE_V2
-	char		str[1024];
-	char		padstr[1044];
+	char		str[8192];
+	char		padstr[9000];
 
 #else
 	if (level >= 2 && !fs_noisy)	return;
@@ -533,7 +533,7 @@ void fs_debug (uint8_t death, uint8_t level, char *fmt, ...)
 	/* Version 1 bridge code - do a simple fprintf to stderr */
 
 	fprintf (stderr, "[+%15.6f]    FS: ", timediffstart());
-	vfprintf (stderr, fmt, ap);
+	vnfprintf (stderr, 8190, fmt, ap);
 	fprintf (stderr, "\n");
 	
 	if (death)	exit(EXIT_FAILURE);
@@ -542,7 +542,7 @@ void fs_debug (uint8_t death, uint8_t level, char *fmt, ...)
 
 	/* Version 2 bridge code */
 
-	vsprintf (str, fmt, ap);
+	vsnprintf (str, 8190, fmt, ap);
 	strcpy (padstr, "                 ");
 	strcat (padstr, str);
 	eb_debug_fmt (death, level, "FS", padstr);
@@ -9460,7 +9460,7 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 
 		fflush(fs_files[server][fs_bulk_ports[server][port].handle].handle);
 	
-		fs_bulk_ports[server][port].received += datalen;
+		fs_bulk_ports[server][port].received += writeable; // datalen;
 
 		if (fs_bulk_ports[server][port].user_handle != 0) // This is a putbytes transfer not a fs_save; in the latter there is no user handle
 		{
