@@ -63,7 +63,7 @@ void fs_debug (uint8_t death, uint8_t level, char *fmt, ...)
 
 	va_start (ap, fmt);
 
-	vsprintf (str, fmt, ap);
+	vsnprintf (str, 8190, fmt, ap);
 	strcpy (padstr, "FS               ");
 	strcat (padstr, str);
 	eb_debug_fmt (death, level, "FS", padstr);
@@ -79,7 +79,7 @@ void fs_debug_full (uint8_t death, uint8_t level, struct __fs_station *s, uint8_
 
 	va_start (ap, fmt);
 
-	vsprintf (str, fmt, ap);
+	vsnprintf (str, 8190, fmt, ap);
 	if (net != 0)
 		sprintf (padstr, "FS       %3d.%3d from %3d.%3d %s", s->net, s->stn, net, stn, str);
 	else
