@@ -58,8 +58,8 @@ void fs_debug (uint8_t death, uint8_t level, char *fmt, ...)
 {
 
 	va_list 	ap;
-	char		str[1024];
-	char		padstr[1044];
+	char		str[8192];
+	char		padstr[9000];
 
 	va_start (ap, fmt);
 
@@ -74,8 +74,8 @@ void fs_debug (uint8_t death, uint8_t level, char *fmt, ...)
 void fs_debug_full (uint8_t death, uint8_t level, struct __fs_station *s, uint8_t net, uint8_t stn, char *fmt, ...)
 {
 	va_list 	ap;
-	char		str[850];
-	char		padstr[1044];
+	char		str[8192];
+	char		padstr[9000];
 
 	va_start (ap, fmt);
 
