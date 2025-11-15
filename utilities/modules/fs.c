@@ -4642,8 +4642,13 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t len, void 
 			);
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 	if (bp->is_gbpb) // Produce additional debug
-		fs_debug_full (0, 2, s, bp->active->net, bp->active->stn, "Bulk trasfer on port %02X old cursor = %06X, new cursor in FS = %06X, new cursor from OS = %06X - %s", bp->bulkport, old_cursor, new_cursor, new_cursor_read, (new_cursor == new_cursor_read) ? "CORRECT" : " *** ERROR ***");
+	{
+		unsigned char	correct[10] = "CORRECT";
+		unsigned char	errorstr[20] = "---ERROR---";
+
+		fs_debug_full (0, 2, s, bp->active->net, bp->active->stn, "Bulk trasfer on port %02X old cursor = %06X, new cursor in FS = %06X, new cursor from OS = %06X - %s", bp->bulkport, old_cursor, new_cursor, new_cursor_read, (new_cursor == new_cursor_read) ? correct: errorstr);
 #pragma GCC diagnostic warning "-Wmaybe-uninitialized"
+	}
 
 	bp->last_receive = (unsigned long long) time(NULL);
 
