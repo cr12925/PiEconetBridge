@@ -4627,7 +4627,9 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t len, void 
 
 	fflush(h);
 
-	bp->received += datalen;
+	//bp->received += datalen;
+	//Attempt to fix no reply errors - sometimes the write has more data than the client said it was sending
+	bp->received += writeable;
 
 	if (bp->is_gbpb) // This is a putbytes transfer not a fs_save; in the latter there is no user handle
 	{
