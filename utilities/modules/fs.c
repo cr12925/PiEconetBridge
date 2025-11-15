@@ -4650,7 +4650,8 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t len, void 
 			strcpy (status, "Correct");
 		else	strcpy (status, "*** ERRROR ***");
 
-		fs_debug_full (0, 2, s, bp->active->net, bp->active->stn, "Bulk trasfer on port %02X old cursor = %06X, new cursor in FS = %06X, new cursor from OS = %06X - %s", bp->bulkport, old_cursor, new_cursor, new_cursor_read, status);
+		// Trixie's C compiler does not like this - it core dumps in strlen, having not copied the status string for some reason. No idea why.
+		//fs_debug_full (0, 2, s, bp->active->net, bp->active->stn, "Bulk trasfer on port %02X old cursor = %06X, new cursor in FS = %06X, new cursor from OS = %06X - %s", bp->bulkport, old_cursor, new_cursor, new_cursor_read, status);
 #pragma GCC diagnostic warning "-Wmaybe-uninitialized"
 	}
 
