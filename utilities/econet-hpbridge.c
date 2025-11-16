@@ -334,6 +334,16 @@ unsigned long timediffmsec(struct timeval *s, struct timeval *d)
 	return (((d->tv_sec - s->tv_sec) * 1000) + ((d->tv_usec - s->tv_usec) / 1000));
 }
 
+/* Calculate ms difference between one time and "now" */
+
+unsigned long timediffnow(struct timeval *s)
+{
+	struct timeval d;
+
+	gettimeofday (&d, 0);
+	return timediffmsec (s, &d);
+}
+
 /* Return a float for seconds since bridge start time
 */
 
@@ -642,7 +652,7 @@ struct __eb_pool_host *eb_pool_find_addr (struct __eb_pool *pool, uint8_t net, u
 
 			// Ignore non-static inactive maps - Splice out elsewhere because the device might or might not be locked here; all we mandate is that the *pool* updatemutex is locked. We might, for example, not know which device the thing is on and there's a risk of deadlock if we try to lock the device here.
 
-			if ((h->is_static) || (timediffmsec(&(h->last_traffic), &now) <= (EB_CONFIG_POOL_DEAD_INTERVAL * 1000)))
+			if ((h->is_static) || (/* timediffmsec(&(h->last_traffic), &now) */ timediffnow(&(h->last_traffic)) <= (EB_CONFIG_POOL_DEAD_INTERVAL * 1000)))
 			{
 
 				if (
@@ -886,7 +896,7 @@ static void *eb_pool_garbage_collector(void *ignored)
 
 				while (h)
 				{
-					if ((!(h->is_static)) && timediffmsec(&(h->last_traffic), &now) > (EB_CONFIG_POOL_DEAD_INTERVAL * 1000))
+					if ((!(h->is_static)) && /* timediffmsec(&(h->last_traffic), &now)*/ timediffnow(&(h->last_traffic)) > (EB_CONFIG_POOL_DEAD_INTERVAL * 1000))
 					{
 						struct __eb_pool_host	*new_h;
 
@@ -2517,7 +2527,7 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 		gettimeofday (&now, NULL);
 
 		if (
-			(ctrl == BRIDGE_WHATNET && (timediffmsec(&(source->wire.last_bridge_whatnet[stn]), &now) > EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL))
+			(ctrl == BRIDGE_WHATNET && (/* timediffmsec(&(source->wire.last_bridge_whatnet[stn]), &now) */ timediffnow(&(source->wire.last_bridge_whatnet[stn]))  > EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL))
 		||	
 			(ctrl == BRIDGE_ISNET /* this is wrong! && (timediffmsec(&(source->wire.last_bridge_isnet[stn]), &now) > EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL) */)
 		)
@@ -2544,6 +2554,8 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 					dest.sin_port = htons(source->aun->port);
 					dest.sin_addr.s_addr = htonl(source->aun->addr);
 	
+					reply->p.ctrl &= 0x7F; 
+
 					r = sendto (EB_CONFIG_GATEWAY_SOCKET, reply, 14, MSG_DONTWAIT, (struct sockaddr *) &dest, sizeof(struct sockaddr_in));
 	
 					if (r < 0)
@@ -3164,6 +3176,8 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 			int			tx;
 			struct __eb_aun_remote	* remotes;
 
+			p->p.ctrl &= 0x7f;
+
 			/* First, gatewayed traffic */
 
 			remotes = aun_remotes;
@@ -3178,7 +3192,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 					bcast.sin_port = htons(remotes->port);
 					bcast.sin_addr.s_addr = htonl(remotes->addr);
 					bcast_size = sizeof(struct sockaddr_in);
-					p->p.ctrl &= 0x7f;
+					//p->p.ctrl &= 0x7f;
 					if ((tx = sendto (EB_CONFIG_GATEWAY_SOCKET, p, length+12, MSG_DONTWAIT, &bcast, bcast_size)) < 0)
 						eb_debug (0, 1, "BCAST", "BCAST    255.255 from %3d.%3d via gateway : Transmission error: %s",
 								p->p.srcnet, p->p.srcstn, strerror(errno));
@@ -3194,7 +3208,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 				bcast.sin_port = htons(32768); // All AUN broadcasts are on destination port 32768
 				bcast.sin_addr.s_addr = 0xFFFFFFFF; // INADDR_BROADCAST;
 				bcast_size = sizeof(struct sockaddr_in);
-				p->p.ctrl &= 0x7F; // Clear high bit
+				//p->p.ctrl &= 0x7F; // Clear high bit
 				if ((tx = sendto (e->socket, &(p->p.aun_ttype), length+8, MSG_DONTWAIT, &bcast, bcast_size)) < 0)
 					eb_debug (0, 1, "BCAST", "BCAST    255.255 from %3d.%3d Transmission error: %s",
 							p->p.srcnet, p->p.srcstn, strerror(errno));
@@ -3298,6 +3312,7 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 							{
 								eb_debug (0, 3, "BCAST", "BCAST    255.255 from %3d.%3d Transmit on %s (if_index %d)",
 									p->p.srcnet, p->p.srcstn, a->ifa_name, socket_addr.sll_ifindex);
+								
 								if (sendto(eb_broadcast_socket, buffer, bufflen, 0, (struct sockaddr *) &socket_addr, sizeof (struct sockaddr_ll)) < 0)
 									eb_debug (0, 2, "BCAST", "BCAST    255.255 from %3d.%3d Transmit on %s (if_index %d) FAILED: %s",
 										p->p.srcnet, p->p.srcstn, a->ifa_name, socket_addr.sll_ifindex, strerror(errno));
@@ -4581,7 +4596,7 @@ struct __eb_device * eb_allocate_dynamic_aun(in_addr_t source_address, uint16_t 
 
 		n = station->next;
 
-		if (station->is_dynamic && (station->port == -1 || (timediffmsec(&(station->last_dynamic), &now) > (EB_CONFIG_DYNAMIC_EXPIRY * 60 * 1000)))) // bother with this one - must be dynamic, and either no port (unused), or last used more than the timeout ago
+		if (station->is_dynamic && (station->port == -1 || (/* timediffmsec(&(station->last_dynamic), &now) */ timediffnow(&(station->last_dynamic))  > (EB_CONFIG_DYNAMIC_EXPIRY * 60 * 1000)))) // bother with this one - must be dynamic, and either no port (unused), or last used more than the timeout ago
 		{
 
 			found = 1;
@@ -4659,6 +4674,7 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 				/* If we've got traffic on a conventional exposure, turn off the uses_gateway flag */
 
 				source_device->aun->uses_gateway = 0;
+				eb_debug (0, 1, "AUN", "AUN      %3d.%3d turning off AUN gateway having received traffic from AUN client on regular exposure, at line %d", source_device->net, source_device->aun->stn, __LINE__);
 
 				eb_add_stats(&(source_device->statsmutex), &(source_device->b_out), length-12); // Traffic stats - this is the remote device generating output
 
@@ -4835,15 +4851,31 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 							/* AUN PROCESS */
 							eb_debug (0, 4, "AUN", "                 source_device = %p, type %s, AUN Auto Ack is %s", source_device, eb_type_str(source_device->type), (source_device->config & EB_DEV_CONF_AUTOACK) ? "On" : "Off");
 							if ((!enqueue_result) || (incoming.p.aun_ttype == ECONET_AUN_DATA && (source_device->config & EB_DEV_CONF_AUTOACK))) // NAK if we didn't manage to enqueue; ACK if other end if AUTO ACK
-								sendto (e->socket, &(ack.p.aun_ttype), 8, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
+							{
+								if (home_device->aun->uses_gateway)
+									sendto (EB_CONFIG_GATEWAY_SOCKET, &(ack), 12, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
+								else
+									sendto (e->socket, &(ack.p.aun_ttype), 8, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
+							}
 						}
 	
 					}
 					else	// MAY AS WELL SEND A NAK (even if not auto ack because the other end will never hear of this packet!)
 					{
+						struct __eb_device	*home_device; // The thing this is an exposure for
+
+						home_device = eb_find_station (2, &incoming);
+
 						ack.p.aun_ttype = ECONET_AUN_NAK;
 	
-						sendto (e->socket, &(ack.p.aun_ttype), 8, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
+						if (home_device)
+						{
+							if (home_device->aun->uses_gateway)
+								sendto (EB_CONFIG_GATEWAY_SOCKET, &(ack), 12, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
+							else
+								sendto (e->socket, &(ack.p.aun_ttype), 8, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
+						}
+						// sendto (e->socket, &(ack.p.aun_ttype), 8, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
 					}
 				}
 			}
@@ -5102,6 +5134,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 		{
 			source_device->aun->uses_gateway = 1; /* Flag gateway use if appropriate, so that return traffic goes that way */
 			source_device->aun->gateway_compatible = 1; /* In case the client doesn't probe with a broadcast */
+			eb_debug (0, 1, "AUN", "AUN      %3d.%3d AUN gateway enabled, having received broadcast traffic via the AUN gateway", incoming.p.dstnet, incoming.p.dststn);
 		}
 
 		if (is_gateway && source_device->aun->is_net_local && incoming.p.aun_ttype == ECONET_AUN_BCAST) /* Drop broadcasts that arrive at the gateway if we know the remote AUN host is subnet local to us - we get them from LAN broadcasts instead */
@@ -5143,6 +5176,8 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 			eb_dump_packet (source_device, EB_PKT_DUMP_POST_I, &incoming, length - 12); // (Drop the header length)
 
 			/* Update last traffic received time so that dynamic stations don't time out */
+
+			//fprintf (stderr, "\n\nUpdating last_dynamic for station %d.%d", source_device->net, source_device->aun->stn);
 
 			gettimeofday(&(source_device->aun->last_dynamic), 0);
 
@@ -5287,6 +5322,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 
 					if ((!enqueue_result) || (incoming.p.aun_ttype == ECONET_AUN_DATA && (source_device->config & EB_DEV_CONF_AUTOACK))) // NAK if we didn't manage to enqueue; ACK if other end if AUTO ACK
 					{
+						ack.p.ctrl &= 0x7f;
 						if (is_gateway)
 							sendto (sock, &ack, 12, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
 						else
@@ -5298,6 +5334,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 			else	// MAY AS WELL SEND A NAK (even if not auto ack because the other end will never hear of this packet!)
 			{
 				ack.p.aun_ttype = ECONET_AUN_NAK;
+				ack.p.ctrl &= 0x7f;
 
 				if (is_gateway)
 					sendto (sock, &ack, 12, MSG_DONTWAIT, (struct sockaddr *)&addr, (socklen_t) sizeof(struct sockaddr_in));
@@ -5660,13 +5697,14 @@ uint8_t eb_aunpacket_to_aun_queue_with_callback (struct __eb_device *d, struct _
 
 	if (exp || (destdevice->aun->uses_gateway /* && TODO - CHECK GATEWAY EXPIRY HERE */)) /* Exposed. If not, packet gets dumped anyway - unless the client talks to us through the gateway, in which case we don't need an exposure for the source */
 	{
-		eb_debug (0, 4, "DESPATCH", "%-8s %3d     Traffic from %3d.%3d to %3d.%3d being put on AUN Output queue", 
+		eb_debug (0, 4, "DESPATCH", "%-8s %3d     Traffic from %3d.%3d to %3d.%3d length %04X being put on AUN Output queue", 
 				eb_type_str(d->type),
 				d->net,
 				p->p.srcnet,
 				p->p.srcstn,
 				p->p.dstnet,
-				p->p.dststn);
+				p->p.dststn,
+				length);
 
 		pthread_mutex_lock(&(d->aun_out_mutex));
 
@@ -5876,6 +5914,10 @@ static void * eb_device_aun_sender (void *device)
 			p = o->p;
 			p_parent = NULL;
 			
+			/* Something somewhere is not stripping the high bit off the ctrl byte in all circs - so we'll do it here */
+
+			p->p->p.ctrl &= 0x7f;
+
 			eb_debug (0, 4, "AUNSEND", "%16s Looking at outq %p to send traffic, packetqueue head is %p", devstring, o, p);
 
 			while (p && !done_a_tx)
@@ -5885,7 +5927,6 @@ static void * eb_device_aun_sender (void *device)
 				uint16_t	timediff;
 				struct timeval	now;
 
-				gettimeofday (&now, 0);
 
 				p_next = p->n;
 
@@ -5903,8 +5944,15 @@ static void * eb_device_aun_sender (void *device)
 
 				/* Time out the uses_gateway if need be */
 
-				if (timediffmsec(&(o->destdevice->aun->last_dynamic), &now) > (EB_CONFIG_DYNAMIC_EXPIRY * 60 * 1000)) /* last_dynamic gets updated even for non-dynamic hosts, and we use it to time out gateway access */
+				/* The debug line below revealed that sometimes gettimeofday() goes backwards! */
+				//fprintf (stderr, "\n\nnow = %ld.%ld, last_dynamic = %ld.%ld, diff = %ld ms\n\n", now.tv_sec, now.tv_usec, o->destdevice->aun->last_dynamic.tv_sec, o->destdevice->aun->last_dynamic.tv_usec, timediffmsec (&(o->destdevice->aun->last_dynamic), &now));
+
+				gettimeofday (&now, 0);
+				if (/* timediffmsec(&(o->destdevice->aun->last_dynamic), &now) */ timediffnow(&(o->destdevice->aun->last_dynamic)) > (EB_CONFIG_DYNAMIC_EXPIRY * 60 * 1000)) /* last_dynamic gets updated even for non-dynamic hosts, and we use it to time out gateway access */
+				{
 					o->destdevice->aun->uses_gateway = o->destdevice->aun->gateway_compatible = o->destdevice->aun->is_net_local = 0;
+					eb_debug (0, 1, "AUNSEND", "AUN      %3d.%3d timing out AUN gateway use at line %d", p->p->p.dstnet, p->p->p.dststn, __LINE__);
+				}
 
 				if (!(exp || o->destdevice->aun->uses_gateway)  || (p->tx++ == EB_CONFIG_AUN_RETRIES)) /* Too many attempts - splice */
 				{
@@ -5936,7 +5984,7 @@ static void * eb_device_aun_sender (void *device)
 					else
 						o->p = p_next;
 				}
-				else if ((timediff = timediffmsec(&(p->last_tx), &now)) >= EB_CONFIG_AUN_RETX)
+				else if ((timediff = /* timediffmsec(&(p->last_tx), &now)*/ timediffnow(&(p->last_tx))) >= EB_CONFIG_AUN_RETX)
 				{
 					/* Send it! */
 
@@ -7931,7 +7979,7 @@ static void * eb_device_despatcher (void * device)
 						
 									while (
 										(err == ECONET_TX_INPROGRESS || err == ECONET_TX_DATAPROGRESS)
-									&&	(timediffmsec(&start, &now) < ((p->length > 4096) ? 3000 : 2500))
+									&&	(/* timediffmsec(&start, &now) */ timediffnow(&start) < ((p->length > 4096) ? 3000 : 2500))
 									)
 									{
 										gettimeofday(&now, 0);
@@ -7939,7 +7987,7 @@ static void * eb_device_despatcher (void * device)
 										//eb_debug (0, 4, "DESPATCH", "%-8s %3d     while() loop progressing for packet at pq %p, packet at %p, after %d ms err = 0x%02X", eb_type_str(d->type), d->net, p, p->p, timediffmsec(&start, &now), err);
 									}
 		
-									eb_debug (0, 4, "DESPATCH", "%-8s %3d     while() loop ended for packet at pq %p, packet at %p after %d ms (result = %02X)", eb_type_str(d->type), d->net, p, p->p, timediffmsec(&start, &now), err);
+									eb_debug (0, 4, "DESPATCH", "%-8s %3d     while() loop ended for packet at pq %p, packet at %p after %d ms (result = %02X)", eb_type_str(d->type), d->net, p, p->p, /*timediffmsec(&start, &now)*/ timediffnow(&start), err);
 
 									if (err == ECONET_TX_SUCCESS)
 									{
@@ -15086,7 +15134,7 @@ static void * eb_statistics (void *nothing)
 
 					gettimeofday (&now, 0);
 
-					if ((hostlist->is_static) || (timediffmsec(&(hostlist->last_traffic), &now) <= (EB_CONFIG_POOL_DEAD_INTERVAL * 1000)))
+					if ((hostlist->is_static) || (/* timediffmsec(&(hostlist->last_traffic), &now)*/ timediffnow(&(hostlist->last_traffic)) <= (EB_CONFIG_POOL_DEAD_INTERVAL * 1000)))
 					{
 					
 						if (hostlist->source->type == EB_DEF_TRUNK)
@@ -15239,7 +15287,7 @@ static void * eb_statistics (void *nothing)
 	
 						gettimeofday (&now, 0);
 	
-						if ((hostlist->is_static) || (timediffmsec(&(hostlist->last_traffic), &now) <= (EB_CONFIG_POOL_DEAD_INTERVAL * 1000)))
+						if ((hostlist->is_static) || (/* timediffmsec(&(hostlist->last_traffic), &now)*/ timediffnow(&(hostlist->last_traffic)) <= (EB_CONFIG_POOL_DEAD_INTERVAL * 1000)))
 						{
 						
 							if (hostlist->source->type == EB_DEF_TRUNK)
