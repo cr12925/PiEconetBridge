@@ -1795,7 +1795,7 @@ void * eb_fast_io_handler_to_network (void * fc)
 		 * more
 		 */
 
-		gettimeofday(&now, 0);
+		eb_gettimeofday(&now, 0);
 		last_tx.tv_sec = last_tx.tv_usec = 0;
 
 		if (!(me->pt_len[EB_FAST_TO_NETWORK] > 0 && me->fast_client_ready))
@@ -1815,7 +1815,7 @@ void * eb_fast_io_handler_to_network (void * fc)
 		{
 			int	sz = (me->pt_len[EB_FAST_TO_NETWORK] > 32 ? 32 : me->pt_len[EB_FAST_TO_NETWORK]);
 
-			gettimeofday(&last_tx, 0);
+			eb_gettimeofday(&last_tx, 0);
 
 			eb_debug (0, 4, "FAST", "%-8s %3d.%3d from %3d.%3d FAST IO thread to network: checking for data to send to network", eb_type_str(me->parent->type), me->parent->net, me->parent->local.stn, me->net, me->stn);
 

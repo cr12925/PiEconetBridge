@@ -1372,6 +1372,7 @@ struct __econet_packet_ip {
 
 /* Utility externs */
 
+int eb_gettimeofday (struct timeval *, struct timezone *);
 unsigned long timediffmsec(struct timeval *s, struct timeval *d);
 
 /* Externs for the FS */

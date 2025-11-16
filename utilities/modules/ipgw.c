@@ -35,7 +35,7 @@ uint16_t eb_ipgw_arp_dest(struct __eb_device *d, uint32_t addr)
 
 	a = d->local.ip.addresses->arp;
 
-	gettimeofday(&now, 0);
+	eb_gettimeofday(&now, 0);
 
 	while (a && (a->ip != addr) && (timediffmsec(&(a->expiry), &now) > 0))
 		a = a->next;
@@ -85,7 +85,7 @@ void eb_ipgw_set_arp(struct __eb_device *d, uint32_t addr, uint8_t net, uint8_t 
 
 	a->ip = addr;
 	a->econet = (net << 8) | stn;
-	gettimeofday(&(a->expiry), 0);
+	eb_gettimeofday(&(a->expiry), 0);
 	a->expiry.tv_sec += 600; // 5 minutes
 
 	eb_debug (0, 3, "IPGW", "%-8s %3d.%3d ARP entry set for network order host %08X, Econet host %3d.%3d",
@@ -117,7 +117,7 @@ uint8_t eb_ipgw_transmit (struct __eb_device *d, uint32_t addr)
 	eb_debug (0, 3, "IPGW", "%-8s %3d.%3d Examining transmit queue after ARP reply received for network order address %08X",
 		eb_type_str(d->type), d->net, d->local.stn, addr);
 
-	gettimeofday(&now, NULL);
+	eb_gettimeofday(&now, NULL);
 
 	while (q)
 	{
@@ -251,7 +251,7 @@ void eb_ipgw_incoming_ip(struct __eb_device *d)
 				q->p = outgoing;
 				q->destination = incoming.destination;
 				q->length = length;
-				gettimeofday(&(q->expiry), 0);
+				eb_gettimeofday(&(q->expiry), 0);
 				q->expiry.tv_sec += 2;
 				q->next = NULL;
 

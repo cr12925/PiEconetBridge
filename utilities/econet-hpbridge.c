@@ -132,6 +132,8 @@ pthread_mutex_t         networks_update; // Must acquire before changing/reading
 
 pthread_mutex_t		fs_mutex, ps_mutex, ip_mutex; // Mutexes (mutices?) for ensuring only one thread talks to a FS, PS, or IPS at the same time
 
+pthread_mutex_t		gettimeofday_mutex; // Locks our local gettimeofday function, since sometimes we get race conditions I think
+
 uint8_t eb_assume_true_aun = 0;         // If 1, will assume that if we don't have a route to network numbers 128+, then we should try addressing the AUN packet to... where? (Not implemented yet.)
 
 struct __eb_config	config; // Holds bridge-wide config information
@@ -326,6 +328,15 @@ void eb_add_stats(pthread_mutex_t *mutex, uint64_t *counter, uint16_t value)
 
 }
 
+int eb_gettimeofday(struct timeval *v, struct timezone *t)
+{
+	int r;
+	pthread_mutex_lock (&gettimeofday_mutex);
+	r = gettimeofday(v, t);
+	pthread_mutex_unlock (&gettimeofday_mutex);
+	return r;
+}
+
 /* Calculate ms difference between two times 
 */
 
@@ -340,7 +351,7 @@ unsigned long timediffnow(struct timeval *s)
 {
 	struct timeval d;
 
-	gettimeofday (&d, 0);
+	eb_gettimeofday (&d, 0);
 	return timediffmsec (s, &d);
 }
 
@@ -352,7 +363,7 @@ float timediffstart()
 
 	struct timeval 	now;
 
-	gettimeofday (&now, 0);
+	eb_gettimeofday (&now, 0);
 
 	return (float) timediffmsec(&(config.start), &now) / 1000;
 
@@ -637,7 +648,7 @@ struct __eb_pool_host *eb_pool_find_addr (struct __eb_pool *pool, uint8_t net, u
 
 	if (!pool)	return NULL; // Can't search a null pool.
 
-	gettimeofday(&now, 0);
+	eb_gettimeofday(&now, 0);
 
 	ret = NULL;
 
@@ -806,7 +817,7 @@ struct __eb_pool_host *eb_find_make_pool_host (struct __eb_device *source,
 	}
 
 	host->is_static = is_static;
-	gettimeofday(&(host->last_traffic), 0);
+	eb_gettimeofday(&(host->last_traffic), 0);
 	host->b_in = host->b_out = 0;
 
 	if (pthread_mutex_init(&(host->statsmutex), NULL) == -1)
@@ -881,7 +892,7 @@ static void *eb_pool_garbage_collector(void *ignored)
 
 		p = pools;
 
-		gettimeofday(&now, 0);
+		eb_gettimeofday(&now, 0);
 
 		while (p)
 		{
@@ -1639,7 +1650,7 @@ void eb_pool_nat (struct __eb_device *d, uint8_t *net, uint8_t *stn)
 	struct __eb_pool	*p;
 	struct timeval		t;
 
-	gettimeofday(&t, 0);
+	eb_gettimeofday(&t, 0);
 
 	// no pool nat for broadcasts or 0 stations
 	if (*net == 255 || *stn == 0)
@@ -1697,7 +1708,7 @@ void eb_pool_nat (struct __eb_device *d, uint8_t *net, uint8_t *stn)
 		*net = h->net;
 		*stn = h->stn;
 		pthread_mutex_lock(&h->pool->updatemutex);
-		gettimeofday (&(h->last_traffic), 0);
+		eb_gettimeofday (&(h->last_traffic), 0);
 		pthread_mutex_unlock(&h->pool->updatemutex);
 
 	}
@@ -1731,7 +1742,7 @@ void eb_pool_unnat(uint8_t *net, uint8_t *stn, struct __eb_device **source)
 				*net = h->s_net;
 				*stn = h->s_stn;
 				*source = h->source;
-				gettimeofday (&(h->last_traffic), 0);
+				eb_gettimeofday (&(h->last_traffic), 0);
 				pthread_mutex_unlock(&(p->updatemutex));
 				return;
 			}
@@ -2524,7 +2535,7 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 		
 		struct timeval	now;
 
-		gettimeofday (&now, NULL);
+		eb_gettimeofday (&now, NULL);
 
 		if (
 			(ctrl == BRIDGE_WHATNET && (/* timediffmsec(&(source->wire.last_bridge_whatnet[stn]), &now) */ timediffnow(&(source->wire.last_bridge_whatnet[stn]))  > EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL))
@@ -2578,9 +2589,9 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 			if (source->type == EB_DEF_WIRE)
 			{
 				if (ctrl == BRIDGE_WHATNET)
-					gettimeofday(&(source->wire.last_bridge_whatnet[stn]), NULL);
+					eb_gettimeofday(&(source->wire.last_bridge_whatnet[stn]), NULL);
 				else
-					gettimeofday(&(source->wire.last_bridge_isnet[stn]), NULL);
+					eb_gettimeofday(&(source->wire.last_bridge_isnet[stn]), NULL);
 			}
 
 			eb_debug (0, 2, "BRIDGE", "%-8s %3d     What/IsNet reply from %3d.%3d to %3d.%3d", eb_type_str(source->type), source->net, farside, 0, net, stn);
@@ -3954,7 +3965,7 @@ uint16_t eb_ipgw_arp_dest(struct __eb_device *d, uint32_t addr)
 
 	a = d->local.ip.addresses->arp;
 
-	gettimeofday(&now, 0);
+	eb_gettimeofday(&now, 0);
 
 	while (a && (a->ip != addr) && (timediffmsec(&(a->expiry), &now) > 0))
 		a = a->next;
@@ -4006,7 +4017,7 @@ void eb_ipgw_set_arp(struct __eb_device *d, uint32_t addr, uint8_t net, uint8_t 
 
 	a->ip = addr;
 	a->econet = (net << 8) | stn;
-	gettimeofday(&(a->expiry), 0);
+	eb_gettimeofday(&(a->expiry), 0);
 	a->expiry.tv_sec += 600; // 5 minutes
 
 	eb_debug (0, 3, "IPGW", "%-8s %3d.%3d ARP entry set for network order host %08X, Econet host %3d.%3d",
@@ -4040,7 +4051,7 @@ uint8_t eb_ipgw_transmit (struct __eb_device *d, uint32_t addr)
 	eb_debug (0, 3, "IPGW", "%-8s %3d.%3d Examining transmit queue after ARP reply received for network order address %08X",
 		eb_type_str(d->type), d->net, d->local.stn, addr);
 
-	gettimeofday(&now, NULL);
+	eb_gettimeofday(&now, NULL);
 
 	while (q)
 	{
@@ -4586,7 +4597,7 @@ struct __eb_device * eb_allocate_dynamic_aun(in_addr_t source_address, uint16_t 
 
 	station = aun_remotes;
 
-	gettimeofday (&now, 0);
+	eb_gettimeofday (&now, 0);
 
 	while (station && !found)
 	{
@@ -4602,7 +4613,7 @@ struct __eb_device * eb_allocate_dynamic_aun(in_addr_t source_address, uint16_t 
 			found = 1;
 
 			station->b_in = station->b_out = 0;
-			gettimeofday(&(station->last_dynamic), 0);
+			eb_gettimeofday(&(station->last_dynamic), 0);
 			station->port = source_port;
 			station->addr = source_address;
 			station->uses_gateway = 0;
@@ -4694,7 +4705,7 @@ void eb_process_incoming_aun (struct __eb_aun_exposure *e)
 	
 					// Update the last transaction time - we do this whether dynamic or not, because it doesn't matter
 	
-					gettimeofday(&(source_device->aun->last_dynamic), 0);
+					eb_gettimeofday(&(source_device->aun->last_dynamic), 0);
 	
 					// If this is an ACK or NAK, scan the outq of the destination device and see if we need to remove a DATA packet. NB, if it's NAK and there's only been one transmission attempt, don't dump it because it might be from a RiscOS machine that has the bug where it isn't listening early enough. Then wake the despatcher up so it tries to transmit the next packet in its queue
 	
@@ -5179,7 +5190,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 
 			//fprintf (stderr, "\n\nUpdating last_dynamic for station %d.%d", source_device->net, source_device->aun->stn);
 
-			gettimeofday(&(source_device->aun->last_dynamic), 0);
+			eb_gettimeofday(&(source_device->aun->last_dynamic), 0);
 
 			/* If it's ACK or NAK and not a broadcast, see if there's a packet to tack off the
 			 * receiver's queue so that it isn't retransmitted
@@ -5944,10 +5955,10 @@ static void * eb_device_aun_sender (void *device)
 
 				/* Time out the uses_gateway if need be */
 
-				/* The debug line below revealed that sometimes gettimeofday() goes backwards! */
+				/* The debug line below revealed that sometimes eb_gettimeofday() goes backwards! */
 				//fprintf (stderr, "\n\nnow = %ld.%ld, last_dynamic = %ld.%ld, diff = %ld ms\n\n", now.tv_sec, now.tv_usec, o->destdevice->aun->last_dynamic.tv_sec, o->destdevice->aun->last_dynamic.tv_usec, timediffmsec (&(o->destdevice->aun->last_dynamic), &now));
 
-				gettimeofday (&now, 0);
+				eb_gettimeofday (&now, 0);
 				if (/* timediffmsec(&(o->destdevice->aun->last_dynamic), &now) */ timediffnow(&(o->destdevice->aun->last_dynamic)) > (EB_CONFIG_DYNAMIC_EXPIRY * 60 * 1000)) /* last_dynamic gets updated even for non-dynamic hosts, and we use it to time out gateway access */
 				{
 					o->destdevice->aun->uses_gateway = o->destdevice->aun->gateway_compatible = o->destdevice->aun->is_net_local = 0;
@@ -5997,7 +6008,7 @@ static void * eb_device_aun_sender (void *device)
 
 					struct sockaddr_in	dest;
 
-					gettimeofday(&(p->last_tx), 0);
+					eb_gettimeofday(&(p->last_tx), 0);
 
 					dest.sin_family = AF_INET;
 					dest.sin_port = htons(o->destdevice->aun->port);
@@ -7143,7 +7154,7 @@ static void * eb_device_despatcher (void * device)
 							q->p = outgoing;
 							q->destination = incoming.destination;
 							q->length = length;
-							gettimeofday(&(q->expiry), 0);
+							eb_gettimeofday(&(q->expiry), 0);
 							q->expiry.tv_sec += 2;
 							q->next = NULL;
 
@@ -7935,7 +7946,7 @@ static void * eb_device_despatcher (void * device)
 						struct timeval	start, now;
 						struct __econet_packet_aun tx; // We copy the packet because it allows us not to much up the ack structure with the network address translation if there's a retransmit
 
-						gettimeofday (&now, 0);
+						eb_gettimeofday (&now, 0);
 
 						memcpy (&tx, p->p, p->length + 12);
 
@@ -7948,9 +7959,9 @@ static void * eb_device_despatcher (void * device)
 							{
 								eb_debug (0, 4, "DESPATCH", "%-8s %3d     Attempting to transmit packet at pq %p, packet at %p, length 0x%04X, attempt %d", eb_type_str(d->type), d->net, p, p->p, p->length, p->tx);
 
-								gettimeofday(&(d->wire.last_tx), 0); // Update last transmission time
+								eb_gettimeofday(&(d->wire.last_tx), 0); // Update last transmission time
 
-								gettimeofday(&start, 0);
+								eb_gettimeofday(&start, 0);
 
 								led_write.flashtime = EB_CONFIG_FLASHTIME * (p->length > 4096 ? 2 : 1);
 
@@ -7973,7 +7984,7 @@ static void * eb_device_despatcher (void * device)
 
 									eb_debug (0, 4, "DESPATCH", "%-8s %3d     TX started for packet at pq %p, packet at %p", eb_type_str(d->type), d->net, p, p->p);
 
-									gettimeofday(&now, 0);
+									eb_gettimeofday(&now, 0);
 
 									err = ioctl(d->wire.socket, ECONETGPIO_IOC_TXERR); // Unnecessary - we've already got it, above
 						
@@ -7982,7 +7993,7 @@ static void * eb_device_despatcher (void * device)
 									&&	(/* timediffmsec(&start, &now) */ timediffnow(&start) < ((p->length > 4096) ? 3000 : 2500))
 									)
 									{
-										gettimeofday(&now, 0);
+										eb_gettimeofday(&now, 0);
 										err = ioctl(d->wire.socket, ECONETGPIO_IOC_TXERR);
 										//eb_debug (0, 4, "DESPATCH", "%-8s %3d     while() loop progressing for packet at pq %p, packet at %p, after %d ms err = 0x%02X", eb_type_str(d->type), d->net, p, p->p, timediffmsec(&start, &now), err);
 									}
@@ -8976,7 +8987,7 @@ static void * eb_device_despatcher (void * device)
 						{
 							// h will tell us where to send this.
 									
-							gettimeofday(&(h->last_traffic), 0);
+							eb_gettimeofday(&(h->last_traffic), 0);
 							p->p->p.dstnet = h->s_net;
 							p->p->p.dststn = h->s_stn;
 
@@ -13606,6 +13617,9 @@ int main (int argc, char **argv)
 		fprintf (stderr, "Failed to initialize even the debug mutex. Quitting.\n");
 		exit (EXIT_FAILURE);
 	}
+
+	if (pthread_mutex_init(&gettimeofday_mutex, NULL) == -1)
+		eb_debug (1, 0, "THREAD", "Unable to initialize gettimeofday mutex.");
 
 	if (pthread_mutex_init(&fs_mutex, NULL) == -1)
 		eb_debug (1, 0, "THREAD", "Unable to initialize fileserver mutex.");
