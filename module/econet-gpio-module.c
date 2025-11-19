@@ -1120,7 +1120,11 @@ void econet_irq_write(void)
 				}
 			}
 			else
+			{
 				ECONET_TX_STAMP(scout_start);
+				// 20251119 Moved to here - indicates in non-AUN mode when tx has started
+				econet_set_tx_status(ECONET_TX_INPROGRESS);
+			}
 		}
 
 		/* The byte_counter loop is here for when we finally get round to
