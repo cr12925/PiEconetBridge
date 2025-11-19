@@ -1092,7 +1092,13 @@ void econet_irq_write(void)
 
 		byte_counter = 0;
 
-		econet_set_tx_status(ECONET_TX_INPROGRESS);
+		// 20251119 Moved from here econet_set_tx_status(ECONET_TX_INPROGRESS);
+                // The thinking is that this will get set even if we're transmitting an ACK as part of
+                // an incoming 4-way, with the result that the previous tx status of an outbound 4-way
+                // gets lost. That means that if we successfully transmit a 4-way outbound, but
+                // before userspace notices the successful completion, an inbound packet arrives
+                // and we're sending the ACK, then userspace thinks its (actually successful) 4-way
+                // outbound has got stuck. It then sends it again - which means a duplicate hits the wire.
 
 		if (econet_pkt_tx.ptr == 0)
 		{
@@ -1104,6 +1110,8 @@ void econet_irq_write(void)
 					case EA_I_WRITEIMM:
 					case EA_I_WRITEREPLY:
 					case EA_W_WRITEBCAST:
+						// 20251119 Moved to here
+						econet_set_tx_status(ECONET_TX_INPROGRESS);
 						ECONET_TX_STAMP(scout_start);
 						break;
 					case EA_W_WRITEDATA:
