@@ -137,12 +137,12 @@ struct __econet_pkt_buffer econet_pkt; /* Temporary buffer for incoming / outgoi
 void econet_set_read_mode(void);
 void econet_set_write_mode(struct __econet_pkt_buffer *, int);
 void econet_set_pwm(uint8_t, uint8_t);
-int econet_probate_adapter(void);
+int econet_probe_adapter(void);
 void econet_adlc_cleardown(unsigned short);
 void econet_finish_tx(void);
 void econet_irq_write(void);
 void econet_irq_read(void);
-void ecxonet_aun_tx_statemachine(void);
+void econet_aun_tx_statemachine(void);
 void econet_led_state (uint8_t);
 /*
  * Bitmap of 65536 stations we 
