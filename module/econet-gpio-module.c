@@ -787,6 +787,7 @@ void econet_reset(void)
 	econet_data->aun_mode = 0;
 	econet_data->resilience = 0;
 	econet_data->aun_last_tx = econet_data->aun_last_rx = 0;
+	atomic64_set(&(econet_data->last_aun_rx_complete), 0);
 
 	econet_set_read_mode(); // Required in addition to the cleadown, because this sets the ADLC up to read, where as cleardown doesn't.
 
@@ -1597,6 +1598,7 @@ unexpected_scout:
 				
 							kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
 							wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
+							atomic64_set (&(econet_data->last_aun_rx_complete), ktime_get_ns());
 
 #ifdef ECONET_GPIO_DEBUG_RX
 							printk (KERN_INFO "econet-gpio: econet_irq_read(): Valid frame received, length %04x, %04x AUN bytes copied to kernel FIFO\n", econet_pkt_rx.ptr, copied_to_fifo);
@@ -1900,6 +1902,7 @@ unexpected_scout:
 
 							kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
 							wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
+							atomic64_set (&(econet_data->last_aun_rx_complete), ktime_get_ns());
 
 #ifdef ECONET_GPIO_DEBUG_RX
 							printk (KERN_INFO "econet-gpio: econet_irq_read(): AUN Immediate reply received from %d.%d - send to userspace, data portion length %d\n", aun_rx.d.p.srcnet, aun_rx.d.p.srcstn, (econet_pkt_rx.ptr -4));
@@ -2265,6 +2268,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 						kfifo_in(&econet_rx_queue, &(aun_rx.d.raw), aun_rx.length); 
 						wake_up(&(econet_data->econet_read_queue)); // Wake up the poller
 					}
+					atomic64_set (&(econet_data->last_aun_rx_complete), ktime_get_ns());
 					econet_set_aunstate(EA_IDLE);
 #ifdef ECONET_GPIO_DEBUG_AUN
 					printk (KERN_INFO "econet-gpio: econet_irq(): AUN: Final ACK to %d.%d, packet delivered to userspace\n", aun_rx.d.p.srcnet, aun_rx.d.p.srcstn);
@@ -2670,7 +2674,6 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	unsigned short txstatus;
 	unsigned short aunstate;
 
-
 	/*
 	 * Lock mutex so writefd is not entered
 	 * twice at once.
@@ -2717,75 +2720,93 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	/* Go back to EA_IDLE if not idle and last AUN-related TX was more than the timeout ago */
 
-	if (econet_data->aun_mode && (aunstate != EA_IDLE) && (txstatus >= ECONET_TX_DATAPROGRESS) && ((ktime_get_ns() - econet_data->aun_last_writefd) >= ECONET_4WAY_TIMEOUT)) // The >= catches data progress, in progress, waiting to start
+	if (econet_data->aun_mode)
 	{
-		uint8_t	chipstate = econet_get_chipstate();
-
-		printk (KERN_INFO "econet-gpio: econet_writefd(): 4-way timeout expired. SR1=0x%02X, SR2=0x%02X, Chip State %d, TX status %d, AUN State %d, tx_ptr = %04X, rx_ptr = %04X\n", sr1, sr2, chipstate, txstatus, aunstate, econet_pkt_tx.ptr, econet_pkt_rx.ptr);
-		econet_set_tx_status(ECONET_TX_SUCCESS);
-		econet_set_aunstate(EA_IDLE); 
-		econet_set_chipstate(EM_IDLE);
-		aunstate = EA_IDLE;
-	}
+		if ((aunstate != EA_IDLE) && (txstatus >= ECONET_TX_DATAPROGRESS) && ((ktime_get_ns() - econet_data->aun_last_writefd) >= ECONET_4WAY_TIMEOUT)) // The >= catches data progress, in progress, waiting to start
+		{
+			uint8_t	chipstate = econet_get_chipstate();
 	
-	/* Timestamp this write */
+			printk (KERN_INFO "econet-gpio: econet_writefd(): 4-way timeout expired. SR1=0x%02X, SR2=0x%02X, Chip State %d, TX status %d, AUN State %d, tx_ptr = %04X, rx_ptr = %04X\n", sr1, sr2, chipstate, txstatus, aunstate, econet_pkt_tx.ptr, econet_pkt_rx.ptr);
+			econet_set_tx_status(ECONET_TX_SUCCESS);
+			econet_set_aunstate(EA_IDLE); 
+			econet_set_chipstate(EM_IDLE);
+			aunstate = EA_IDLE;
+		}
+	
+		/* Timestamp this write */
+	
+		econet_data->aun_last_writefd = ktime_get_ns();
+	
+		/* 
+	 	* Go back to idle if last TX was more than 100ms ago and we are waiting for an RX frame to come in.
+	 	* Assume we are stuck.
+	 	*
+	 	* TODO: this might be a source of problems - should we lengthen this timeout ? 100ms is 0.1s, so at 
+	 	* 200kHz clock spead, 200,000 bits will move each second, so this is 20,000 bits, which is about
+	 	* 2.5kB. Most transfers will be less than that but some may be longer...
+	 	*
+	 	*/
+	
+		if ((aunstate == EA_W_READFIRSTACK || aunstate == EA_W_READFINALACK || aunstate == EA_I_READREPLY || aunstate == EA_R_READDATA) && ((ktime_get_ns() - econet_data->aun_last_tx) > 100000000))
+		{
+	
+			if (econet_data->extralogs) printk (KERN_INFO "econet-gpio: Return to AUN idle - more than 0.1s since we last tx'd and we are still waiting for read data to arrive - in AUN state 0x%02x\n", aunstate);
+			econet_set_tx_status(ECONET_TX_SUCCESS);
+			econet_set_aunstate(EA_IDLE); 
+			econet_set_chipstate(EM_IDLE);
+			aunstate = EA_IDLE;
+		}
+	
+		// Next, see if we are idle
+	
+		/* 
+	 	* If not idle, tell user space we are busy and put IRQs back on.
+	 	* Unlock the mutex & spinlock along the way.
+	 	*/
+	
+		if (aunstate != EA_IDLE) // Not idle
+		{
+			if (econet_data->extralogs) printk (KERN_INFO "econet-gpio: Flag busy because AUN state machine busy (state = 0x%02x)\n", aunstate);
+			econet_set_tx_status(ECONET_TX_BUSY);
+			spin_unlock(&econet_irqstate_spin);
+			mutex_unlock(&econet_writefd_mutex);
+			econet_irq_mode(1);
+			return -1;
+		}
 
-	econet_data->aun_last_writefd = ktime_get_ns();
+		/* Flag busy if we have not waited long enough after last packet rx - try to see if we can fix the transmission issues that generate No reply when lots of BPUTs happen quickly - 20251122 */
 
-	/* 
-	 * Go back to idle if last TX was more than 100ms ago and we are waiting for an RX frame to come in.
-	 * Assume we are stuck.
-	 *
-	 * TODO: this might be a source of problems - should we lengthen this timeout ? 100ms is 0.1s, so at 
-	 * 200kHz clock spead, 200,000 bits will move each second, so this is 20,000 bits, which is about
-	 * 2.5kB. Most transfers will be less than that but some may be longer...
-	 *
-	 */
-
-	if (econet_data->aun_mode && (aunstate == EA_W_READFIRSTACK || aunstate == EA_W_READFINALACK || aunstate == EA_I_READREPLY || aunstate == EA_R_READDATA) && ((ktime_get_ns() - econet_data->aun_last_tx) > 100000000))
-	{
-
-		if (econet_data->extralogs) printk (KERN_INFO "econet-gpio: Return to AUN idle - more than 0.1s since we last tx'd and we are still waiting for read data to arrive - in AUN state 0x%02x\n", aunstate);
-		econet_set_tx_status(ECONET_TX_SUCCESS);
-		econet_set_aunstate(EA_IDLE); 
-		econet_set_chipstate(EM_IDLE);
-		aunstate = EA_IDLE;
+		if ((ktime_get_ns() - atomic64_read(&(econet_data->last_aun_rx_complete))) < ECONET_AUN_RX_TO_TX_GAP) /* 2us */
+		{
+			printk (KERN_INFO "econet-gpio: Flag busy because last AUN rx was not long enough ago");
+			econet_set_tx_status(ECONET_TX_BUSY);
+			spin_unlock(&econet_irqstate_spin);
+			mutex_unlock(&econet_writefd_mutex);
+			econet_irq_mode(1);
+			return -1;
+		}
 	}
-
-	// Next, see if we are idle
-
-	/* 
-	 * If not idle, tell user space we are busy and put IRQs back on.
-	 * Unlock the mutex & spinlock along the way.
-	 */
-
-	if (econet_data->aun_mode && aunstate != EA_IDLE) // Not idle
+	else // Not in AUN mode
 	{
-		if (econet_data->extralogs) printk (KERN_INFO "econet-gpio: Flag busy because AUN state machine busy (state = 0x%02x)\n", aunstate);
-		econet_set_tx_status(ECONET_TX_BUSY);
-		spin_unlock(&econet_irqstate_spin);
-		mutex_unlock(&econet_writefd_mutex);
-		econet_irq_mode(1);
-		return -1;
-	}
 
-	/*
-	 * Is the ADLC receiving or transmitting?
-	 *
-	 * If so, tell userspace we're busy.
-	 *
-	 */
-
-	chipmode = econet_get_chipstate();
-
-	if (chipmode != EM_IDLE && chipmode != EM_IDLEINIT && chipmode != EM_FLAGFILL)
-	{
-		if (econet_data->extralogs) printk (KERN_INFO "econet-gpio: Flag busy because chip state not idle / flagfill\n");
-		econet_set_tx_status(ECONET_TX_BUSY);
-		spin_unlock(&econet_irqstate_spin);
-		mutex_unlock(&econet_writefd_mutex);
-		econet_irq_mode(1);
-		return -1;
+		/*
+	 	* Is the ADLC receiving or transmitting?
+	 	*
+	 	* If so, tell userspace we're busy.
+	 	*
+	 	*/
+	
+		chipmode = econet_get_chipstate();
+	
+		if (chipmode != EM_IDLE && chipmode != EM_IDLEINIT && chipmode != EM_FLAGFILL)
+		{
+			if (econet_data->extralogs) printk (KERN_INFO "econet-gpio: Flag busy because chip state not idle / flagfill\n");
+			econet_set_tx_status(ECONET_TX_BUSY);
+			spin_unlock(&econet_irqstate_spin);
+			mutex_unlock(&econet_writefd_mutex);
+			econet_irq_mode(1);
+			return -1;
+		}
 	}
 
 	/* 

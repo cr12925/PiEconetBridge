@@ -67,6 +67,7 @@
 
 #define ECONET_AUN_DATA_TIMEOUT 500000000 /* 0.5s - if the data packet after a received scout turns up after this length of time, we assume it can't be the data packet and reset the statemachine */
 
+#define ECONET_AUN_RX_TO_TX_GAP	2000	/* Module will flag writefd() as busy if the last reception in AUN mode was less than this many ns ago */
 /* Internal functions */
 
 /* Function declarations */
@@ -160,6 +161,7 @@ struct __econet_data {
 	u64 aun_last_rx;
 	u64 aun_last_writefd;
 	u64 aun_last_statechange;
+	atomic64_t	last_aun_rx_complete;
 	short last_tx_user_error;
 	struct gpio_desc	*econet_gpios[20];
 	unsigned char hwver;
