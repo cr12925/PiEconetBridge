@@ -748,6 +748,8 @@ void econet_adlc_cleardown(unsigned short in_irq)
 
 	econet_data->aun_last_writefd = 0;
 
+	atomic64_set(&(econet_data->last_aun_rx_complete), 0);
+
 	if (!in_irq)
 		econet_irq_mode(1);
 
@@ -2363,13 +2365,18 @@ irqreturn_t econet_irq(int irq, void *ident)
 	{
 		econet_irq_read();
 
+		ndelay(1000); // 20251124 Try to fix double reads
+
 		if ((!(sr2 & ECONET_GPIO_S2_VALID)) && econet_data->twobytemode) /* If twobyte mode & that wasn't the end of frame */
 		{
 			sr1 = econet_read_sr(1);
 			sr2 = econet_read_sr(2);
 
 			if (sr1 & ECONET_GPIO_S1_RDA) /* More data available - collect it */
+			{
 				econet_irq_read();
+				ndelay(1000); // 20251124 Try to fix double reads
+			}
 
 		}
 	}
@@ -2736,6 +2743,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 			econet_set_tx_status(ECONET_TX_SUCCESS);
 			econet_set_aunstate(EA_IDLE); 
 			econet_set_chipstate(EM_IDLE);
+			atomic64_set(&(econet_data->last_aun_rx_complete), 0);
 			aunstate = EA_IDLE;
 		}
 	
@@ -2760,6 +2768,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 			econet_set_tx_status(ECONET_TX_SUCCESS);
 			econet_set_aunstate(EA_IDLE); 
 			econet_set_chipstate(EM_IDLE);
+			atomic64_set(&(econet_data->last_aun_rx_complete), 0);
 			aunstate = EA_IDLE;
 		}
 	
@@ -2770,7 +2779,9 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	 	* Unlock the mutex & spinlock along the way.
 	 	*/
 	
-		if (aunstate != EA_IDLE) // Not idle
+		chipmode = econet_get_chipstate();
+
+		if (aunstate != EA_IDLE || (chipmode != EM_IDLE && chipmode != EM_IDLEINIT && chipmode != EM_FLAGFILL)) // Not idle - 20251124 we also need to make sure chipstate is IDLE, otherwise we must be reading something
 		{
 			if (econet_data->extralogs) printk (KERN_INFO "econet-gpio: Flag busy because AUN state machine busy (state = 0x%02x)\n", aunstate);
 			econet_set_tx_status(ECONET_TX_BUSY);
@@ -2782,7 +2793,8 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 		/* Flag busy if we have not waited long enough after last packet rx - try to see if we can fix the transmission issues that generate No reply when lots of BPUTs happen quickly - 20251122 */
 
-		if ((ktime_get_ns() - atomic64_read(&(econet_data->last_aun_rx_complete))) < ECONET_AUN_RX_TO_TX_GAP) /* 2us */
+		/* 20251124 Commented
+		if ((ktime_get_ns() - atomic64_read(&(econet_data->last_aun_rx_complete))) < ECONET_AUN_RX_TO_TX_GAP) 
 		{
 			printk (KERN_INFO "econet-gpio: Flag busy because last AUN rx was not long enough ago");
 			econet_set_tx_status(ECONET_TX_BUSY);
@@ -2791,6 +2803,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 			econet_irq_mode(1);
 			return -1;
 		}
+		*/
 	}
 	else // Not in AUN mode
 	{
@@ -4431,6 +4444,12 @@ void econet_remove(struct platform_device *pdev)
 		if (econet_data->irq)
 			free_irq(econet_data->irq, THIS_MODULE->name);
 
+		/* Free PWM Clock if we have it */
+
+		/* This function seems to have disappeared in more recent kernels 
+		if (econet_data->gpio18pwm)
+			devm_pwm_put(&(pdev->dev), econet_data->gpio18pwm);
+			*/
 		/*
 		 * Free private storage
 		 *
