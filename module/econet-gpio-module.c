@@ -2060,6 +2060,10 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 	sr1 = econet_read_sr(1);
 
+	/* 20251127 No, let's read sr2 as well just in case we are screwing some logic up below */
+
+	sr2 = econet_read_sr(2);
+
 	/* 
 	 * Pick up our atomics once so we don't waste time
 	 * reading them over and over.
@@ -2129,7 +2133,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 	 *
 	 */
 
-	else if (((sr2 = econet_read_sr(2)) & ECONET_GPIO_S2_RX_IDLE) && !(sr2 & ECONET_GPIO_S2_VALID) && (econet_data->initialized) && (econet_data->aun_mode) && (aun_state == EA_W_READFINALACK)) 
+	else if ((/* (sr2 = econet_read_sr(2)) 20251127 */ sr2 & ECONET_GPIO_S2_RX_IDLE) && !(sr2 & ECONET_GPIO_S2_VALID) && (econet_data->initialized) && (econet_data->aun_mode) && (aun_state == EA_W_READFINALACK)) 
 	{
 
 
