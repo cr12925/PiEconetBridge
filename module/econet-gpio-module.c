@@ -14,6 +14,8 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#define ECONET_GPIO_TIMING
+
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -391,7 +393,7 @@ unsigned char econet_read_sr(unsigned short r)
 			gpiod_direction_input(econet_data->econet_gpios[count]);
 #else
 		iowrite32(ioread32(NGPFSEL2) & ~ECONET_GPIO_DATA_PIN_MASK, NGPFSEL2);
-		barrier();
+		// 20251127 Shouldn't be required: barrier();
 #endif
 	}
 
@@ -422,7 +424,8 @@ unsigned char econet_read_sr(unsigned short r)
 	
 	// Shouldn't need a barrier here because apparently iowrite32() has one in it.
 
-	barrier();
+	//barrier(); // Shouldn't need this, but it might allow the ADLC to settle after we've put the address & RW signals on it
+	//ndelay(100); // 20251127 Test - see if this helps
 
 #endif
 
@@ -447,7 +450,7 @@ unsigned char econet_read_sr(unsigned short r)
 
 	econet_set_cs(ECONET_GPIO_CS_OFF);	
 
-	barrier();
+	// 20251127 Shouldn't be required: barrier();
 
 #ifndef ECONET_GPIO_NEW
 	if (econet_data->hwver < 2)
@@ -2365,7 +2368,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 	{
 		econet_irq_read();
 
-		ndelay(1000); // 20251124 Try to fix double reads
+		// ndelay(1000); // 20251124 Try to fix double reads
 
 		if ((!(sr2 & ECONET_GPIO_S2_VALID)) && econet_data->twobytemode) /* If twobyte mode & that wasn't the end of frame */
 		{
@@ -2406,8 +2409,30 @@ irqreturn_t econet_irq(int irq, void *ident)
 	 */
 
 	else
+	{
 		printk (KERN_INFO "econet-gpio: IRQ received in unknown state - sr1=0x%02X, sr2=0x%02X, chip state %02X\n", sr1, sr2, econet_get_chipstate());
+		goto exit_irq_handler; /* Skips the wait for IRQ flag to clear */
+	}
 
+
+	/*
+	 * 20251127 Wait until the ADLC is no longer flagging an IRQ - attempt to avoid double reads on Pi 3
+	 */
+
+	if (econet_data->peribase == 0x3F000000) /* Don't bother for other platforms - we don't seem to have the issue on those! */
+	{
+		u64	start_time;
+
+		start_time = ktime_get_ns();
+
+		/* 2000ns = 2us = maximum wait time for ADLC to clear IRQ flag */
+
+		while (((ktime_get_ns() - start_time) < 2000) && (econet_read_sr(1) & ECONET_GPIO_S1_IRQ)) { ndelay(10); }
+
+		// Doesn't seem to do anything useful ndelay(650); /* Yet another attempt to avoid double reads. Why do these happen?? Or is it that read_sr is faulty in some way? */
+	}
+
+exit_irq_handler:
 
 	/*
 	 * Unlock IRQ spinlock prior to return.
@@ -2772,6 +2797,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 			aunstate = EA_IDLE;
 		}
 	
+#if 0
 		// Next, see if we are idle
 	
 		/* 
@@ -2790,10 +2816,11 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 			econet_irq_mode(1);
 			return -1;
 		}
+#endif
 
 		/* Flag busy if we have not waited long enough after last packet rx - try to see if we can fix the transmission issues that generate No reply when lots of BPUTs happen quickly - 20251122 */
 
-		/* 20251124 Commented
+		/* 20251124 Commented - 20251127 Uncommented */
 		if ((ktime_get_ns() - atomic64_read(&(econet_data->last_aun_rx_complete))) < ECONET_AUN_RX_TO_TX_GAP) 
 		{
 			printk (KERN_INFO "econet-gpio: Flag busy because last AUN rx was not long enough ago");
@@ -2803,10 +2830,14 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 			econet_irq_mode(1);
 			return -1;
 		}
-		*/
+		/* */
 	}
+
+#if 0 /* Do this for all calls. We had it duplicated in the if (econet_data->aun_mode) above, just put it back here */
+
 	else // Not in AUN mode
 	{
+#endif
 
 		/*
 	 	* Is the ADLC receiving or transmitting?
@@ -2826,7 +2857,9 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 			econet_irq_mode(1);
 			return -1;
 		}
+#if 0
 	}
+#endif
 
 	/* 
 	 * By here, we have:
@@ -2925,11 +2958,12 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 #ifdef ECONET_GPIO_DEBUG_AUN
 		printk (KERN_INFO "econet-gpio: econet_writefd(): AUN: Packet from userspace from %d.%d to %d.%d, data length %d", aun_tx.d.p.srcnet, aun_tx.d.p.srcstn, aun_tx.d.p.dstnet, aun_tx.d.p.dststn, (len - 12));
 #endif
-		spin_unlock(&econet_irqstate_spin);
 
-		/* Trigger TX */
+		/* Trigger TX - 20251127 Moved from below the spin unlock */
 
 		econet_set_write_mode (&econet_pkt_tx_prepare, econet_pkt_tx_prepare.length);
+
+		spin_unlock(&econet_irqstate_spin);
 	}
 
 
