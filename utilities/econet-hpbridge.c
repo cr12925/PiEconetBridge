@@ -6879,6 +6879,7 @@ static void * eb_device_despatcher (void * device)
 									
 									eb_update_lastrx(d);
 
+
 									// Having received a valid packet, let's update our remote end status if we are dynamic
 
 									if (d->trunk.is_dynamic)
@@ -6973,6 +6974,8 @@ static void * eb_device_despatcher (void * device)
 					if (length >= 12) { 
 
 						eb_update_lastrx(d); packetreceived = 1; 
+
+						eb_gettimeofday(&(d->wire.last_rx), 0);
 
 						/* 20250713 */
 
@@ -7967,6 +7970,14 @@ static void * eb_device_despatcher (void * device)
 
 								if (!EB_CONFIG_LEDS_OFF && !pthread_create(&flash_write_thread, NULL, eb_flash_led, &led_write))
 									pthread_detach(flash_write_thread);
+
+								/* Check for Pi3 here and force a delay between RX & TX */
+
+								if (eb_mtype == 0xEF)
+								{
+									if (timediffnow(&(d->wire.last_rx)) < 2)
+										usleep(500);
+								}
 
 								result = write (d->wire.socket, &tx, p->length + 12);
 

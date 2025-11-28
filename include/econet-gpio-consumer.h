@@ -129,6 +129,78 @@ struct __econet_packet_plain {
 #define ECONET_AUN_MAXTYPE	ECONET_AUN_INK
 #define ECONET_AUN_BEEBEM_PROBE	0xFF	// Used by dev BeebEm to negotiate / announce local Econet addresses in their emulator. Defined here to pick it up and allow sane logging / ability not to log "Unknown AUN" error
 
+/* 20251128 New data structure for internal kernel use, but put here because they may be passed on a monitor device in the future */
+
+#ifdef ECONETGPIO_KERNEL
+#define		uint8_t		u8
+#define		uint16_t	u16
+#define 	uint32_t	u32
+#define		uint64_t	u64
+#endif
+
+/* Structure to hold timings for phases of 4-way transmissions. If you are in raw mode (i.e. not doing 4-way at all) then only the first 4 and the last will hold valid data.
+ * Likewise if you transmit a broadcast or a 2-way immediate. (Some immedaites are 4-way).
+ * All times are in ns from boot.
+ */
+struct __econet_packet_timings {
+	uint64_t	time_on_queue; // Inserted by userspace not kernel
+	uint64_t	packet_from_user; // ns from boot when module received the packet and able to deal. If you got told the module was busy, this will be invalid and probably relates to a different packet.
+	uint64_t	line_seize; // ns from boot when line successfully seized
+	uint64_t	scout_start; // ns from boot when scout tx started. Will be 0 if it never did (as with the rest below).
+	uint64_t	scout_end;
+	uint64_t	first_ack_start;
+	uint64_t	first_ack_end;
+	uint64_t	data_start;
+	uint64_t	data_end;
+	uint64_t	final_ack_start;
+	uint64_t	final_ack_end;
+};
+
+struct __econet_packet_detail { 
+		uint8_t		ttype; /* One of the AUN types - populated user side. */
+		uint16_t	len_data; /* Total number of bytes in the data[] array */
+		uint16_t	len_scout; /* of len_data, how many are on the scout - must be at least 6 otherwise it's not a scout */
+		uint8_t		term_state; /* Byte of flags indicating how the packet ended */
+			/* If len_scout == len_data then there was no valid data frame in a 4-way 
+			 * The byte has the following bits, some of which deliberately coincide with SR2 
+			 * b0		TX Underrun (this overlaps with DCD in SR2, but this bit is in SR1)
+			 * b1		Valid frame
+			 * b2		RX Idle
+			 * b3		RX Abort
+			 * b4		RX Error
+			 * b5		No clock
+			 * b6		RX Overrun
+			 * b7		First ACK sent/received on 4-way transmissions
+			 */
+		uint16_t	underover_byte; /* Which byte in data[] we under or over ran at */
+		uint8_t		underover_ack; /* If non-zero, this indicates a byte number in an ack which we over/under ran at.
+						  If b7 of term_state is unset, then this was during first ack, otherwise during second */
+		uint8_t	 	ack[4]; /* populated either on receipt of scout, not used on tx */
+		struct __econet_packet_timings	pt; /* Timing data */
+		uint8_t 	data[6+ECONET_MAX_PACKET_SIZE]; 
+};
+		
+#define __SRCSTN(p)			p.data[2]
+#define __SRCNET(p)			p.data[3]
+#define __DSTSTN(p)			p.data[0]
+#define __DSTNET(p)			p.data[1]
+#define __CTRL(p)			p.data[4]
+#define __PORT(p)			p.data[5]
+#define __DATA(p,n)			p.data[6+n]
+#define __DETAIL_TX_UNDERRUN		(1 << 0)
+#define __DETAIL_VALID			(1 << 1)
+#define __DETAIL_RX_IDLE		(1 << 2)
+#define __DETAIL_RX_ABORT		(1 << 3)
+#define __DETAIL_RX_ERROR		(1 << 4)
+#define __DETAIL_NO_CLOCK		(1 << 5)
+#define __DETAIL_RX_OVERRUN		(1 << 6)
+#define __DETAIL_FIRST_ACK_OK		(1 << 7) /* On TX, this means we got a correct first ACK. Otherwise we didn't. On RX, this means we sent first ack successfully, or we didn't. */
+#define __DETAIL_PACKET_OK(p)		(!(p.term_state & (__DETAIL_TX_UNDERRUN | __DETAIL_RX_ABORT | __DETAIL_RX_ERROR | __DETAIL_NO_CLOCK | __DETAIL_RX_OVERRUN)) && (p.term_state & __DETAIL_VALID))
+#define __IS_BROADCAST(p)		( __DSTSTN(p) == 0xFF && __DSTNET(p) == 0xFF )
+#define __IS_IMM_FOURWAY(p)		( __PORT(p) == 0x00 && (__CTRL(p) >= 0x82 && __CTRL(p) <= 0x85) ) /* 0x82-85 are the funky 4-way immediates */
+#define __IS_FOURWAY(p)			( (!_IS_BROADCAST(p)) && ( (__PORT(p) > 0) || __IS_IMM_FOURWAY(p) )  /* If 4-way, then on tx we send scout and wait for reply etc.; on rx we flag fill and send acks */
+#define __IS_TWOWAY(p)			( (!_IS_BROADCAST(p)) && ( __PORT(p) == 0x00 && !(__IS_IMM_FOURWAY(p) ) ) ) /* If 2-way on a receive, we flag fill, waiting for userspace to tx a reply */
+
 /* Data structure for passing AUN packets userspace<->kernel via /dev/econet-gpio, and within the kernel
  * NB: This does NOT match what they look like on the wire, even within the UDP data portion because the
  * format has source & destination net/station at the start, which the real ones don't - but these are to
@@ -195,30 +267,6 @@ struct __econet_packet_pipe {
 #endif
 
 			unsigned char data[ECONET_MAX_PACKET_SIZE-9];
-};
-
-#ifdef ECONETGPIO_KERNEL
-	#define 	__econet_u64	u64
-#else
-	#define		__econet_u64	uint64_t
-#endif
-
-/* Structure to hold timings for phases of 4-way transmissions. If you are in raw mode (i.e. not doing 4-way at all) then only the first 4 and the last will hold valid data.
- * Likewise if you transmit a broadcast or a 2-way immediate. (Some immedaites are 4-way).
- * All times are in ns from boot.
- */
-struct __econet_packet_timings {
-	__econet_u64	time_on_queue; // Inserted by userspace not kernel
-	__econet_u64	packet_from_user; // ns from boot when module received the packet and able to deal. If you got told the module was busy, this will be invalid and probably relates to a different packet.
-	__econet_u64	line_seize; // ns from boot when line successfully seized
-	__econet_u64	scout_start; // ns from boot when scout tx started. Will be 0 if it never did (as with the rest below).
-	__econet_u64	scout_end;
-	__econet_u64	first_ack_start;
-	__econet_u64	first_ack_end;
-	__econet_u64	data_start;
-	__econet_u64	data_end;
-	__econet_u64	final_ack_start;
-	__econet_u64	final_ack_end;
 };
 
 #define ECONETGPIO_READLED	0x02

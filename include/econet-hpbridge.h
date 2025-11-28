@@ -974,6 +974,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			int		socket; // Socket for Wire device we are talking to
 			char 		*device; // Path to device we need to try and open (supports multiple adapters now - in theory!)
 			struct timeval	last_tx; // Last transmission on this device - used to insert interpacket gap
+			struct timeval 	last_rx; // Used on Pi3 class machines to impose a delay to try and avoid kernel crashes
 			uint32_t	seq[256][256]; // Sequence numbers for wire stations. Used to track sequence numbers for wire stations. Local & Pipe are expected to do their own.
 			uint8_t		last_imm_dest_net, last_imm_dest_stn; // Last wire station an immediate was sent to from somewhere that wasn't on the wire
 			uint32_t	last_imm_seq; // Sequence number of the last immediate sent to the wire from somewhere else. If we get an immediate reply from the net/stn in the line above, then put the matching sequence number in the reply
