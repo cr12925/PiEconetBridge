@@ -6234,6 +6234,8 @@ static void * eb_device_despatcher (void * device)
 			if (d->wire.socket < 0) // Failed
 				eb_debug (1, 0, "DESPATCH", "%-8s %3d     Cannot open device %s", "", d->net, (EB_CONFIG_LOCAL ? "/dev/null" : d->wire.device));
 
+			d->wire.last_rx.tv_sec = d->wire.last_rx.tv_usec = 0;
+
 			// Do station setup
 	
 			ioctl(d->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(d->wire.stations));	
