@@ -4128,8 +4128,9 @@ static int econet_probe (struct platform_device *pdev)
 		if (IS_ERR(econet_data->gpio4clk))
 		{
 			printk (KERN_ERR "econet-gpio: Unable to obtain GPIO 4 clock (GPCLK0) for ADLC clock (%ld)\n", PTR_ERR(econet_data->gpio4clk));
+			result = PTR_ERR(econet_data->gpio4clk);
 			econet_remove(NULL);
-			return PTR_ERR(econet_data->gpio4clk);
+			return result;
 		}
 	
 		/* 
@@ -4187,8 +4188,9 @@ static int econet_probe (struct platform_device *pdev)
 		if (IS_ERR(econet_data->gpio18pwm))
 		{
 			printk (KERN_ERR "econet-gpio: Unable to obtain BCM 18 PWM (PWM0) for Econet clock (Error %ld)\n", PTR_ERR(econet_data->gpio18pwm));
+			result = PTR_ERR(econet_data->gpio18pwm);
 			econet_remove(NULL);
-			return PTR_ERR(econet_data->gpio18pwm);
+			return result;
 		}
 
 		/*
@@ -4244,8 +4246,9 @@ static int econet_probe (struct platform_device *pdev)
 	if (econet_data->major < 0)
 	{
 		printk (KERN_INFO "econet-gpio: Failed to obtain major device number.\n");
+		result = econet_data->major;
 		econet_remove(NULL);
-		return econet_data->major;
+		return result;
 	}
 
 	/*
@@ -4266,8 +4269,9 @@ static int econet_probe (struct platform_device *pdev)
 #endif
 	{
 		printk (KERN_INFO "econet-gpio: Failed creating device class\n");
+		result = PTR_ERR(econet_class);
 		econet_remove(NULL);
-		return PTR_ERR(econet_class);
+		return result;
 	}
 
 	/*
@@ -4288,8 +4292,9 @@ static int econet_probe (struct platform_device *pdev)
 	if (IS_ERR(econet_data->dev = device_create(econet_class, NULL, MKDEV(econet_data->major, 0), NULL, DEVICE_NAME)))
 	{
 		printk (KERN_INFO "econet-gpio: Failed creating device\n");
+		result = PTR_ERR(econet_data->dev);
 		econet_remove(NULL);
-		return PTR_ERR(econet_data->dev);
+		return result;
 	}
 		
 	/*
