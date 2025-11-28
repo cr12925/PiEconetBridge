@@ -7979,8 +7979,8 @@ static void * eb_device_despatcher (void * device)
 								{
 									unsigned long p;
 									p = timediffnow(&(d->wire.last_rx));
-								        if (p < 12)
-										usleep((12-p) * 1000);
+								        if (p < 17)
+										usleep((17-p) * 1000);
 								}
 
 								result = write (d->wire.socket, &tx, p->length + 12);
