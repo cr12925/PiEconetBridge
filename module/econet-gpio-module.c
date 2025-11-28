@@ -2372,8 +2372,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 	{
 		econet_irq_read();
 
-		// ndelay(1000); // 20251124 Try to fix double reads
-
 		if ((!(sr2 & ECONET_GPIO_S2_VALID)) && econet_data->twobytemode) /* If twobyte mode & that wasn't the end of frame */
 		{
 			sr1 = econet_read_sr(1);
@@ -2382,7 +2380,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 			if (sr1 & ECONET_GPIO_S1_RDA) /* More data available - collect it */
 			{
 				econet_irq_read();
-				ndelay(1000); // 20251124 Try to fix double reads
 			}
 
 		}
@@ -2418,23 +2415,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 		goto exit_irq_handler; /* Skips the wait for IRQ flag to clear */
 	}
 
-
-	/*
-	 * 20251127 Wait until the ADLC is no longer flagging an IRQ - attempt to avoid double reads on Pi 3
-	 */
-
-	if (econet_data->peribase == 0x3F000000) /* Don't bother for other platforms - we don't seem to have the issue on those! */
-	{
-		u64	start_time;
-
-		start_time = ktime_get_ns();
-
-		/* 2000ns = 2us = maximum wait time for ADLC to clear IRQ flag */
-
-		while (((ktime_get_ns() - start_time) < 2000) && (econet_read_sr(1) & ECONET_GPIO_S1_IRQ)) { ndelay(10); }
-
-		// Doesn't seem to do anything useful ndelay(650); /* Yet another attempt to avoid double reads. Why do these happen?? Or is it that read_sr is faulty in some way? */
-	}
 
 exit_irq_handler:
 
