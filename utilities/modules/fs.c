@@ -5202,6 +5202,7 @@ void fsop_setup(void)
 	FSOP_SET (2a, (FSOP_F_LOGGEDIN)); /* 32 bit Set Random Access Info */
 	FSOP_SET (2b, (FSOP_F_LOGGEDIN)); /* 32 bit Get bytes */
 	FSOP_SET (2c, (FSOP_F_LOGGEDIN)); /* 32 bit Put bytes */
+	FSOP_SET (2d, (FSOP_F_LOGGEDIN)); /* 32 bit Examine */
 	FSOP_SET (2e, (FSOP_F_LOGGEDIN)); /* 32 bit Open */
 	FSOP_SET (40, (FSOP_F_LOGGEDIN | FSOP_F_MDFS)); /* Read SJ Information - Not yet implemented */
 	FSOP_SET (41, (FSOP_F_LOGGEDIN | FSOP_F_MDFS | FSOP_F_SYST)); /* Read/write SJ SYstem information */

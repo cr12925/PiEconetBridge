@@ -22,7 +22,8 @@ FSOP(03)
 
 	FS_REPLY_DATA(0x80);
 
-	uint8_t relative_to, arg, start, n;
+	uint8_t relative_to, arg, n, owner_32bit = 0xff, fnlength_32bit = 10;
+	uint16_t start;
 	unsigned char path[1024]; // Was 256 before long filenames
 	struct path pt;
 	struct path_entry *e;
@@ -30,15 +31,28 @@ FSOP(03)
 	unsigned short examined, dirsize;
 	char acornpathfromroot[1024];
 	uint8_t		pad_length = 10;
+	uint8_t		is_32bit = 0;
+
+	if (FSOP_FSOP == 0x2D)
+		is_32bit = 1;
 
 	relative_to = FSOP_CWD;
-	arg = FSOP_ARG;
-	start = *(f->data + 6);
 	n = *(f->data + 7);
-
 	fs_copy_to_cr(path, (f->data + 8), 255);
 
-	fs_debug_full (0, 2, f->server, f->net, f->stn, "Examine %s relative to %d (%s), start %d, extent %d, arg = %d", path, relative_to, f->active->fhandles[relative_to].acornfullpath, start, n, arg);
+	if (!is_32bit)
+	{
+		arg = FSOP_ARG;
+		start = *(f->data + 6);
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "Examine %s relative to %d (%s), start %d, extent %d, arg = %d", path, relative_to, f->active->fhandles[relative_to].acornfullpath, start, n, arg);
+
+	}
+	else
+	{
+		arg = 0xFE; // Rogue for our loop
+		start = *(f->data + 5) + (256 * *(f->data + 6));
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "Examine32 %s relative to %d (%s), start %d, extent %d", path, relative_to, f->active->fhandles[relative_to].acornfullpath, start, n);
+	}
 
 	replylen = 2;
 
@@ -58,6 +72,17 @@ FSOP(03)
 		return;
 
 	}
+
+	if (is_32bit)
+	{
+		if (FS_PERM_EFFOWNER(f->active, pt.owner))
+			owner_32bit = 0x00; // Because 0x00 means owner not public
+		reply.p.data[3] = owner_32bit;
+		reply.p.data[replylen++] = 0xff; // Padding, apparently.
+		reply.p.data[replylen++] = 0xff; // Padding, apparently. See https://mdfs.net/Docs/Comp/Econet/FileServ/FSOp32bit
+
+	}
+
 
 	// Add final entry onto path_from_root (because normalize doesn't do it on a wildcard call)
 
@@ -101,6 +126,13 @@ FSOP(03)
 	if (pt.max_fname_length > 10)
 		pad_length = 50; // Pad to one line, and add 10 characters to get us to start of load address
 
+	if (is_32bit)
+	{
+		// Filename length + CR + padding needs to be multiple of 4 bytes - see mdfs.net link above
+		pad_length = (4 - ((pt.max_fname_length + 1) % 4)) % 4; // Final modulo gives us 0 if (pt.max_fname_length + 1) % 4 is 0.
+		fnlength_32bit = pt.max_fname_length;
+	}
+
 	e = pt.paths;
 
 	while (dirsize < start && (e != NULL))
@@ -120,6 +152,7 @@ FSOP(03)
 		case 2: replyseglen = ECONET_MAX_FILENAME_LENGTH + 1; break;
 		case 3: replyseglen = ECONET_MAX_FILENAME_LENGTH + 9; break;
 		case 4: replyseglen = 34; break; /* 32 bit machine-readable, but 10 character FN */
+		case 0xFE: replyseglen = 24 + ECONET_MAX_FILENAME_LENGTH + 1 + pad_length; break; // arg 0xFE is our way of signallying FSOP &2D reply
 		default:
 			{
 				fsop_error(f, 0xFF, "Bad argument");
@@ -131,7 +164,7 @@ FSOP(03)
 	{
 		if (FS_ACTIVE_SYST(f->active) || (e->perm & FS_PERM_H) == 0 || (e->owner == f->userid)) // not hidden or we are the owner
 		{
-			switch (arg)
+			switch (arg) 
 			{
 				case 0: // Machine readable format
 				{
@@ -264,6 +297,7 @@ FSOP(03)
 				} break;
 
 				case 4: /* 32-bit machine readable */
+				case 0xFE: /* 32-bit FSOP 0x2D reply */
 				{
 #define FSOP_03_STORE32(n) reply.p.data[replylen++] = e->n & 0xff; \
 			reply.p.data[replylen++] = (e->n & 0xff00) >> 8; \
@@ -291,9 +325,23 @@ FSOP(03)
 					memset(&(reply.p.data[replylen]), 0, 4);
 					replylen += 4;
 
-					fs_copy_padded(&(reply.p.data[replylen]), e->acornname, 10);
+					//fs_copy_padded(&(reply.p.data[replylen]), e->acornname, 10);
+					fs_copy_padded(&(reply.p.data[replylen]), e->acornname, fnlength_32bit);
+					if (is_32bit) // Add 0x0D terminator and padding
+					{
+						uint8_t	padcount = 0;
+						replylen += fnlength_32bit;
+						FS_PUTR8(replylen, 0x0D);
+						replylen++;
+						// Now add padding
+						while (padcount++ < pad_length)
+						{
+							FS_PUTR8(replylen, 0x00);
+							replylen++;
+						}
+					}
+					else replylen += 10;
 
-					replylen += 10;
 				}
 			}
 
@@ -309,7 +357,7 @@ FSOP(03)
 
 	reply.p.data[replylen++] = 0x80;
 	reply.p.data[2] = (examined & 0xff);
-	reply.p.data[3] = (dirsize & 0xff); // Can't work out how L3 is calculating this number
+	if (!is_32bit) reply.p.data[3] = (dirsize & 0xff); // Can't work out how L3 is calculating this number - only for 24-bit replies, because this is an ownership byte in 32-bit replies
 
 	fsop_aun_send(&reply, replylen, f);
 
@@ -318,3 +366,7 @@ FSOP(03)
 
 }
 
+FSOP(2d)
+{
+	fsop_03(f); /* The 24-bit code above works out whether it's been called for FSOP &2D */
+}
