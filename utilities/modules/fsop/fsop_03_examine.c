@@ -300,12 +300,13 @@ FSOP(03)
 				case 0xFE: /* 32-bit FSOP 0x2D reply */
 				{
 #define FSOP_03_STORE32(n) reply.p.data[replylen++] = e->n & 0xff; \
-			reply.p.data[replylen++] = (e->n & 0xff00) >> 8; \
-			reply.p.data[replylen++] = (e->n & 0xff0000) >> 16; \
-			reply.p.data[replylen++] = (e->n & 0xff000000) >> 24;
+			reply.p.data[replylen++] = (htole32(e->n) & 0xff00) >> 8; \
+			reply.p.data[replylen++] = (htole32(e->n) & 0xff0000) >> 16; \
+			reply.p.data[replylen++] = (htole32(e->n) & 0xff000000) >> 24;
 
 					uint8_t		c_hour, c_min, c_sec, c_monthyear, c_day;
 
+					if (e->ftype == FS_FTYPE_DIR)   e->length = 0x200; // Dir length in FS3
 					fsop_get_create_time (e->unixpath, &c_day, &c_monthyear, &c_hour, &c_min, &c_sec);
 
 					FSOP_03_STORE32(load);
@@ -315,7 +316,7 @@ FSOP(03)
 					if (f->server->config->fs_mask_dir_wrr && e->ftype == FS_FTYPE_DIR && (e->perm & (FS_ACORN_DIR_MASK | FS_PERM_OTH_W)) == FS_ACORN_DIR_MASK)
 						e->perm &= ~(FS_ACORN_DIR_MASK);
 
-					reply.p.data[replylen++] = fsop_perm_to_acorn(f->server, e->perm, (e->ftype == FS_FTYPE_DIR ? 1 : 0));
+					reply.p.data[replylen++] = fsop_perm_to_acorn(f->server, e->perm, e->ftype);
 					reply.p.data[replylen++] = 0x00;
 					reply.p.data[replylen++] = c_day; // e->day;
 					reply.p.data[replylen++] = c_monthyear; // e->monthyear;
