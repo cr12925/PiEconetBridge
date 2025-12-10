@@ -48,7 +48,13 @@ FSOP(02)
 
 	struct __fs_active_load_queue	*alq;
 
-        fs_copy_to_cr(command, f->data+5, 256);
+	if (is_32bit)
+	{
+		data_port = *(f->data+5);
+        	fs_copy_to_cr(command, f->data+6, 256);
+	}
+	else
+        	fs_copy_to_cr(command, f->data+5, 256);
 
         if (loadas) // End the command at first space if there is one - BBC Bs seem to send the whole command line
         {
