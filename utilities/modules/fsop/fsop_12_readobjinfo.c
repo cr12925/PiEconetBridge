@@ -38,9 +38,20 @@ void fsop_12_internal (struct fsop_data *f, uint8_t is_32bit)
 
         // Use replylen as a temporary counter
 
+	// Totally unclear why we start at byte 10 for ARG=3 - can't find any docs to explain why I wrote that.
+	
+
+	/*
         while (replylen < 1024 && *(data+(command != 3 ? 6 : 10)+replylen) != 0x0d)
         {
                 path[replylen] = *(data+(command != 3 ? 6 : 10)+replylen);
+                replylen++;
+        }
+	*/
+
+        while (replylen < 1024 && *(data+ 6+replylen) != 0x0d)
+        {
+                path[replylen] = *(data+ 6+replylen);
                 replylen++;
         }
 
