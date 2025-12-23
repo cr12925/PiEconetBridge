@@ -155,11 +155,16 @@ void fsop_12_internal (struct fsop_data *f, uint8_t is_32bit)
 
         if (command == 1 || command == 5 || command == 8 || command == 96)
         {
-		uint8_t		c_hour, c_min, c_sec, c_monthyear, c_day;
+		//uint8_t		c_hour, c_min, c_sec, c_monthyear, c_day;
 
-		fsop_get_create_time(p.unixpath, &c_day, &c_monthyear, &c_hour, &c_min, &c_sec);
-                reply.p.data[replylen++] = c_day; // p.day;
-                reply.p.data[replylen++] = c_monthyear; // p.monthyear;
+		//fsop_get_create_time(p.unixpath, &c_day, &c_monthyear, &c_hour, &c_min, &c_sec);
+
+		// Create date note apparently in the normalize data
+		// Where command = 8, this is an MDFS-ism, and requires the *create* date not the modify date
+		
+                reply.p.data[replylen++] = (command != 8) ? p.day : p.c_day; // c_day; // p.day;
+                reply.p.data[replylen++] = (command != 8) ? p.monthyear : p.c_monthyear; // c_monthyear; // p.monthyear;
+
         }
 
         if (command == 4 || command == 5 || command == 8 || command == 96) // arg 4 doesn't request ownership - but the RISC OS PRM says it does, so we'll put this back
