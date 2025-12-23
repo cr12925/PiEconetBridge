@@ -160,7 +160,7 @@ FSOP(03)
 			} break;
 	}
 
-	while (examined < n && (e != NULL) && (replylen < (255-replyseglen)))
+	while (examined < n && (e != NULL) && (replylen < ((is_32bit ? 511 : 255)-replyseglen))) /* Longer packets for 32-bit clients */
 	{
 		if (FS_ACTIVE_SYST(f->active) || (e->perm & FS_PERM_H) == 0 || (e->owner == f->userid)) // not hidden or we are the owner
 		{
