@@ -165,7 +165,7 @@ FSOP_00(FSCONFIG)
 
 	if (!strcasecmp("ACORNHOME", configitem))
 		f->server->config->fs_acorn_home = (operator == '+' ? 1 : 0);
-	else if (!strcasecmp("COLONMAP", configitem))
+	else if (!strcasecmp("COLONMAP", configitem) || !strcasecmp("INFCOLON", configitem))
 		f->server->config->fs_infcolon = (operator == '+' ? 1 : 0);
 	else if (!strcasecmp("MDFS", configitem))
 		f->server->config->fs_sjfunc = (operator == '+' ? 1 : 0);
