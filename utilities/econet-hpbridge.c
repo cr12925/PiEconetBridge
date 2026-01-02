@@ -8055,7 +8055,7 @@ static void * eb_device_despatcher (void * device)
 										ioctl(d->wire.socket, ECONETGPIO_IOC_GETTIMINGS, &pt);
 										/* Shouldn't need to - pt.time_on_queue = p->time_on_queue; */
 
-										if (tx.p.aun_ttype == ECONET_AUN_DATA) /* Attempt to discern clock rate from time taken to transmit 3rd part of 4-way handshake (the data portion, which will usually be the longest) */
+										if (tx.p.aun_ttype == ECONET_AUN_DATA && pt.data_end > pt.data_start) /* Attempt to discern clock rate from time taken to transmit 3rd part of 4-way handshake (the data portion, which will usually be the longest) */
 										{
 											uint64_t	data_tx_time;
 
