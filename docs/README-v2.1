@@ -181,7 +181,7 @@ fix the ARM clock in your Pi to a specific speed to stop it switching in and
 out of turbo mode. If you don't, then your bridge will be unreliable because of
 some sensitive timing routines in the v1 board support in the kernel module.
 
-In your /boot/config.txt file, set arm_freq=900 force_turbo=1
+In your /boot/firmware/config.txt file, set arm_freq=900 force_turbo=1
 
 ... and reboot. 900MHz is conservative. It'll probably work at a faster speed
 quite happily.
@@ -214,12 +214,13 @@ install the desktop. As part of that process:
   (You *might* be alright with desktop if you have a version 2 HAT, but
    no promises can be made and YMMV...)
 
-- *Immediately* after installing a 32 bit OS, edit your config.txt and
-  insert a new line
+- *Immediately* after installing a 32 bit OS, edit your
+  /boot/firmware/config.txt and insert a new line
 
   arm_64bit=0
 
-  ... and save the config.txt and reboot before you do anything else.
+  ... and save /boot/firmware/config.txt and reboot before you do
+  anything else.
 
   PiOS Bookworm seems to have developed a "feature" whereby you install
   a 32-bit OS but it boots as a 64-bit OS. (i.e. shows 'v8' on 'uname -a'
@@ -251,8 +252,8 @@ earlier.
 
 
 If you are using a 'shutdown' button that connects to the GPIOs, use your
-favourite editor (e.g. vi, nano) to edit /boot/config.txt (or, more recently,
-/boot/firmware/config.txt) to include the following additional entry:
+favourite editor (e.g. vi, nano) to edit /boot/firmware/config.txt to
+include the following additional entry:
 
 	dtoverlay=gpio-shutdown
 
@@ -263,11 +264,11 @@ include the following entries:
 	arm_freq=1000 
         force_turbo=1
 
-Then save config.txt
+Then save /boot/firmware/config.txt
 
 
-If you have installed Bookworm 32bit, the installer seems to boot you into
-a 64 bit system. Add the following to config.txt and save it:
+If you have installed Bookworm 32bit, the installer may still boot you into
+a 64 bit system. Add the following to /boot/firmware/config.txt and save it:
 
 	arm_64bit=0
 
@@ -313,7 +314,7 @@ The next step depends on what kind of board you have.
 	instructions accordingly.
 
 	Similarly, config.txt is either in /boot or
-	/boot/firmwqre depending on which version of PiOS you
+	/boot/firmware depending on which version of PiOS you
 	are running.
 
 
