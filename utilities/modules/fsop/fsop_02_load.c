@@ -50,7 +50,13 @@ FSOP(02)
 
 	if (is_32bit)
 	{
-		data_port = *(f->data+5);
+		data_port = *(f->data+5); /* Also looks like it might be in the URD space? See the following captured data packet (3rd of a 4-way to port &99) from a 32 bit NetFS client:
+0000001b --- PACKET ---
+         DST Net/Stn 0x00/0xac
+         SRC Net/Stn 0x00/0x96
+00000000 ac 00 96 00 15 28 14 01 04 14 47 61 6d 65 73 2e 41 32 50 61 73 73 77 6f 72 64 0d                .....(....Games.A2Password.
+0000001b --- END ---
+		*/
         	fs_copy_to_cr(command, f->data+6, 256);
 	}
 	else
@@ -140,7 +146,12 @@ FSOP(02)
         r.p.data[13+is_32bit] = p.perm;
         r.p.data[14+is_32bit] = p.day; // TODO - Change to create day/month/year
         r.p.data[15+is_32bit] = p.monthyear;
+
+	fs_copy_padded(&(r.p.data[16+is_32bit]), p.acornname, strlen(p.acornname));
+	r.p.data[16+is_32bit+strlen(p.acornname)] = 0x0D;
+
         r.p.seq = eb_get_local_seq(f->server->fs_device);
+
 
         // sequence = r.p.seq; // Forces enqueuer to start new queue, and sets up the ack trigger for the packet we are about to send so that when that ACK turns up, we send the first packet in the queue.
 
@@ -170,7 +181,7 @@ FSOP(02)
 
 	/* Send OK response and wait to see what happens */
 
-        if (fsop_aun_send_noseq(&r, 16+is_32bit, f))
+        if (fsop_aun_send_noseq(&r, 16+is_32bit+strlen(p.acornname)+1, f))
         {
 
 
