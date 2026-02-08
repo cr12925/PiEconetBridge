@@ -77,7 +77,7 @@ FSOP(03)
 	{
 		if (FS_PERM_EFFOWNER(f->active, pt.owner))
 			owner_32bit = 0x00; // Because 0x00 means owner not public
-		reply.p.data[3] = owner_32bit;
+		reply.p.data[replylen++] = owner_32bit;
 		reply.p.data[replylen++] = 0xff; // Padding, apparently.
 		reply.p.data[replylen++] = 0xff; // Padding, apparently. See https://mdfs.net/Docs/Comp/Econet/FileServ/FSOp32bit
 
@@ -129,9 +129,10 @@ FSOP(03)
 	if (is_32bit)
 	{
 		// Filename length + CR + padding needs to be multiple of 4 bytes - see mdfs.net link above
-		pad_length = (4 - ((pt.max_fname_length + 1) % 4)) % 4; // Final modulo gives us 0 if (pt.max_fname_length + 1) % 4 is 0.
 		fnlength_32bit = pt.max_fname_length;
+		pad_length = (4 - ((fnlength_32bit + 1) % 4)) % 4; // Final modulo gives us 0 if (pt.max_fname_length + 1) % 4 is 0.
 	}
+	else	fnlength_32bit = 10; /* For FSOp 3 ARG=4, always 10 character filenames with no 0x0D on them */
 
 	e = pt.paths;
 
@@ -152,7 +153,18 @@ FSOP(03)
 		case 2: replyseglen = ECONET_MAX_FILENAME_LENGTH + 1; break;
 		case 3: replyseglen = ECONET_MAX_FILENAME_LENGTH + 9; break;
 		case 4: replyseglen = 34; break; /* 32 bit machine-readable, but 10 character FN */
-		case 0xFE: replyseglen = 24 + ECONET_MAX_FILENAME_LENGTH + 1 + pad_length; break; // arg 0xFE is our way of signallying FSOP &2D reply
+		case 0xFE: replyseglen = 24 + fnlength_32bit + 1 + pad_length; break; // arg 0xFE is our way of signallying FSOP &2D reply
+	/* Here's an example packet dump of a NetFS32 reply to FSOp 2D:
+00000000 96 00 ac 00 00 00 07 00 fd ff 5a fd ff ff 83 33 7f a7 00 08 00 00 23 00 54 a5 01 a2 23 00 63 2d ..........Z....3......#.T...#.c-
+00000020 31 20 41 72 74 68 75 72 6c 69 62 20 0d 00 5a fd ff ff a4 26 7f a7 00 08 00 00 31 00 54 a5 01 85 1 Arthurlib ..Z....&......1.T...
+00000040 23 00 57 49 4e 44 43 6f 6d 70 5f 57 65 6c 20 20 0d 00 5a fd ff ff 2b 9b fa a7 00 08 00 00 20 00 #.WINDComp_Wel  ..Z...+....... .
+00000060 55 a5 01 e0 1a 00 52 47 00 00 47 61 6d 65 73 20 20 20 20 20 0d 00 5a fd ff ff a6 33 7f a7 00 08 U.....RG..Games     ..Z....3....
+00000080 00 00 23 00 54 a5 01 a3 23 00 5f 41 4c 54 4c 69 62 72 61 72 79 20 20 20 0d 00 5a fd ff ff 6c 34 ..#.T...#._ALTLibrary   ..Z...l4
+000000a0 7f a7 00 08 00 00 23 00 54 a5 01 a4 23 00 4f 52 4d 41 4c 69 62 72 61 72 79 31 20 20 0d 00 5a fd ......#.T...#.ORMALibrary1  ..Z.
+000000c0 ff ff 69 2a 7f a7 00 08 00 00 31 00 54 a5 01 95 23 00 00 00 57 49 4d 61 73 74 65 72 5f 57 65 6c ..i*......1.T...#...WIMaster_Wel
+000000e0 0d 00 43 fd ff ff 6d c6 85 a4 00 08 00 00 20 00 18 b1 01 f5 1f 00 41 50 57 49 53 59 53 54 20 20 ..C...m....... .......APWISYST  
+00000100 20 20 20 20 0d 00                                                                                   ..
+*/
 		default:
 			{
 				fsop_error(f, 0xFF, "Bad argument");
@@ -356,7 +368,8 @@ FSOP(03)
 
 	fs_free_wildcard_list(&pt);
 
-	reply.p.data[replylen++] = 0x80;
+	if (!is_32bit) reply.p.data[replylen++] = 0x80; /* AL4FS does not appear to add the &80 terminator on FSOp &2D */
+
 	reply.p.data[2] = (examined & 0xff);
 	if (!is_32bit) reply.p.data[3] = (dirsize & 0xff); // Can't work out how L3 is calculating this number - only for 24-bit replies, because this is an ownership byte in 32-bit replies
 
