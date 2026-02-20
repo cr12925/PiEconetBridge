@@ -97,6 +97,7 @@ uint8_t fsop_parse_priv(char *str, uint8_t *priv, uint8_t *priv2)
 FSOP_00(NEWUSER)
 {
 	unsigned char		username[11], username_pad[11];
+	unsigned char		dir_tmp[97];
 	unsigned char		priv_string[30];
 	uint8_t			priv, priv2;
 	int16_t			userid;
@@ -178,8 +179,12 @@ FSOP_00(NEWUSER)
 	snprintf(username_pad, 11, "%-10s", username);
 	memcpy(user->username, username_pad, 10);
 	snprintf((char * ) user->password, 11, "%-10s", "");
-	snprintf((char * ) user->home, 97, "$.%s", username);
-	snprintf((char * ) user->lib, 97, "$.%s", "Library");
+	//snprintf((char * ) user->home, 97, "$.%s", username);
+	snprintf(dir_tmp, 97, "$.%s", username);
+	memcpy(user->home, dir_tmp, 96);
+	//snprintf((char * ) user->lib, 97, "$.%s", "Library");
+	snprintf(dir_tmp, 97, "$.%s", "Library");
+	memcpy(user->lib, dir_tmp, 96);
 	user->home_disc = disc_index;
 	user->priv2 = priv2; // clear priv2 byte
 	user->quota_free[0] = (f->server->fs_device->local.fs.new_user_quota & 0xff);
