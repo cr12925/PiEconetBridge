@@ -181,7 +181,7 @@ fix the ARM clock in your Pi to a specific speed to stop it switching in and
 out of turbo mode. If you don't, then your bridge will be unreliable because of
 some sensitive timing routines in the v1 board support in the kernel module.
 
-In your /boot/config.txt file, set arm_freq=900 force_turbo=1
+In your /boot/firmware/config.txt file, set arm_freq=900 force_turbo=1
 
 ... and reboot. 900MHz is conservative. It'll probably work at a faster speed
 quite happily.
@@ -251,8 +251,8 @@ earlier.
 
 
 If you are using a 'shutdown' button that connects to the GPIOs, use your
-favourite editor (e.g. vi, nano) to edit /boot/config.txt (or, more recently,
-/boot/firmware/config.txt) to include the following additional entry:
+favourite editor (e.g. vi, nano) to edit /boot/firmware/config.txt 
+to include the following additional entry:
 
 	dtoverlay=gpio-shutdown
 
