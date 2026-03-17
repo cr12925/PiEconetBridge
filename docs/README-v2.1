@@ -214,8 +214,8 @@ install the desktop. As part of that process:
   (You *might* be alright with desktop if you have a version 2 HAT, but
    no promises can be made and YMMV...)
 
-- *Immediately* after installing a 32 bit OS, edit your config.txt and
-  insert a new line
+- *Immediately* after installing a 32 bit OS, edit your 
+  /boot/firmware/config.txt and insert a new line
 
   arm_64bit=0
 
@@ -266,7 +266,7 @@ include the following entries:
 Then save config.txt
 
 
-If you have installed Bookworm 32bit, the installer seems to boot you into
+If you have installed Bookworm 32bit, the installer may still boot you into
 a 64 bit system. Add the following to config.txt and save it:
 
 	arm_64bit=0
