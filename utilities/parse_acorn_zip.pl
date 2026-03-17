@@ -25,8 +25,14 @@ use warnings;
 use strict;
 
 my $name=$ARGV[0];
+my $attr=0;
+if (@ARGV && $name eq "-attr")
+{
+  $attr=1;
+  $name=$ARGV[1];
+}
 
-die "$0 filename\n" unless $name;
+die "$0 [-attr] filename\n" unless $name;
 
 open(my $fh,"<$name") or die "$name: $!\n";
 
@@ -75,7 +81,17 @@ while(1)
   
   my $perm=0x17;  # LWR/R
   $perm=3 if $filename=~s/\/$//;  # WR for directories
-  push(@results,sprintf("echo -n %x %08x %08x %02x > %s.inf",0,$load,$exec,$perm,$filename));
+  if ($attr)
+  {
+    push(@results,sprintf("setfattr -n user.econet_exec -v %08x %s",$exec,$filename));
+    push(@results,sprintf("setfattr -n user.econet_load -v %08x %s",$load,$filename));
+    push(@results,sprintf("setfattr -n user.econet_owner -v 0 %s",$filename));
+    push(@results,sprintf("setfattr -n user.econet_perm -v %02x %s",$perm,$filename));
+  }
+  else
+  {
+    push(@results,sprintf("echo -n %x %08x %08x %02x > %s.inf",0,$load,$exec,$perm,$filename));
+  }
 }
 
 print "#!/bin/bash\n";
