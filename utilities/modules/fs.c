@@ -58,12 +58,12 @@ void fs_debug (uint8_t death, uint8_t level, char *fmt, ...)
 {
 
 	va_list 	ap;
-	char		str[8192];
-	char		padstr[9000];
+	char		str[800];
+	char		padstr[1000];
 
 	va_start (ap, fmt);
 
-	vsnprintf (str, 8190, fmt, ap);
+	vsnprintf (str, 798, fmt, ap);
 	strcpy (padstr, "FS               ");
 	strcat (padstr, str);
 	eb_debug_fmt (death, level, "FS", padstr);
@@ -74,12 +74,12 @@ void fs_debug (uint8_t death, uint8_t level, char *fmt, ...)
 void fs_debug_full (uint8_t death, uint8_t level, struct __fs_station *s, uint8_t net, uint8_t stn, char *fmt, ...)
 {
 	va_list 	ap;
-	char		str[8192];
-	char		padstr[9000];
+	char		str[800];
+	char		padstr[1000];
 
 	va_start (ap, fmt);
 
-	vsnprintf (str, 8190, fmt, ap);
+	vsnprintf (str, 798, fmt, ap);
 	if (net != 0)
 		sprintf (padstr, "FS       %3d.%3d from %3d.%3d %s", s->net, s->stn, net, stn, str);
 	else
@@ -4970,9 +4970,22 @@ void fsop_port99 (struct __fs_station *s, struct __econet_packet_aun *packet, ui
 
         }
 
-	fsop_param.urd = *(fsop_param.data+2); // NB sometimes this isn't the root handle and is used for something else (fsop 1,2,5,10,11 we think)
-	fsop_param.cwd = *(fsop_param.data+3);
-	fsop_param.lib = *(fsop_param.data+4);
+	/* 20260317 - Changed so that we don't copy empty data if there was a short packet,
+	 * instead, we take the existing data from the active structure, which will not have
+	 * been updated above if the packet was short
+	 */
+	if (active)
+	{
+		fsop_param.urd = active->root;
+		fsop_param.cwd = active->current;
+		fsop_param.lib = active->lib;
+	}
+	else
+	{
+		fsop_param.urd = *(fsop_param.data+2); // NB sometimes this isn't the root handle and is used for something else (fsop 1,2,5,10,11 we think)
+		fsop_param.cwd = *(fsop_param.data+3);
+		fsop_param.lib = *(fsop_param.data+4);
+	}
 
 	/* Reset sequence number to rogue if not fsop &09 - i.e. not a putbyte operation */
 
