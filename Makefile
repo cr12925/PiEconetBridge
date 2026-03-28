@@ -52,7 +52,7 @@ install-utilities:	install-mkgroup build-utilities
 	-sudo systemctl daemon-reload
 	-sudo systemctl enable econet-hpbridge
 	-sudo systemctl start econet-hpbridge
-	@cat docs/Makefile-MOTD
+	@cat Makefile-MOTD
 
 
 install-hp-utilities:	install-utilities
