@@ -8445,7 +8445,7 @@ static void * eb_device_despatcher (void * device)
 						{
 							// Deal with machinetype queries here
 							ack.p.aun_ttype = ECONET_AUN_IMMREP;
-							ack.p.data[0] = eb_mfr; ack.p.data[1] = eb_mtype;
+							ack.p.data[1] = eb_mfr; ack.p.data[0] = eb_mtype;
 							ack.p.data[2] = (EB_VERSION); // & 0xff);
 							ack.p.data[3] = 5; // (EB_VERSION & 0xff00) >> 8;
 
