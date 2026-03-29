@@ -19,6 +19,10 @@
 
 #include "../include/econet-gpio.h"
 
+/* Prototypes */
+
+u8 econet_writefd_transmit(void);
+
 /* 
  * Module operations
  */

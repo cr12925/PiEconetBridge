@@ -30,6 +30,12 @@ spinlock_t econet_irq_spin;
 spinlock_t econet_tx_spin;
 spinlock_t econet_irqstate_spin;
 
+/* Prototypes */
+
+void econet_irq_to_workqueue(struct __econet_packet **, u8, u8, u8);
+void econet_irq_read_new(u8, u8);
+void econet_irq_write_new(u8, u8);
+
 /*
  * econet_irq_mode() - Enable / Disable IRQs from GPIO
  *

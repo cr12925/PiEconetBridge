@@ -25,6 +25,13 @@
 #define EWAS_NOTHING 0
 #define EWAS_BOTH (EWAS_DATA_READ | EWAS_DATA_WRITE) /* Means we got an out of sequence packet and need to signal to WRITE that something failed, but also present a packet to the read fifo */
 
+/* Prototypes */
+
+void econet_workqueue_copy_new_packet(struct __econet_packet *, u8);
+void econet_workqueue_build_ack(struct __econet_packet *);
+u8 econet_workqueue_respond_new_packet(struct __econet_packet *, u8, u8);
+u8 econet_workqueue_aun_statemachine(struct __econet_packet *);
+
 /* 
  * econet_workqueue_copy_new_packet
  *

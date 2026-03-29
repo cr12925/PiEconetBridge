@@ -27,6 +27,10 @@ struct gpio_desc *a01rw_desc_array[3];
 struct gpio_desc *data_desc_array[11]; // Top 3 are the address & RnW lines in case of need
 #endif
 
+/* Prototypes */
+
+int econet_init_vars(void);
+
 /* econet_init_vars 
  *
  * set up various globals and state
