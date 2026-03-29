@@ -3673,7 +3673,7 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
  *
  */
 
-static int econet_probe (struct platform_device *pdev)
+int econet_probe (struct platform_device *pdev)
 {
 
 	int err;
