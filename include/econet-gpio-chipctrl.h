@@ -112,6 +112,7 @@ void econet_flagfill(void);
 
 #define econet_set_chipstate(x) { \
 	atomic_set(&(econet_data->mode), (x)); \
+	if (econet_data->chipstatelogs) printk (KERN_INFO "econet-fast: Chip state change to 0x%02X\n", (x)); \
 }
 
 #define econet_get_chipstate() atomic_read(&(econet_data->mode))
@@ -119,12 +120,26 @@ void econet_flagfill(void);
 #define econet_set_aunstate(x) { \
         atomic_set(&(econet_data->aun_state), (x)); \
         econet_data->aun_last_statechange = ktime_get_ns(); \
+	if (econet_data->auntransitionlogs) printk (KERN_INFO "econet-fast: AUN state change to 0x%02X (%s)\n", (x), \
+		(x == EA_W_WRITESCOUT ? "Write Scout" : \
+		 x == EA_W_READFIRSTACK ? "Read first ACK" : \
+		 x == EA_W_WRITEDATA ? "Write 4-way data" : \
+		 x == EA_W_READFINALACK ? "Read final ACK" : \
+		 x == EA_R_WRITEFIRSTACK ? "Write first ACK" : \
+		 x == EA_R_READDATA ? "Read 4-way data" : \
+		 x == EA_R_WRITEFINALACK ? "Write final ACK" : \
+		 x == EA_I_WRITEREPLY ? "Write immediate reply" : \
+		 x == EA_I_READREPLY ? "Read immediate reply" : \
+		 x == EA_IDLE ? "Idle" : \
+		 "Unknown" \
+		 )); \
 }
 
 #define econet_get_aunstate() atomic_read(&(econet_data->aun_state))
 
-#define econet_set_tx_status(x) \
-        atomic_set(&(econet_data->tx_status), (x)); 
+#define econet_set_tx_status(x) { \
+        atomic_set(&(econet_data->tx_status), (x)); \
+	econet_data->tx_status_valid = 1; }
 
 #define econet_set_irq_state(x) \
         atomic_set(&(econet_data->irq_state), (x))

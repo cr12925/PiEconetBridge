@@ -22,6 +22,8 @@
 //#ifndef u32
 #ifndef ECONETGPIO_KERNEL
 	#include <stdint.h>
+	#define u8 uint8_t
+	#define u16 uint16_t
 #endif
 
 /* This is the map of stations we want to handle traffic for that
@@ -48,11 +50,64 @@
    5		Port number
    6		... data
 */
+
+
 struct __econet_packet {
-	int ptr; /* Read/Write pointer - holds the index of the *next* byte to be read/written, so always starts at 0 */
+	u16 ptr; /* Read/Write pointer - holds the index of the *next* byte to be read/written, so always starts at 0 */
+	u16 txlen; /* Data length to transmit */
+	u8	sr1, sr2; /* SR1, SR2 on completion of transaction */
+	u8	tx; /* 0 0=RX packet, 1=TX packet */
+	u8	tx_flags; /* See below */
 	char data[ECONET_MAX_PACKET_SIZE];
 };
 
+#define EP_DSTSTN(p)	p.data[0]
+#define EP_DSTNET(p)	p.data[1]
+#define EP_SRCSTN(p)	p.data[2]
+#define EP_SRCNET(p)	p.data[3]
+#define EP_CTRL(p)	p.data[4]
+#define EP_PORT(p)	p.data[5]
+#define EP_FOURDATA(p,n)	p.data[4+n]
+#define EP_SCOUTDATA(p,n)	p.data[6+n]
+
+/* Pointer equivalents */
+#define __SRCSTN(p)			p->data[2]
+#define __SRCNET(p)			p->data[3]
+#define __DSTSTN(p)			p->data[0]
+#define __DSTNET(p)			p->data[1]
+#define __CTRL(p)			p->data[4]
+#define __PORT(p)			p->data[5]
+#define __SCOUTDATA(p,n)		p->data[6+n]
+#define __DATA(p,n)			p->data[4+n]
+#define __IS_BROADCAST(p)		( __DSTSTN(p) == 0xFF && __DSTNET(p) == 0xFF )
+#define __IS_IMM_FOURWAY(p)		( __PORT(p) == 0x00 && (__CTRL(p) >= 0x82 && __CTRL(p) <= 0x85) ) /* 0x82-85 are the funky 4-way immediates */
+#define __IS_FOURWAY(p)			( (!__IS_BROADCAST(p)) && ( (__PORT(p) > 0) || __IS_IMM_FOURWAY(p) ) )  /* If 4-way, then on tx we send scout and wait for reply etc.; on rx we flag fill and send acks */
+#define __IS_TWOWAY(p)			( (!__IS_BROADCAST(p)) && ( __PORT(p) == 0x00 && !(__IS_IMM_FOURWAY(p) ) ) ) /* If 2-way on a receive, we flag fill, waiting for userspace to tx a reply */
+
+/* And some AUN equivalents for __econet_packet_aun structures */
+
+#define __AUN_SRCSTN(r)			r.p.srcstn
+#define __AUN_SRCNET(r)			r.p.srcnet
+#define __AUN_DSTSTN(r)			r.p.dststn
+#define __AUN_DSTNET(r)			r.p.dstnet
+#define __AUN_CTRL(r)			r.p.ctrl
+#define __AUN_PORT(r)			r.p.port
+#define __AUN_TYPE(r)			r.p.aun_ttype
+#define __IS_AUN_BROADCAST(r)		(__AUN_TYPE(p) == ECONET_AUN_BCAST)
+#define __IS_AUN_IMM_FOURWAY(r)		((__AUN_TYPE(r) == ECONET_AUN_DATA || __AUN_TYPE(r) == ECONET_AUN_IMM) && __AUN_PORT(r) == 0x00 && (__AUN_CTRL(r) >= 0x82 && __AUN_CTRL(r) <= 0x85))
+#define __IS_AUN_FOURWAY(r)		( (__AUN_TYPE(r) == ECONET_AUN_DATA || __IS_AUN_IMM_FOURWAY(r)) )
+#define __IS_AUN_TWOWAY(r)		(__AUN_TYPE(r) == ECONET_AUN_IMM && (!(__IS_AUN_IMM_FOURWAY(r))))
+#define __AUN_SCOUTBYTES(r)		((__IS_AUN_IMM_FOURWAY(r)) ? \
+		(__AUN_CTRL(r) == 0x82 ? 8 : 4) : 0) /* 8 bytes on 4-way immediates with ctrl 0x82, otherwise 4, and none on ordinary 4-ways */
+
+/* Packet direction - for use in tx field */
+
+#define EP_PACKET_RX	0
+#define EP_PACKET_TX	1
+
+/* Tx flags - for use in tx_flags field */
+
+#define EP_TX_NO_SEIZE_IF_ACK 0x01 /* Do not flag fill on receipt of an ACK corresponding to this frame. This is used when sending the data portion of a 4-way transaction. Ordinarily, the module will always seize the line on a packet which is destined for a station we are handling (i.e. not including broadcast traffic). That works because if it's an incoming 2-way, we'll want to flag fill ready to see if there's a reply coming, and if it's an incoming scout, we'll flag fill ready to send an ACK. However, the exception is if we're sending the data portion of a 4-way - the ACK which will follow is 'end of transaction', so we don't want to flag fill. */
 
 /* Clear the station map */
 #define	ECONET_INIT_STATIONS(m)	 	memset(&(m), 0, 8192);
@@ -80,41 +135,6 @@ struct __econet_packet_wire {
 	};
 };
 
-/* 'Plain' format packet - very much like a raw mode packet, but has some additional fields so that
- * userspace can convert it to AUN. Used in 'Plain' mode because the kernel works faster then and
- * hopefully we get fewer underruns / overruns
- */
-
-struct __econet_packet_plain {
-	unsigned char	txmode; // See defines below - when receiving a packet, this will be set to indicate how it was received
-	unsigned char	scoutbytes; // Number of data bytes that came/to be sent with the scout
-	// These four are the original bytes received off the wire - the actual destination. No need to set on transmission - module will do it for you.
-	// They are held separately (and copied from the union below when a valid packet we're interested in is received) because when an
-	// ACK (on transmit) or data packet (on receive) arrives, it'll get stored in the struct below, and then compared - and at that stage it will be backwards!
-	// So we store them the other way round here so that we can do a straight memcmp() at when byte 4 received and abort reception if need be
-	unsigned char	r_srcstn; 
-	unsigned char	r_srcnet;
-	unsigned char	r_dststn; 
-	unsigned char	r_dstnet; 
-	union {
-		unsigned char alldata[ECONET_MAX_PACKET_SIZE];
-		struct {
-			unsigned char dststn;
-			unsigned char dstnet;
-			unsigned char srcstn;
-			unsigned char srcnet;
-			unsigned char ctrl; // Ctrl & Port are the other way round on the wire from an AUN packet
-			unsigned char port;
-			unsigned char data[ECONET_MAX_PACKET_SIZE-6];
-		};
-	};
-};
-
-/* Defines for plain packet use */
-
-#define ECONET_PLAIN_ONESHOT 0xff	// E.g. broadcasts - no flag fill at end
-#define ECONET_PLAIN_FOURWAY 0x01	// Full four-way handshake, and if we're in resilience mode, then put the extra wait phase in
-#define ECONET_PLAIN_ONEFLAG 0x02	// Oneshot, but if we received then we are now flag filling (e.g. certain immediates)
 
 /* AUN Packet Types */
 
@@ -155,51 +175,6 @@ struct __econet_packet_timings {
 	uint64_t	final_ack_start;
 	uint64_t	final_ack_end;
 };
-
-struct __econet_packet_detail { 
-		uint8_t		ttype; /* One of the AUN types - populated user side. */
-		uint16_t	len_data; /* Total number of bytes in the data[] array */
-		uint16_t	len_scout; /* of len_data, how many are on the scout - must be at least 6 otherwise it's not a scout */
-		uint8_t		term_state; /* Byte of flags indicating how the packet ended */
-			/* If len_scout == len_data then there was no valid data frame in a 4-way 
-			 * The byte has the following bits, some of which deliberately coincide with SR2 
-			 * b0		TX Underrun (this overlaps with DCD in SR2, but this bit is in SR1)
-			 * b1		Valid frame
-			 * b2		RX Idle
-			 * b3		RX Abort
-			 * b4		RX Error
-			 * b5		No clock
-			 * b6		RX Overrun
-			 * b7		First ACK sent/received on 4-way transmissions
-			 */
-		uint16_t	underover_byte; /* Which byte in data[] we under or over ran at */
-		uint8_t		underover_ack; /* If non-zero, this indicates a byte number in an ack which we over/under ran at.
-						  If b7 of term_state is unset, then this was during first ack, otherwise during second */
-		uint8_t	 	ack[4]; /* populated either on receipt of scout, not used on tx */
-		struct __econet_packet_timings	pt; /* Timing data */
-		uint8_t 	data[6+ECONET_MAX_PACKET_SIZE]; 
-};
-		
-#define __SRCSTN(p)			p.data[2]
-#define __SRCNET(p)			p.data[3]
-#define __DSTSTN(p)			p.data[0]
-#define __DSTNET(p)			p.data[1]
-#define __CTRL(p)			p.data[4]
-#define __PORT(p)			p.data[5]
-#define __DATA(p,n)			p.data[6+n]
-#define __DETAIL_TX_UNDERRUN		(1 << 0)
-#define __DETAIL_VALID			(1 << 1)
-#define __DETAIL_RX_IDLE		(1 << 2)
-#define __DETAIL_RX_ABORT		(1 << 3)
-#define __DETAIL_RX_ERROR		(1 << 4)
-#define __DETAIL_NO_CLOCK		(1 << 5)
-#define __DETAIL_RX_OVERRUN		(1 << 6)
-#define __DETAIL_FIRST_ACK_OK		(1 << 7) /* On TX, this means we got a correct first ACK. Otherwise we didn't. On RX, this means we sent first ack successfully, or we didn't. */
-#define __DETAIL_PACKET_OK(p)		(!(p.term_state & (__DETAIL_TX_UNDERRUN | __DETAIL_RX_ABORT | __DETAIL_RX_ERROR | __DETAIL_NO_CLOCK | __DETAIL_RX_OVERRUN)) && (p.term_state & __DETAIL_VALID))
-#define __IS_BROADCAST(p)		( __DSTSTN(p) == 0xFF && __DSTNET(p) == 0xFF )
-#define __IS_IMM_FOURWAY(p)		( __PORT(p) == 0x00 && (__CTRL(p) >= 0x82 && __CTRL(p) <= 0x85) ) /* 0x82-85 are the funky 4-way immediates */
-#define __IS_FOURWAY(p)			( (!_IS_BROADCAST(p)) && ( (__PORT(p) > 0) || __IS_IMM_FOURWAY(p) )  /* If 4-way, then on tx we send scout and wait for reply etc.; on rx we flag fill and send acks */
-#define __IS_TWOWAY(p)			( (!_IS_BROADCAST(p)) && ( __PORT(p) == 0x00 && !(__IS_IMM_FOURWAY(p) ) ) ) /* If 2-way on a receive, we flag fill, waiting for userspace to tx a reply */
 
 /* Data structure for passing AUN packets userspace<->kernel via /dev/econet-gpio, and within the kernel
  * NB: This does NOT match what they look like on the wire, even within the UDP data portion because the
@@ -305,7 +280,7 @@ struct __econet_packet_pipe {
 #define ECONETGPIO_IOC_TESTPACKET	_IO(ECONETGPIO_MAGIC, 105)
 #define ECONETGPIO_IOC_EXTRALOGS	_IOW(ECONETGPIO_MAGIC, 106, char) /* TUrn on additional logging */
 #define ECONETGPIO_IOC_KERNVERS		_IO(ECONETGPIO_MAGIC, 107) /* Obtain Pi version (based on HW GPIO address) (b8-b15), Hardware HAT version (low byte) */
-
+#define ECONETGPIO_IOC_MODULEVERS	_IO(ECONETGPIO_MAGIC, 108) /* Obtain kernel module version: 1 = Original; 2 = Fast */
 
 #define ECONET_GPIO_WRITE 0
 #define ECONET_GPIO_READ 1
@@ -331,6 +306,8 @@ struct __econet_packet_pipe {
 #define ECONET_OVERRUN 0x56 /* Overrun whilst receiving - may be used to signal overrun during receive on part of a 4-way */
 #define ECONET_CRCERROR 0x57 /* CRC Error - may also arise during receive phases of a 4-way */
 #define ECONET_RXABORT 0x58 /* RX Abort received - may also arise during receive phases of a 4-way */
+#define ECONET_TX_NOMEM 0x59 /* Memory allocation failure within kernel module */
+#define ECONET_TX_INSUFFICIENTDATA 0x5a /* not enough data in four-way transaction */
 #define ECONET_TX_INVALID 0xfc // Attempt to transmit packet which cannot go on a wire - e.g. ACK, NAK, INK
 #define ECONET_TX_DATAPROGRESS 0xfd // Flags the fact that we got an ack to the Scout
 #define ECONET_TX_INPROGRESS 0xfe
@@ -355,7 +332,8 @@ struct __econet_packet_pipe {
 #define ECONET_SERVER_PRINT 0x02
 
 enum econet_aunstate {
-        EA_IDLE = 1, // Waiting for something to happen
+        EA_IDLE = 1, // Waiting for something to happen - more accurately, we're in read mode before a transaction has happened
+	EA_R_READSCOUT, // Reading a scout (including 1 & 2-way transaction first packets),
         EA_W_WRITESCOUT, // Given a data packet by userspace. Writing the Scout
         EA_W_READFIRSTACK, // We've been given an AUN packet by userspace, and written the scout, now waiting for first ack from wire
         EA_W_WRITEDATA, // Given a data packet by userspace, done the scout, picked up the first ack, now writing the data packet
@@ -369,7 +347,18 @@ enum econet_aunstate {
         EA_I_READREPLY, // We've written an immediate to the wire, we are now waiting for the response from the wire
         EA_I_IMMSENTTOAUN, // We've received an immediate off the wire and sent it to userspace. We are waiting for a reply to come back and will then transmit it
         EA_W_WRITEBCAST, // Writing a broadcast. Don't hang about for a reply
-	EA_R_PENDINGFINALACK // We received scout, sent ACK, received data, and are now flagfilling whilst waiting for userspace to tell us whether to send final ack. (And userspace must put us back in read mode if that ACK is not received from the distant station - based on a timeout.)
+	EA_R_PENDINGFINALACK, // We received scout, sent ACK, received data, and are now flagfilling whilst waiting for userspace to tell us whether to send final ack. (And userspace must put us back in read mode if that ACK is not received from the distant station - based on a timeout.)
 };
+
+
+#define __AUN_IS_IDLE(t) (t == EA_IDLE)
+
+#define __AUN_TX_OPERATION(t) \
+	(t == EA_W_WRITESCOUT || t == EA_W_READFIRSTACK || t == EA_W_WRITEDATA || t == EA_W_READFINALACK \
+	 || t == EA_I_WRITEREPLY || t == EA_I_WRITEIMM || t == EA_W_WRITEBCAST)
+
+#define __AUN_RX_OPERATION(t) \
+	(t == EA_R_READSCOUT || t == EA_R_WRITEFIRSTACK || t == EA_R_READDATA || t == EA_R_WRITEFINALACK \
+	 t == EA_I_READREPLY || t == EA_R_PENDINGFINALACK)
 
 #endif

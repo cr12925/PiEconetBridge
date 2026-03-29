@@ -19,7 +19,7 @@
 #define __ECONETBRIDGEMODULES_H__
 
 //extern uint8_t eb_module_fooserver_init(void *, struct json_object *);
-//extern uint8_t setp_module_init(void *, struct json_object *);
+extern uint8_t setp_module_init(void *, struct json_object *);
 
 /* Please see struct definition in econet-hpbridge.h */
 /* Essentially first entry is the name of an object which must exist in the diverts[] array for a virtual server to which the module is attached, the second is 
@@ -31,7 +31,7 @@
 
 static struct __eb_module_table eb_module_table[] = {
 //	{	"fooserv", 	eb_module_fooserver_init },
-//	{	"setpserv",	setp_module_init },
+	{	"setpserv",	setp_module_init },
 	{	NULL, NULL }
 };
 
