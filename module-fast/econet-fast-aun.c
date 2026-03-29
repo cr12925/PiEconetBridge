@@ -480,7 +480,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 			if (is_immrep)
 			{
-				// printk (KERN_ERR "econet-fast: Immediate 2-way reply found from %d.%d\n", p->data[1], p->data[0]);
+				printk (KERN_ERR "econet-fast: Immediate 2-way reply found from %d.%d\n", p->data[1], p->data[0]);
 				econet_workqueue_copy_new_packet(p, aun_state);
 				econet_data->aun_packet.p.aun_ttype = ECONET_AUN_IMMREP;
 				econet_data->aun_packet.p.seq = seq; /* Restore */
@@ -489,9 +489,11 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			}
 			else
 			{
-				/* Treat as new incoming packet */
+				/* Dump it - we've no idea what it is */
 
-				return econet_workqueue_respond_new_packet(p, sr1_errors, sr2_errors);
+				ECONET_NOT_BUSY();
+				return EWAS_NOTHING;
+
 			}
 		}
 		else if (aun_state == EA_I_WRITEREPLY && p->tx == EP_PACKET_TX)
