@@ -278,6 +278,7 @@ struct __econet_data {
 	dev_t majorminor;
 	short open_count;
 	wait_queue_head_t rx_queue;
+	wait_queue_head_t econet_read_queue; /* Old module compat */
 	wait_queue_head_t tx_queue;
 	struct kfifo_rec_ptr_2 readfd_fifo;
 	u8 readfd_fifo_initialized;
