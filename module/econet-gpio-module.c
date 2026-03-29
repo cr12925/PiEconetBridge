@@ -1046,7 +1046,7 @@ void econet_finish_tx(void)
  *
  */
 
-static inline void econet_aun_setidle_txstatus(int txstate)
+inline void econet_aun_setidle_txstatus(int txstate)
 {
 	econet_pkt_tx.length = 0;
 	econet_set_tx_status(txstate);
