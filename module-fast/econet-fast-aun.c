@@ -48,48 +48,48 @@ void econet_workqueue_copy_new_packet(struct __econet_packet *p, u8 aun_state)
 
 	/* Copy relevant data */
 
-	memcpy(&(econet_data->aun_packet), &(p->data), 4); /* Address bytes */
-	__AUN_SRCSTN(econet_data->aun_packet) = __SRCSTN(p);
-	__AUN_SRCNET(econet_data->aun_packet) = __SRCNET(p);
-	__AUN_DSTSTN(econet_data->aun_packet) = __DSTSTN(p);
-	__AUN_DSTNET(econet_data->aun_packet) = __DSTNET(p);
-	__AUN_PORT(econet_data->aun_packet) = __PORT(p);
-	__AUN_CTRL(econet_data->aun_packet) = __CTRL(p);
+	memcpy(&(econet_data->aun_packet_rx), &(p->data), 4); /* Address bytes */
+	__AUN_SRCSTN(econet_data->aun_packet_rx) = __SRCSTN(p);
+	__AUN_SRCNET(econet_data->aun_packet_rx) = __SRCNET(p);
+	__AUN_DSTSTN(econet_data->aun_packet_rx) = __DSTSTN(p);
+	__AUN_DSTNET(econet_data->aun_packet_rx) = __DSTNET(p);
+	__AUN_PORT(econet_data->aun_packet_rx) = __PORT(p);
+	__AUN_CTRL(econet_data->aun_packet_rx) = __CTRL(p);
 
 	/* Put a sequence number in */
 
-	econet_data->aun_packet.p.seq = (econet_data->aun_seq += 4);
-	econet_data->aun_packet.p.padding = 0;
+	econet_data->aun_packet_rx.p.seq = (econet_data->aun_seq += 4);
+	econet_data->aun_packet_rx.p.padding = 0;
 
 	/* Packet type */
 
 	if (aun_state == EA_I_READREPLY)
-		econet_data->aun_packet.p.aun_ttype = ECONET_AUN_IMMREP;
+		econet_data->aun_packet_rx.p.aun_ttype = ECONET_AUN_IMMREP;
 	else if (__IS_FOURWAY(p))
-		econet_data->aun_packet.p.aun_ttype = ECONET_AUN_DATA;
+		econet_data->aun_packet_rx.p.aun_ttype = ECONET_AUN_DATA;
 	else if (__IS_BROADCAST(p))
-		econet_data->aun_packet.p.aun_ttype = ECONET_AUN_BCAST;
+		econet_data->aun_packet_rx.p.aun_ttype = ECONET_AUN_BCAST;
 	else if (__IS_TWOWAY(p))
-		econet_data->aun_packet.p.aun_ttype = ECONET_AUN_IMM;
+		econet_data->aun_packet_rx.p.aun_ttype = ECONET_AUN_IMM;
 
 	/* And the data element if any */
 
 	if (aun_state == EA_I_READREPLY)
 	{
-		econet_data->aun_packet_len = p->ptr - 4;
+		econet_data->aun_packet_len_rx = p->ptr - 4;
 		datastart = &(p->data[4]);
 	}
 	else
 	{
-		econet_data->aun_packet_len = p->ptr - 6;
+		econet_data->aun_packet_len_rx = p->ptr - 6;
 		datastart = &(p->data[6]);
 	}
 
-	if (econet_data->aun_packet_len > 0)
+	if (econet_data->aun_packet_len_rx > 0)
 	{
-		memcpy (&(econet_data->aun_packet.p.data),
+		memcpy (&(econet_data->aun_packet_rx.p.data),
 			datastart,
-			econet_data->aun_packet_len);	
+			econet_data->aun_packet_len_rx);	
 	}
 }
 
@@ -107,10 +107,10 @@ u8 inline econet_workqueue_correct_reply_source(struct __econet_packet *p)
 	u8 ret = 0;
 
 	if (
-		__DSTSTN(p) == __AUN_SRCSTN(econet_data->aun_packet)
-	&&	__DSTNET(p) == __AUN_SRCNET(econet_data->aun_packet)
-	&&	__SRCSTN(p) == __AUN_DSTSTN(econet_data->aun_packet)
-	&&	__SRCNET(p) == __AUN_DSTNET(econet_data->aun_packet)
+		__DSTSTN(p) == __AUN_SRCSTN(econet_data->aun_packet_tx)
+	&&	__DSTNET(p) == __AUN_SRCNET(econet_data->aun_packet_tx)
+	&&	__SRCSTN(p) == __AUN_DSTSTN(econet_data->aun_packet_tx)
+	&&	__SRCNET(p) == __AUN_DSTNET(econet_data->aun_packet_tx)
 	)
 		ret = 1;
 
@@ -127,10 +127,10 @@ u8 inline econet_workqueue_correct_reply_source(struct __econet_packet *p)
 
 void econet_workqueue_build_ack (struct __econet_packet *p)
 {
-	__SRCSTN(p) = __AUN_DSTSTN(econet_data->aun_packet);
-	__SRCNET(p) = __AUN_DSTNET(econet_data->aun_packet);
-	__DSTSTN(p) = __AUN_SRCSTN(econet_data->aun_packet);
-	__DSTNET(p) = __AUN_SRCNET(econet_data->aun_packet);
+	__SRCSTN(p) = __AUN_DSTSTN(econet_data->aun_packet_rx);
+	__SRCNET(p) = __AUN_DSTNET(econet_data->aun_packet_rx);
+	__DSTSTN(p) = __AUN_SRCSTN(econet_data->aun_packet_rx);
+	__DSTNET(p) = __AUN_SRCNET(econet_data->aun_packet_rx);
 
 	p->tx = EP_PACKET_TX;
 	p->txlen = 4;
@@ -216,12 +216,15 @@ u8 econet_workqueue_respond_new_packet(struct __econet_packet *p, u8 sr1_errors,
 		{
 			u8 seized = 0;
 			econet_workqueue_build_ack(econet_data->txp);
+			printk (KERN_INFO "econet-fast: EA_R_WRITEFIRSTACK seizing line\n");
 			if ((seized = econet_seize()))
 			{
 				/* Failed. */
+				printk (KERN_INFO "econet-fast: EA_R_WRITEFIRSTACK failed line seize - abort to EA_IDLE\n");
 				econet_set_aunstate(EA_IDLE);
 				econet_set_read_mode();
 			}
+			printk (KERN_INFO "econet-fast: EA_R_WRITEFIRSTACK: Line seized - TX should begin\n");
 		}
 		else
 		{
@@ -269,8 +272,8 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 	u8 sr1_errors = 0, sr2_errors = 0;
 
 	sr1_errors = (sr1 & ( /* Invert CTS? - it'll be high if not clear to send - not sure about this */
-		ECONET_GPIO_S1_UNDERRUN	|
-		ECONET_GPIO_S1_CTS /* Collision */
+		ECONET_GPIO_S1_UNDERRUN	
+		// Unclear this is actually needed. | ECONET_GPIO_S1_CTS /* Collision */
 		));
 
 	sr2_errors = sr2 & (
@@ -403,21 +406,37 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 				/* Fall throughs deliberate - for testing */
 
 				case EA_W_READFIRSTACK:
-					if (p->ptr > 3) break; /* Otherwise fall through - because it means we got idle before a 4-byte frame was received */
-				case EA_W_WRITESCOUT: /* Not listening - if it's a data packet or 2-way immediate (could be broadcast) */
 					{
-						printk (KERN_INFO "econet-fast: Idle detected after writing scout\n");
-						if (econet_data->aun_packet.p.aun_ttype == ECONET_AUN_DATA || econet_data->aun_packet.p.aun_ttype == ECONET_AUN_IMM)
+						if (p->ptr < 4)
 						{
 							econet_set_aunstate(EA_IDLE);
 							econet_set_tx_status(ECONET_TX_NOTLISTENING);
-							printk (KERN_INFO "econet-data: Resetting sate machine after idle on writing scout\n");
+							printk (KERN_INFO "econet-data: Resetting state machine after idle on writing scout\n");
+							return EWAS_DATA_WRITE;
+						}
+					} break;
+				case EA_W_WRITESCOUT: /* Not listening - if it's a data packet or 2-way immediate (could be broadcast) */
+					{
+						printk (KERN_INFO "econet-fast: Idle detected after writing scout\n");
+						if (econet_data->aun_packet_tx.p.aun_ttype == ECONET_AUN_DATA || econet_data->aun_packet_tx.p.aun_ttype == ECONET_AUN_IMM)
+						{
+							econet_set_aunstate(EA_IDLE);
+							econet_set_tx_status(ECONET_TX_NOTLISTENING);
+							printk (KERN_INFO "econet-data: Resetting state machine after idle on writing scout\n");
 							return EWAS_DATA_WRITE;
 						}
 						/* If it was a broadcast or an immediate reply, the receipt of the TX frame below will trigger a return to idle */
 					} break;
 				case EA_W_READFINALACK:
-					if (p->ptr > 3) break; /* Otherwise fall through - because it means we got idle before a 4-byte frame was received */
+					{
+						if (p->ptr < 4)
+						{
+							econet_set_aunstate(EA_IDLE);
+							econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
+							printk (KERN_INFO "econet-data: Resetting state machine after idle on writing scout\n");
+							return EWAS_DATA_WRITE;
+						}
+					} break;
 				case EA_W_WRITEDATA: /* Net error */
 					{
 							econet_set_aunstate(EA_IDLE);
@@ -476,14 +495,14 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			if (econet_workqueue_correct_reply_source(p))
 				is_immrep = 1;
 
-			seq = econet_data->aun_packet.p.seq; /* Preserve since we are about to overwrite aun_packet */
+			seq = econet_data->aun_packet_tx.p.seq; /* Preserve since we are about to overwrite aun_packet */
 
 			if (is_immrep)
 			{
-				printk (KERN_ERR "econet-fast: Immediate 2-way reply found from %d.%d\n", p->data[1], p->data[0]);
+				// printk (KERN_ERR "econet-fast: Immediate 2-way reply found from %d.%d\n", p->data[1], p->data[0]);
 				econet_workqueue_copy_new_packet(p, aun_state);
-				econet_data->aun_packet.p.aun_ttype = ECONET_AUN_IMMREP;
-				econet_data->aun_packet.p.seq = seq; /* Restore */
+				econet_data->aun_packet_rx.p.aun_ttype = ECONET_AUN_IMMREP;
+				econet_data->aun_packet_rx.p.seq = seq; /* Restore */
 				ECONET_NOT_BUSY();
 				return EWAS_DATA_READ;
 			}
@@ -592,12 +611,12 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 				/* How much data didn't go on the scout? */
 
 				data_balance =
-					econet_data->aun_packet_len
-				-	econet_data->aun_packet.p.padding;
+					econet_data->aun_packet_len_tx
+				-	econet_data->aun_packet_tx.p.padding;
 
 				if (data_balance < 1 || data_balance > ECONET_MAX_PACKET_SIZE)
 				{
-					printk (KERN_ERR "econet-fast: Unlawful TX frame size (0x%04X)! (aun_packet_len = 0x%04X, padding = 0x%02X\n", data_balance, econet_data->aun_packet_len, econet_data->aun_packet.p.padding);
+					printk (KERN_ERR "econet-fast: Unlawful TX frame size (0x%04X)! (aun_packet_len_tx = 0x%04X, padding = 0x%02X\n", data_balance, econet_data->aun_packet_len_tx, econet_data->aun_packet_tx.p.padding);
 					/* Abort */
 					ECONET_NOT_BUSY();
 					econet_set_tx_status (ECONET_TX_INVALID);
@@ -636,7 +655,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 				 */
 
 				memcpy (&(econet_data->txp->data[4]),
-					&(econet_data->aun_packet.p.data[econet_data->aun_packet.p.padding]),
+					&(econet_data->aun_packet_tx.p.data[econet_data->aun_packet_tx.p.padding]),
 					data_balance);
 				
 				econet_data->txp->txlen = data_balance + 4;
@@ -649,7 +668,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 					econet_set_aunstate(EA_IDLE);
 					econet_set_tx_status(seized);
 					econet_set_read_mode();
-					return EWAS_DATA_WRITE;
+					return EWAS_DATA_WRITE; /* Notify userspace writefd so it can return and report error */
 				}
 
 			}
@@ -664,7 +683,10 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 				 */
 
 				econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
-				return econet_workqueue_respond_new_packet(p, sr1_errors, sr2_errors) | EWAS_DATA_WRITE;
+				/* Old module used to treat non-ack frames received when it wanted an ack as just a
+				 * new frame. Not sure we want to do that now we track RX IDLE properly. 
+				 */
+				return /* econet_workqueue_respond_new_packet(p, sr1_errors, sr2_errors) | */ EWAS_DATA_WRITE;
 			}
 
 		}
@@ -755,21 +777,21 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 				/* The IDLE routine will have started building an AUN packet with the original src/dst pairs in it */
 				if (
-					__SRCSTN(p) == __AUN_SRCSTN(econet_data->aun_packet)
-				&& 	__SRCNET(p) == __AUN_SRCNET(econet_data->aun_packet)
-				&&	__DSTSTN(p) == __AUN_DSTSTN(econet_data->aun_packet)
-				&& 	__DSTNET(p) == __AUN_DSTNET(econet_data->aun_packet)
+					__SRCSTN(p) == __AUN_SRCSTN(econet_data->aun_packet_rx)
+				&& 	__SRCNET(p) == __AUN_SRCNET(econet_data->aun_packet_rx)
+				&&	__DSTSTN(p) == __AUN_DSTSTN(econet_data->aun_packet_rx)
+				&& 	__DSTNET(p) == __AUN_DSTNET(econet_data->aun_packet_rx)
 				)
 				{
 					/* Copy remaining data to AUN */
 
-					memcpy (&(econet_data->aun_packet.p.data[econet_data->aun_packet.p.padding]),
+					memcpy (&(econet_data->aun_packet_rx.p.data[econet_data->aun_packet_rx.p.padding]),
 						&(p->data[4]),
 						p->ptr);
 
 					/* Update aun_packet_len */
 
-					econet_data->aun_packet_len += p->ptr;
+					econet_data->aun_packet_len_rx += p->ptr;
 
 					econet_set_aunstate(EA_R_WRITEFINALACK);
 
@@ -810,10 +832,10 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 						__DSTNET(p),
 						__DSTSTN(p),
 						p->ptr,
-						__AUN_SRCNET(econet_data->aun_packet),
-						__AUN_SRCSTN(econet_data->aun_packet),
-						__AUN_DSTNET(econet_data->aun_packet),
-						__AUN_DSTSTN(econet_data->aun_packet)
+						__AUN_SRCNET(econet_data->aun_packet_rx),
+						__AUN_SRCSTN(econet_data->aun_packet_rx),
+						__AUN_DSTNET(econet_data->aun_packet_rx),
+						__AUN_DSTSTN(econet_data->aun_packet_rx)
 					       );
 
 					return econet_workqueue_respond_new_packet(p, sr1_errors, sr2_errors);
@@ -858,11 +880,11 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		{
 			if (p->ptr > 0)
 			{
-				memcpy(&(econet_data->aun_packet),
+				memcpy(&(econet_data->aun_packet_rx),
 					p->data,
 					p->ptr);
 	
-				econet_data->aun_packet_len = p->ptr; /* Total length, not just data, in raw mode */
+				econet_data->aun_packet_len_rx = p->ptr; /* Total length, not just data, in raw mode */
 	
 				return EWAS_DATA_READ;
 			}
@@ -928,7 +950,7 @@ void econet_workqueue_handler (struct work_struct *work)
 		return;
 	}
 	
-	printk (KERN_INFO "econet-fast: workqueue handler invoked with aun_mode = %d, my_work->p = %p, sr1 = %02X, s2 = %02X, ptr = %04x, tx = %1X, txlen = 0x%04X\n", econet_data->aun_mode, my_work->p, my_work->p->sr1, my_work->p->sr2, my_work->p->ptr, my_work->p->tx, my_work->p->txlen);
+	// printk (KERN_INFO "econet-fast: workqueue handler invoked with aun_mode = %d, my_work->p = %p, sr1 = %02X, s2 = %02X, ptr = %04x, tx = %1X, txlen = 0x%04X\n", econet_data->aun_mode, my_work->p, my_work->p->sr1, my_work->p->sr2, my_work->p->ptr, my_work->p->tx, my_work->p->txlen);
 
 	statemachine_response = econet_workqueue_aun_statemachine(p);
 
@@ -958,12 +980,12 @@ void econet_workqueue_handler (struct work_struct *work)
 			 * overall length in raw mode
 			 */
 
-			// printk (KERN_INFO "econet-fast: Attempting to put packet length 0x%04X on user fifo\n", econet_data->aun_packet_len + (econet_data->aun_mode ? 12 : 0));
+			// printk (KERN_INFO "econet-fast: Attempting to put packet length 0x%04X on user fifo\n", econet_data->aun_packet_len_rx + (econet_data->aun_mode ? 12 : 0));
 
-			if (!kfifo_in(&(econet_data->readfd_fifo), &(econet_data->aun_packet), econet_data->aun_packet_len + (econet_data->aun_mode ? 12 : 0)))
+			if (!kfifo_in(&(econet_data->readfd_fifo), &(econet_data->aun_packet_rx), econet_data->aun_packet_len_rx + (econet_data->aun_mode ? 12 : 0)))
 			{
 				printk (KERN_ERR "econet-fast: Error putting packet onto RX FIFO, length 0x%04X, %s mode\n",
-							econet_data->aun_packet_len,
+							econet_data->aun_packet_len_rx,
 							econet_data->aun_mode ? "AUN" : "RAW");
 			}
 			else

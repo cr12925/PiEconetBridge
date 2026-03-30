@@ -89,10 +89,10 @@ u8 econet_writefd_transmit(void)
 
 		/* Check for invalid AUN packet types. */
 
-		if (	econet_data->aun_packet.p.aun_ttype > 6 
-			|| econet_data->aun_packet.p.aun_ttype == 0 
-			|| econet_data->aun_packet.p.aun_ttype == 3 
-			|| econet_data->aun_packet.p.aun_ttype == 4
+		if (	econet_data->aun_packet_tx.p.aun_ttype > 6 
+			|| econet_data->aun_packet_tx.p.aun_ttype == 0 
+			|| econet_data->aun_packet_tx.p.aun_ttype == 3 
+			|| econet_data->aun_packet_tx.p.aun_ttype == 4
 	   	)
 		{
 			econet_set_tx_status (ECONET_TX_INVALID); /* Can't put that packet type on the wire */
@@ -101,24 +101,24 @@ u8 econet_writefd_transmit(void)
 
 		/* Is it a 4-way transaction we're starting ? */
 
-		else if (__IS_AUN_FOURWAY(econet_data->aun_packet))
+		else if (__IS_AUN_FOURWAY(econet_data->aun_packet_tx))
 		{
 			/* We cheat and put the number of extra data bytes in the scout into the AUN padding field 
 		 	* which saves the IRQ routine calculating it all the time
 		 	*/
 	
-			scout_data_len = __AUN_SCOUTBYTES(econet_data->aun_packet);
+			scout_data_len = __AUN_SCOUTBYTES(econet_data->aun_packet_tx);
 
-			if (!econet_data->aun_packet_len || scout_data_len >= econet_data->aun_packet_len)
+			if (!econet_data->aun_packet_len_tx || scout_data_len >= econet_data->aun_packet_len_tx)
 			{
 				/* There is either insufficient data to make a valid scout, or there would be no data left to go in the data phase, so this must be an invalid packet */
 				econet_set_tx_status (ECONET_TX_INSUFFICIENTDATA); 
 				return 0;
 			}
 		}
-		else	scout_data_len = econet_data->aun_packet_len; /* Send all the data - so for 2-way immediates and broadcasts */
+		else	scout_data_len = econet_data->aun_packet_len_tx; /* Send all the data - so for 2-way immediates and broadcasts */
 	
-		econet_data->aun_packet.p.padding = scout_data_len; /* Used later when the AUN statemachine receives a first ACK - enables it to work out how much storage to allocate for the subsequent data frame */
+		econet_data->aun_packet_tx.p.padding = scout_data_len; /* Used later when the AUN statemachine receives a first ACK - enables it to work out how much storage to allocate for the subsequent data frame */
 
 		/* Copy packet data */
 
@@ -133,20 +133,20 @@ u8 econet_writefd_transmit(void)
 
 		/* First, copy addressing */
 
-		memcpy(&(econet_data->txp->data), &(econet_data->aun_packet.p.dststn), 4);
+		memcpy(&(econet_data->txp->data), &(econet_data->aun_packet_tx.p.dststn), 4);
 
-		if (econet_data->aun_packet.p.aun_ttype == ECONET_AUN_IMMREP)
+		if (econet_data->aun_packet_tx.p.aun_ttype == ECONET_AUN_IMMREP)
 			data_position = 4; /* No port/ctrl on an immrep */
 
 		/* Then port & ctrl - these get overwritten below if it's an immrep */
 
-		__PORT(econet_data->txp) = econet_data->aun_packet.p.port;
-		__CTRL(econet_data->txp) = econet_data->aun_packet.p.ctrl | 0x80; /* May as well set high bit here */
+		__PORT(econet_data->txp) = econet_data->aun_packet_tx.p.port;
+		__CTRL(econet_data->txp) = econet_data->aun_packet_tx.p.ctrl | 0x80; /* May as well set high bit here */
 
 		/* Then scout data */
 
 		if (scout_data_len > 0)
-			memcpy(&(econet_data->txp->data[data_position]), &(econet_data->aun_packet.p.data), scout_data_len);
+			memcpy(&(econet_data->txp->data[data_position]), &(econet_data->aun_packet_tx.p.data), scout_data_len);
 
 		/* Tell the IRQ routine how many bytes to send */
 
@@ -160,7 +160,7 @@ u8 econet_writefd_transmit(void)
 		 * or 4-way state.
 		 */
 
-		if (econet_data->aun_packet.p.aun_ttype != ECONET_AUN_IMMREP) /* Only change state if not an immediate reply, because we'll be in EA_I_WRITEREPLY if that's the case */
+		if (econet_data->aun_packet_tx.p.aun_ttype != ECONET_AUN_IMMREP) /* Only change state if not an immediate reply, because we'll be in EA_I_WRITEREPLY if that's the case */
 			econet_set_aunstate (EA_W_WRITESCOUT); 
 	}
 	else /* Not AUN mode - i.e. raw */
@@ -171,7 +171,7 @@ u8 econet_writefd_transmit(void)
 		 * just copy the lot
 		 */
 
-		econet_data->txp = emalloc(ECONET_PACKET_SIZE(econet_data->aun_packet_len));
+		econet_data->txp = emalloc(ECONET_PACKET_SIZE(econet_data->aun_packet_len_tx));
 
 		if (!econet_data->txp)
 		{
@@ -180,11 +180,11 @@ u8 econet_writefd_transmit(void)
 			return 0;
 		}
 
-		printk (KERN_INFO "econet-fast: Copying 0x%04X bytes into txp->data\n", econet_data->aun_packet_len);
+		printk (KERN_INFO "econet-fast: Copying 0x%04X bytes into txp->data\n", econet_data->aun_packet_len_tx);
 
-		memcpy(&(econet_data->txp->data), &(econet_data->aun_packet.raw), econet_data->aun_packet_len);
+		memcpy(&(econet_data->txp->data), &(econet_data->aun_packet_tx.raw), econet_data->aun_packet_len_tx);
 
-		econet_data->txp->txlen = econet_data->aun_packet_len;
+		econet_data->txp->txlen = econet_data->aun_packet_len_tx;
 
 	}
 
@@ -196,6 +196,7 @@ u8 econet_writefd_transmit(void)
 
 		econet_set_tx_status(seize_result);
 		devm_kfree(econet_data->module_dev, econet_data->txp);
+		econet_data->txp = NULL;
 
 		ECONET_NOT_BUSY();
 
@@ -258,14 +259,12 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		return -EFAULT;
 	}
 
-	// econet_irq_mode(0); /* Turn IRQs off */
-
 	/* Copy buffer from userspace to aun_packet
 	 * (which is used for raw transmissions as well
 	 */
 
 	if (!access_ok((void __user *) buffer, len) ||
-		copy_from_user(&(econet_data->aun_packet), (void *) buffer, len)
+		copy_from_user(&(econet_data->aun_packet_tx), (void *) buffer, len)
 	   )
 	{
 		printk (KERN_INFO "econet-fast: Unable to copy packet from userspace\n");
@@ -276,7 +275,20 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	 * otherwise whole length
 	 */
 
-	econet_data->aun_packet_len = len - (econet_data->aun_mode ? 12 : 0);
+	econet_data->aun_packet_len_tx = len - (econet_data->aun_mode ? 12 : 0);
+
+	if (econet_data->aun_mode && econet_aunstate_stale() && econet_get_aunstate() != EA_IDLE)
+	{
+		econet_set_aunstate(EA_IDLE);
+		econet_set_read_mode();
+		if (econet_data->txp) /* Free if not NULL */
+		{
+			devm_kfree(econet_data->module_dev, econet_data->txp);
+			econet_data->txp = NULL;
+		}
+		printk (KERN_ERR "econet-fast: AUN State appears to be stale - reset to EA_IDLE\n");
+	
+	}
 
 	if (!econet_writefd_transmit()) /* Sort out the packet data to transmit */
 	{

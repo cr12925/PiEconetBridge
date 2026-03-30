@@ -392,6 +392,10 @@ void econet_set_read_mode(void)
  * Note, though, that in this context ECONET_TX_SUCCESS does *not* mean the packet has been
  * transmitted, obvs....
  *
+ * Do NOT call this routine until econet->txp has a frame ready to tx on the wire otherwise
+ * an IRQ for tx will be generated and there may be invalid data read from that structure
+ * by the IRQ handler.
+ *
  */
 
 u8 econet_seize(void)
@@ -415,6 +419,10 @@ u8 econet_seize(void)
 		econet_set_read_mode();
 		return ECONET_TX_NOCLOCK;
 	}
+
+	/* 20260329 Reset both TX and RX sections */
+
+	econet_write_cr (ECONET_GPIO_CR1, ECONET_GPIO_C1_RX_RESET | ECONET_GPIO_C1_TX_RESET);
 
 	while (seize_error && (outercount++ < 1))
 	{
@@ -445,7 +453,8 @@ u8 econet_seize(void)
 			// printk (KERN_INFO "econet-fast: Line idle after seize attempt\n");
 
 			econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT2); // +RTS
-			econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2); // + (TIE + RX Reset)
+			/* Commented 20260329 - INIT2 does an RX Reset and enables TIE. Let's not turn TIE on just yet */
+			// econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2); // + (TIE + RX Reset)
 
 			/* Check to see if CTS went low */
 
@@ -463,6 +472,7 @@ u8 econet_seize(void)
 	if (!seize_error)
 	{
 		// printk (KERN_INFO "econet-fast: Successful line seize\n");
+		econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2); // + (TIE + RX Reset)
 		econet_set_chipstate(EM_WRITE);
 	}
 	else	
@@ -484,8 +494,14 @@ u8 econet_seize(void)
 void econet_flagfill(void)
 {
 
-	econet_write_cr(ECONET_GPIO_CR1, ECONET_GPIO_C1_RX_DISC | ECONET_GPIO_C1_RX_RESET);
-	econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT2 | ECONET_GPIO_C2_FC); /* FC flag added 20260328 to avoid IRQs during flagfill. Old module din't seem to have the issue! Though its IRQ handler would have complained about an IRQ in that mode, so quite why it coped I don't know. OR we migh want to just turn TX IRQs off? */
+	/* Maybe the EM_FLAGFILL IRQs are an IRQ that was already pending which we then pick up
+	 * next time the IRQ handler is triggered, and think it's an EM_FLAGFILL IRQ even though
+	 * the CR1 setting below turns off TIE. Maybe try a TX_RESET as well - assuming that
+	 * works OK with flag fill?
+	 */
+
+	econet_write_cr(ECONET_GPIO_CR1, ECONET_GPIO_C1_RX_DISC | ECONET_GPIO_C1_RX_RESET); 
+	econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT2); 
 	econet_set_chipstate(EM_FLAGFILL);
 
 }

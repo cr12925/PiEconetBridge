@@ -206,7 +206,7 @@ int econet_probe (struct platform_device *pdev)
 
 	/* 20260326 TEMP */
 
-	econet_data->auntransitionlogs = 1;
+	econet_data->auntransitionlogs = 0;
 	// econet_data->chipstatelogs = 1;
 
 	/* Next set up initial storage for an incoming packet */

@@ -296,8 +296,10 @@ struct __econet_data {
 
 	/* AUN Packet storage - sending AUN data between readfd()/writefd() and the workqueue handler */
 	/* Signalling between writefd() and the workqueue */
-	struct __econet_packet_aun aun_packet;
-	u16 aun_packet_len; /* Number of AUN data bytes inside aun_packet_tx */
+	struct __econet_packet_aun aun_packet_rx;
+	u16 aun_packet_len_rx; /* Number of AUN data bytes inside aun_packet_rx */
+	struct __econet_packet_aun aun_packet_tx;
+	u16 aun_packet_len_tx; /* Number of AUN data bytes inside aun_packet_tx */
 
 	/* Main module state */
 	atomic_t mode; // IRQ handler state machine IDLEINIT -> IDLE -> (READ / WRITE_START); WRITE_START -> WRITE -> WRITE_WAIT or IDLE. Only IRQ space writes to this.

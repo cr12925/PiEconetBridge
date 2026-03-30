@@ -137,6 +137,8 @@ void econet_flagfill(void);
 
 #define econet_get_aunstate() atomic_read(&(econet_data->aun_state))
 
+#define econet_aunstate_stale() ((ktime_get_ns() - econet_data->aun_last_statechange) > 3000000000)
+
 #define econet_set_tx_status(x) { \
         atomic_set(&(econet_data->tx_status), (x)); \
 	econet_data->tx_status_valid = 1; }

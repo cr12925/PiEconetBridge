@@ -116,6 +116,7 @@ void econet_irq_to_workqueue(struct __econet_packet **p, u8 sr1, u8 sr2, u8 dir)
 			if (p)
 				devm_kfree (econet_data->module_dev, *p);
 
+
 			devm_kfree(econet_data->module_dev, work);
 
 			printk (KERN_ERR "econet-fast: Unable to put work on work queue!\n");
@@ -131,6 +132,7 @@ void econet_irq_to_workqueue(struct __econet_packet **p, u8 sr1, u8 sr2, u8 dir)
 
 	if (dir == EP_PACKET_RX)
 		*p = devm_kzalloc(econet_data->module_dev, sizeof(struct __econet_packet), GFP_KERNEL);
+	else	econet_data->txp = NULL;
 
 }
 
@@ -398,6 +400,15 @@ irqreturn_t econet_irq(int irq, void *ident)
 		/* Turn off ADLC IRQs */
 		econet_write_cr(ECONET_GPIO_CR1, ECONET_GPIO_C1_TX_RESET | ECONET_GPIO_C1_RX_RESET);
 	}
+	else if (chip_state == EM_FLAGFILL) /* IRQs are supposed to be off - let's make sure thye are */
+	{
+		/* We'll also discontinue RX just in case, and reset RX */
+
+		printk (KERN_INFO "econet-fast: IRQ in EM_FLAGFILL state - ensuring TX IRQs are off\n");
+
+		econet_write_cr(ECONET_GPIO_CR1, ECONET_GPIO_C1_RX_RESET | ECONET_GPIO_C1_RX_DISC);
+		handled = 1;
+	}
 	else if (sr1 & ECONET_GPIO_S1_IRQ)
 	{
 
@@ -407,6 +418,9 @@ irqreturn_t econet_irq(int irq, void *ident)
 			if (chip_state == EM_WRITE_WAIT)
 			{
 				econet_data->pkt_since_idle++; /* We've transmitted a packet - increase our pkt count since idle */
+
+				if (!(sr1 & ECONET_GPIO_S1_TDRA)) /* On this IRQ, we should have FC set. If we don't, let's flag an error for now */
+					printk (KERN_INFO "econet-data: IRQ received in EM_WRITE_WAIT but Frame Complete not set. txp->ptr = 0x%02X, txp->txlen = 0x%02X\n", econet_data->txp->ptr, econet_data->txp->txlen);
 
 				if (
 					(econet_data->pkt_since_idle == 1 && __IS_TWOWAY(econet_data->txp)) /* We've just transmitted a two-way immediate - don't flag fill on the reply */
@@ -431,6 +445,18 @@ irqreturn_t econet_irq(int irq, void *ident)
 				/* reset packet pointer */
 				econet_data->rxp->ptr = 0;
 			}
+			else if ( /* TX-Specific Errors we need to look at */
+					chip_state == EM_WRITE 
+				&&	(sr1 & ECONET_GPIO_S1_UNDERRUN)
+				)
+			{
+				econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX); /* Puts an empty packet into the monitor kfifo, but has the status in it */
+				econet_set_read_mode();
+				econet_set_chipstate(EM_IDLE);
+				chip_state = EM_IDLE;
+				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
+				handled = 1;
+			}
 			else if ( /* Errors we need to clear */
 				(sr1 & (ECONET_GPIO_S1_FLAG))
 				||	(sr2 & (ECONET_GPIO_S2_RX_IDLE))
@@ -452,9 +478,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 					break;
 				case EM_WRITE:
 					econet_irq_write_new(sr1, sr2);
-					handled = 1;
-					break;
-				case EM_FLAGFILL:
 					handled = 1;
 					break;
 				case EM_IDLE:
