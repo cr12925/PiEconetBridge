@@ -31,7 +31,6 @@ extern uint8_t setp_module_init(void *, struct json_object *);
 
 static struct __eb_module_table eb_module_table[] = {
 //	{	"fooserv", 	eb_module_fooserver_init },
-	{	"setpserv",	setp_module_init },
 	{	NULL, NULL }
 };
 
