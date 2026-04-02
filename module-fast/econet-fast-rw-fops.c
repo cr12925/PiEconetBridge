@@ -192,11 +192,15 @@ u8 econet_writefd_transmit(void)
 
 	if ((seize_result = econet_seize()))
 	{
-		printk (KERN_INFO "econet-fast: Line seize failed!\n");
+		printk (KERN_INFO "econet-fast: writefd(): line seize failed!\n");
 
 		econet_set_tx_status(seize_result);
 		devm_kfree(econet_data->module_dev, econet_data->txp);
 		econet_data->txp = NULL;
+
+		/* Put AUN state back to IDLE so that we don't get RX Idles in the state machine during WRITESCOUT */
+
+		econet_set_aunstate(EA_IDLE);
 
 		ECONET_NOT_BUSY();
 

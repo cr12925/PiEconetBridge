@@ -273,11 +273,6 @@ void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 
 	u8	tdra;
 
-	/*
-	if (econet_data->txp->ptr == 0)
-		printk ("econet-fast: IRQ begin tx new frame,  length 0x%04X\n", econet_data->txp->txlen);
-	*/
-
 	if (econet_data->txp->ptr < econet_data->txp->txlen) /* Something left to transmit */
 	{
 		u8	bytes = 0;
@@ -302,7 +297,7 @@ void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 
 			tdra_counter = 0;
 
-			while (tdra_counter++ < 10 && (!tdra)) /* Try 10 times waiting for tdra */
+			while ((bytes == 0) && tdra_counter++ < 10 && (!tdra)) /* Try 10 times waiting for tdra - but only on first byte if in two byte mode */
 			{
 				econet_write_cr(ECONET_GPIO_CR2,
 						ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_CLR_TX_STATUS |
@@ -314,7 +309,7 @@ void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 				tdra = ((sr1 = econet_read_sr(1)) & ECONET_GPIO_S1_TDRA);
 			}
 
-			if (!tdra)
+			if (bytes < 0 && !tdra) /* Only check on first byte if in 2-byte mode */
 			{
 				if (sr1 & ECONET_GPIO_S1_CTS) /* Collision? */
 				{
@@ -450,6 +445,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 				&&	(sr1 & ECONET_GPIO_S1_UNDERRUN)
 				)
 			{
+				printk (KERN_INFO "econet-fast: TX Underrun detected - SR1 = 0x%02X, SR2 = 0x%02X, txp->ptr = 0x%04X, txp->txlen = 0x%04X\n",
+						sr1, sr2, econet_data->txp->ptr, econet_data->txp->txlen);
 				econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX); /* Puts an empty packet into the monitor kfifo, but has the status in it */
 				econet_set_read_mode();
 				econet_set_chipstate(EM_IDLE);

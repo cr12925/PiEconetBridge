@@ -406,8 +406,8 @@ u8 econet_seize(void)
 	if (econet_get_chipstate() == EM_FLAGFILL)
 	{
 		// printk (KERN_INFO "econet-fast: Set EM_WRITE since in flag fill\n");
+		econet_set_chipstate(EM_WRITE); /* Do this before turning IRQs on otherwise IRQ happens in flag fill state! */
 		econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2); // + (TIE + RX Reset)
-		econet_set_chipstate(EM_WRITE);
 		return ECONET_TX_SUCCESS;
 	}
 
@@ -424,11 +424,11 @@ u8 econet_seize(void)
 
 	econet_write_cr (ECONET_GPIO_CR1, ECONET_GPIO_C1_RX_RESET | ECONET_GPIO_C1_TX_RESET);
 
-	while (seize_error && (outercount++ < 1))
+	while (seize_error && (outercount++ < 2))
 	{
 		// printk (KERN_INFO "econet-fast: Line seize attempt %d\n", outercount);
 
-		econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT1);
+		// This gets done in the loop below ? Why do it here too ? econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT1);
 
 		count = 0;
 
@@ -441,7 +441,7 @@ u8 econet_seize(void)
 
 			/* Exponential backoff */
 
-			udelay (count << 2);
+			udelay (count << 1);
 
 			sr2 = econet_read_sr(2);
 		}
@@ -453,7 +453,8 @@ u8 econet_seize(void)
 			// printk (KERN_INFO "econet-fast: Line idle after seize attempt\n");
 
 			econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT2); // +RTS
-			/* Commented 20260329 - INIT2 does an RX Reset and enables TIE. Let's not turn TIE on just yet */
+
+			/* Commented 20260329 - C1_WRITE_INIT2 does an RX Reset and enables TIE. Let's not turn TIE on just yet */
 			// econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2); // + (TIE + RX Reset)
 
 			/* Check to see if CTS went low */
@@ -464,20 +465,22 @@ u8 econet_seize(void)
 			{
 				// printk (KERN_INFO "econet-fast: Clear to send\n");
 				seize_error = ECONET_TX_SUCCESS;
+				break;
 			}
 			else	seize_error = ECONET_TX_JAMMED;
 		}
 	}
 
-	if (!seize_error)
+	// printk (KERN_INFO "econet-fast: Line seize loop exit\n");
+
+	if (!seize_error) /* Seized */
 	{
-		// printk (KERN_INFO "econet-fast: Successful line seize\n");
 		econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2); // + (TIE + RX Reset)
 		econet_set_chipstate(EM_WRITE);
 	}
 	else	
 	{
-		// printk (KERN_INFO "econet-fast: Failed line seize\n");
+		printk (KERN_INFO "econet-fast: Failed line seize - SR1 = 0x%02X, SR2 = 0x%02X\n", sr1, sr2);
 		econet_set_read_mode();
 	}
 

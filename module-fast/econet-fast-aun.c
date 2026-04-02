@@ -215,8 +215,11 @@ u8 econet_workqueue_respond_new_packet(struct __econet_packet *p, u8 sr1_errors,
 		if (econet_data->txp)
 		{
 			u8 seized = 0;
+
 			econet_workqueue_build_ack(econet_data->txp);
-			printk (KERN_INFO "econet-fast: EA_R_WRITEFIRSTACK seizing line\n");
+
+			// printk (KERN_INFO "econet-fast: EA_R_WRITEFIRSTACK seizing line\n");
+
 			if ((seized = econet_seize()))
 			{
 				/* Failed. */
@@ -224,11 +227,13 @@ u8 econet_workqueue_respond_new_packet(struct __econet_packet *p, u8 sr1_errors,
 				econet_set_aunstate(EA_IDLE);
 				econet_set_read_mode();
 			}
-			printk (KERN_INFO "econet-fast: EA_R_WRITEFIRSTACK: Line seized - TX should begin\n");
+
+			// printk (KERN_INFO "econet-fast: EA_R_WRITEFIRSTACK: Line seized - TX should begin\n");
 		}
 		else
 		{
 			econet_set_aunstate(EA_IDLE);
+
 			printk (KERN_ERR "econet-fast: Unable to allocate packet memory for first ACK having received 4-way from %d.%d to %d.%d\n",
 				__SRCNET(p),
 				__SRCSTN(p),
@@ -411,21 +416,30 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 						{
 							econet_set_aunstate(EA_IDLE);
 							econet_set_tx_status(ECONET_TX_NOTLISTENING);
-							printk (KERN_INFO "econet-data: Resetting state machine after idle on writing scout\n");
+							printk (KERN_INFO "econet-fast: Resetting state machine after idle on writing scout\n");
 							return EWAS_DATA_WRITE;
 						}
 					} break;
 				case EA_W_WRITESCOUT: /* Not listening - if it's a data packet or 2-way immediate (could be broadcast) */
 					{
-						printk (KERN_INFO "econet-fast: Idle detected after writing scout\n");
 						if (econet_data->aun_packet_tx.p.aun_ttype == ECONET_AUN_DATA || econet_data->aun_packet_tx.p.aun_ttype == ECONET_AUN_IMM)
 						{
 							econet_set_aunstate(EA_IDLE);
 							econet_set_tx_status(ECONET_TX_NOTLISTENING);
-							printk (KERN_INFO "econet-data: Resetting state machine after idle on writing scout\n");
+							printk (KERN_INFO "econet-fast: Resetting state machine after idle on writing scout\n");
 							return EWAS_DATA_WRITE;
 						}
+
 						/* If it was a broadcast or an immediate reply, the receipt of the TX frame below will trigger a return to idle */
+
+						/* Which means that if we get Idle during writescout, it's a failed TX - probably line seize failure */
+
+						econet_set_aunstate(EA_IDLE);
+						econet_set_tx_status(ECONET_TX_COLLISION);
+						printk (KERN_INFO "econet-fast: RX Idle during Scout write - likely collision. Returning to idle.\n");
+						return EWAS_DATA_WRITE;
+
+						
 					} break;
 				case EA_W_READFINALACK:
 					{
@@ -433,7 +447,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 						{
 							econet_set_aunstate(EA_IDLE);
 							econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
-							printk (KERN_INFO "econet-data: Resetting state machine after idle on writing scout\n");
+							printk (KERN_INFO "econet-fast: Resetting state machine after idle on writing scout\n");
 							return EWAS_DATA_WRITE;
 						}
 					} break;
@@ -606,8 +620,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 				u16	data_balance = 0;
 				u8	seized = 0;
 
-				econet_set_aunstate(EA_W_WRITEDATA);
-
 				/* How much data didn't go on the scout? */
 
 				data_balance =
@@ -660,7 +672,11 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 				
 				econet_data->txp->txlen = data_balance + 4;
 
-				if ((seized = econet_seize()))
+				// printk (KERN_INFO "econet-fast: Move to EA_W_WRITEDATA; chip state is %d\n", econet_get_chipstate());
+
+				econet_set_aunstate(EA_W_WRITEDATA);
+
+				if ((seized = econet_seize())) /* NB Kernel module should have put us in flag fill */
 				{
 					/* Failed. */
 					printk (KERN_ERR "econet-fast: Failed to seize line for 4-way data phase: frame length 0x%04X\n", p->txlen);
@@ -682,6 +698,12 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 				 * stage.
 				 */
 
+				printk (KERN_ERR "econet-fast: 4-way TX begun and first ACK expected from %d.%d but received from %d.%d!\n",
+						__AUN_DSTNET(econet_data->aun_packet_tx),
+						__AUN_DSTSTN(econet_data->aun_packet_tx),
+						__SRCNET(p),
+						__SRCSTN(p)
+				       );
 				econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
 				/* Old module used to treat non-ack frames received when it wanted an ack as just a
 				 * new frame. Not sure we want to do that now we track RX IDLE properly. 
