@@ -285,7 +285,7 @@ void main(int argc, char **argv)
 
 	source = destination = 0;
 
-	p_continue = p_halt = p_mpeek, p_rpeek = 0;
+	p_continue = p_halt = p_mpeek = p_rpeek = 0;
 	mem_start = mem_end = 0;
 
 	while ((opt = getopt(argc, argv, "hs:d:pcjmpq:r:")) != -1)
