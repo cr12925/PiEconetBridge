@@ -1,0 +1,1 @@
+SUBSYSTEM=="econetgpio", KERNEL=="econet-gpio0", SYMLINK+="econet-gpio"
