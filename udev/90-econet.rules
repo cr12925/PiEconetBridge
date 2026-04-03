@@ -1,1 +1,2 @@
 KERNEL=="econet-gpio", GROUP="econet", MODE="0660"
+KERNEL=="econet-monitor", GROUP="econet", MODE="0660"
