@@ -24,6 +24,7 @@
 	#include <stdint.h>
 	#define u8 uint8_t
 	#define u16 uint16_t
+	#define u32 uint32_t
 #endif
 
 /* This is the map of stations we want to handle traffic for that
@@ -58,6 +59,7 @@ struct __econet_packet {
 	u8	sr1, sr2; /* SR1, SR2 on completion of transaction */
 	u8	tx; /* 0 0=RX packet, 1=TX packet */
 	u8	tx_flags; /* See below */
+	u32	device; /* Device number 0 - 7 - which to tx on; which this packet was received on. u32 to preserve 4-byte boundary, but can be split later */
 	char data[ECONET_MAX_PACKET_SIZE];
 };
 
