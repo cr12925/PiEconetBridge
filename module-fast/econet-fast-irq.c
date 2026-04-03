@@ -459,6 +459,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 				||	(sr2 & (ECONET_GPIO_S2_RX_IDLE))
 				)
 			{
+				printk (KERN_INFO "econet-fast: RX Idle received at rxptr=0x%04X", econet_data->rxp->ptr);
 				econet_irq_to_workqueue(&(econet_data->rxp), sr1, sr2, EP_PACKET_RX); /* Puts an empty packet into the monitor kfifo, but has the status in it */
 				econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Just clear status
 				econet_set_chipstate(EM_IDLE);

@@ -274,7 +274,9 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 	u8	sr1 = p->sr1, sr2 = p->sr2;
 
-	u8 sr1_errors = 0, sr2_errors = 0;
+	u8 	sr1_errors = 0, sr2_errors = 0;
+
+	u8 	aun_state = econet_get_aunstate();
 
 	sr1_errors = (sr1 & ( /* Invert CTS? - it'll be high if not clear to send - not sure about this */
 		ECONET_GPIO_S1_UNDERRUN	
@@ -303,15 +305,21 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 	if (p->ptr < 4 && !(p->ptr == 0 && p->tx == EP_PACKET_RX)) /* Ignore "runts" which are just signalling packets */
 	{
-		printk (KERN_ERR "econet-fast: Runt %s packet length 0x%02X received by workqueue from %3d.%3d to %3d.%3d, sr1 = 0x%02X, sr2 = 0x%02X\n",
+		u8 	count;
+		printk (KERN_ERR "econet-fast: Runt %s packet length 0x%02X received by workqueue from %3d.%3d to %3d.%3d, sr1 = 0x%02X, sr2 = 0x%02X, aun state = 0x%02X\n",
 				p->tx == EP_PACKET_RX ? "RX" : "TX",
 				p->ptr,
 				__SRCNET(p),
 				__SRCSTN(p),
 				__DSTNET(p),
 				__DSTSTN(p),
-				p->sr1, p->sr2
+				p->sr1, p->sr2,
+				aun_state
 		       );
+
+		for (count = 0; count <= (p->ptr > 3 ? 3 : p->ptr); count++)
+			printk (KERN_ERR "econet-fast: Byte %d = 0x%02X\n", count, p->data[count]);
+
 		econet_set_aunstate(EA_IDLE); /* Don't need to check if in aun-mode - means nothing if we're not */
 		return EWAS_NOTHING;
 	}
@@ -319,7 +327,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 	if (econet_data->aun_mode) /* Only change state if in AUN mode, otherwise just deal with raw packet */
 	{
 
-		u8 aun_state = econet_get_aunstate();
 
 		if (p->tx == EP_PACKET_TX && __AUN_TX_OPERATION(aun_state)) /* deal with tx errors */
 		{
