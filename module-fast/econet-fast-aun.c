@@ -723,7 +723,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 				}
 				else
 				{
-					printk (KERN_ERR "econet-fast: Expecting ACK fomr %d.%d but got a longer frame from %d.%d, treating as scout\n",
+					printk (KERN_ERR "econet-fast: Expecting ACK from %d.%d but got a longer frame from %d.%d, treating as scout\n",
 						__AUN_DSTNET(econet_data->aun_packet_tx),
 						__AUN_DSTSTN(econet_data->aun_packet_tx),
 						__SRCNET(p),

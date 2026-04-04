@@ -388,6 +388,13 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 	sr2 = (sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
 
+	if (!(sr1 & ECONET_GPIO_S1_IRQ)) /* Read it again in case we've read it too quickly! */
+	{
+		sr1 = econet_read_sr(1);
+
+		sr2 = (sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
+	}
+	
 	chip_state = econet_get_chipstate();
 
 	if (chip_state == EM_TEST)
