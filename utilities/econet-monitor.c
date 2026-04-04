@@ -335,7 +335,12 @@ void econet_portdecode (struct __econet_packet *p, uint8_t port, uint8_t ctrl)
 
 			switch (ctrl)
 			{
-				case 0x80: printf ("reset from net %d", p->data[6]); break;
+				case 0x80: 
+				{
+					if (!not_idle)
+						printf ("reset from net %d", p->data[6]); 
+					else	printf ("what/is net reply for net %d", p->data[4]);
+				} break;
 				case 0x81: 
 				{
 					uint8_t count = 6;
