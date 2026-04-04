@@ -499,15 +499,9 @@ u8 econet_seize(void)
 void econet_flagfill(void)
 {
 
-	/* Maybe the EM_FLAGFILL IRQs are an IRQ that was already pending which we then pick up
-	 * next time the IRQ handler is triggered, and think it's an EM_FLAGFILL IRQ even though
-	 * the CR1 setting below turns off TIE. Maybe try a TX_RESET as well - assuming that
-	 * works OK with flag fill?
-	 */
-
 	econet_write_cr(ECONET_GPIO_CR1, ECONET_GPIO_C1_RX_DISC | ECONET_GPIO_C1_RX_RESET); 
-	econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT2); 
 	econet_set_chipstate(EM_FLAGFILL);
+	econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT2); 
 
 }
 
