@@ -290,42 +290,43 @@ void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 				if (sr1 & ECONET_GPIO_S1_S2RQ) { sr2 = econet_read_sr(2); } else sr2 = 0;
 			}
 
-			tdra = (sr1 & ECONET_GPIO_S1_TDRA);
-
-			tdra_counter = 0;
-
-			while ((bytes == 0) && tdra_counter++ < 10 && (!tdra)) /* Try 10 times waiting for tdra - but only on first byte if in two byte mode */
+			if (bytes == 0)
 			{
-				econet_write_cr(ECONET_GPIO_CR2,
+				tdra = (sr1 & ECONET_GPIO_S1_TDRA);
+	
+				tdra_counter = 0;
+
+				while (tdra_counter++ < 10 && (!tdra)) /* Try 10 times waiting for tdra - but only on first byte if in two byte mode */
+				{
+					econet_write_cr(ECONET_GPIO_CR2,
 						ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_CLR_TX_STATUS |
 						ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE |
 						(econet_data->twobytemode) ? ECONET_GPIO_C2_2BYTES : 0);
 
-				udelay (10);
-
-				tdra = ((sr1 = econet_read_sr(1)) & ECONET_GPIO_S1_TDRA);
-			}
-
-			if (bytes == 0 && !tdra) /* Only check on first byte if in 2-byte mode */
-			{
-				if (sr1 & ECONET_GPIO_S1_CTS) /* Collision? */
-				{
-					if (econet_data->extralogs) printk (KERN_INFO "econet-fast: Collision: SR1 = 0x%02X, SR2 = 0x%02X, TX ptr = 0x%04X - TX aborted\n",
-							sr1,
-							(sr2 = econet_read_sr(2)),
-							econet_data->txp->ptr);
-					econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
-				}
-				else
-				{
-					if (econet_data->extralogs) printk (KERN_INFO "econet-fast: TDRA Unavailable: SR1 = 0x%02X, SR2 = 0x%02X, TX ptr = 0x%04X - TX aborted\n",
-							sr1,
-							(sr2 = econet_read_sr(2)),
-							econet_data->txp->ptr);
-					econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
+					tdra = ((sr1 = econet_read_sr(1)) & ECONET_GPIO_S1_TDRA);
 				}
 
-				return;
+				if (!tdra) /* Only check on first byte if in 2-byte mode */
+				{
+					if (sr1 & ECONET_GPIO_S1_CTS) /* Collision? */
+					{
+						if (econet_data->extralogs) printk (KERN_INFO "econet-fast: Collision: SR1 = 0x%02X, SR2 = 0x%02X, TX ptr = 0x%04X - TX aborted\n",
+								sr1,
+								(sr2 = econet_read_sr(2)),
+								econet_data->txp->ptr);
+						econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
+					}
+					else
+					{
+						if (econet_data->extralogs) printk (KERN_INFO "econet-fast: TDRA Unavailable: SR1 = 0x%02X, SR2 = 0x%02X, TX ptr = 0x%04X - TX aborted\n",
+								sr1,
+								(sr2 = econet_read_sr(2)),
+								econet_data->txp->ptr);
+						econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
+					}
+	
+					return;
+				}
 			}
 
 			if (sr2 & ECONET_GPIO_S2_DCD) /* No clock */
@@ -357,6 +358,7 @@ void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 			}
 
 			bytes++;
+
 		}
 	}
 
