@@ -149,7 +149,7 @@ void econet_workqueue_handler (struct work_struct *);
  * Some variables in the sources
  */
 
-extern unsigned char econet_stations[8192];
+// extern unsigned char econet_stations[8192];
 extern u8 sr1, sr2, econet_class_initialized, econet_device_initialized;
 extern u32 gpioset_value;
 extern void __iomem *GPIO_PORT;
@@ -257,6 +257,8 @@ enum econet_gpio_pin_index {
         EGP_READLED,
         EGP_WRITELED };
 
+#define econet_stations	(econet_data->station_map)
+
 /* Kernel module state */
 
 struct __econet_data {
@@ -284,7 +286,6 @@ struct __econet_data {
 	u8 readfd_fifo_initialized;
 
 	/* Econet monitor device */
-
 	struct device *monitor_dev;
 	struct cdev monitor_c_dev;
 	int monitor_major;
@@ -373,6 +374,8 @@ struct __econet_data {
 
 	struct __econet_packet *txp;
 
+	/* Station map */
+	u8	station_map[8192];
 };
 
 /* Macro to calculate mem allocation needed for a packet with n bytes in it */

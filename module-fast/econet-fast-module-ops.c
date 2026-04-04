@@ -562,7 +562,7 @@ int econet_probe (struct platform_device *pdev)
 		 *
 		 */
 
-		printk (KERN_INFO "econet-fast: Setting gpio4 ADLC clock (GPCLK0) to %dHz\n", gpio4clk_rate);
+		printk (KERN_INFO "econet-fast: Setting gpio4 ADLC clock (GPCLK0) to %dkHz\n", gpio4clk_rate/1000);
 	
 		/* 
 		 * Set the rate & enable clock.

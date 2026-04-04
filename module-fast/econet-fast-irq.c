@@ -202,9 +202,6 @@ void econet_irq_read_new (u8 i_sr1, u8 i_sr2)
 			)
 		)
 		{
-			//printk (KERN_INFO "econet-fast: FLAG filling\n");
-
-			// 20260329 DO WE NEED ECONET_RX_CLEARDOWN HERE? (The old module does it)
 			econet_flagfill();
 		}
 		else {
@@ -249,7 +246,7 @@ void econet_irq_read_new (u8 i_sr1, u8 i_sr2)
 			printk (KERN_INFO "econet-fast: No clock during RX at ptr = %04X", econet_data->rxp->ptr);
 		if (sr2 & ECONET_GPIO_S2_OVERRUN)
 			printk (KERN_INFO "econet-fast: RX Overrun at ptr = %04X", econet_data->rxp->ptr);
-		if (sr2 & ECONET_GPIO_S2_RX_IDLE)
+		if ((sr2 & ECONET_GPIO_S2_RX_IDLE) && (econet_data->rxp->ptr != 0))
 			printk (KERN_INFO "econet-fast: RX Idle received during frame RX at ptr = %04X", econet_data->rxp->ptr);
 
 		econet_discontinue(); /* Discontinue unless valid frame or just an Idle IRQ */
@@ -309,7 +306,7 @@ void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 				tdra = ((sr1 = econet_read_sr(1)) & ECONET_GPIO_S1_TDRA);
 			}
 
-			if (bytes < 0 && !tdra) /* Only check on first byte if in 2-byte mode */
+			if (bytes == 0 && !tdra) /* Only check on first byte if in 2-byte mode */
 			{
 				if (sr1 & ECONET_GPIO_S1_CTS) /* Collision? */
 				{
@@ -459,7 +456,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 				||	(sr2 & (ECONET_GPIO_S2_RX_IDLE))
 				)
 			{
-				printk (KERN_INFO "econet-fast: RX Idle received at rxptr=0x%04X", econet_data->rxp->ptr);
+				if (econet_data->rxp->ptr > 0)
+					printk (KERN_INFO "econet-fast: RX Idle received at rxptr=0x%04X", econet_data->rxp->ptr);
 				econet_irq_to_workqueue(&(econet_data->rxp), sr1, sr2, EP_PACKET_RX); /* Puts an empty packet into the monitor kfifo, but has the status in it */
 				econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Just clear status
 				econet_set_chipstate(EM_IDLE);

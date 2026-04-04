@@ -34,7 +34,9 @@ unsigned long tx_packets;
  *
  */
 
+/* Moved to econet_data
 unsigned char econet_stations[8192];
+*/
 
 /* 
  * Buffers to hold packets to be tx'd,

@@ -283,14 +283,18 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	if (econet_data->aun_mode && econet_aunstate_stale() && econet_get_aunstate() != EA_IDLE)
 	{
+		u8	state = econet_get_aunstate();
+
 		econet_set_aunstate(EA_IDLE);
 		econet_set_read_mode();
+
 		if (econet_data->txp) /* Free if not NULL */
 		{
 			devm_kfree(econet_data->module_dev, econet_data->txp);
 			econet_data->txp = NULL;
 		}
-		printk (KERN_ERR "econet-fast: AUN State appears to be stale - reset to EA_IDLE\n");
+
+		printk (KERN_ERR "econet-fast: AUN State appears to be stale - reset to EA_IDLE from 0x%02X\n", state);
 	
 	}
 

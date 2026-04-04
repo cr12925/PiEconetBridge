@@ -125,6 +125,11 @@ inline void econet_write_cr(unsigned short r, unsigned char d)
 	gpioval = (r << 8) | d; // RnW = 0 for write
 	gpiod_set_array_value (11, data_desc_array, NULL, &gpioval); // 11 because the address & RnW are in 8,9,10
 
+	// Enable nCS - Tell the ADLC we want to talk to it
+	
+	econet_set_cs(ECONET_GPIO_CS_ON);
+
+
 #else
 	// Put that lot on the GPIO
 	iowrite32(gpioval, NGPSET0);
@@ -138,22 +143,23 @@ inline void econet_write_cr(unsigned short r, unsigned char d)
 		econet_data->current_dir = ECONET_GPIO_WRITE;
 	}
 
-	barrier();
-#endif
-
 	// Enable nCS - Tell the ADLC we want to talk to it
 	
 	econet_set_cs(ECONET_GPIO_CS_ON);
 
+	barrier();
+#endif
+
 #ifndef ECONET_GPIO_NEW
 	// If v1 hardware, wait until we know CS has reached the ADLC
+
 	if (econet_data->hwver < 2)
 	{
 		econet_wait_pin_low(ECONET_GPIO_PIN_CSRETURN, (ECONET_GPIO_CLOCK_DUTY_CYCLE));
 	}
-#endif
 
 	barrier(); // Operates for both v1 & v2 hardware
+#endif
 
 	// Disable nCS again
 	
@@ -251,10 +257,6 @@ inline unsigned char econet_read_sr(unsigned short r)
 	iowrite32(gpioval, NGPSET0);
 	iowrite32((~gpioval) & gpiomask, NGPCLR0);
 	
-	// Shouldn't need a barrier here because apparently iowrite32() has one in it.
-
-	//barrier(); // Shouldn't need this, but it might allow the ADLC to settle after we've put the address & RW signals on it
-	//ndelay(100); // 20251127 Test - see if this helps
 
 #endif
 
@@ -275,16 +277,16 @@ inline unsigned char econet_read_sr(unsigned short r)
 #endif
 		barrier();
 
+	ndelay(5); 
+
 	/* Finish with ADLC */
 
 	econet_set_cs(ECONET_GPIO_CS_OFF);	
 
-	// 20251127 Shouldn't be required: barrier();
-
 #ifndef ECONET_GPIO_NEW
 	if (econet_data->hwver < 2)
 	{
-		econet_ndelay(100);
+		ndelay(100);
 	}
 	else
 #endif

@@ -101,7 +101,7 @@ void econet_workqueue_copy_new_packet(struct __econet_packet *p, u8 aun_state)
  * to and vice versa
  */
 
-u8 inline econet_workqueue_correct_reply_source(struct __econet_packet *p)
+inline u8 econet_workqueue_correct_reply_source(struct __econet_packet *p)
 {
 
 	u8 ret = 0;
@@ -324,7 +324,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		return EWAS_NOTHING;
 	}
 
-	if (econet_data->aun_mode) /* Only change state if in AUN mode, otherwise just deal with raw packet */
+	if (econet_data->aun_mode && (p->tx == EP_PACKET_TX || (ECONET_DEV_STATION(econet_stations, __DSTNET(p), __DSTSTN(p))))) /* Only change state if in AUN mode, otherwise just deal with raw packet */
 	{
 
 
@@ -423,7 +423,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 						{
 							econet_set_aunstate(EA_IDLE);
 							econet_set_tx_status(ECONET_TX_NOTLISTENING);
-							printk (KERN_INFO "econet-fast: Resetting state machine after idle on writing scout\n");
+							printk (KERN_INFO "econet-fast: Resetting state machine after idle on reading first ACK\n");
 							return EWAS_DATA_WRITE;
 						}
 					} break;
@@ -454,7 +454,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 						{
 							econet_set_aunstate(EA_IDLE);
 							econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
-							printk (KERN_INFO "econet-fast: Resetting state machine after idle on writing scout\n");
+							printk (KERN_INFO "econet-fast: Resetting state machine after idle on reading final ACK\n");
 							return EWAS_DATA_WRITE;
 						}
 					} break;
@@ -705,17 +705,30 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 				 * stage.
 				 */
 
-				printk (KERN_ERR "econet-fast: 4-way TX begun and first ACK expected from %d.%d but received from %d.%d!\n",
+				if (p->ptr == 4)
+					printk (KERN_ERR "econet-fast: 4-way TX begun and first ACK expected from %d.%d (to %d.%d) but received from %d.%d (to %d.%d)!\n",
+						__AUN_DSTNET(econet_data->aun_packet_tx),
+						__AUN_DSTSTN(econet_data->aun_packet_tx),
+						__AUN_SRCNET(econet_data->aun_packet_tx),
+						__AUN_SRCSTN(econet_data->aun_packet_tx),
+						__SRCNET(p),
+						__SRCSTN(p),
+						__DSTNET(p),
+						__DSTSTN(p)
+				       );
+				else
+					printk (KERN_ERR "econet-fast: Expecting ACK fomr %d.%d but got a longer frame from %d.%d - ignoring\n",
 						__AUN_DSTNET(econet_data->aun_packet_tx),
 						__AUN_DSTSTN(econet_data->aun_packet_tx),
 						__SRCNET(p),
 						__SRCSTN(p)
-				       );
+					);
+
 				econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
-				/* Old module used to treat non-ack frames received when it wanted an ack as just a
-				 * new frame. Not sure we want to do that now we track RX IDLE properly. 
-				 */
-				return /* econet_workqueue_respond_new_packet(p, sr1_errors, sr2_errors) | */ EWAS_DATA_WRITE;
+				econet_set_aunstate(EA_IDLE);
+				econet_set_read_mode();	
+
+				return ((p->ptr > 4) ? econet_workqueue_respond_new_packet(p, sr1_errors, sr2_errors) : 0) | EWAS_DATA_WRITE; /* Process new frame if it was longer than 4 bytes */
 			}
 
 		}
