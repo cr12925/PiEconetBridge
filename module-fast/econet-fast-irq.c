@@ -167,6 +167,8 @@ void econet_irq_read_new (u8 i_sr1, u8 i_sr2)
 			if (econet_data->rxp->ptr > ECONET_MAX_PACKET_SIZE)
 				econet_data->rxp->ptr--; /* Just let keep overwriting last byte of data */
 	
+			// ndelay(5); /* 20260404 - We seem to get misreads where we read &81 from FIFO (content of SR1 possibly?) so try a little delay */
+
 			econet_data->rxp->data[econet_data->rxp->ptr++] = d = econet_read_fifo();
 
 		}

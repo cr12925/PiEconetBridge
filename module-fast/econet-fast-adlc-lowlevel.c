@@ -260,6 +260,9 @@ inline unsigned char econet_read_sr(unsigned short r)
 
 #endif
 
+	/* 20260404 Try a delay here in case we are not waiting long enough for address lines to settle */
+	ndelay(5);
+
 	// Waggle nCS appropriately
 	
 	econet_set_cs(ECONET_GPIO_CS_ON);

@@ -84,7 +84,7 @@ u8 econet_writefd_transmit(void)
 
 	if (econet_data->aun_mode)
 	{
-		u16	scout_data_len = 0;
+		u16	scout_data_len = 0, scout_packet_size;
 		u8	data_position = 6; /* For an ordinary scout */
 
 		/* Check for invalid AUN packet types. */
@@ -122,7 +122,8 @@ u8 econet_writefd_transmit(void)
 
 		/* Copy packet data */
 
-		econet_data->txp = emalloc(ECONET_SCOUT_PACKET_SIZE(scout_data_len));
+		scout_packet_size = ECONET_SCOUT_PACKET_SIZE(scout_data_len);
+		econet_data->txp = emalloc(scout_packet_size);
 		
 		if (!econet_data->txp)
 		{
@@ -137,11 +138,13 @@ u8 econet_writefd_transmit(void)
 
 		if (econet_data->aun_packet_tx.p.aun_ttype == ECONET_AUN_IMMREP)
 			data_position = 4; /* No port/ctrl on an immrep */
+		else /* Only needed if not an immedate reply! */
+		{
+			/* Then port & ctrl - these get overwritten below if it's an immrep */
 
-		/* Then port & ctrl - these get overwritten below if it's an immrep */
-
-		__PORT(econet_data->txp) = econet_data->aun_packet_tx.p.port;
-		__CTRL(econet_data->txp) = econet_data->aun_packet_tx.p.ctrl | 0x80; /* May as well set high bit here */
+			__PORT(econet_data->txp) = econet_data->aun_packet_tx.p.port;
+			__CTRL(econet_data->txp) = econet_data->aun_packet_tx.p.ctrl | 0x80; /* May as well set high bit here */
+		}
 
 		/* Then scout data */
 
@@ -151,6 +154,26 @@ u8 econet_writefd_transmit(void)
 		/* Tell the IRQ routine how many bytes to send */
 
 		econet_data->txp->txlen = data_position + scout_data_len;
+
+		/* Double check */
+
+		if (econet_data->txp->txlen > scout_packet_size)
+		{
+			printk (KERN_ERR "econet-fast: writefd_transmit() allocated too little memory! (%d.%d to %d.%d port &%02X, ctrl &%02X, aun length 0x%04X\n",
+				econet_data->aun_packet_tx.p.srcnet,
+				econet_data->aun_packet_tx.p.srcstn,
+				econet_data->aun_packet_tx.p.dstnet,
+				econet_data->aun_packet_tx.p.dststn,
+				econet_data->aun_packet_tx.p.port,
+				econet_data->aun_packet_tx.p.ctrl,
+				econet_data->aun_packet_len_tx);
+			ECONET_NOT_BUSY();
+			devm_kfree(econet_data->module_dev, econet_data->txp);
+			econet_data->txp = NULL;
+			econet_set_aunstate(EA_IDLE);
+			return 0;
+		}
+			
 
 		/* Set AUN status to WRITESCOUT.
 		 * In this version of the kernel module, all first
@@ -286,15 +309,13 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		u8	state = econet_get_aunstate();
 
 		econet_set_aunstate(EA_IDLE);
-		econet_set_read_mode();
+		econet_adlc_cleardown(0); /* was set_read_mode - let's reset it completely now */
 
-		if (econet_data->txp) /* Free if not NULL */
-		{
-			devm_kfree(econet_data->module_dev, econet_data->txp);
-			econet_data->txp = NULL;
-		}
+		/* No need to free txp - it isn't allocated until econet_writefd_transmit() below */
 
 		printk (KERN_ERR "econet-fast: AUN State appears to be stale - reset to EA_IDLE from 0x%02X\n", state);
+		spin_unlock_irqrestore(&econet_irq_spin, flags);
+		return -EFAULT;
 	
 	}
 
@@ -304,7 +325,6 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 		econet_set_read_mode();
 		spin_unlock_irqrestore(&econet_irq_spin, flags);
-		// econet_irq_mode(1);
 		return -EFAULT;
 	}
 
@@ -327,6 +347,11 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	else /* Timeout and condition not true */
 	{
 		printk (KERN_INFO "econet-fast: writefd() wait timeout expired\n");
+		spin_lock_irqsave(&econet_irq_spin, flags);
+		econet_set_aunstate(EA_IDLE);
+		econet_set_read_mode();
+		ECONET_NOT_BUSY();
+		spin_unlock_irqrestore(&econet_irq_spin, flags);
 		return -EFAULT;
 	}
 }
@@ -384,13 +409,11 @@ int econet_release(struct inode *inode, struct file *file) {
 	}
 #endif
 
-#if 0 /* Don't do this. Because if your client goes away mid transaction, the work queue does a RAW mode AUN statemachine */
 	/* Turn off AUN mode */
 
-	econet_data->aun_mode = 0;
+	econet_data->aun_mode = 0; /* But we do need to find a way of turning this off on a release... otherwise the module keeps doing 4-ways! */
 
 	econet_set_aunstate(EA_IDLE);
-#endif
 
 	module_put(THIS_MODULE);
 
