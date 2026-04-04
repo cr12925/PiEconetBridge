@@ -464,6 +464,8 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 							econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL); /* For now. Do we have net error in our list? */
 							return EWAS_DATA_WRITE;
 					} break;
+				/* 20260404 See if we need to detect a line idle on EA_R_READDATA as well? Fall through */
+				case EA_R_READDATA:
 				case EA_R_WRITEFIRSTACK: /* Handshake failure - no data frame (phase 3) is coming */
 					{
 							econet_set_aunstate(EA_IDLE);
@@ -831,11 +833,11 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 					memcpy (&(econet_data->aun_packet_rx.p.data[econet_data->aun_packet_rx.p.padding]),
 						&(p->data[4]),
-						p->ptr);
+						p->ptr-4); /* Was p->ptr, but surely that copies 4 bytes too much? */
 
 					/* Update aun_packet_len */
 
-					econet_data->aun_packet_len_rx += p->ptr;
+					econet_data->aun_packet_len_rx += p->ptr - 4;
 
 					econet_set_aunstate(EA_R_WRITEFINALACK);
 
