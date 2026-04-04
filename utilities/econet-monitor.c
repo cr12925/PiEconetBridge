@@ -421,7 +421,7 @@ void econet_portdecode (struct __econet_packet *p, uint8_t port, uint8_t ctrl)
 				case 0x07: /* Close */
 				case 0x2E: /* 32 bit close fall through */
 				{
-					printf ("Close%s handle ", (fsop == 0x2E ? "32" : ""), p->data[7]);
+					printf ("Close%s#&%02X ", (fsop == 0x2E ? "32" : ""), p->data[9]);
 				} break;
 				case 0x08: /* Get byte */
 				{
