@@ -154,7 +154,7 @@ void econet_led_state (uint8_t);
  *
  */
 
-unsigned char econet_stations[8192]; 
+// unsigned char econet_stations[8192]; 
 
 /* 
  * Buffers to hold packets to be tx'd,
