@@ -1572,6 +1572,12 @@ struct __eb_device * eb_find_station_internal (uint8_t net, uint8_t stn)
 
 	eb_debug (0, 4, "BRIDGE", "%-8s %3d.%3d Looking for station struct... eb_get_network() returns %p", "", net, stn, (result = eb_get_network(net)));
 
+	if (net == 255 || stn == 255) /* Broadcast */
+	{
+		eb_debug (0, 4, "BRIDGE", "%-8s %3d.%3d eb_get_network() returning NULL for broadcast traffic", "", net, stn);
+		return NULL;
+	}
+
 	if ((net != 255) && (stn != 255) && result) // Good start, this network looks like it might exist, and we aren't looking for a broadcast
 	{
 	
