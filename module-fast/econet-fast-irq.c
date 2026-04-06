@@ -522,7 +522,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 		printk (KERN_INFO "econet-fast: IRQ handler called but ADLC not flagging an IRQ (SR1 = %02X, SR2 = %02X)", sr1, sr2);
 
 		/* Reset CRs to try and get the thing to continue */
-
+#if 0
 		switch (chip_state) 
 		{
 			case EM_WRITE:
@@ -541,6 +541,10 @@ irqreturn_t econet_irq(int irq, void *ident)
 					econet_set_read_mode();
 				}
 		}
+#else
+		econet_adlc_cleardown(1);
+		econet_set_read_mode();
+#endif
 	}
 
 	/*
