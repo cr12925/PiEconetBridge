@@ -547,6 +547,11 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			econet_set_aunstate(EA_IDLE);
 			econet_set_tx_status(ECONET_TX_SUCCESS);
 
+#if 0
+			econet_data->pt.scout_start = p->timing_start;
+			econet_data->pt.scout_end = p->timing_end;
+#endif
+
 			return EWAS_DATA_WRITE;
 		}
 
@@ -564,6 +569,11 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			 * That probably wants changing. And moving here.
 			 *
 			 */
+
+#if 0
+			econet_data->pt.scout_start = p->timing_start;
+			econet_data->pt.scout_end = p->timing_end;
+#endif
 
 			/* General TX errors are checked above */
 
@@ -601,6 +611,11 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 		else if (aun_state == EA_W_READFIRSTACK && p->tx == EP_PACKET_RX)
 		{
+#if 0
+			econet_data->pt.first_ack_start = p->timing_start;
+			econet_data->pt.first_ack_end = p->timing_end;
+#endif
+
 			if (sr1_errors || sr2_errors)
 			{
 				if (sr2_errors & ECONET_GPIO_S2_RX_IDLE) /* Not listening */
@@ -742,6 +757,11 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		}
 		else if (aun_state == EA_W_WRITEDATA && p->tx == EP_PACKET_TX)
 		{
+#if 0
+			econet_data->pt.data_start = p->timing_start;
+			econet_data->pt.data_end = p->timing_end;
+#endif
+
 			/* TX Underrun and no clock are checked above */
 
 			/* Otherwise looks like we did a successful data TX */
@@ -753,6 +773,11 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		}
 		else if (aun_state == EA_W_READFINALACK && p->tx == EP_PACKET_RX)
 		{
+#if 0
+			econet_data->pt.final_ack_start = p->timing_start;
+			econet_data->pt.final_ack_end = p->timing_end;
+#endif
+
 			/* TX Underrun is checked above */
 
 			/* Correct length & source ? */

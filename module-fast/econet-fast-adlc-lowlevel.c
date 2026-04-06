@@ -261,7 +261,8 @@ inline unsigned char econet_read_sr(unsigned short r)
 #endif
 
 	/* 20260404 Try a delay here in case we are not waiting long enough for address lines to settle */
-	ndelay(5);
+	// ndelay(5);
+	ndelay(1); /* 20260406 Try 1ns instead of 5 in case that's causing these clock lockups ? */
 
 	// Waggle nCS appropriately
 	
@@ -280,7 +281,8 @@ inline unsigned char econet_read_sr(unsigned short r)
 #endif
 		barrier();
 
-	ndelay(5); 
+	if (econet_data->hwver >= 2)
+		ndelay(1); /* 20260406 Try 1ns instead of 5 in case that's causing these clock lockups ? */
 
 	/* Finish with ADLC */
 
@@ -374,8 +376,6 @@ void econet_reset(void)
 
 void econet_set_read_mode(void)
 {
-
-	/* Blank the packet buffers */
 
 	econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 	econet_write_cr(ECONET_GPIO_CR1, C1_READ);
@@ -503,7 +503,7 @@ void econet_flagfill(void)
 {
 
 	econet_write_cr(ECONET_GPIO_CR1, ECONET_GPIO_C1_RX_DISC | ECONET_GPIO_C1_RX_RESET); 
-	econet_set_chipstate(EM_FLAGFILL);
+	econet_set_chipstate(EM_FLAGFILL); /* This goes here because otherwise an IRQ turns up quickly and we get an IRQ in FLAGFILL before we've set the registers! */
 	econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT2); 
 
 }

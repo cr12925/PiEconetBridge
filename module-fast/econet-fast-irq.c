@@ -167,8 +167,6 @@ void econet_irq_read_new (u8 i_sr1, u8 i_sr2)
 			if (econet_data->rxp->ptr > ECONET_MAX_PACKET_SIZE)
 				econet_data->rxp->ptr--; /* Just let keep overwriting last byte of data */
 	
-			// ndelay(5); /* 20260404 - We seem to get misreads where we read &81 from FIFO (content of SR1 possibly?) so try a little delay */
-
 			econet_data->rxp->data[econet_data->rxp->ptr++] = d = econet_read_fifo();
 
 		}
@@ -187,6 +185,9 @@ void econet_irq_read_new (u8 i_sr1, u8 i_sr2)
 		econet_data->pkt_since_idle++;
 
 		deliver_to_workqueue = 1;
+
+
+		// econet_data->rxp->timing_end = ktime_get_ns();
 
 		/* Flag fill if the packet was destined to one our stations, UNLESS:
 		 * 1. It was a broadcast (because broadcast will be in the station map)
@@ -280,6 +281,7 @@ void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 		if (econet_data->txp->ptr == 0) /* Start of fresh packet */
 		{
 			econet_set_tx_status(ECONET_TX_INPROGRESS);
+			// econet_data->txp->timing_start = ktime_get_ns();
 		}
 
 		while (bytes < (econet_data->twobytemode ? 2 : 1))
@@ -435,6 +437,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 				}
 					
 				econet_set_read_mode();
+				// econet_data->txp->timing_end = ktime_get_ns();
 				econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
 				econet_set_chipstate(EM_IDLE);
 				chip_state = EM_IDLE;
@@ -447,6 +450,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 				ECONET_SET_BUSY();
 				/* reset packet pointer */
 				econet_data->rxp->ptr = 0;
+				/* Mark start of reception */
+				// econet_data->rxp->timing_start = ktime_get_ns();
 			}
 			else if ( /* TX-Specific Errors we need to look at */
 					chip_state == EM_WRITE 
@@ -515,8 +520,27 @@ irqreturn_t econet_irq(int irq, void *ident)
 	else
 	{
 		printk (KERN_INFO "econet-fast: IRQ handler called but ADLC not flagging an IRQ (SR1 = %02X, SR2 = %02X)", sr1, sr2);
-		econet_adlc_cleardown(1);
-		econet_set_read_mode();
+
+		/* Reset CRs to try and get the thing to continue */
+
+		switch (chip_state) 
+		{
+			case EM_WRITE:
+				{
+					econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT2);
+					break;
+				}
+			case EM_READ:
+				{
+					econet_write_cr(ECONET_GPIO_CR2, C2_READ);
+					break;
+				}
+			default: /* Probably idle! */
+				{
+					econet_adlc_cleardown(1);
+					econet_set_read_mode();
+				}
+		}
 	}
 
 	/*

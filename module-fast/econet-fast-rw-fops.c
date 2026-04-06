@@ -124,7 +124,7 @@ u8 econet_writefd_transmit(void)
 
 		scout_packet_size = ECONET_SCOUT_PACKET_SIZE(scout_data_len);
 		econet_data->txp = emalloc(scout_packet_size);
-		
+
 		if (!econet_data->txp)
 		{
 			printk (KERN_ERR "econet-fast: Failed to allocate memory for AUN mode TX packet!\n");
@@ -132,6 +132,11 @@ u8 econet_writefd_transmit(void)
 			return 0;
 		}
 
+		/* Reset packet timing structure */
+#if 0
+		memset (&(econet_data->pt), 0, sizeof(struct __econet_packet_timings));
+#endif
+		
 		/* First, copy addressing */
 
 		memcpy(&(econet_data->txp->data), &(econet_data->aun_packet_tx.p.dststn), 4);
@@ -173,7 +178,6 @@ u8 econet_writefd_transmit(void)
 			econet_set_aunstate(EA_IDLE);
 			return 0;
 		}
-			
 
 		/* Set AUN status to WRITESCOUT.
 		 * In this version of the kernel module, all first
@@ -229,6 +233,10 @@ u8 econet_writefd_transmit(void)
 
 		return 0;
 	}
+
+	/* Timestamp line seize */
+
+	// econet_data->pt.line_seize = ktime_get_ns();
 
 	/* Set our status to startwait, though in this version of
 	 * the module, userspace will never see it.
@@ -297,6 +305,10 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		printk (KERN_INFO "econet-fast: Unable to copy packet from userspace\n");
 		return -EFAULT;
 	}
+
+	/* Timestamp receive from user */
+
+	// econet_data->pt.packet_from_user = ktime_get_ns();
 
 	/* Set AUN packet length - data bytes only if AUN mode,
 	 * otherwise whole length
