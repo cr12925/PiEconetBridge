@@ -520,6 +520,10 @@ struct __eb_device * eb_get_network (uint8_t net)
 
 	struct __eb_device *result;
 
+	if (net == 255) return NULL;
+
+	if (net == 0) return NULL;
+
 	pthread_mutex_lock (&networks_update);
 
 	result = networks[net];
