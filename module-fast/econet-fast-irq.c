@@ -542,6 +542,43 @@ irqreturn_t econet_irq(int irq, void *ident)
 				}
 		}
 #else
+		switch (chip_state)
+		{
+			case EM_WRITE:
+			case EM_WRITE_WAIT:
+				{
+					econet_data->txp->sr1 = sr1;
+					econet_data->txp->sr2 = sr2;
+					econet_data->txp->tx_flags = EP_IRQHANDLER_FAILED;
+					econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
+				}; break;
+			case EM_READ:
+				{
+					econet_data->rxp->sr1 = sr1;
+					econet_data->rxp->sr2 = sr2;
+					econet_data->rxp->tx_flags = EP_IRQHANDLER_FAILED;
+					econet_irq_to_workqueue(&(econet_data->rxp), sr1, sr2, EP_PACKET_RX);
+				} break;
+			default:
+				{
+					struct __econet_packet *p;
+
+					p = devm_kzalloc(econet_data->module_dev, sizeof(struct __econet_packet) - ECONET_MAX_PACKET_SIZE, GFP_KERNEL);
+
+					/* Flag empty packet with the error in it */
+
+					if (p)
+					{
+						p->tx = EP_PACKET_RX;
+						p->sr1 = sr1;
+						p->sr2 = sr2;
+						p->tx_flags = EP_IRQHANDLER_FAILED;
+						econet_irq_to_workqueue(&p, sr1, sr2, EP_PACKET_RX);
+					}
+
+				}
+		}
+
 		econet_adlc_cleardown(1);
 		econet_set_read_mode();
 #endif

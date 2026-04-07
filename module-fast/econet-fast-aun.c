@@ -301,9 +301,40 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		sr2_errors &= (ECONET_GPIO_S2_DCD);
 	}
 
+	/* See if we had an IRQ Handler fail */
+
+	if (p->tx_flags & EP_IRQHANDLER_FAILED) /* IRQ handler got called when ADLC not flagging IRQ! */
+	{
+		u8 ret = EWAS_NOTHING;
+
+		switch (aun_state)
+		{
+			case EA_W_WRITESCOUT:
+			case EA_W_READFIRSTACK:
+			case EA_W_WRITEDATA:
+			case EA_I_WRITEIMM:
+			case EA_I_WRITEREPLY:
+				ret = EWAS_DATA_WRITE; /* Notify the write side */
+				break;
+			case EA_R_WRITEFIRSTACK:
+			case EA_R_READDATA:
+			case EA_R_WRITEFINALACK:
+				ret = EWAS_DATA_READ;
+				break;
+			/* EA_IDLE - do nothing */
+			/* EA_W_READFINALACK - Handled below */
+		}
+
+		econet_set_aunstate(EA_IDLE); /* Back to idle */
+
+		return ret; /* Tell the workqueue what to do */
+	}
+
 	/* Deal with runts */
 
-	if (p->ptr < 4 && !(p->ptr == 0 && p->tx == EP_PACKET_RX)) /* Ignore "runts" which are just signalling packets */
+	if (p->ptr < 4 && !(p->ptr == 0 && p->tx == EP_PACKET_RX)
+		&& !((aun_state != EA_W_READFINALACK && (p->tx_flags & EP_IRQHANDLER_FAILED))) /* Because we handle these specially in the EA_W_READFINALACK section below because we seem to get problems receiving them */
+			) /* Ignore "runts" which are just signalling packets */
 	{
 		u8 	count;
 		printk (KERN_ERR "econet-fast: Runt %s packet length 0x%02X received by workqueue from %3d.%3d to %3d.%3d, sr1 = 0x%02X, sr2 = 0x%02X, aun state = 0x%02X\n",
@@ -777,6 +808,13 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			econet_data->pt.final_ack_start = p->timing_start;
 			econet_data->pt.final_ack_end = p->timing_end;
 #endif
+
+			/* BODGEROONY - See what gives */
+
+			if (p->ptr != 4) printk("econet-fast: EA_W_READFINALACK got packet length &%04X - accepting anyway\n", p->ptr);
+			econet_set_tx_status(ECONET_TX_SUCCESS);
+
+			return EWAS_DATA_WRITE; /* Accept just about anything here. If an idle gets received, the state machine will reset to EA_IDLE, so whatever we get here arrived after flag fill from somewhere after we transmitted data, so let's just accept it... */
 
 			/* TX Underrun is checked above */
 

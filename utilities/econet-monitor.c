@@ -990,6 +990,8 @@ void econet_newdump(struct __econet_packet *p)
 		if (pkt.sr2 & ECONET_GPIO_S2_DCD) printf("!CLOCK ");
 		if (pkt.sr2 & ECONET_GPIO_S2_OVERRUN) printf("RX_OVERRUN ");
 		if (pkt.sr2 & ECONET_GPIO_S2_RDA) printf("RX-DATA ");
+
+		if (pkt.tx_flags & EP_IRQHANDLER_FAILED) printf("NO-IRQ ");
 	}
 
 	if (pkt.sr2 & ECONET_GPIO_S2_RX_IDLE)
