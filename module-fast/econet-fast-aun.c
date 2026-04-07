@@ -813,6 +813,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 			if (p->ptr != 4) printk("econet-fast: EA_W_READFINALACK got packet length &%04X - accepting anyway\n", p->ptr);
 			econet_set_tx_status(ECONET_TX_SUCCESS);
+			econet_set_aunstate(EA_IDLE);
 
 			return EWAS_DATA_WRITE; /* Accept just about anything here. If an idle gets received, the state machine will reset to EA_IDLE, so whatever we get here arrived after flag fill from somewhere after we transmitted data, so let's just accept it... */
 
