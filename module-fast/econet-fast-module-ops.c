@@ -268,7 +268,7 @@ int econet_probe (struct platform_device *pdev)
 
 	else if (version == 0)
 	{
-		printk (KERN_INFO "econet-fast: No version found in device tree. Abort.\n");
+		printk (KERN_INFO "econet-fast: No version found in device tree. Do you need to load an overlay? Abort.\n");
 		// Now device-managed: kfree(econet_data->rxp);
 		// Now device-managed: kfree(econet_data);
 		econet_data = NULL;
