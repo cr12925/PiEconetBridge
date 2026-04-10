@@ -25,6 +25,7 @@
 	#define u8 uint8_t
 	#define u16 uint16_t
 	#define u32 uint32_t
+	#define u64 uint64_t
 #endif
 
 /* This is the map of stations we want to handle traffic for that
@@ -60,6 +61,7 @@ struct __econet_packet {
 	u8	tx; /* 0 0=RX packet, 1=TX packet */
 	u8	tx_flags; /* See below */
 	u32	device; /* Device number 0 - 7 - which to tx on; which this packet was received on. u32 to preserve 4-byte boundary, but can be split later */
+	u64	timing_start, timing_end; /* ktime_get_ns() for start of rx/tx, and end */
 	char data[ECONET_MAX_PACKET_SIZE];
 };
 
@@ -110,6 +112,7 @@ struct __econet_packet {
 /* Tx flags - for use in tx_flags field */
 
 #define EP_TX_NO_SEIZE_IF_ACK 0x01 /* Do not flag fill on receipt of an ACK corresponding to this frame. This is used when sending the data portion of a 4-way transaction. Ordinarily, the module will always seize the line on a packet which is destined for a station we are handling (i.e. not including broadcast traffic). That works because if it's an incoming 2-way, we'll want to flag fill ready to see if there's a reply coming, and if it's an incoming scout, we'll flag fill ready to send an ACK. However, the exception is if we're sending the data portion of a 4-way - the ACK which will follow is 'end of transaction', so we don't want to flag fill. */
+#define EP_IRQHANDLER_FAILED 0x02 /* Set by IRQ routine if it got an IRQ but the ADLC wasn't flagging one. Enables workqueue to clear down. */
 
 /* Clear the station map */
 #define	ECONET_INIT_STATIONS(m)	 	memset(&(m), 0, 8192);

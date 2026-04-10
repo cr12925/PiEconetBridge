@@ -147,11 +147,14 @@ void econet_irq_read_new (u8 i_sr1, u8 i_sr2)
 	u8	sr1 = i_sr1, sr2 = i_sr2;
 	u8 	read_counter = 0, bytes_to_read = 1;
 	u8	deliver_to_workqueue = 0;
+	u8	valid = 0;
 
 	if (econet_data->twobytemode)
 		bytes_to_read = 2;
 
-	while (++read_counter <= bytes_to_read)
+while (!valid && (sr1 & ECONET_GPIO_S1_IRQ))
+{
+	while (!valid && (++read_counter <= bytes_to_read))
 	{
 		econet_data->rxp->sr1 = sr1;
 		econet_data->rxp->sr2 = sr2;
@@ -160,7 +163,20 @@ void econet_irq_read_new (u8 i_sr1, u8 i_sr2)
 
 		/* First, is there some data available? */
 	
+#if 0
 		if ((sr1 & ECONET_GPIO_S1_RDA) || (sr2 & ECONET_GPIO_S2_VALID) || (read_counter == 1 && (sr2 & ECONET_GPIO_S2_AP)))
+#else
+		if (
+			(econet_data->rxp->ptr == 0 && (sr2 & ECONET_GPIO_S2_AP)) /* New packet */
+		||	(sr1 & ECONET_GPIO_S1_RDA &&
+				(
+					(econet_data->twobytemode && (read_counter == 1 || econet_data->rxp->ptr == 1)) /* ANFS only checks RDA on (i) the byte after AP was set, and (ii) first byte of a two-byte pair */
+				||	!(econet_data->twobytemode)
+				)
+			) /* RDA on either first byte read (only) in two byte mode (we quit out on FV below), or any byte in one byte mode - ANFS does not check RDA on second byte of two byte read */
+		||	(sr2 & ECONET_GPIO_S2_VALID) /* Not sure we ought to have this here... */
+		)
+#endif
 		{
 			u8	d;
 
@@ -172,11 +188,17 @@ void econet_irq_read_new (u8 i_sr1, u8 i_sr2)
 		}
 
 		if (sr2 & ECONET_GPIO_S2_VALID) /* Final byte - quit out */
-			break;
-
-		sr1 = econet_read_sr(1);
-		sr2 = (sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
+			valid = 1;
+		else
+		{
+			sr1 = econet_read_sr(1);
+			sr2 = (sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
+		}
 	}
+
+	/* And we loop around if there's another IRQ being flagged - which is what ANFS appears to do */
+
+}
 
 	/* First, is it a valid frame? i.e. this was the last byte */
 
@@ -432,7 +454,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 				||	(econet_data->pkt_since_idle == 3) /* Must be data phase of 4-way */
 				)
 				{
-					econet_data->no_flag_fill = 1;
+					econet_data->no_flag_fill = 1; /* Expecting next packet to be reply to immediate, or final phase of 4-way, so don't flag fill */
 					// printk (KERN_INFO "econet-fast: Setting no_flag_fill\n");
 				}
 					
@@ -542,45 +564,32 @@ irqreturn_t econet_irq(int irq, void *ident)
 				}
 		}
 #else
-		switch (chip_state)
+		if (chip_state == EM_WRITE || chip_state == EM_WRITE_WAIT)
 		{
-			case EM_WRITE:
-			case EM_WRITE_WAIT:
-				{
-					econet_data->txp->sr1 = sr1;
-					econet_data->txp->sr2 = sr2;
-					econet_data->txp->tx_flags = EP_IRQHANDLER_FAILED;
-					econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
-				}; break;
-			case EM_READ:
-				{
-					econet_data->rxp->sr1 = sr1;
-					econet_data->rxp->sr2 = sr2;
-					econet_data->rxp->tx_flags = EP_IRQHANDLER_FAILED;
-					econet_irq_to_workqueue(&(econet_data->rxp), sr1, sr2, EP_PACKET_RX);
-				} break;
-			default:
-				{
-					struct __econet_packet *p;
-
-					p = devm_kzalloc(econet_data->module_dev, sizeof(struct __econet_packet) - ECONET_MAX_PACKET_SIZE, GFP_KERNEL);
-
-					/* Flag empty packet with the error in it */
-
-					if (p)
-					{
-						p->tx = EP_PACKET_RX;
-						p->sr1 = sr1;
-						p->sr2 = sr2;
-						p->tx_flags = EP_IRQHANDLER_FAILED;
-						econet_irq_to_workqueue(&p, sr1, sr2, EP_PACKET_RX);
-					}
-
-				}
+			econet_set_chipstate(EM_IDLE);
+			if (!econet_data->txp)
+				econet_data->txp = devm_kzalloc(econet_data->module_dev, sizeof(struct __econet_packet), GFP_KERNEL);
+			if (!econet_data->txp)
+				printk (KERN_ERR "econet-fast: Unable to allocate txp structure to report failed IRQ!\n");
+			else
+			{
+				econet_data->txp->sr1 = sr1;
+				econet_data->txp->sr2 = sr2;
+				econet_data->txp->tx_flags = EP_IRQHANDLER_FAILED;
+				econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX); 
+			}
 		}
-
-		econet_adlc_cleardown(1);
-		econet_set_read_mode();
+		else
+		{
+			econet_set_chipstate(EM_IDLE);
+			econet_data->rxp->sr1 = sr1;
+			econet_data->rxp->sr2 = sr2;
+			econet_data->rxp->tx_flags = EP_IRQHANDLER_FAILED;
+			econet_irq_to_workqueue(&(econet_data->rxp), sr1, sr2, EP_PACKET_RX); 
+		}
+		econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
+		handled = 1;
+		ECONET_NOT_BUSY();
 #endif
 	}
 
