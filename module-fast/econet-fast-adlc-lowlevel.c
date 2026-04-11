@@ -403,7 +403,85 @@ void econet_set_read_mode(void)
  *
  */
 
+/* The old version is below this function. This function is an attempt
+   to copy what ANFS 4.08 does
+   NEVER call this in IRQ context.
+ */
+
 u8 econet_seize(void)
+{
+
+	u8 outercount = 0;
+
+	if (econet_get_chipstate() == EM_FLAGFILL)
+	{
+		// printk (KERN_INFO "econet-fast: Set EM_WRITE since in flag fill\n");
+		econet_set_chipstate(EM_WRITE); /* Do this before turning IRQs on otherwise IRQ happens in flag fill state! */
+		econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2); // + (TIE + RX Reset)
+		return ECONET_TX_SUCCESS;
+	}
+
+	sr2 = econet_read_sr(2);
+
+	if (sr2 & ECONET_GPIO_S2_DCD) /* Clock */
+	{
+		printk (KERN_ERR "econet-fast: No clock attempting to seize line!\n");
+		econet_set_read_mode();
+		return ECONET_TX_NOCLOCK;
+	}
+
+	while (outercount++ < 5)
+	{
+		if (!(sr2 & ECONET_GPIO_S2_RX_IDLE)) /* Is the line busy ? */
+		{
+			udelay (1 << outercount); /* Exponential backoff */
+			sr2 = econet_read_sr(2);
+			continue;
+		}
+
+		/* Line is idle, move forwards */
+
+		/* Read SR1 - clear pending IRQ (apparently!) */
+
+		sr1 = econet_read_sr(1);
+
+		econet_write_cr(2, ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FC |
+			ECONET_GPIO_C2_CLR_RX_STATUS |
+			ECONET_GPIO_C2_CLR_TX_STATUS |
+			(econet_data->twobytemode ? ECONET_GPIO_C2_2BYTES : 0)
+		);
+
+		sr1 = econet_read_sr(1);
+
+		if (sr1 & ECONET_GPIO_S1_CTS) /* CTS set - start TX */
+		{
+			econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT2); // +RTS
+
+			econet_set_chipstate(EM_WRITE); /* Do this before turning IRQs on otherwise IRQ happens in flag fill state! */
+			econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2); // + (TIE + RX Reset)
+
+			return ECONET_TX_SUCCESS;
+		}
+
+		printk (KERN_INFO "econet-fast: /CTS on line seize, trying again\n");
+
+		/* Not CTS, wait & retry */
+
+		udelay (1 << outercount); /* Exponential backoff */
+
+		sr2 = econet_read_sr(2);
+	}
+
+	econet_set_read_mode();
+	printk (KERN_INFO "econet-fast: Reporting line jammed on line seize\n");
+	return ECONET_TX_JAMMED;
+	
+}
+
+
+/* Old version */
+
+u8 econet_seize_old(void)
 {
 
 	u8 count = 0, outercount = 0, seize_error = ECONET_TX_JAMMED;
@@ -429,6 +507,7 @@ u8 econet_seize(void)
 
 	econet_write_cr (ECONET_GPIO_CR1, ECONET_GPIO_C1_RX_RESET | ECONET_GPIO_C1_TX_RESET);
 
+	
 	while (seize_error && (outercount++ < 2))
 	{
 		// printk (KERN_INFO "econet-fast: Line seize attempt %d\n", outercount);
