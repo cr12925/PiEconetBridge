@@ -145,11 +145,32 @@ u8 econet_workqueue_respond_new_packet(struct __econet_packet *p, u8 sr1_errors,
 
 	/* Errors ? */
 
-	if (sr1_errors || sr2_errors)
+	if (
+		(sr1_errors || sr2_errors)
+	&&	!( /* Ignore rx abort where it's the only error and the packet is the right size */
+			(sr2_errors == ECONET_GPIO_S2_RX_ABORT)
+		   &&	(	(	aun_state == EA_IDLE && p->ptr == 6 
+						&& (__PORT(p) > 0x00 
+						    || (__CTRL(p) >= 0x82 && __CTRL(p) <= 0x85) /* Immediate special 4-way */
+						   )
+				)
+		  		||	
+				(	(aun_state == EA_W_READFIRSTACK || aun_state == EA_W_READFINALACK)
+				   &&	(p->ptr == 4)
+				)
+			)
+		) /* Exclusions! */
+	)
 	{
 		ECONET_NOT_BUSY();
 		if (!(aun_state == EA_IDLE && sr1_errors == 0 && sr2_errors == ECONET_GPIO_S2_RX_IDLE)) /* Don't report on innocuous "error" */
-			printk ("econet-fast: AUN workqueue responder found errors: SR1 = 0x%02X, SR2 = 0x%02X, AUN state 0x%02X\n", sr1_errors, sr2_errors, aun_state);
+			printk ("econet-fast: AUN workqueue responder found errors: SR1 = 0x%02X, SR2 = 0x%02X, AUN state 0x%02X, ptr = 0x%04X\n", sr1_errors, sr2_errors, aun_state, p->ptr);
+		
+		/* Notify writefd() as necessary */
+		
+		if (__AUN_TX_OPERATION(aun_state))
+			return EWAS_DATA_WRITE;
+
 		return EWAS_NOTHING; /* Just stay where we are */
 	}
 
@@ -479,6 +500,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 						
 					} break;
+#if 0 /* 20260411 I think sometimes clients put a line idle before the final ACK and it confuses the hell out of the statemachine */
 				case EA_W_READFINALACK:
 					{
 						if (p->ptr < 4)
@@ -489,6 +511,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 							return EWAS_DATA_WRITE;
 						}
 					} break;
+#endif
 				case EA_W_WRITEDATA: /* Net error */
 					{
 							econet_set_aunstate(EA_IDLE);
