@@ -159,7 +159,10 @@ FSOP(0d)
 		case 0: // Set pointer
 		{
 
-			fs_debug_full (0, 2, f->server, f->net, f->stn, "Set file pointer%s on channel %02X to %06lX, current extent %06lX%s", (is_32bit ? " (32 bit)" : ""), handle, value, extent, (value > extent) ? " which is beyond EOF" : "");
+			if (value > extent)
+				fs_debug_full (0, 2, f->server, f->net, f->stn, "Set file pointer%s on channel %02X to %06lX, current extent %06lX (which is beyond EOF)", (is_32bit ? " (32 bit)" : ""), handle, value, extent);
+			else
+				fs_debug_full (0, 2, f->server, f->net, f->stn, "Set file pointer%s on channel %02X to %06lX, current extent %06lX", (is_32bit ? " (32 bit)" : ""), handle, value, extent);
 
 			if ((value > extent) && a->fhandles[handle].mode == 1) // Don't extend if read only!
 			{

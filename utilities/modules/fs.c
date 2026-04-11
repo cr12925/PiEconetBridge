@@ -75,7 +75,7 @@ void fs_debug_full (uint8_t death, uint8_t level, struct __fs_station *s, uint8_
 {
 	va_list 	ap;
 	char		str[800];
-	char		padstr[1000];
+	char		padstr[2000]; /* Trixie STRLEN issue */
 
 	va_start (ap, fmt);
 
@@ -953,7 +953,8 @@ int raw_fsop_aun_send_noseq(struct __econet_packet_udp *p, int len, struct __fs_
 {
         struct __econet_packet_aun *a;
 
-	a = eb_malloc(__FILE__, __LINE__, "FS", "Create new AUN packet for transmission", 12+len);
+	/* STRLEN a = eb_malloc(__FILE__, __LINE__, "FS", "Create new AUN packet for transmission", 12+len); */
+	a = eb_malloc(__FILE__, __LINE__, "FS", "Create new AUN packet for transmission", sizeof(struct __econet_packet_aun)); 
 
         memcpy(&(a->p.aun_ttype), p, len+8);
         a->p.padding = 0x00;
