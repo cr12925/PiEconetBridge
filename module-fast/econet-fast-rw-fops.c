@@ -348,8 +348,6 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	spin_unlock_irqrestore(&econet_irq_spin, flags); /* Let the ADLC and the IRQ routine run */
 	
-	// econet_irq_mode(1);
-
 	/* Wait on the write_queue - the work queue will tell us when the transaction ends, good bad or indifferent */
 
 	happens = wait_event_interruptible_timeout(econet_data->tx_queue, (econet_data->tx_status_valid & 0x8000), 3 * HZ);
@@ -358,10 +356,10 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		return len; /* We accepted the whole packet, userspace can work out what happened by getting the status */
 	else /* Timeout and condition not true */
 	{
-		printk (KERN_INFO "econet-fast: writefd() wait timeout expired\n");
 		spin_lock_irqsave(&econet_irq_spin, flags);
+		printk (KERN_INFO "econet-fast: writefd() wait timeout expired in AUN state 0x%02X\n", econet_get_aunstate());
 		econet_set_aunstate(EA_IDLE);
-		econet_adlc_cleardown(0);
+		econet_set_read_mode();
 		ECONET_NOT_BUSY();
 		spin_unlock_irqrestore(&econet_irq_spin, flags);
 		return -EFAULT;

@@ -149,7 +149,7 @@ u8 econet_workqueue_respond_new_packet(struct __econet_packet *p, u8 sr1_errors,
 	{
 		ECONET_NOT_BUSY();
 		if (!(aun_state == EA_IDLE && sr1_errors == 0 && sr2_errors == ECONET_GPIO_S2_RX_IDLE)) /* Don't report on innocuous "error" */
-			printk ("econet-fast: AUN workqueue responder found errors: SR1 = 0x%02X, SR2 = 0x%02X\n", sr1_errors, sr2_errors);
+			printk ("econet-fast: AUN workqueue responder found errors: SR1 = 0x%02X, SR2 = 0x%02X, AUN state 0x%02X\n", sr1_errors, sr2_errors, aun_state);
 		return EWAS_NOTHING; /* Just stay where we are */
 	}
 
@@ -642,12 +642,15 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 		else if (aun_state == EA_W_READFIRSTACK && p->tx == EP_PACKET_RX)
 		{
+			u8 	correct_source;
+
+			correct_source = econet_workqueue_correct_reply_source(p);
 #if 0
 			econet_data->pt.first_ack_start = p->timing_start;
 			econet_data->pt.first_ack_end = p->timing_end;
 #endif
 
-			if (sr1_errors || sr2_errors)
+			if (sr1_errors || (sr2_errors && !(correct_source && p->ptr == 4))) /* Ignore errors if from the right place and 4 bytes */
 			{
 				if (sr2_errors & ECONET_GPIO_S2_RX_IDLE) /* Not listening */
 				{
@@ -670,78 +673,92 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 			/* Was it an ACK and was it from the right place? */
 
-			if (p->ptr == 4 && econet_workqueue_correct_reply_source(p))
+			if (correct_source)
 			{
 				u16	data_balance = 0;
 				u8	seized = 0;
 
-				/* How much data didn't go on the scout? */
-
-				data_balance =
-					econet_data->aun_packet_len_tx
-				-	econet_data->aun_packet_tx.p.padding;
-
-				if (data_balance < 1 || data_balance > ECONET_MAX_PACKET_SIZE)
+				if (p->ptr == 4) /* Correct source and correct length */
 				{
-					printk (KERN_ERR "econet-fast: Unlawful TX frame size (0x%04X)! (aun_packet_len_tx = 0x%04X, padding = 0x%02X\n", data_balance, econet_data->aun_packet_len_tx, econet_data->aun_packet_tx.p.padding);
-					/* Abort */
-					ECONET_NOT_BUSY();
-					econet_set_tx_status (ECONET_TX_INVALID);
-					econet_set_aunstate(EA_IDLE);
-					econet_set_read_mode();
-					return EWAS_DATA_WRITE;
+					/* How much data didn't go on the scout? */
+	
+					
+	data_balance =
+						econet_data->aun_packet_len_tx
+					-	econet_data->aun_packet_tx.p.padding;
+	
+					if (data_balance < 1 || data_balance > ECONET_MAX_PACKET_SIZE)
+					{
+						printk (KERN_ERR "econet-fast: Unlawful TX frame size (0x%04X)! (aun_packet_len_tx = 0x%04X, padding = 0x%02X\n", data_balance, econet_data->aun_packet_len_tx, econet_data->aun_packet_tx.p.padding);
+						/* Abort */
+						ECONET_NOT_BUSY();
+						econet_set_tx_status (ECONET_TX_INVALID);
+						econet_set_aunstate(EA_IDLE);
+						econet_set_read_mode();
+						return EWAS_DATA_WRITE;
+					}
+	
+					/* Make up the data packet and trigger */
+					/* Note that number of scout data bytes
+				 	* will have been stored in padding for us
+				 	*/
+	
+					econet_data->txp = emalloc(4 + data_balance);
+	
+					if (!econet_data->txp)
+					{
+						ECONET_NOT_BUSY();
+						econet_set_tx_status(ECONET_TX_NOMEM);
+						econet_set_aunstate(EA_IDLE);
+						econet_set_read_mode();
+						return EWAS_DATA_WRITE;
+					}
+	
+					/* Copy addressing */
+	
+					__SRCNET(econet_data->txp) = __DSTNET(p);
+					__SRCSTN(econet_data->txp) = __DSTSTN(p);
+					__DSTNET(econet_data->txp) = __SRCNET(p);
+					__DSTSTN(econet_data->txp) = __SRCSTN(p);
+	
+					/* Copy data - padding byte tells us 
+				 	* how much went on the scout */
+					/* We checked there was enough data, above,
+				 	* although writefd() also validates this.
+				 	*/
+	
+					memcpy (&(econet_data->txp->data[4]),
+						&(econet_data->aun_packet_tx.p.data[econet_data->aun_packet_tx.p.padding]),
+						data_balance);
+					
+					econet_data->txp->txlen = data_balance + 4;
+	
+					// printk (KERN_INFO "econet-fast: Move to EA_W_WRITEDATA; chip state is %d\n", econet_get_chipstate());
+	
+					econet_set_aunstate(EA_W_WRITEDATA);
+	
+					if ((seized = econet_seize())) /* NB Kernel module should have put us in flag fill */
+					{
+						/* Failed. */
+						printk (KERN_ERR "econet-fast: Failed to seize line for 4-way data phase: frame length 0x%04X\n", p->txlen);
+						ECONET_NOT_BUSY();
+						econet_set_aunstate(EA_IDLE);
+						econet_set_tx_status(seized);
+						econet_set_read_mode();
+						return EWAS_DATA_WRITE; /* Notify userspace writefd so it can return and report error */
+					}
 				}
-
-				/* Make up the data packet and trigger */
-				/* Note that number of scout data bytes
-				 * will have been stored in padding for us
-				 */
-
-				econet_data->txp = emalloc(4 + data_balance);
-
-				if (!econet_data->txp)
+				else /* Correct source, wrong length - e.g. we sent a scout for port &XX, and there was no idle, but the sender was sending us a scout in reply instead of an ACK */
 				{
-					ECONET_NOT_BUSY();
-					econet_set_tx_status(ECONET_TX_NOMEM);
+					printk (KERN_INFO "econet-fast: Expected first ACK from %d.%d but got something else instead - signal failure to writefd()\n",
+						__SRCNET(p), __SRCSTN(p));
 					econet_set_aunstate(EA_IDLE);
+					econet_set_tx_status(ECONET_TX_NOTLISTENING); /* This is good enough if we didn't get a first ACK */
 					econet_set_read_mode();
-					return EWAS_DATA_WRITE;
-				}
-
-				/* Copy addressing */
-
-				__SRCNET(econet_data->txp) = __DSTNET(p);
-				__SRCSTN(econet_data->txp) = __DSTSTN(p);
-				__DSTNET(econet_data->txp) = __SRCNET(p);
-				__DSTSTN(econet_data->txp) = __SRCSTN(p);
-
-				/* Copy data - padding byte tells us 
-				 * how much went on the scout */
-				/* We checked there was enough data, above,
-				 * although writefd() also validates this.
-				 */
-
-				memcpy (&(econet_data->txp->data[4]),
-					&(econet_data->aun_packet_tx.p.data[econet_data->aun_packet_tx.p.padding]),
-					data_balance);
-				
-				econet_data->txp->txlen = data_balance + 4;
-
-				// printk (KERN_INFO "econet-fast: Move to EA_W_WRITEDATA; chip state is %d\n", econet_get_chipstate());
-
-				econet_set_aunstate(EA_W_WRITEDATA);
-
-				if ((seized = econet_seize())) /* NB Kernel module should have put us in flag fill */
-				{
-					/* Failed. */
-					printk (KERN_ERR "econet-fast: Failed to seize line for 4-way data phase: frame length 0x%04X\n", p->txlen);
 					ECONET_NOT_BUSY();
-					econet_set_aunstate(EA_IDLE);
-					econet_set_tx_status(seized);
-					econet_set_read_mode();
 					return EWAS_DATA_WRITE; /* Notify userspace writefd so it can return and report error */
+					
 				}
-
 			}
 			else /* Not correct reply source */
 			{
@@ -809,20 +826,13 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			econet_data->pt.final_ack_end = p->timing_end;
 #endif
 
-			/* BODGEROONY - See what gives */
-
-			if (p->ptr != 4) printk("econet-fast: EA_W_READFINALACK got packet length &%04X - accepting anyway\n", p->ptr);
-			econet_set_tx_status(ECONET_TX_SUCCESS);
-			econet_set_aunstate(EA_IDLE);
-
-			return EWAS_DATA_WRITE; /* Accept just about anything here. If an idle gets received, the state machine will reset to EA_IDLE, so whatever we get here arrived after flag fill from somewhere after we transmitted data, so let's just accept it... */
-
 			/* TX Underrun is checked above */
 
 			/* Correct length & source ? */
 
-			if (p->ptr == 4 && econet_workqueue_correct_reply_source(p))
+			if (/* BODGE: Accept any old rubbish if it's from the right place p->ptr == 4 && */ econet_workqueue_correct_reply_source(p))
 			{
+			
 				/* Signal successful TX */
 
 				// econet_set_read_mode(); IRQ handler should have done this
