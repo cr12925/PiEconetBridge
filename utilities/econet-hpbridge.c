@@ -5095,6 +5095,9 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 	 * case client will have filled in the destination address
 	 */
 
+	if (incoming.p.port == EB_PORT_BRIDGE && !is_broadcast_listener && incoming.p.ctrl == 0x10) /* Don't allocate traffic if this is a gateway finding broadcast */
+		return; /* Don't process */
+
 	/* Now figure out where the traffic came from and whether we know about it */
 
 	source_address = ntohl(addr.sin_addr.s_addr);
@@ -5103,7 +5106,14 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 
 	/* If it's not a known source, see if we can allocate a dynamic address */
 
-	if (!source_device && (incoming.p.port == EB_PORT_BRIDGE || !is_broadcast_listener || (is_broadcast_listener && (incoming.p.port == 0x99 || incoming.p.port == 0xb0)))) /* We'll allocate stations if it's a bridge broadcast, but otherwise if it's broadcast traffic we don't, so that broadcasts from other AUN exposures on the same LAN don't cause a station to be allocated. We'll allocate on broadcasts if it's a fileserver or findserver broadcast, but only them. */
+	if (!source_device  
+	&&	(	incoming.p.port == EB_PORT_BRIDGE 
+			|| !is_broadcast_listener 
+			|| (is_broadcast_listener 
+				&& (incoming.p.port == 0x99 || incoming.p.port == 0xb0)
+			   )
+		)
+	    ) /* We'll allocate stations if it's a bridge broadcast, but otherwise if it's broadcast traffic we don't, so that broadcasts from other AUN exposures on the same LAN don't cause a station to be allocated. We'll allocate on broadcasts if it's a fileserver or findserver broadcast, but only them. */
 	{
 		source_device = eb_allocate_dynamic_aun (source_address, source_port);
 		if (!source_device)
