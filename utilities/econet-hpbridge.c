@@ -1989,7 +1989,8 @@ static void * eb_bridge_update_watcher (void *device)
 
 			/* Allocate packet to send */
 	
-			update = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge packet", 12 + 255);
+			/* STRLEN update = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge packet", 12 + 255);*/
+			update = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge packet", sizeof(struct __econet_packet_aun));
 	
 			if (!update)
 				eb_debug (1, 0, "BRIDGE", "Core         Malloc() failed creating bridge packet!");
@@ -2160,7 +2161,8 @@ static void * eb_bridge_reset_watcher (void *device)
 
 			/* Allocate packet to send */
 	
-			update = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge packet", 12 + 255);
+			/* STRLEN update = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge packet", 12 + 255); */
+			update = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge packet", sizeof(struct __econet_packet_aun));
 	
 			if (!update)
 				eb_debug (1, 0, "BRIDGE", "Core         Malloc() failed creating bridge packet!");
@@ -2463,7 +2465,9 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 	struct __eb_pool_host		*host;
 	struct __eb_pool		*pool;
 
-	reply = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge What/IsNet reply packet", 14);
+	//reply = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge What/IsNet reply packet", 14);
+	/* STRLEN Remove warning in case it's causing the weird strlen() segfault */
+	reply = eb_malloc (__FILE__, __LINE__, "BRIDGE", "Creating bridge What/IsNet reply packet", sizeof(struct __econet_packet_aun));
 
 	if (!reply)
 	{
@@ -2768,7 +2772,8 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 				default:	snprintf(reply_diags, 383, "%s %03d Unknnwn destination type", hostname, net); break;
 			}
 
-			reply = eb_malloc (__FILE__, __LINE__, "TRACE", "Allocating reply packet for a trace query", 12 + strlen(reply_diags) + 4);
+			/* STRLEN reply = eb_malloc (__FILE__, __LINE__, "TRACE", "Allocating reply packet for a trace query", 12 + strlen(reply_diags) + 4); */
+			reply = eb_malloc (__FILE__, __LINE__, "TRACE", "Allocating reply packet for a trace query", sizeof(struct __econet_packet_aun));
 
 			if (reply)
 			{
@@ -2935,7 +2940,8 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 				struct __econet_packet_aun *r;
 				struct sockaddr_in	dest;
 
-				r = eb_malloc (__FILE__, __LINE__, "GATEWAY", "Gateway responder packet", 12);
+				/* STRLEN fix r = eb_malloc (__FILE__, __LINE__, "GATEWAY", "Gateway responder packet", 12); */
+				r = eb_malloc (__FILE__, __LINE__, "GATEWAY", "Gateway responder packet", sizeof(struct __econet_packet_aun)); 
 
 				r->p.srcnet = eb_bridge_sender_net(source);
 				r->p.srcstn = 0;
@@ -3715,7 +3721,8 @@ void eb_send_ack (struct __eb_device *d, struct __econet_packet_aun *p, uint8_t 
 
 	struct __econet_packet_aun *ack;
 
-	ack = eb_malloc (__FILE__, __LINE__, "TRAFFIC", "New ACK packet", 12);
+	/* STRLEN ack = eb_malloc (__FILE__, __LINE__, "TRAFFIC", "New ACK packet", 12); */
+	ack = eb_malloc (__FILE__, __LINE__, "TRAFFIC", "New ACK packet", sizeof(struct __econet_packet_aun));
 
 	ack->p.srcstn = p->p.dststn;
 	ack->p.srcnet = p->p.dstnet;
@@ -5487,7 +5494,8 @@ static void * eb_trunk_keepalive (void * device)
 	{
 		uint8_t		dead;
 
-		p = eb_malloc (__FILE__, __LINE__, "TRUNK", "Memory for trunk keepalive packet", 12);
+		/* STRLEN p = eb_malloc (__FILE__, __LINE__, "TRUNK", "Memory for trunk keepalive packet", 12); */
+		p = eb_malloc (__FILE__, __LINE__, "TRUNK", "Memory for trunk keepalive packet", sizeof(struct __econet_packet_aun));
 	
 		if (!p)
 			eb_debug (1, 0, "FSLIST", "Unable to malloc() new trunk keepalive packet");
@@ -5724,7 +5732,6 @@ uint8_t eb_aunpacket_to_aun_queue_with_callback (struct __eb_device *d, struct _
 	/* Put it on our AUN queue and wake the AUN sender */
 
 	exp = eb_is_exposed(p->p.srcnet, p->p.srcstn, 1); /* 1 = must be active */
-
 
 	if (exp || (destdevice->aun->uses_gateway /* && TODO - CHECK GATEWAY EXPIRY HERE */)) /* Exposed. If not, packet gets dumped anyway - unless the client talks to us through the gateway, in which case we don't need an exposure for the source */
 	{
@@ -7145,7 +7152,8 @@ static void * eb_device_despatcher (void * device)
 							struct __econet_packet_aun	*arp;
 							struct __eip_ip_queue		*q, *tail;
 
-							arp = eb_malloc(__FILE__, __LINE__, "IPGW", "Outgoing Econet ARP query", 12 + 8);
+							// STRLEN arp = eb_malloc(__FILE__, __LINE__, "IPGW", "Outgoing Econet ARP query", 12 + 8); 
+							arp = eb_malloc(__FILE__, __LINE__, "IPGW", "Outgoing Econet ARP query", sizeof(struct __econet_packet_aun));
 
 							if (!arp)
 								eb_debug (1, 0, "IPGW", "Unable to malloc() storage for outgoing ARP query to Econet");
@@ -8216,7 +8224,8 @@ static void * eb_device_despatcher (void * device)
 							//if (ack.p.dstnet == 0)
 								//ack.p.dstnet = d->net;
 
-							ap = eb_malloc(__FILE__, __LINE__, "ACK", "New ACK packet to return to sender", 12);
+							/* STRLEN ap = eb_malloc(__FILE__, __LINE__, "ACK", "New ACK packet to return to sender", 12); */
+							ap = eb_malloc(__FILE__, __LINE__, "ACK", "New ACK packet to return to sender", sizeof(struct __econet_packet_aun));
 							memcpy (ap, &ack, 12);
 
 							eb_debug (0, 4, "LOCAL", "%-8s %3d.%3d from %3d.%3d attempting to send ACK from local emulator, P: &%02X, C: &%02X, Seq: 0x%08X", "Local", ack.p.dstnet, ack.p.dststn, ack.p.srcnet, ack.p.srcstn, ack.p.port, ack.p.ctrl, ack.p.seq);
@@ -15468,7 +15477,8 @@ void eb_loopdetect_send_probe (struct __eb_device *d)
 	if (d->all_nets_pooled)
 		return;
 
-	p = eb_malloc (__FILE__, __LINE__, "TRUNK", "Trunk loop probe packet", 12 + sizeof(struct __eb_loop_probe));
+	/* STRLEN = eb_malloc (__FILE__, __LINE__, "TRUNK", "Trunk loop probe packet", 12 + sizeof(struct __eb_loop_probe)); */
+	p = eb_malloc (__FILE__, __LINE__, "TRUNK", "Trunk loop probe packet", sizeof(struct __econet_packet_aun));
 
 	if (!p) return;
 
