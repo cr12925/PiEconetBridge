@@ -301,6 +301,11 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 	u8 	aun_state = econet_get_aunstate();
 
+#if 0
+	if (aun_state != EA_IDLE && (sr2 & ECONET_GPIO_S2_RX_IDLE))
+		printk (KERN_INFO "econet-fast: AUN statemachine detected RX Idle in state 0x%02X\n", aun_state);
+#endif
+	
 	sr1_errors = (sr1 & ( /* Invert CTS? - it'll be high if not clear to send - not sure about this */
 		ECONET_GPIO_S1_UNDERRUN	
 		// Unclear this is actually needed. | ECONET_GPIO_S1_CTS /* Collision */
@@ -320,12 +325,12 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 	{
 		sr1_errors = 0;
 
-		if (p->sr2 & ECONET_GPIO_S2_VALID) /* If FV set, do what ANFS does and pretend the rest of the world is OK */
-			sr2_errors &= ~ECONET_GPIO_S2_RX_IDLE; /* We still want to know about idle - stops writefd() getting stuck - we can return not listening */
+		if (sr2 & ECONET_GPIO_S2_VALID) /* If FV set, do what ANFS does and pretend the rest of the world is OK */
+			sr2_errors = sr2 & ECONET_GPIO_S2_RX_IDLE; /* We still want to know about idle - stops writefd() getting stuck - we can return not listening */
 	}
 	else
 	{
-		sr2_errors &= (ECONET_GPIO_S2_DCD);
+		sr2_errors &= (ECONET_GPIO_S2_DCD | ECONET_GPIO_S2_RX_IDLE);
 	}
 
 	/* See if we had an IRQ Handler fail */
@@ -385,7 +390,50 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		return EWAS_NOTHING;
 	}
 
-	if (econet_data->aun_mode && (p->tx == EP_PACKET_TX || (ECONET_DEV_STATION(econet_stations, __DSTNET(p), __DSTSTN(p))))) /* Only change state if in AUN mode, otherwise just deal with raw packet */
+	/* Check for AUN Line idle where it's a problem */
+
+	/* TODO: Remove the checks in the rest of the state machine */
+	
+	if (econet_data->aun_mode && (sr2_errors & ECONET_GPIO_S2_RX_IDLE))
+	{
+		if (
+			(p->tx == EP_PACKET_TX && econet_data->aun_packet_tx.p.aun_ttype != ECONET_AUN_BCAST && aun_state == EA_W_WRITESCOUT) /* Not listening */
+		||	(p->tx == EP_PACKET_RX && aun_state == EA_W_READFIRSTACK)
+		||	(p->tx == EP_PACKET_TX && aun_state == EA_I_WRITEIMM) /* Not sure we ever go into this state now */
+		||	(p->tx == EP_PACKET_RX && aun_state == EA_I_READREPLY)
+		)
+		{
+			econet_set_aunstate(EA_IDLE);
+			econet_set_tx_status(ECONET_TX_NOTLISTENING);
+			printk (KERN_INFO "econet-fast: Resetting state machine after idle on reading first ACK or immediate reply\n");
+			return EWAS_DATA_WRITE;
+		}
+		else if (
+			(p->tx == EP_PACKET_TX && aun_state == EA_W_WRITEDATA) /* Failed handshake */
+		)
+		{
+			econet_set_aunstate(EA_IDLE);
+			econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
+			printk (KERN_INFO "econet-fast: Resetting state machine after idle on writing data / waiting for final ACK\n");
+			return EWAS_DATA_WRITE;
+		}
+		else if (
+			(p->tx == EP_PACKET_TX && aun_state == EA_R_WRITEFIRSTACK)
+		||	(p->tx == EP_PACKET_RX && aun_state == EA_R_READDATA)
+		)
+		{
+			econet_set_aunstate(EA_IDLE);
+			econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
+			printk (KERN_INFO "econet-fast: Resetting state machine after idle on writing first ACK / waiting for data\n");
+			return EWAS_DATA_WRITE;
+		}
+	}
+
+	if (econet_data->aun_mode 
+		&& (p->tx == EP_PACKET_TX 
+			|| (p->ptr >= 4 && ECONET_DEV_STATION(econet_stations, __DSTNET(p), __DSTSTN(p)))
+		   )
+	    ) /* Only change state if in AUN mode, otherwise just deal with raw packet */
 	{
 
 
@@ -466,7 +514,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 		/* Did we get line idle in a state where it's an error ? */
 
-
 		if	(p->tx == EP_PACKET_RX 
 			&&	(sr2_errors & ECONET_GPIO_S2_RX_IDLE)
 			)
@@ -477,7 +524,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 					aun_state, p->sr1, p->sr2, sr2_errors, p->tx, p->ptr);
 					*/
 
-			switch (aun_state)
+			if (econet_data->aun_mode) switch (aun_state)
 			{
 				/* Fall throughs deliberate - for testing */
 
@@ -684,6 +731,14 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		else if (aun_state == EA_W_READFIRSTACK && p->tx == EP_PACKET_RX)
 		{
 			u8 	correct_source;
+
+			if (p->ptr != 4 && (sr2_errors & ECONET_GPIO_S2_RX_IDLE)) /* Another form of "not listening" */
+			{
+				printk (KERN_INFO "econet-fast: Not listening whilst awaiting first ACK from station\n");
+				econet_set_aunstate(EA_IDLE);
+				econet_set_tx_status(ECONET_TX_NECOUTEZPAS);
+				return EWAS_DATA_WRITE;
+			}
 
 			correct_source = econet_workqueue_correct_reply_source(p);
 #if 0
@@ -932,6 +987,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 				ECONET_NOT_BUSY();
 				econet_set_aunstate(EA_IDLE);
+				econet_set_read_mode(); /* I don't think we should need this, but perhaps we do */
 
 				/* No tx status to set - this is a receive state */
 			}

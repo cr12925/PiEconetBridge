@@ -280,6 +280,7 @@ while (!valid && (sr1 & ECONET_GPIO_S1_IRQ) && irq_loop_count++ < 5)
 
 			econet_write_cr(2, C2_READ);
 			econet_write_cr(1, C1_READ | ECONET_GPIO_C1_RX_DISC);
+			econet_set_chipstate(EM_IDLE);
 		}
 
 		deliver_to_workqueue = 1;
