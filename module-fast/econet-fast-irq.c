@@ -263,7 +263,7 @@ while (!valid && (sr1 & ECONET_GPIO_S1_IRQ) && irq_loop_count++ < 5)
 
 		if (sr1 & ECONET_GPIO_S1_LOOP)
 			printk (KERN_INFO "econet-fast: Loop mode found to be turned on!\n");
-		if (sr2 & ECONET_GPIO_S2_RX_ABORT)
+		if (econet_data->extralogs && sr2 & ECONET_GPIO_S2_RX_ABORT)
 			printk (KERN_INFO "econet-fast: RX Abort received during RX at ptr = %04X, AUN state 0x%02X\n", econet_data->rxp->ptr, econet_get_aunstate());
 		if (sr2 & ECONET_GPIO_S2_ERR)
 			printk (KERN_INFO "econet-fast: RX CRC Error\n");

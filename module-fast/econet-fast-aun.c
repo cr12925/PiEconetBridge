@@ -405,7 +405,8 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		{
 			econet_set_aunstate(EA_IDLE);
 			econet_set_tx_status(ECONET_TX_NOTLISTENING);
-			printk (KERN_INFO "econet-fast: Resetting state machine after idle on reading first ACK or immediate reply\n");
+			if (econet_data->extralogs)
+				printk (KERN_INFO "econet-fast: Resetting state machine after idle on reading first ACK or immediate reply\n");
 			return EWAS_DATA_WRITE;
 		}
 		else if (
@@ -414,7 +415,8 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		{
 			econet_set_aunstate(EA_IDLE);
 			econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
-			printk (KERN_INFO "econet-fast: Resetting state machine after idle on writing data / waiting for final ACK\n");
+			if (econet_data->extralogs)
+				printk (KERN_INFO "econet-fast: Resetting state machine after idle on writing data / waiting for final ACK\n");
 			return EWAS_DATA_WRITE;
 		}
 		else if (
@@ -424,7 +426,8 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		{
 			econet_set_aunstate(EA_IDLE);
 			econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
-			printk (KERN_INFO "econet-fast: Resetting state machine after idle on writing first ACK / waiting for data\n");
+			if (econet_data->extralogs)
+				printk (KERN_INFO "econet-fast: Resetting state machine after idle on writing first ACK / waiting for data\n");
 			return EWAS_DATA_WRITE;
 		}
 	}
