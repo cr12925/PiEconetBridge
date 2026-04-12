@@ -274,7 +274,14 @@ while (!valid && (sr1 & ECONET_GPIO_S1_IRQ))
 		if ((sr2 & ECONET_GPIO_S2_RX_IDLE) && (econet_data->rxp->ptr != 0))
 			printk (KERN_INFO "econet-fast: RX Idle received during frame RX at ptr = %04X", econet_data->rxp->ptr);
 
-		econet_discontinue(); /* Discontinue unless valid frame or just an Idle IRQ */
+		if (!deliver_to_workqueue) /* Only discontinue if we don't have FV above */
+		{
+			/* Old discontinue routine does all sorts that was more relevant to old module */
+
+			econet_write_cr(2, C2_READ);
+			econet_write_cr(1, C1_READ | ECONET_GPIO_C1_RX_DISC);
+		}
+
 		deliver_to_workqueue = 1;
 
 	}
