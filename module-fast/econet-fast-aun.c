@@ -352,6 +352,8 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 		econet_set_aunstate(EA_IDLE); /* Back to idle */
 
+		if (ret == EWAS_NOTHING) ECONET_NOT_BUSY();
+
 		return ret; /* Tell the workqueue what to do */
 	}
 
@@ -377,6 +379,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			printk (KERN_ERR "econet-fast: Byte %d = 0x%02X\n", count, p->data[count]);
 
 		econet_set_aunstate(EA_IDLE); /* Don't need to check if in aun-mode - means nothing if we're not */
+		ECONET_NOT_BUSY();
 		return EWAS_NOTHING;
 	}
 
@@ -405,7 +408,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 				if (abort)
 				{
-					ECONET_NOT_BUSY();
 					econet_set_aunstate(EA_IDLE);
 					econet_set_read_mode();
 					return EWAS_DATA_WRITE;
@@ -414,8 +416,8 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 			if (sr2_errors & ECONET_GPIO_S2_DCD)
 			{
+				printk (KERN_ERR "econet-fast: Lost clock during tx frame; resetting state machine\n");
 				econet_set_tx_status(ECONET_TX_NOCLOCK);
-				ECONET_NOT_BUSY();
 				econet_set_aunstate(EA_IDLE);
 				econet_set_read_mode();
 				return EWAS_DATA_WRITE;
@@ -434,6 +436,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			(sr1_errors)
 		   )
 		{
+			printk (KERN_INFO "econet-fast: Resetting state machine after error during first or final ACK tx\n");
 			econet_set_aunstate(EA_IDLE); /* Abandon */
 			return EWAS_NOTHING;
 		}
@@ -444,14 +447,17 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		{
 			if (__AUN_TX_OPERATION(aun_state))
 			{
+				printk (KERN_INFO "econet-fast: Resetting state machine after loss of clock (TX)\n");
 				econet_set_aunstate(EA_IDLE);
 				econet_set_tx_status(ECONET_TX_NOCLOCK);
 				return EWAS_DATA_WRITE;
 			}
 			else /* No clock in idle state or during AUN read operation */
 			{
+				printk (KERN_INFO "econet-fast: Resetting state machine after loss of clock (RX or idle)\n");
 				econet_set_read_mode();
 				econet_set_aunstate(EA_IDLE);
+				ECONET_NOT_BUSY();
 				return EWAS_NOTHING; /* Do nothing. */
 			}
 		}
@@ -518,6 +524,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 #endif
 				case EA_W_WRITEDATA: /* Net error */
 					{
+							printk (KERN_INFO "econet-fast: Resetting state machine after idle during 4-way data phase transmission\n");
 							econet_set_aunstate(EA_IDLE);
 							econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL); /* For now. Do we have net error in our list? */
 							return EWAS_DATA_WRITE;
@@ -539,7 +546,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 		if (aun_state == EA_IDLE && p->tx == EP_PACKET_RX) /* Something arrived off the line - shouldn't be getting a TX'd packet in idle, so that's an error */
 		{
-			//printk (KERN_INFO "econet-fast: Packet received from idle\n");
 			return econet_workqueue_respond_new_packet(p, sr1_errors, sr2_errors);
 		}
 		
@@ -584,7 +590,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 				econet_workqueue_copy_new_packet(p, aun_state);
 				econet_data->aun_packet_rx.p.aun_ttype = ECONET_AUN_IMMREP;
 				econet_data->aun_packet_rx.p.seq = seq; /* Restore */
-				ECONET_NOT_BUSY();
 				return EWAS_DATA_READ;
 			}
 			else
@@ -692,9 +697,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 					econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
 				}
 
-				// econet_set_read_mode(); IRQ handler should have done this
-
-				ECONET_NOT_BUSY();
 				return EWAS_DATA_WRITE;
 			}
 
@@ -718,7 +720,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 					{
 						printk (KERN_ERR "econet-fast: Unlawful TX frame size (0x%04X)! (aun_packet_len_tx = 0x%04X, padding = 0x%02X\n", data_balance, econet_data->aun_packet_len_tx, econet_data->aun_packet_tx.p.padding);
 						/* Abort */
-						ECONET_NOT_BUSY();
 						econet_set_tx_status (ECONET_TX_INVALID);
 						econet_set_aunstate(EA_IDLE);
 						econet_set_read_mode();
@@ -734,7 +735,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 	
 					if (!econet_data->txp)
 					{
-						ECONET_NOT_BUSY();
 						econet_set_tx_status(ECONET_TX_NOMEM);
 						econet_set_aunstate(EA_IDLE);
 						econet_set_read_mode();
@@ -768,7 +768,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 					{
 						/* Failed. */
 						printk (KERN_ERR "econet-fast: Failed to seize line for 4-way data phase: frame length 0x%04X\n", p->txlen);
-						ECONET_NOT_BUSY();
 						econet_set_aunstate(EA_IDLE);
 						econet_set_tx_status(seized);
 						econet_set_read_mode();
@@ -782,7 +781,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 					econet_set_aunstate(EA_IDLE);
 					econet_set_tx_status(ECONET_TX_NOTLISTENING); /* This is good enough if we didn't get a first ACK */
 					econet_set_read_mode();
-					ECONET_NOT_BUSY();
 					return EWAS_DATA_WRITE; /* Notify userspace writefd so it can return and report error */
 					
 				}
@@ -891,6 +889,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 				econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
 				if (sr2_errors & ECONET_GPIO_S2_DCD)
 					econet_set_tx_status(ECONET_TX_NOCLOCK);
+				printk (KERN_ERR "econet-fast: Aborted 4-way read when writing first ACK: loss of clock\n");
 				return EWAS_DATA_WRITE; /* Tell userspace it all fell in a heap */
 			}
 			else
@@ -915,7 +914,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 				printk (KERN_INFO "econet-fast: Abandoned 4-way RX on errors (SR2 = 0x%02X) reading data phase\n", sr2_errors);
 
 				ECONET_NOT_BUSY();
-
 				econet_set_aunstate(EA_IDLE);
 
 				/* No tx status to set - this is a receive state */
@@ -956,6 +954,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 						econet_set_aunstate(EA_IDLE);
 						econet_set_read_mode();
+						ECONET_NOT_BUSY();
 					}
 					else
 					{
@@ -967,7 +966,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 						{
 							/* Failed. */
 							/* But we could return the data anyway */
-							ECONET_NOT_BUSY();
 							econet_set_aunstate(EA_IDLE);
 							econet_set_read_mode();
 							return EWAS_DATA_READ;
@@ -1020,6 +1018,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 					p->ptr,
 					p->tx_flags);
 			econet_set_aunstate(EA_IDLE);
+			ECONET_NOT_BUSY();
 			return EWAS_NOTHING;
 		}
 	}
@@ -1040,6 +1039,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 				return EWAS_DATA_READ;
 			}
 
+			ECONET_NOT_BUSY();
 			return EWAS_NOTHING;
 		}
 		else

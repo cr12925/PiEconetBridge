@@ -79,7 +79,7 @@ void econet_irq_mode(short m)
  * can be dealt with.
  */
 
-void econet_irq_to_workqueue(struct __econet_packet **p, u8 sr1, u8 sr2, u8 dir)
+inline void econet_irq_to_workqueue(struct __econet_packet **p, u8 sr1, u8 sr2, u8 dir)
 {
 
 	eco_work_t *work = devm_kzalloc(econet_data->module_dev, sizeof(eco_work_t), GFP_KERNEL);
@@ -142,17 +142,18 @@ void econet_irq_to_workqueue(struct __econet_packet **p, u8 sr1, u8 sr2, u8 dir)
  *
  */
 
-void econet_irq_read_new (u8 i_sr1, u8 i_sr2)
+inline void econet_irq_read_new (u8 i_sr1, u8 i_sr2)
 {
 	u8	sr1 = i_sr1, sr2 = i_sr2;
 	u8 	read_counter = 0, bytes_to_read = 1;
 	u8	deliver_to_workqueue = 0;
 	u8	valid = 0;
+	u8	irq_loop_count = 0;
 
 	if (econet_data->twobytemode)
 		bytes_to_read = 2;
 
-while (!valid && (sr1 & ECONET_GPIO_S1_IRQ))
+while (!valid && (sr1 & ECONET_GPIO_S1_IRQ) && irq_loop_count++ < 5)
 {
 	while (!valid && (++read_counter <= bytes_to_read))
 	{
@@ -262,17 +263,17 @@ while (!valid && (sr1 & ECONET_GPIO_S1_IRQ))
 	{
 
 		if (sr1 & ECONET_GPIO_S1_LOOP)
-			printk (KERN_INFO "econet-fast: Loop mode found to be turned on!");
+			printk (KERN_INFO "econet-fast: Loop mode found to be turned on!\n");
 		if (sr2 & ECONET_GPIO_S2_RX_ABORT)
-			printk (KERN_INFO "econet-fast: RX Abort received during RX at ptr = %04X", econet_data->rxp->ptr);
+			printk (KERN_INFO "econet-fast: RX Abort received during RX at ptr = %04X, AUN state 0x%02X\n", econet_data->rxp->ptr, econet_get_aunstate());
 		if (sr2 & ECONET_GPIO_S2_ERR)
-			printk (KERN_INFO "econet-fast: RX CRC Error");
+			printk (KERN_INFO "econet-fast: RX CRC Error\n");
 		if (sr2 & ECONET_GPIO_S2_DCD)
-			printk (KERN_INFO "econet-fast: No clock during RX at ptr = %04X", econet_data->rxp->ptr);
+			printk (KERN_INFO "econet-fast: No clock during RX at ptr = %04X\n", econet_data->rxp->ptr);
 		if (sr2 & ECONET_GPIO_S2_OVERRUN)
-			printk (KERN_INFO "econet-fast: RX Overrun at ptr = %04X", econet_data->rxp->ptr);
+			printk (KERN_INFO "econet-fast: RX Overrun at ptr = %04X\n", econet_data->rxp->ptr);
 		if ((sr2 & ECONET_GPIO_S2_RX_IDLE) && (econet_data->rxp->ptr != 0))
-			printk (KERN_INFO "econet-fast: RX Idle received during frame RX at ptr = %04X", econet_data->rxp->ptr);
+			printk (KERN_INFO "econet-fast: RX Idle received during frame RX at ptr = %04X\n", econet_data->rxp->ptr);
 
 		if (!deliver_to_workqueue) /* Only discontinue if we don't have FV above */
 		{
@@ -295,7 +296,7 @@ while (!valid && (sr1 & ECONET_GPIO_S1_IRQ))
  * Write to FIFO if we have a packet to write, or deal with errors
  */
 
-void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
+inline void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 {
 
 	u8	sr1 = i_sr1, sr2 = i_sr2;
