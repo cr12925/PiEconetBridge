@@ -517,6 +517,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 				econet_write_cr(1, C1_READ);
 				econet_write_cr(2, C2_READ);
 				econet_data->clock_state = 0;
+				econet_set_chipstate(EM_IDLE);
+				chip_state = EM_IDLE;
 				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
 				handled = 1;
 			}
@@ -527,10 +529,12 @@ irqreturn_t econet_irq(int irq, void *ident)
 				econet_write_cr(1, C1_READ);
 				econet_write_cr(2, C2_READ);
 				econet_data->clock_state = 1;
+				econet_set_chipstate(EM_IDLE);
+				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
 				chip_state = EM_IDLE;
 			}
 
-			if (!handled) switch (chip_state) // Otherwise process traffic
+			switch (chip_state) // Otherwise process traffic
 			{
 				case EM_READ:
 					econet_irq_read_new(sr1, sr2);
