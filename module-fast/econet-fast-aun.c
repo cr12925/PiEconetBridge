@@ -317,6 +317,9 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 	if (p->tx == EP_PACKET_RX) 
 	{
 		sr1_errors = 0;
+
+		if (p->sr2 & ECONET_GPIO_S2_VALID) /* If FV set, do what ANFS does and pretend the rest of the world is OK */
+			sr2_errors = 0;
 	}
 	else
 	{
