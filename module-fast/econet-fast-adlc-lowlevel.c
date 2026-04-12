@@ -421,7 +421,18 @@ u8 econet_seize(void)
 	{
 		// printk (KERN_INFO "econet-fast: Set EM_WRITE since in flag fill\n");
 		econet_set_chipstate(EM_WRITE); /* Do this before turning IRQs on otherwise IRQ happens in flag fill state! */
+
+		econet_write_cr(ECONET_GPIO_CR2, 
+				ECONET_GPIO_C2_PSE
+			|	ECONET_GPIO_C2_RTS
+			|	ECONET_GPIO_C2_FLAGIDLE /* We do this but ANFS doesn't ? */
+			|	(econet_data->twobytemode ? ECONET_GPIO_C2_2BYTES : 0)
+		);
+
+		/* We write this again here because it turns IRQs on for us */
+
 		econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2); // + (TIE + RX Reset)
+
 		return ECONET_TX_SUCCESS;
 	}
 
@@ -585,9 +596,34 @@ u8 econet_seize_old(void)
 void econet_flagfill(void)
 {
 
+#if 0 /* Old version */
 	econet_write_cr(ECONET_GPIO_CR1, ECONET_GPIO_C1_RX_DISC | ECONET_GPIO_C1_RX_RESET); 
 	econet_set_chipstate(EM_FLAGFILL); /* This goes here because otherwise an IRQ turns up quickly and we get an IRQ in FLAGFILL before we've set the registers! */
 	econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT2); 
+#else /* What ANFS does - see ANFS 4.08 disassembly at &878D */
+
+	/* Put RX side into reset until we're ready and turn IRQs off */
+
+	econet_write_cr(ECONET_GPIO_CR1, ECONET_GPIO_C1_RX_RESET); 
+
+	/* Set chip state now IRQs can't happen */
+
+	econet_set_chipstate(EM_FLAGFILL);
+
+	/* Set up for TX */
+
+	econet_write_cr(ECONET_GPIO_CR2,	ECONET_GPIO_C2_RTS
+					|	ECONET_GPIO_C2_CLR_TX_STATUS
+					|	ECONET_GPIO_C2_FLAGIDLE /* We do this but ANFS doesn't? */
+					|	ECONET_GPIO_C2_PSE
+					|	(econet_data->twobytemode ? ECONET_GPIO_C2_2BYTES : 0)
+					|	ECONET_GPIO_C2_FC /* Probably will stop IRQs in flag fill - we'll undo this when we seize */
+			);
+
+	/* TX Interrupts on - NO, they get turned on during line seize */
+
+	// econet_write_cr(ECONET_GPIO_CR1,	ECONET_GPIO_C1_RX_RESET | ECONET_GPIO_C1_TINT);
+#endif
 
 }
 

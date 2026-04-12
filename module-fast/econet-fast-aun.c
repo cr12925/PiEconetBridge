@@ -193,6 +193,8 @@ u8 econet_workqueue_respond_new_packet(struct __econet_packet *p, u8 sr1_errors,
 			p->sr1, p->sr2
 	       );
 
+		econet_set_aunstate(EA_IDLE);
+		econet_set_read_mode();
 		ECONET_NOT_BUSY();
 
 		return EWAS_NOTHING;
@@ -319,7 +321,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		sr1_errors = 0;
 
 		if (p->sr2 & ECONET_GPIO_S2_VALID) /* If FV set, do what ANFS does and pretend the rest of the world is OK */
-			sr2_errors = 0;
+			sr2_errors &= ~ECONET_GPIO_S2_RX_IDLE; /* We still want to know about idle - stops writefd() getting stuck - we can return not listening */
 	}
 	else
 	{
@@ -481,7 +483,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 				case EA_W_READFIRSTACK:
 					{
-						if (p->ptr < 4)
+						//if (p->ptr < 4)
 						{
 							econet_set_aunstate(EA_IDLE);
 							econet_set_tx_status(ECONET_TX_NOTLISTENING);
@@ -657,6 +659,13 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			else if (__IS_FOURWAY(p))
 			{
 				econet_set_aunstate(EA_W_READFIRSTACK);
+				if (sr2 & ECONET_GPIO_S2_RX_IDLE) /* Not listening */
+				{
+					econet_set_aunstate(EA_IDLE);
+					econet_set_tx_status(ECONET_TX_NOTLISTENING);
+					printk (KERN_INFO "econet-fast: Resetting state machine after idle writing scout\n");
+					return EWAS_DATA_WRITE;
+				}
 				return EWAS_NOTHING;
 			}
 			else
@@ -834,6 +843,14 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			econet_data->pt.data_start = p->timing_start;
 			econet_data->pt.data_end = p->timing_end;
 #endif
+
+			if (sr2 & ECONET_GPIO_S2_RX_IDLE) /* Net error */
+			{
+				econet_set_aunstate(EA_IDLE);
+				econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
+				printk (KERN_INFO "econet-fast: Resetting state machine after idle on writing 4-way data phase\n");
+				return EWAS_DATA_WRITE;
+			}
 
 			/* TX Underrun and no clock are checked above */
 
