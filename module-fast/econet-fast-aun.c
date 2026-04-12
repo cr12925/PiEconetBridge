@@ -313,6 +313,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		);
 
 	/* Filter errors */
+
 	if (p->tx == EP_PACKET_RX) 
 	{
 		sr1_errors = 0;
@@ -849,8 +850,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			econet_data->pt.final_ack_end = p->timing_end;
 #endif
 
-			/* TX Underrun is checked above */
-
 			/* Correct length & source ? */
 
 			if (/* BODGE: Accept any old rubbish if it's from the right place p->ptr == 4 && */ econet_workqueue_correct_reply_source(p))
@@ -885,7 +884,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			{
 				/* Abandon */
 
-				// econet_set_read_mode(); IRQ handler should do this on errors
 				econet_set_aunstate(EA_IDLE);
 				econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
 				if (sr2_errors & ECONET_GPIO_S2_DCD)
@@ -897,7 +895,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 				/* Apparently successful TX of ACK */
 
-				// econet_set_read_mode(); IRQ handler should be doing this
 				econet_set_aunstate (EA_R_READDATA);
 			}
 
@@ -911,9 +908,13 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			if (sr2_errors)
 			{
 				/* Just abandon */
+				
+				printk (KERN_INFO "econet-fast: Abandoned 4-way RX on errors (SR2 = 0x%02X) reading data phase\n", sr2_errors);
+
+				ECONET_NOT_BUSY();
 
 				econet_set_aunstate(EA_IDLE);
-				// econet_set_read_mode(); /* Module likely in flag fill - IRQ handler should be doing this
+
 				/* No tx status to set - this is a receive state */
 			}
 			else
