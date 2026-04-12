@@ -503,6 +503,26 @@ irqreturn_t econet_irq(int irq, void *ident)
 				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
 				handled = 1;
 			}	
+			else if (econet_data->clock_state && !(sr2 & ECONET_GPIO_S2_DCD)) /* CLock lost */
+			{
+				printk (KERN_ERR "econet-fast: No clock\n");
+				econet_data->clock_state = 0;
+				econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Just clear status
+				econet_set_chipstate(EM_IDLE);
+				chip_state = EM_IDLE;
+				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
+				handled = 1;
+			}
+			else if (!(econet_data->clock_state) && (sr2 & ECONET_GPIO_S2_DCD)) /* Clock resumed */
+			{
+				printk (KERN_INFO "econet-fast: Clock resumed\n");
+				econet_data->clock_state = 1;
+				econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Just clear status
+				econet_set_chipstate(EM_IDLE);
+				chip_state = EM_IDLE;
+				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
+				handled = 1;
+			}
 
 			switch (chip_state) // Otherwise process traffic
 			{

@@ -717,8 +717,15 @@ int econet_probe (struct platform_device *pdev)
 	sr2 = econet_read_sr(2);
 
 	if (sr2 & ECONET_GPIO_S2_DCD)
+	{
 		printk (KERN_ERR "econet-fast: No clock! (SR1 = 0x%02x, SR2 = 0x%02x)\n", sr1, sr2);
-	else	if (econet_data->extralogs) printk (KERN_INFO "econet-fast: Clock detected\n"); /* Don't bother unless the user wants to know! */
+		econet_data->clock_state = 0;
+	}
+	else	
+	{
+		econet_data->clock_state = 1;
+		if (econet_data->extralogs) printk (KERN_INFO "econet-fast: Clock detected\n"); /* Don't bother unless the user wants to know! */
+	}
 
 	/* Show that we are ready for service */
 

@@ -352,6 +352,10 @@ void econet_reset(void)
 
 	econet_set_read_mode(); // Required in addition to the cleadown, because this sets the ADLC up to read, where as cleardown doesn't.
 
+	/* Set clock state */
+
+	econet_data->clock_state = !!(econet_read_sr(2) & ECONET_GPIO_S2_DCD);
+
 	if (econet_data->extralogs)
 		printk (KERN_INFO "econet-fast: Module reset. AUN mode off. ADLC re-initialized.\n");
 

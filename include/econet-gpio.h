@@ -322,6 +322,9 @@ struct __econet_data {
 	/* How many Packets since idle - we don't flag fill on receipt if this is two! */
 	u8 pkt_since_idle;
 
+	/* Clock detection state */
+	u8 clock_state;
+
 	/* Whether module busy */
 	atomic_t busy;
 
