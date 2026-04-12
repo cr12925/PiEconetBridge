@@ -209,7 +209,6 @@ while (!valid && (sr1 & ECONET_GPIO_S1_IRQ) && irq_loop_count++ < 5)
 
 		deliver_to_workqueue = 1;
 
-
 		// econet_data->rxp->timing_end = ktime_get_ns();
 
 		/* Flag fill if the packet was destined to one our stations, UNLESS:
@@ -511,28 +510,27 @@ irqreturn_t econet_irq(int irq, void *ident)
 				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
 				handled = 1;
 			}	
-			else if (econet_data->clock_state && !(sr2 & ECONET_GPIO_S2_DCD)) /* CLock lost */
+
+			if (econet_data->clock_state && (sr2 & ECONET_GPIO_S2_DCD)) /* Clock lost */
 			{
 				printk (KERN_ERR "econet-fast: No clock\n");
+				econet_write_cr(1, C1_READ);
+				econet_write_cr(2, C2_READ);
 				econet_data->clock_state = 0;
-				econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Just clear status
-				econet_set_chipstate(EM_IDLE);
-				chip_state = EM_IDLE;
-				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
-				handled = 1;
-			}
-			else if (!(econet_data->clock_state) && (sr2 & ECONET_GPIO_S2_DCD)) /* Clock resumed */
-			{
-				printk (KERN_INFO "econet-fast: Clock resumed\n");
-				econet_data->clock_state = 1;
-				econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Just clear status
-				econet_set_chipstate(EM_IDLE);
-				chip_state = EM_IDLE;
 				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
 				handled = 1;
 			}
 
-			switch (chip_state) // Otherwise process traffic
+			if (!(econet_data->clock_state) && !(sr2 & ECONET_GPIO_S2_DCD)) /* Clock resumed */
+			{
+				printk (KERN_INFO "econet-fast: Clock resumed\n");
+				econet_write_cr(1, C1_READ);
+				econet_write_cr(2, C2_READ);
+				econet_data->clock_state = 1;
+				chip_state = EM_IDLE;
+			}
+
+			if (!handled) switch (chip_state) // Otherwise process traffic
 			{
 				case EM_READ:
 					econet_irq_read_new(sr1, sr2);
