@@ -39,17 +39,24 @@ inline struct __econet_packet * econet_alloc_pbuf(void)
 
 	for (pbuf_count = 0; pbuf_count < ECONET_GPIO_MAX_BUFFERS; pbuf_count++)
 	{
-		if (econet_data->pbuf_inuse & (1 << pbuf_count))
-			continue;
+		if (!(econet_data->pbuf_inuse & (1 << pbuf_count)))
+		{
+			/* Found */
 
-		r = econet_data->pbuf[pbuf_count];
-		r->pbuf_index = pbuf_count;
-		econet_data->pbuf_inuse |= (1 << pbuf_count);
-		r->ptr = 0; /* Reset pointer */
-		r->sr1 = r->sr2 = r->tx = r->tx_flags = 0;
+			r = econet_data->pbuf[pbuf_count];
+			r->pbuf_index = pbuf_count;
+			econet_data->pbuf_inuse |= (1 << pbuf_count);
+			r->ptr = 0; /* Reset pointer */
+			r->sr1 = r->sr2 = r->tx = r->tx_flags = 0;
+
+			break;
+		}
+
 	}
 
 	mutex_unlock(&(econet_data->pbuf_mutex));
+
+	//printk (KERN_ERR "econet-fast: Allocate pbuf %d at %p\n", pbuf_count, r);
 
 	return r;
 }
@@ -67,16 +74,19 @@ inline eco_work_t * econet_alloc_workbuf(void)
 
 	for (wb_count = 0; wb_count < ECONET_GPIO_MAX_WORK_BUFFERS; wb_count++)
 	{
-		if (econet_data->workbuf_inuse & (1 << wb_count))
-			continue;
-
-		r = econet_data->workbuf[wb_count];
-		r->wb_index = wb_count;
-		econet_data->workbuf_inuse |= (1 << wb_count);
-		r->p = NULL;
+		if (!(econet_data->workbuf_inuse & (1 << wb_count)))
+		{
+			r = econet_data->workbuf[wb_count];
+			r->wb_index = wb_count;
+			econet_data->workbuf_inuse |= (1 << wb_count);
+			r->p = NULL;
+			break;
+		}
 	}
 
 	mutex_unlock(&(econet_data->workbuf_mutex));
+
+	//printk (KERN_ERR "econet-fast: Allocate workbuf %d at %p\n", wb_count, r);
 
 	return r;
 }
@@ -85,6 +95,8 @@ inline eco_work_t * econet_alloc_workbuf(void)
 
 inline void econet_free_pbuf(struct __econet_packet *p)
 {
+
+	//printk (KERN_ERR "econet-fast: Free pbuf at %p, no. %d\n", p, p->pbuf_index);
 
 	mutex_lock(&(econet_data->pbuf_mutex));
 
@@ -97,6 +109,8 @@ inline void econet_free_pbuf(struct __econet_packet *p)
 
 inline void econet_free_workbuf(eco_work_t *e)
 {
+
+	//printk (KERN_ERR "econet-fast: Free workbuf at %p, no. %d\n", e, e->wb_index);
 
 	mutex_lock(&(econet_data->workbuf_mutex));
 
