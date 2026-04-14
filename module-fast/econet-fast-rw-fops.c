@@ -423,6 +423,8 @@ int econet_release(struct inode *inode, struct file *file) {
 	}
 #endif
 
+	/* TODO : need to drain & reset any applicable fifo */
+
 	/* Turn off AUN mode */
 
 	econet_data->aun_mode = 0; /* But we do need to find a way of turning this off on a release... otherwise the module keeps doing 4-ways! */

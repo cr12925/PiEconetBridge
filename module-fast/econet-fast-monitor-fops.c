@@ -120,6 +120,8 @@ int econet_monitor_release(struct inode *inode, struct file *file) {
 
 	econet_data->monitor_count--;
 
+	/* TODO: need to drain the fifo */
+
 	kfifo_reset(&(econet_data->monitor_fifo));
 
 	module_put(THIS_MODULE);
