@@ -45,6 +45,8 @@ inline struct __econet_packet * econet_alloc_pbuf(void)
 		r = econet_data->pbuf[pbuf_count];
 		r->pbuf_index = pbuf_count;
 		econet_data->pbuf_inuse |= (1 << pbuf_count);
+		r->ptr = 0; /* Reset pointer */
+		r->sr1 = r->sr2 = r->tx = r->tx_flags = 0;
 	}
 
 	mutex_unlock(&(econet_data->pbuf_mutex));
@@ -71,6 +73,7 @@ inline eco_work_t * econet_alloc_workbuf(void)
 		r = econet_data->workbuf[wb_count];
 		r->wb_index = wb_count;
 		econet_data->workbuf_inuse |= (1 << wb_count);
+		r->p = NULL;
 	}
 
 	mutex_unlock(&(econet_data->workbuf_mutex));

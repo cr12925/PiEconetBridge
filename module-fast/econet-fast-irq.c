@@ -181,8 +181,8 @@ while (!valid && (sr1 & ECONET_GPIO_S1_IRQ) && irq_loop_count++ < 5)
 		{
 			u8	d;
 
-			if (econet_data->rxp->ptr > ECONET_MAX_PACKET_SIZE)
-				econet_data->rxp->ptr--; /* Just let keep overwriting last byte of data */
+			if (econet_data->rxp->ptr >= ECONET_MAX_PACKET_SIZE)
+				econet_data->rxp->ptr--; /* Just let keep overwriting last byte of data TODO - discontinue() */
 	
 			econet_data->rxp->data[econet_data->rxp->ptr++] = d = econet_read_fifo();
 
@@ -560,7 +560,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 		}
 		else
 		{
-			printk (KERN_ERR "econet-fast: No RX packet storage in IRQ handler!\n");
+			printk (KERN_ERR "econet-fast: No RX packet storage in IRQ handler! (rxp = %p)\n", econet_data->rxp);
 
 			/* Turn the ADLC off! */
 

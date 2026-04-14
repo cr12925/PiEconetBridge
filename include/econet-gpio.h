@@ -399,7 +399,7 @@ struct __econet_data {
 
 	/* Econet workqueue buffers */
 	eco_work_t *workbuf[ECONET_GPIO_MAX_WORK_BUFFERS];
-	u32 workbuf_inuse;
+	u32 	workbuf_inuse;
 	struct mutex workbuf_mutex;
 
 	/* RX Buffer pointer, suitable for putting on a workqueue */

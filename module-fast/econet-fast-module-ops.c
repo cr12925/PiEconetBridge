@@ -271,8 +271,6 @@ int econet_probe (struct platform_device *pdev)
 	if (!econet_device)
 	{
 		printk (KERN_INFO "econet-fast: No device tree entry found. Abort.\n");
-		// Now device-managed: kfree(econet_data->rxp);
-		// Now device-managed: kfree(econet_data);
 		econet_data = NULL;
 		return -ENODEV;
 	}
@@ -292,8 +290,6 @@ int econet_probe (struct platform_device *pdev)
 	else if (version == 0)
 	{
 		printk (KERN_INFO "econet-fast: No version found in device tree. Do you need to load an overlay? Abort.\n");
-		// Now device-managed: kfree(econet_data->rxp);
-		// Now device-managed: kfree(econet_data);
 		econet_data = NULL;
 		return -ENODEV;
 	}
@@ -332,8 +328,6 @@ int econet_probe (struct platform_device *pdev)
 	if (econet_data->hwver < 2)
 	{
 		printk (KERN_ERR "econet-fast: Hardware version (%d) incompatible with this module. Please compile module in old mode.\n", econet_data->hwver);
-		// Now device-managed: kfree(econet_data->rxp);
-		// Now device-managed: kfree(econet_data);
 		econet_data = NULL;
 		return -ENODEV;
 	}
@@ -845,16 +839,6 @@ void econet_remove(struct platform_device *pdev)
 		if (econet_data->monitor_fifo_initialized) kfifo_free(&(econet_data->monitor_fifo));
 
 		/* PWM clock is under device management - shouldn't need to put/free it */
-
-		/*
-		 * Free private storage
-		 * Note that rxp & ack are device managed, so we don't need to worry about them
-		 *
-		 */
-
-		// Now device-managed: kfree(econet_data);
-
-		// econet_data = NULL;
 
 	}
 
