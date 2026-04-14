@@ -35,7 +35,7 @@ inline struct __econet_packet * econet_alloc_pbuf(void)
 	u8	pbuf_count;
 	struct __econet_packet *r = NULL;
 
-	mutex_lock(econet_data->pbuf_mutex);
+	mutex_lock(&(econet_data->pbuf_mutex));
 
 	for (pbuf_count = 0; pbuf_count < ECONET_GPIO_MAX_BUFFERS; pbuf_count++)
 	{
@@ -47,7 +47,7 @@ inline struct __econet_packet * econet_alloc_pbuf(void)
 		econet_data->pbuf_inuse |= (1 << pbuf_count);
 	}
 
-	mutex_unlock(econet_data->pbuf_mutex);
+	mutex_unlock(&(econet_data->pbuf_mutex));
 
 	return r;
 }
@@ -61,7 +61,7 @@ inline eco_work_t * econet_alloc_workbuf(void)
 	u8 wb_count;
 	eco_work_t *r;
 
-	mutex_lock(econet_data->workbuf_mutex);
+	mutex_lock(&(econet_data->workbuf_mutex));
 
 	for (wb_count = 0; wb_count < ECONET_GPIO_MAX_WORK_BUFFERS; wb_count++)
 	{
@@ -73,7 +73,7 @@ inline eco_work_t * econet_alloc_workbuf(void)
 		econet_data->workbuf_inuse |= (1 << wb_count);
 	}
 
-	mutex_unlock(econet_data->workbuf_mutex);
+	mutex_unlock(&(econet_data->workbuf_mutex));
 
 	return r;
 }
@@ -83,11 +83,11 @@ inline eco_work_t * econet_alloc_workbuf(void)
 inline void econet_free_pbuf(struct __econet_packet *p)
 {
 
-	mutex_lock(econet_data->pbuf_mutex);
+	mutex_lock(&(econet_data->pbuf_mutex));
 
 	econet_data->pbuf_inuse |= (1<< (p->pbuf_index));
 
-	mutex_unlock(econet_data->pbuf_mutex);
+	mutex_unlock(&(econet_data->pbuf_mutex));
 }
 
 /* And likewise an eco_work_t */
@@ -95,9 +95,9 @@ inline void econet_free_pbuf(struct __econet_packet *p)
 inline void econet_free_workbuf(eco_work_t *e)
 {
 
-	mutex_lock(econet_data->workbuf_mutex);
+	mutex_lock(&(econet_data->workbuf_mutex));
 
 	econet_data->workbuf_inuse |= (1<<(e->wb_index));
 
-	mutex_unlock(econet_data->workbuf_mutex);
+	mutex_unlock(&(econet_data->workbuf_mutex));
 }

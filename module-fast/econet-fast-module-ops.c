@@ -172,7 +172,7 @@ int econet_init_vars (void)
 
 	econet_data->pbuf_inuse = 0;
 
-	mutex_init(econet_data->pbuf_mutex);
+	mutex_init(&(econet_data->pbuf_mutex));
 
 	/* And now the workqueue buffers */
 
@@ -189,7 +189,7 @@ int econet_init_vars (void)
 
 	econet_data->workbuf_inuse = 0;
 
-	mutex_init(econet_data->workbuf_mutex);
+	mutex_init(&(econet_data->workbuf_mutex));
 
 	return 0;
 }
