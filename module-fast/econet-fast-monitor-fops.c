@@ -66,7 +66,7 @@ ssize_t econet_monitor_readfd(struct file *flip, char *buffer, size_t len, loff_
 			// printk (KERN_INFO "econet-fast: copy packet at %p to user on read()\n", p);
 			ret = copy_to_user(buffer, p, sizeof(struct __econet_packet) - (ECONET_MAX_PACKET_SIZE - p->ptr)); /* Only copy the used bytes */
 			//printk (KERN_INFO "econet-fast: free()ing packet pointer at %p\n", p);
-			devm_kfree (econet_data->module_dev, p); /* This is what had been allocated to econet_data->rxp at init and whenever an RX packet or signalling is put on the workqueue */
+			econet_free_pbuf(p); /* This is what had been allocated to econet_data->rxp at init and whenever an RX packet or signalling is put on the workqueue */
 		}
 	}
 

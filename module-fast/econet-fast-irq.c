@@ -82,14 +82,14 @@ void econet_irq_mode(short m)
 inline void econet_irq_to_workqueue(struct __econet_packet **p, u8 sr1, u8 sr2, u8 dir)
 {
 
-	eco_work_t *work = devm_kzalloc(econet_data->module_dev, sizeof(eco_work_t), GFP_KERNEL);
+	eco_work_t *work = econet_alloc_workbuf();
 
 	if (!*p)
 	{
 		if (econet_data->extralogs)
 			printk (KERN_INFO "econet-fast: econet_irq_to_workqueue() called with no packet data!\n");
 
-		if (work) devm_kfree(econet_data->module_dev, work);
+		if (work) econet_free_workbuf(work);
 
 		return;
 	}
@@ -113,11 +113,10 @@ inline void econet_irq_to_workqueue(struct __econet_packet **p, u8 sr1, u8 sr2, 
 		{
 			/* Free it up and complain - the workqueue failed! */
 	
-			if (p)
-				devm_kfree (econet_data->module_dev, *p);
+			if (*p)
+				econet_free_pbuf(*p);
 
-
-			devm_kfree(econet_data->module_dev, work);
+			econet_free_workbuf(work);
 
 			printk (KERN_ERR "econet-fast: Unable to put work on work queue!\n");
 		}
@@ -125,13 +124,14 @@ inline void econet_irq_to_workqueue(struct __econet_packet **p, u8 sr1, u8 sr2, 
 	else
 	{
 		printk (KERN_ERR "econet-fast: Unable to allocate memory to transfer packet to work queue!\n");
-		devm_kfree (econet_data->module_dev, *p); // *p must be non-NULL because we checked it above */
+		econet_free_pbuf(*p);
+
 	}
 
 	/* Reallocate new RX packet if required */
 
 	if (dir == EP_PACKET_RX)
-		*p = devm_kzalloc(econet_data->module_dev, sizeof(struct __econet_packet), GFP_KERNEL);
+		*p = econet_alloc_pbuf();
 	else	econet_data->txp = NULL;
 
 }
@@ -335,7 +335,7 @@ inline void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 					econet_write_cr(ECONET_GPIO_CR2,
 						ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_CLR_TX_STATUS |
 						ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE |
-						(econet_data->twobytemode) ? ECONET_GPIO_C2_2BYTES : 0);
+						((econet_data->twobytemode) ? ECONET_GPIO_C2_2BYTES : 0));
 
 					tdra = ((sr1 = econet_read_sr(1)) & ECONET_GPIO_S1_TDRA);
 				}
@@ -599,9 +599,10 @@ irqreturn_t econet_irq(int irq, void *ident)
 		{
 			econet_set_chipstate(EM_IDLE);
 			if (!econet_data->txp)
-				econet_data->txp = devm_kzalloc(econet_data->module_dev, sizeof(struct __econet_packet), GFP_KERNEL);
+				econet_data->txp = econet_alloc_pbuf();
+
 			if (!econet_data->txp)
-				printk (KERN_ERR "econet-fast: Unable to allocate txp structure to report failed IRQ!\n");
+				printk (KERN_ERR "econet-fast: No available packet structure for txp!\n");
 			else
 			{
 				econet_data->txp->sr1 = sr1;

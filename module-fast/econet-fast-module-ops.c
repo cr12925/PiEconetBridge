@@ -41,6 +41,7 @@ int econet_init_vars (void)
 {
 
 	int result;
+	u8	pbuf_count;
 
         /* Main initialization routine */
 
@@ -157,6 +158,39 @@ int econet_init_vars (void)
         spin_lock_init(&econet_irqstate_spin);
         spin_lock_init(&econet_tx_spin);
 
+	/* Packet buffer init */
+
+	for (pbuf_count = 0; pbuf_count < ECONET_GPIO_MAX_BUFFERS; pbuf_count++)
+	{
+		econet_data->pbuf[pbuf_count] = devm_kzalloc(econet_data->module_dev, sizeof(struct __econet_packet), GFP_KERNEL);
+		if (!econet_data->pbuf[pbuf_count]) /* Failed */
+		{
+			printk (KERN_ERR "econet-fast: Unable to allocate packet buffer memory, entry %d\n", pbuf_count);
+			return -ENOMEM;
+		}
+	}
+
+	econet_data->pbuf_inuse = 0;
+
+	mutex_init(econet_data->pbuf_mutex);
+
+	/* And now the workqueue buffers */
+
+	for (pbuf_count = 0; pbuf_count < ECONET_GPIO_MAX_WORK_BUFFERS; pbuf_count++)
+	{
+		econet_data->workbuf[pbuf_count] = devm_kzalloc(econet_data->module_dev, sizeof(eco_work_t), GFP_KERNEL);
+
+		if (!econet_data->workbuf[pbuf_count])
+		{
+			printk (KERN_ERR "econet-fast: Unable to allocate workqueue buffer, entry %d\n", pbuf_count);
+			return -ENOMEM;
+		}
+	}
+
+	econet_data->workbuf_inuse = 0;
+
+	mutex_init(econet_data->workbuf_mutex);
+
 	return 0;
 }
 
@@ -208,17 +242,6 @@ int econet_probe (struct platform_device *pdev)
 
 	econet_data->auntransitionlogs = 0;
 	// econet_data->chipstatelogs = 1;
-
-	/* Next set up initial storage for an incoming packet */
-
-	econet_data->rxp = devm_kzalloc(econet_data->module_dev, sizeof(struct __econet_packet), GFP_KERNEL);
-
-	if (!econet_data->rxp)
-	{
-		printk (KERN_ERR "econet-fast: Failed to allocate rx packet storage.\n");
-		// Now device-managed: kfree(econet_data);
-		return -ENOMEM;
-	}
 
 	/*
 	 * Next, look for the econet-gpio entry in
@@ -282,10 +305,18 @@ int econet_probe (struct platform_device *pdev)
 	if ((result = econet_init_vars()))
 	{
 		printk (KERN_INFO "econet-fast: Unable to initialize main module variables. Abort.\n");
-		// Now device-managed: kfree(econet_data->rxp);
-		// Now device-managed: kfree(econet_data);
 		econet_data = NULL;
 		return result;
+	}
+
+	/* Next set up initial storage for an incoming packet */
+
+	econet_data->rxp = econet_alloc_pbuf();
+
+	if (!econet_data->rxp)
+	{
+		printk (KERN_ERR "econet-fast: Failed to allocate rx packet storage.\n");
+		return -ENOMEM;
 	}
 
 	result = 0;

@@ -27,35 +27,6 @@ struct __econet_packet dump_pkt;
 unsigned long tx_packets;
 
 /*
- * Bitmap of 65536 stations we 
- * might receive traffic for. 
- *
- * Updated from user space with ioctl()
- *
- */
-
-/* Moved to econet_data
-unsigned char econet_stations[8192];
-*/
-
-/* 
- * Buffers to hold packets to be tx'd,
- * packet being rx'd and
- * ... er, something else.
- *
- */
-
-struct __econet_pkt_buffer      econet_pkt_tx,
-                                econet_pkt_tx_prepare,
-                                econet_pkt_rx;
-
-/* 
- * writefd() buffer
- */
-
-struct __econet_pkt_buffer pkt_copy; /* Temporary buffer for incoming / outgoing packets */
-
-/*
  * Tracks when last data received
  *
  * So we can tell whether to start new transaction

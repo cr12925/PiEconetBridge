@@ -41,6 +41,7 @@ __used __section("__versions") = {
 	{ 0x615c316, "__register_chrdev" },
 	{ 0xb1ad28e0, "__gnu_mcount_nc" },
 	{ 0xae353d77, "arm_copy_from_user" },
+	{ 0x67ea780, "mutex_unlock" },
 	{ 0x5af58d5d, "__platform_driver_register" },
 	{ 0x51a910c0, "arm_copy_to_user" },
 	{ 0x81745c35, "of_property_read_variable_u8_array" },
@@ -48,15 +49,16 @@ __used __section("__versions") = {
 	{ 0x5f754e5a, "memset" },
 	{ 0xdbdf6c92, "ioport_resource" },
 	{ 0xf3d0b495, "_raw_spin_unlock_irqrestore" },
+	{ 0xe346f67a, "__mutex_init" },
 	{ 0xc5850110, "printk" },
 	{ 0x1d37eeed, "ioremap" },
 	{ 0xdec6108b, "devm_gpiod_get_index" },
 	{ 0xa1c76e0a, "_cond_resched" },
+	{ 0xc271c3be, "mutex_lock" },
 	{ 0x8c03d20c, "destroy_workqueue" },
 	{ 0x5d3eb04, "device_create" },
 	{ 0x92d5838e, "request_threaded_irq" },
 	{ 0x8e865d3c, "arm_delay_ops" },
-	{ 0xe8de7970, "devm_kfree" },
 	{ 0x42160169, "flush_workqueue" },
 	{ 0xfe487975, "init_wait_entry" },
 	{ 0xe9d59def, "module_put" },
@@ -71,6 +73,7 @@ __used __section("__versions") = {
 	{ 0x76d9b876, "clk_set_rate" },
 	{ 0x3dcf1ffa, "__wake_up" },
 	{ 0x647af474, "prepare_to_wait_event" },
+	{ 0x2cfde9a2, "warn_slowpath_fmt" },
 	{ 0xfcec0987, "enable_irq" },
 	{ 0x9d669763, "memcpy" },
 	{ 0xf4d64ff, "gpiod_to_irq" },
@@ -96,4 +99,4 @@ MODULE_INFO(depends, "");
 MODULE_ALIAS("of:N*T*Ceconet-gpio");
 MODULE_ALIAS("of:N*T*Ceconet-gpioC*");
 
-MODULE_INFO(srcversion, "1D2F35B5871249E6E1D345C");
+MODULE_INFO(srcversion, "273AD39FE9518B6C8333FC1");

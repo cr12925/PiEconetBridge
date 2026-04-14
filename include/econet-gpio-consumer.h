@@ -62,6 +62,7 @@ struct __econet_packet {
 	u8	tx_flags; /* See below */
 	u32	device; /* Device number 0 - 7 - which to tx on; which this packet was received on. u32 to preserve 4-byte boundary, but can be split later */
 	u64	timing_start, timing_end; /* ktime_get_ns() for start of rx/tx, and end */
+	u32	pbuf_index; /* So econet_free_pbuf() can be called with the right number. u32 for padding only - only needs u8 */
 	char data[ECONET_MAX_PACKET_SIZE];
 };
 

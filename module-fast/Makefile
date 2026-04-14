@@ -1,7 +1,7 @@
 ifneq ($(KERNELRELEASE),)
 
 obj-m += econet-fast.o
-econet-fast-y := econet-fast-adlc-lowlevel.o econet-fast-adlc-ops.o econet-fast-rw-fops.o econet-fast-rw-ioctl.o econet-fast-irq.o econet-fast-module-ops.o econet-fast-netclock.o econet-fast-leds.o econet-fast-aun.o econet-fast-devices.o econet-fast-monitor-fops.o econet-fast-monitor-ioctl.o
+econet-fast-y := econet-fast-adlc-lowlevel.o econet-fast-adlc-ops.o econet-fast-rw-fops.o econet-fast-rw-ioctl.o econet-fast-irq.o econet-fast-module-ops.o econet-fast-netclock.o econet-fast-leds.o econet-fast-aun.o econet-fast-devices.o econet-fast-monitor-fops.o econet-fast-monitor-ioctl.o econet-fast-pbuf.o
 
 else
 

@@ -19,6 +19,8 @@
 
 #include "../include/econet-gpio.h"
 
+struct __econet_packet_aun	aun_tmp;
+
 /* Prototypes */
 
 u8 econet_writefd_transmit(void);
@@ -173,7 +175,7 @@ u8 econet_writefd_transmit(void)
 				econet_data->aun_packet_tx.p.ctrl,
 				econet_data->aun_packet_len_tx);
 			ECONET_NOT_BUSY();
-			devm_kfree(econet_data->module_dev, econet_data->txp);
+			econet_free_pbuf(econet_data->txp);
 			econet_data->txp = NULL;
 			econet_set_aunstate(EA_IDLE);
 			return 0;
@@ -222,7 +224,7 @@ u8 econet_writefd_transmit(void)
 		printk (KERN_INFO "econet-fast: writefd(): line seize failed!\n");
 
 		econet_set_tx_status(seize_result);
-		devm_kfree(econet_data->module_dev, econet_data->txp);
+		econet_free_pbuf(econet_data->txp);
 		econet_data->txp = NULL;
 
 		/* Put AUN state back to IDLE so that we don't get RX Idles in the state machine during WRITESCOUT */
@@ -271,6 +273,14 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	if (len > (ECONET_MAX_PACKET_SIZE + (econet_data->aun_mode ? 12 : 0)))
 		return -EPROTO;
 
+	if (!access_ok((void __user *) buffer, len) ||
+		copy_from_user(&aun_tmp, (void *) buffer, len)
+	   )
+	{
+		printk (KERN_INFO "econet-fast: Unable to copy packet from userspace\n");
+		return -EFAULT;
+	}
+
 	/* Attempt to seize the line, and return error on failure. 
 	 * If successful, copy packet to the econet_data->aun_packet and econet_data->aun_packet_length
 	 * fields.
@@ -298,13 +308,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	 * (which is used for raw transmissions as well
 	 */
 
-	if (!access_ok((void __user *) buffer, len) ||
-		copy_from_user(&(econet_data->aun_packet_tx), (void *) buffer, len)
-	   )
-	{
-		printk (KERN_INFO "econet-fast: Unable to copy packet from userspace\n");
-		return -EFAULT;
-	}
+	memcpy(&(econet_data->aun_packet_tx), &aun_tmp, len);
 
 	/* Timestamp receive from user */
 

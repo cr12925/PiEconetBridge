@@ -303,10 +303,12 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 		 * Enables userspace to report what happened
 		 * on a failed transmission.
 		 *
+		 * Module fast no longer returns the tx ptr
+		 *
 		 */
 
 		case ECONETGPIO_IOC_GETAUNSTATE:
-			return ((econet_pkt_tx.ptr << 16) | econet_get_aunstate());
+			return (econet_get_aunstate());
 			break;
 
 		/*

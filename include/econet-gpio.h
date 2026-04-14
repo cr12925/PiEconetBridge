@@ -18,6 +18,14 @@
 
 #define __ECONETGPIOKERNEL_H__
 
+/* 
+ * Max packet buffers for module-fast - maximum 32
+ */
+
+#define ECONET_GPIO_MAX_BUFFERS 8
+#define ECONET_GPIO_MAX_WORK_BUFFERS 8
+
+
 /*
  * ECONET_GPIO_NEW define.
  *
@@ -92,7 +100,15 @@
 
 #define ECONET_TX_STAMP(n)	econet_data->pt.n = ktime_get_ns()
 
-/* Packet buffer definitions */
+/* Workqueue typedef */
+
+typedef struct {
+	struct work_struct	econet_work;
+	struct __econet_packet	*p;
+	u8	wb_index; /* Index so econet_free_workbuf knows which one to free */
+} eco_work_t;
+
+/* Packet buffer definitions - only used in old module */
 
 struct __econet_pkt_buffer {
 	struct __econet_packet_wire d;
@@ -178,6 +194,11 @@ extern u8 econet_rx_queue_initialized, econet_tx_queue_initialized, monitor_rx_q
 /* Mutex externs */
 
 extern spinlock_t econet_irq_spin, econet_tx_spin, econet_irqstate_spin;
+
+extern struct __econet_packet * econet_alloc_pbuf(void);
+extern void econet_free_pbuf(struct __econet_packet *);
+extern eco_work_t * econet_alloc_workbuf(void);
+extern void econet_free_workbuf(eco_work_t *);
 
 /*
  * Some macros to make the code
@@ -366,6 +387,21 @@ struct __econet_data {
 
 	struct workqueue_struct *workqueue; // Process-side packet manipulation workqueue
 
+	/* Econet packet buffers */
+	/* Each of rxp and txp below will point to one of these
+	 * buffer array entries, so we don't alloc/free 
+	 * in IRQ
+	 */
+
+	struct __econet_packet *pbuf[ECONET_GPIO_MAX_BUFFERS];
+	u32	pbuf_inuse; /* 1 bit per entry - bit 0 is pbuf[0] */
+	struct mutex *pbuf_mutex;
+
+	/* Econet workqueue buffers */
+	eco_work_t *workbuf[ECONET_GPIO_MAX_WORK_BUFFERS];
+	u32 workbuf_inuse;
+	struct mutex *workbuf_mutex;
+
 	/* RX Buffer pointer, suitable for putting on a workqueue */
 
 	struct __econet_packet *rxp;
@@ -380,6 +416,8 @@ struct __econet_data {
 	/* Station map */
 	u8	station_map[8192];
 };
+
+extern struct __econet_packet_aun	aun_tmp; /* Used by writefd() in module-fast to avoid a copy_from_user whilst IRQ locked */
 
 /* Macro to calculate mem allocation needed for a packet with n bytes in it */
 
@@ -401,12 +439,7 @@ struct __econet_data {
 
 #define emalloc(n) devm_kzalloc(econet_data->module_dev, n, GFP_KERNEL);
 
-/* Workqueue definition */
-
-typedef struct {
-	struct work_struct	econet_work;
-	struct __econet_packet	*p;
-} eco_work_t;
+/* Extern for main driver data */
 
 extern struct __econet_data *econet_data;
 

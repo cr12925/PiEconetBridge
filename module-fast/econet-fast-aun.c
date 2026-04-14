@@ -1173,7 +1173,7 @@ void econet_workqueue_handler (struct work_struct *work)
 	{
 		/* Barf */
 		printk (KERN_ERR "econet-fast: workqueue handler called without any packet data!\n");
-		devm_kfree(econet_data->module_dev, my_work);
+		econet_free_workbuf(my_work);
 		return;
 	}
 	
@@ -1245,7 +1245,7 @@ void econet_workqueue_handler (struct work_struct *work)
 			/* If we've put my_work->p on the fifo, the readfd routine will free it. */
 		}
 		else
-			devm_kfree (econet_data->module_dev, my_work->p);
+			econet_free_pbuf(my_work->p);
 
 
 	}
@@ -1253,13 +1253,13 @@ void econet_workqueue_handler (struct work_struct *work)
 	{
 		/* If monitor not open, free the packet data */
 
-		devm_kfree (econet_data->module_dev, my_work->p);
+		econet_free_pbuf(my_work->p);
 	}
 
 
 	/* Free the work queue data, but not the packet data, which the monitor_readfd() does. */
 
-	devm_kfree (econet_data->module_dev, my_work);
+	econet_free_workbuf(my_work);
 
 	return;
 
