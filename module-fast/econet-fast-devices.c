@@ -168,9 +168,7 @@ int econet_monitor_init(void)
 
 	econet_data->monitor_count = 0;
 
-	/* Test for now 20260320 */
-
-	econet_data->extralogs = 1;
+	econet_data->extralogs = 0;
 
         /*
          * Create device within class, 
