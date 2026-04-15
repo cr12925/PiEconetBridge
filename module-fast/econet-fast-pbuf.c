@@ -100,7 +100,7 @@ inline void econet_free_pbuf(struct __econet_packet *p)
 
 	mutex_lock(&(econet_data->pbuf_mutex));
 
-	econet_data->pbuf_inuse |= (1<< (p->pbuf_index));
+	econet_data->pbuf_inuse &= ~(1<< (p->pbuf_index));
 
 	mutex_unlock(&(econet_data->pbuf_mutex));
 }
@@ -114,7 +114,7 @@ inline void econet_free_workbuf(eco_work_t *e)
 
 	mutex_lock(&(econet_data->workbuf_mutex));
 
-	econet_data->workbuf_inuse |= (1<<(e->wb_index));
+	econet_data->workbuf_inuse &= ~(1<<(e->wb_index));
 
 	mutex_unlock(&(econet_data->workbuf_mutex));
 }
