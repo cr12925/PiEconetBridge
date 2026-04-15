@@ -599,7 +599,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 				econet_data->txp = econet_alloc_pbuf();
 
 			if (!econet_data->txp)
-				printk (KERN_ERR "econet-fast: No available packet structure for txp!\n");
+				printk (KERN_ERR "econet-fast: No available packet structure for txp! Failure not logged to workqueue.\n");
 			else
 			{
 				econet_data->txp->sr1 = sr1;
@@ -616,10 +616,15 @@ irqreturn_t econet_irq(int irq, void *ident)
 				printk (KERN_ERR "econet-fast: RX packet buffer is null on IRQ Failure handler!\n");
 				econet_data->rxp = econet_alloc_pbuf();
 			}
-			econet_data->rxp->sr1 = sr1;
-			econet_data->rxp->sr2 = sr2;
-			econet_data->rxp->tx_flags = EP_IRQHANDLER_FAILED;
-			econet_irq_to_workqueue(&(econet_data->rxp), sr1, sr2, EP_PACKET_RX); 
+			if (!econet_data->rxp)
+				printk (KERN_ERR "econet-fast: RX packet buffer remained null after IRQ failure handler tried to re-allocate it. RX packet buffer starving! Failure not sent to workqueue.\n");
+			else
+			{
+				econet_data->rxp->sr1 = sr1;
+				econet_data->rxp->sr2 = sr2;
+				econet_data->rxp->tx_flags = EP_IRQHANDLER_FAILED;
+				econet_irq_to_workqueue(&(econet_data->rxp), sr1, sr2, EP_PACKET_RX); 
+			}
 		}
 		econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
 		handled = 1;
