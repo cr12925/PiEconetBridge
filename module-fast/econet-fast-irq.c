@@ -94,10 +94,8 @@ inline void econet_irq_to_workqueue(struct __econet_packet **p, u8 sr1, u8 sr2, 
 		return;
 	}
 
-	/*
 	if (econet_data->extralogs)
 		printk (KERN_INFO "econet-fast: Transferring packet at %p to workqueue, sr1 = %02X, sr2 = %02X, dir = %02X, data bytes = %02X\n", *p, sr1, sr2, dir, (*p)->ptr);
-	*/
 
 	if (work)
 	{
@@ -132,7 +130,8 @@ inline void econet_irq_to_workqueue(struct __econet_packet **p, u8 sr1, u8 sr2, 
 
 	if (dir == EP_PACKET_RX)
 		*p = econet_alloc_pbuf();
-	else	econet_data->txp = NULL;
+	else	*p = NULL; /* will be econet_data->txp */
+	//else	econet_data->txp = NULL;
 
 }
 

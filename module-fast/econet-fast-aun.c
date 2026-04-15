@@ -233,7 +233,8 @@ u8 econet_workqueue_respond_new_packet(struct __econet_packet *p, u8 sr1_errors,
 	{
 		econet_set_aunstate(EA_R_WRITEFIRSTACK);
 
-		econet_data->txp = emalloc(ECONET_ACK_PACKET_SIZE);
+		//econet_data->txp = emalloc(ECONET_ACK_PACKET_SIZE);
+		econet_data->txp = econet_alloc_pbuf();
 
 		if (econet_data->txp)
 		{
@@ -798,7 +799,8 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 				 	* will have been stored in padding for us
 				 	*/
 	
-					econet_data->txp = emalloc(4 + data_balance);
+					//econet_data->txp = emalloc(4 + data_balance);
+					econet_data->txp = econet_alloc_pbuf();
 	
 					if (!econet_data->txp)
 					{
@@ -1022,7 +1024,8 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 					/* Build Ack */
 
-					econet_data->txp = emalloc(ECONET_ACK_PACKET_SIZE);
+					//econet_data->txp = emalloc(ECONET_ACK_PACKET_SIZE);
+					econet_data->txp = econet_alloc_pbuf();
 
 					if (!econet_data->txp)
 					{

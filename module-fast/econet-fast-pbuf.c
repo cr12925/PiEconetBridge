@@ -23,6 +23,7 @@
  */
 
 #define ECONETGPIO_KERNEL
+// #define ECONET_PBUF_DEBUG
 
 #include "../include/econet-gpio.h"
 
@@ -56,7 +57,9 @@ inline struct __econet_packet * econet_alloc_pbuf(void)
 
 	mutex_unlock(&(econet_data->pbuf_mutex));
 
-	//printk (KERN_ERR "econet-fast: Allocate pbuf %d at %p\n", pbuf_count, r);
+#ifdef ECONET_PBUF_DEBUG
+	printk (KERN_ERR "econet-fast: Allocate pbuf    %d at %p\n", pbuf_count, r);
+#endif
 
 	return r;
 }
@@ -86,7 +89,9 @@ inline eco_work_t * econet_alloc_workbuf(void)
 
 	mutex_unlock(&(econet_data->workbuf_mutex));
 
-	//printk (KERN_ERR "econet-fast: Allocate workbuf %d at %p\n", wb_count, r);
+#ifdef ECONET_PBUF_DEBUG
+	printk (KERN_ERR "econet-fast: Allocate workbuf %d at %p\n", wb_count, r);
+#endif
 
 	return r;
 }
@@ -96,7 +101,16 @@ inline eco_work_t * econet_alloc_workbuf(void)
 inline void econet_free_pbuf(struct __econet_packet *p)
 {
 
-	//printk (KERN_ERR "econet-fast: Free pbuf at %p, no. %d\n", p, p->pbuf_index);
+#ifdef ECONET_PBUF_DEBUG
+	printk (KERN_ERR "econet-fast: Free     pbuf    %d at %p\n", p->pbuf_index, p);
+#endif
+	if (econet_data->pbuf[p->pbuf_index] != p) /* Address mismatch */
+		printk (KERN_ERR "econet-fast: ERROR: Address mismatch freeing pbuf %d: address given is %p, but address of pbuf[%d] is %p!\n",
+			p->pbuf_index, 
+			p,
+			p->pbuf_index,
+			econet_data->pbuf[p->pbuf_index]
+		);
 
 	mutex_lock(&(econet_data->pbuf_mutex));
 
@@ -110,7 +124,17 @@ inline void econet_free_pbuf(struct __econet_packet *p)
 inline void econet_free_workbuf(eco_work_t *e)
 {
 
-	//printk (KERN_ERR "econet-fast: Free workbuf at %p, no. %d\n", e, e->wb_index);
+#ifdef ECONET_PBUF_DEBUG
+	printk (KERN_ERR "econet-fast: Free     workbuf %d at %p\n", e->wb_index, e);
+#endif
+
+	if (econet_data->workbuf[e->wb_index] != e) /* Address mismatch */
+		printk (KERN_ERR "econet-fast: ERROR: Address mismatch freeing workbuf %d: address given is %p, but address of workbuf[%d] is %p!\n",
+			e->wb_index, 
+			e,
+			e->wb_index, 
+			econet_data->workbuf[e->wb_index]
+		);
 
 	mutex_lock(&(econet_data->workbuf_mutex));
 

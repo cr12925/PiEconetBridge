@@ -125,7 +125,7 @@ u8 econet_writefd_transmit(void)
 		/* Copy packet data */
 
 		scout_packet_size = ECONET_SCOUT_PACKET_SIZE(scout_data_len);
-		econet_data->txp = emalloc(scout_packet_size);
+		econet_data->txp = econet_alloc_pbuf(); // was emalloc(scout_packet_size)
 
 		if (!econet_data->txp)
 		{
@@ -200,7 +200,8 @@ u8 econet_writefd_transmit(void)
 		 * just copy the lot
 		 */
 
-		econet_data->txp = emalloc(ECONET_PACKET_SIZE(econet_data->aun_packet_len_tx));
+		//econet_data->txp = emalloc(ECONET_PACKET_SIZE(econet_data->aun_packet_len_tx));
+		econet_data->txp = econet_alloc_pbuf();
 
 		if (!econet_data->txp)
 		{
