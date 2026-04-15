@@ -71,7 +71,7 @@ inline struct __econet_packet * econet_alloc_pbuf(void)
 inline eco_work_t * econet_alloc_workbuf(void)
 {
 	u8 wb_count;
-	eco_work_t *r;
+	eco_work_t *r = NULL;
 
 	mutex_lock(&(econet_data->workbuf_mutex));
 

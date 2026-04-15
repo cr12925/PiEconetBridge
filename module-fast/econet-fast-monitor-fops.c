@@ -125,7 +125,10 @@ int econet_monitor_release(struct inode *inode, struct file *file) {
 	/* TODO: need to drain the fifo */
 
 	while (kfifo_out(&(econet_data->monitor_fifo), &p, sizeof(struct __econet_packet *)))
-		econet_free_pbuf(p);	
+	{
+		if (p)
+			econet_free_pbuf(p);	
+	}
 
 	kfifo_reset(&(econet_data->monitor_fifo));
 
