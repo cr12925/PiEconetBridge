@@ -40,7 +40,7 @@ struct file_operations monitor_fops = {
 
 ssize_t econet_monitor_readfd(struct file *flip, char *buffer, size_t len, loff_t *offset) {
 
-	int ret = -1;
+	int ret = -EFAULT;
 
 	struct __econet_packet	*p;
 
@@ -63,16 +63,16 @@ ssize_t econet_monitor_readfd(struct file *flip, char *buffer, size_t len, loff_
 
 		if (p)
 		{
+			int	copyres;
 			// printk (KERN_INFO "econet-fast: copy packet at %p to user on read()\n", p);
-			ret = copy_to_user(buffer, p, sizeof(struct __econet_packet) - (ECONET_MAX_PACKET_SIZE - p->ptr)); /* Only copy the used bytes */
+			copyres = copy_to_user(buffer, p, sizeof(struct __econet_packet) - (ECONET_MAX_PACKET_SIZE - p->ptr)); /* Only copy the used bytes */
 			//printk (KERN_INFO "econet-fast: free()ing packet pointer at %p\n", p);
+			if (!copyres) ret = sizeof(struct __econet_packet) - (ECONET_MAX_PACKET_SIZE - p->ptr);
 			econet_free_pbuf(p); /* This is what had been allocated to econet_data->rxp at init and whenever an RX packet or signalling is put on the workqueue */
 		}
 	}
 
-	if (ret == 0)
-		return sizeof(struct __econet_packet) - (ECONET_MAX_PACKET_SIZE - p->ptr);
-	else	return -EFAULT;
+	return ret;
 
 }
 
@@ -116,11 +116,16 @@ int econet_monitor_open(struct inode *inode, struct file *file) {
 
 int econet_monitor_release(struct inode *inode, struct file *file) {
 
+	struct __econet_packet *p;
+
 	/* Decrement the open counter and usage count. Without this, the module would not unload. */
 
 	econet_data->monitor_count--;
 
 	/* TODO: need to drain the fifo */
+
+	while (kfifo_out(&(econet_data->monitor_fifo), &p, sizeof(struct __econet_packet *)))
+		econet_free_pbuf(p);	
 
 	kfifo_reset(&(econet_data->monitor_fifo));
 
