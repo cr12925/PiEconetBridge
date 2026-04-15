@@ -155,8 +155,7 @@ int econet_init_vars (void)
 
         /* Init spinlocks */
 
-        spin_lock_init(&econet_irqstate_spin);
-        spin_lock_init(&econet_tx_spin);
+        spin_lock_init(&econet_irq_spin);
 
 	/* Packet buffer init */
 
@@ -172,7 +171,7 @@ int econet_init_vars (void)
 
 	econet_data->pbuf_inuse = 0;
 
-	mutex_init(&(econet_data->pbuf_mutex));
+	spin_lock_init(&(econet_data->pbuf_spinlock));
 
 	/* And now the workqueue buffers */
 
@@ -189,7 +188,7 @@ int econet_init_vars (void)
 
 	econet_data->workbuf_inuse = 0;
 
-	mutex_init(&(econet_data->workbuf_mutex));
+	spin_lock_init(&(econet_data->workbuf_spinlock));
 
 	return 0;
 }

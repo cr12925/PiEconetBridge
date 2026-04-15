@@ -27,8 +27,6 @@
  */
 
 spinlock_t econet_irq_spin;
-spinlock_t econet_tx_spin;
-spinlock_t econet_irqstate_spin;
 
 /* Prototypes */
 

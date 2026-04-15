@@ -18,7 +18,7 @@
 
 /* econet-fast-pbuf.c
  *
- * Contains mutex locked operations for obtaining spare workqueue entries and
+ * Contains spin locked operations for obtaining spare workqueue entries and
  * packet buffers
  */
 
@@ -35,8 +35,9 @@ inline struct __econet_packet * econet_alloc_pbuf(void)
 {
 	u8	pbuf_count;
 	struct __econet_packet *r = NULL;
+	unsigned long	flags;
 
-	mutex_lock(&(econet_data->pbuf_mutex));
+	spin_lock_irqsave(&(econet_data->pbuf_spinlock), flags);
 
 	for (pbuf_count = 0; pbuf_count < ECONET_GPIO_MAX_BUFFERS; pbuf_count++)
 	{
@@ -55,7 +56,7 @@ inline struct __econet_packet * econet_alloc_pbuf(void)
 
 	}
 
-	mutex_unlock(&(econet_data->pbuf_mutex));
+	spin_unlock_irqrestore(&(econet_data->pbuf_spinlock), flags);
 
 #ifdef ECONET_PBUF_DEBUG
 	printk (KERN_ERR "econet-fast: Allocate pbuf    %d at %p\n", pbuf_count, r);
@@ -72,8 +73,9 @@ inline eco_work_t * econet_alloc_workbuf(void)
 {
 	u8 wb_count;
 	eco_work_t *r = NULL;
+	unsigned long flags;
 
-	mutex_lock(&(econet_data->workbuf_mutex));
+	spin_lock_irqsave(&(econet_data->workbuf_spinlock), flags);
 
 	for (wb_count = 0; wb_count < ECONET_GPIO_MAX_WORK_BUFFERS; wb_count++)
 	{
@@ -87,7 +89,7 @@ inline eco_work_t * econet_alloc_workbuf(void)
 		}
 	}
 
-	mutex_unlock(&(econet_data->workbuf_mutex));
+	spin_unlock_irqrestore(&(econet_data->workbuf_spinlock), flags);
 
 #ifdef ECONET_PBUF_DEBUG
 	printk (KERN_ERR "econet-fast: Allocate workbuf %d at %p\n", wb_count, r);
@@ -101,6 +103,8 @@ inline eco_work_t * econet_alloc_workbuf(void)
 inline void econet_free_pbuf(struct __econet_packet *p)
 {
 
+	unsigned long flags;
+
 #ifdef ECONET_PBUF_DEBUG
 	printk (KERN_ERR "econet-fast: Free     pbuf    %d at %p\n", p->pbuf_index, p);
 #endif
@@ -112,17 +116,19 @@ inline void econet_free_pbuf(struct __econet_packet *p)
 			econet_data->pbuf[p->pbuf_index]
 		);
 
-	mutex_lock(&(econet_data->pbuf_mutex));
+	spin_lock_irqsave(&(econet_data->pbuf_spinlock), flags);
 
 	econet_data->pbuf_inuse &= ~(1<< (p->pbuf_index));
 
-	mutex_unlock(&(econet_data->pbuf_mutex));
+	spin_unlock_irqrestore(&(econet_data->pbuf_spinlock), flags);
 }
 
 /* And likewise an eco_work_t */
 
 inline void econet_free_workbuf(eco_work_t *e)
 {
+
+	unsigned long flags; 
 
 #ifdef ECONET_PBUF_DEBUG
 	printk (KERN_ERR "econet-fast: Free     workbuf %d at %p\n", e->wb_index, e);
@@ -136,9 +142,9 @@ inline void econet_free_workbuf(eco_work_t *e)
 			econet_data->workbuf[e->wb_index]
 		);
 
-	mutex_lock(&(econet_data->workbuf_mutex));
+	spin_lock_irqsave(&(econet_data->workbuf_spinlock), flags);
 
 	econet_data->workbuf_inuse &= ~(1<<(e->wb_index));
 
-	mutex_unlock(&(econet_data->workbuf_mutex));
+	spin_unlock_irqrestore(&(econet_data->workbuf_spinlock), flags);
 }

@@ -395,12 +395,12 @@ struct __econet_data {
 
 	struct __econet_packet *pbuf[ECONET_GPIO_MAX_BUFFERS];
 	u32	pbuf_inuse; /* 1 bit per entry - bit 0 is pbuf[0] */
-	struct mutex pbuf_mutex;
+	spinlock_t pbuf_spinlock;
 
 	/* Econet workqueue buffers */
 	eco_work_t *workbuf[ECONET_GPIO_MAX_WORK_BUFFERS];
 	u32 	workbuf_inuse;
-	struct mutex workbuf_mutex;
+	spinlock_t workbuf_spinlock;
 
 	/* RX Buffer pointer, suitable for putting on a workqueue */
 
