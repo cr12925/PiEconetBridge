@@ -71,15 +71,22 @@ FSOP(0a)
 
 	if (handle < 1 || handle > FS_MAX_OPEN_FILES || !a->fhandles[handle].handle)
 	{
-		fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB%s FAILED Get %08lX from offset %08lX (%s) by user %04x on handle %02X - Unknown handle", 
-			(is_32bit ? "32" : ""),
+		if (is_32bit)
+			fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB32 FAILED Get %08lX from offset %08lX (%s) by user %04x on handle %02X - Unknown handle",
 			bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), f->userid, handle);
+		else
+			fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB24 FAILED Get %08lX from offset %08lX (%s) by user %04x on handle %02X - Unknown handle",
+			bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), f->userid, handle);
+
 		fsop_error(f, 0xDE, "Channel ?");
 		return;
 	}
 
-	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB%s Get %08lX from offset %08lX (%s) by user %04x on handle %02X", 
-			(is_32bit ? "32" : ""),
+	if (is_32bit)
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB32 Get %08lX from offset %08lX (%s) by user %04x on handle %02X", 
+			bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), f->userid, handle);
+	else
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB24 Get %08lX from offset %08lX (%s) by user %04x on handle %02X", 
 			bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), f->userid, handle);
 
 	internal_handle = a->fhandles[handle].handle;
@@ -116,7 +123,7 @@ FSOP(0a)
 	else
 		eofreached = 0;
 
-	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Get from offset %06lX, file length %06lX, beyond EOF %s", offset, length, (eofreached ? "Yes" : "No"));
+	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB Get from offset %06lX, file length %06lX, beyond EOF (%d)", offset, length, eofreached);
 
 	// Update sequence
 	a->fhandles[handle].sequence = (FSOP_CTRL & 0x01);
@@ -210,9 +217,12 @@ FSOP(0b)
 	if ((handle < 1) || (handle > FS_MAX_OPEN_FILES) || !(a->fhandles[handle].handle))
 	{
 		fsop_error(f, 0xDE, "Channel ?");
-		fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB%s FAILED Put %08lX at offset %08lX by user %04X on handle %02X - Unknown handle",
-			(is_32bit ? "32" : ""),
-			bytes, offset, f->userid,  handle);
+		if (is_32bit)
+			fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB32 FAILED Put %08lX at offset %08lX by user %04X on handle %02X - Unknown handle",
+				bytes, offset, f->userid,  handle);
+		else
+			fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB24 FAILED Put %08lX at offset %08lX by user %04X on handle %02X - Unknown handle",
+				bytes, offset, f->userid,  handle);
 		return;
 	}
 
@@ -231,8 +241,11 @@ FSOP(0b)
 	if (offsetstatus) // write to current position
 		offset = a->fhandles[handle].cursor;
 
-	fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB%s Put %08lX at offset %08lX by user %04X on handle %02X",
-			(is_32bit ? "32" : ""),
+	if (is_32bit)
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB32 Put %08lX at offset %08lX by user %04X on handle %02X",
+			bytes, offset, f->userid,  handle);
+	else
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "OSGBPB24 Put %08lX at offset %08lX by user %04X on handle %02X",
 			bytes, offset, f->userid,  handle);
 
 	/* Quota check */
