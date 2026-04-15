@@ -611,6 +611,11 @@ irqreturn_t econet_irq(int irq, void *ident)
 		else
 		{
 			econet_set_chipstate(EM_IDLE);
+			if (!econet_data->rxp)
+			{
+				printk (KERN_ERR "econet-fast: RX packet buffer is null on IRQ Failure handler!\n");
+				econet_data->rxp = econet_alloc_pbuf();
+			}
 			econet_data->rxp->sr1 = sr1;
 			econet_data->rxp->sr2 = sr2;
 			econet_data->rxp->tx_flags = EP_IRQHANDLER_FAILED;
