@@ -108,7 +108,7 @@ inline void econet_write_cr(unsigned short r, unsigned char d)
 	// No need to set RW because it will be 0 by virtue of the first assignment to gpioval above.
 
 	if (econet_data->hwver >= 2)
-		while (econet_isbusy());
+		econet_wait_not_busy();
 
 
 #ifdef ECONET_GPIO_NEW
@@ -177,7 +177,7 @@ inline void econet_write_cr(unsigned short r, unsigned char d)
 	}
 	else
 #endif
-		while (econet_isbusy()); // Wait until the ADLC has read our data. Not massively reliable yet.. SHouldn't be required, but seems to be!
+		econet_wait_not_busy(); // Wait until the ADLC has read our data. Not massively reliable yet.. SHouldn't be required, but seems to be!
 }
 
 /* 
@@ -210,9 +210,9 @@ inline unsigned char econet_read_sr(unsigned short r)
 	r--;
 
 	if (econet_data->hwver >= 2)
-		while (econet_isbusy());
+		econet_wait_not_busy();
 
-	 
+
 	// First, set the data pins to read if need be
 
 	if (econet_data->current_dir != ECONET_GPIO_READ)
@@ -295,7 +295,7 @@ inline unsigned char econet_read_sr(unsigned short r)
 	}
 	else
 #endif
-		while (econet_isbusy());
+		econet_wait_not_busy();
 
 #ifdef ECONET_GPIO_NEW
 

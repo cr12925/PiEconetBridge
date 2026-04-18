@@ -18,6 +18,10 @@
 
 #define __ECONETGPIOCHIPCTRL_H__
 
+/* Max spins on waiting for v2 busy line */
+
+#define ECONET_ISBUSY_MAX_SPINS	100000
+
 // Including gpioreg.h won't be needed if we ever get to using exclusively gpiod_ calls
 #include "gpioreg.h"
 
@@ -71,7 +75,28 @@ void econet_flagfill(void);
 					barrier()
 #endif
 
-	
+/* Bounded wait for !econet_isbusy().
+ *
+ * Original code was `while (econet_isbusy());` inside spin_lock_irqsave
+ * sections — if the BUSY/DIR pin ever sticks (bus glitch, brief
+ * disconnect, ADLC in an unexpected state) the CPU sits in this loop
+ * with IRQs disabled on the local core. UART/USB/WiFi stop being
+ * serviced and the VideoCore firmware eventually resets the SoC.
+ *
+ * 100000 iterations is generous for a healthy bus (tens of µs on a
+ * Pi 3B) but caps the pathological case at something survivable.
+ */
+
+#define econet_wait_not_busy()	do { \
+					unsigned int _n = ECONET_ISBUSY_MAX_SPINS; \
+					while (econet_isbusy() && --_n) \
+						cpu_relax(); \
+					if (!_n) \
+						printk_ratelimited(KERN_WARNING \
+							"econet-fast: BUSY pin stuck at %s:%d - giving up wait\n", \
+							__FILE__, __LINE__); \
+				} while (0)
+
 #define econet_ndelay(t)	{ \
 					u64 p; \
 					\

@@ -223,6 +223,7 @@ extern void econet_free_workbuf(eco_work_t *);
 unsigned char econet_read_sr(unsigned short);
 
 /* IRQ */
+irqreturn_t econet_irq_hardirq(int, void *);
 irqreturn_t econet_irq(int, void *);
 void econet_irq_mode(short);
 
@@ -287,6 +288,12 @@ struct __econet_data {
 	/* IRQ state information */
 	int irq;
 	atomic_t irq_state;
+
+	/* Hybrid IRQ: top half reads FIFO bytes in EM_READ,
+	 * thread handles state transitions. IRQF_ONESHOT
+	 * serializes top half and thread — no lock needed. */
+	atomic_t fast_rx_enabled;	/* 1 when top half may read FIFO */
+	u8	shadow_sr1, shadow_sr2;	/* SR snapshot from top half for thread */
 
 	/* Module type */
 	u8	module_type;

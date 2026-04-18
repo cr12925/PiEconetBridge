@@ -264,7 +264,6 @@ u8 econet_writefd_transmit(void)
 ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t *offset)
 {
 
-	unsigned long flags;
 	int happens;
 
 	econet_data->tx_status_valid = 0; /* High bit set means valid */
@@ -296,12 +295,12 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	/* Grab IRQ spinlock and see if the module is busy */
 
-	spin_lock_irqsave(&econet_irq_spin, flags);
+	spin_lock(&econet_irq_spin);
 
 	if (ECONET_IS_BUSY())
 	{
 		econet_set_tx_status (ECONET_TX_BUSY);
-		spin_unlock_irqrestore(&econet_irq_spin, flags);
+		spin_unlock(&econet_irq_spin);
 		return -EFAULT;
 	}
 
@@ -331,7 +330,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		/* No need to free txp - it isn't allocated until econet_writefd_transmit() below */
 
 		printk (KERN_ERR "econet-fast: AUN State appears to be stale - reset to EA_IDLE from 0x%02X\n", state);
-		spin_unlock_irqrestore(&econet_irq_spin, flags);
+		spin_unlock(&econet_irq_spin);
 		return -EFAULT;
 	
 	}
@@ -341,7 +340,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		/* Failed! */
 
 		econet_set_read_mode();
-		spin_unlock_irqrestore(&econet_irq_spin, flags);
+		spin_unlock(&econet_irq_spin);
 		return -EFAULT;
 	}
 
@@ -351,7 +350,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	/* Turn IRQs back on */
 
-	spin_unlock_irqrestore(&econet_irq_spin, flags); /* Let the ADLC and the IRQ routine run */
+	spin_unlock(&econet_irq_spin); /* Let the ADLC and the IRQ routine run */
 	
 	/* Wait on the write_queue - the work queue will tell us when the transaction ends, good bad or indifferent */
 
@@ -361,12 +360,12 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		return len; /* We accepted the whole packet, userspace can work out what happened by getting the status */
 	else /* Timeout and condition not true */
 	{
-		spin_lock_irqsave(&econet_irq_spin, flags);
+		spin_lock(&econet_irq_spin);
 		printk (KERN_INFO "econet-fast: writefd() wait timeout expired in AUN state 0x%02X\n", econet_get_aunstate());
 		econet_set_aunstate(EA_IDLE);
 		econet_set_read_mode();
 		ECONET_NOT_BUSY();
-		spin_unlock_irqrestore(&econet_irq_spin, flags);
+		spin_unlock(&econet_irq_spin);
 		return -EFAULT;
 	}
 }

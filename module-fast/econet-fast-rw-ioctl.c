@@ -189,7 +189,7 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 
 			if (econet_data->hwver >= 2)
 			{
-				 while (econet_isbusy());
+				econet_wait_not_busy();
 			}
 
 			/* Set the lines */

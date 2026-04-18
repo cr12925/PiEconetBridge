@@ -1237,27 +1237,26 @@ void econet_workqueue_handler (struct work_struct *work)
 
 	if (econet_data->monitor_count) /* Someone is looking at the monitor */
 	{
-		/* Put work->p onto a read queue and wake up the poller */
+		/* Copy only the used portion of the packet into a small
+		 * kmalloc'd buffer for the monitor fifo. This decouples
+		 * the pbuf pool from monitor userspace drain rate — the
+		 * pbuf is freed immediately below regardless. */
 
-		if (kfifo_in (&(econet_data->monitor_fifo), &(my_work->p), sizeof(struct __econet_packet *))) /* Just put packet pointer on queue - it gets free()d by readfd() */
-		{	
-			/* Wake up the monitor poller */
-	
-			wake_up (&(econet_data->monitor_queue));
+		size_t mon_len = sizeof(struct __econet_packet) - (ECONET_MAX_PACKET_SIZE - my_work->p->ptr);
+		struct __econet_packet *mon = kmalloc(mon_len, GFP_KERNEL);
 
-			/* If we've put my_work->p on the fifo, the readfd routine will free it. */
+		if (mon)
+		{
+			memcpy(mon, my_work->p, mon_len);
+
+			if (kfifo_in(&(econet_data->monitor_fifo), &mon, sizeof(mon)))
+				wake_up(&(econet_data->monitor_queue));
+			else
+				kfree(mon);
 		}
-		else
-			econet_free_pbuf(my_work->p);
-
-
 	}
-	else
-	{
-		/* If monitor not open, free the packet data */
 
-		econet_free_pbuf(my_work->p);
-	}
+	econet_free_pbuf(my_work->p);
 
 
 	/* Free the work queue data, but not the packet data, which the monitor_readfd() does. */

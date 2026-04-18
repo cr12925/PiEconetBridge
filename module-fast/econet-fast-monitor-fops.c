@@ -68,7 +68,7 @@ ssize_t econet_monitor_readfd(struct file *flip, char *buffer, size_t len, loff_
 			copyres = copy_to_user(buffer, p, sizeof(struct __econet_packet) - (ECONET_MAX_PACKET_SIZE - p->ptr)); /* Only copy the used bytes */
 			//printk (KERN_INFO "econet-fast: free()ing packet pointer at %p\n", p);
 			if (!copyres) ret = sizeof(struct __econet_packet) - (ECONET_MAX_PACKET_SIZE - p->ptr);
-			econet_free_pbuf(p); /* This is what had been allocated to econet_data->rxp at init and whenever an RX packet or signalling is put on the workqueue */
+			kfree(p); /* Monitor packets are kmalloc'd copies, not pool pbufs */
 		}
 	}
 
@@ -127,7 +127,7 @@ int econet_monitor_release(struct inode *inode, struct file *file) {
 	while (kfifo_out(&(econet_data->monitor_fifo), &p, sizeof(struct __econet_packet *)))
 	{
 		if (p)
-			econet_free_pbuf(p);	
+			kfree(p);
 	}
 
 	kfifo_reset(&(econet_data->monitor_fifo));
