@@ -440,10 +440,19 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 	hsr1 = econet_read_sr(1);
 	hsr2 = (hsr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
 
+#if 0 /* This didn't work */
+	if (chipstate == EM_IDLE && (hsr2 & ECONET_GPIO_S2_AP)) /* New packet */
+	{
+		econet_data->rxp->ptr = 0;
+		atomic_set(&(econet_data->fastpath_enabled), 1);
+		fastpath = 1;
+		econet_set_chipstate(EM_READ);
+		chipstate = EM_READ;
+	}
+#endif
+
 	if (fastpath && chipstate == EM_READ)
 	{
-		//if ((econet_data->rxp->ptr & 0xfffe) == 2) printk_ratelimited(KERN_INFO "econet-fast: IRQ read in fastpath\n");
-
 		while (max_hard_loop-- > 0 && (hsr1 & ECONET_GPIO_S1_IRQ))
 		{
 			u8 bytes_to_do = (econet_data->twobytemode) ? 2 : 1;
@@ -459,7 +468,7 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
     				&& !(hsr2 & (ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_ERR
                				| ECONET_GPIO_S2_OVERRUN | ECONET_GPIO_S2_DCD
                				| ECONET_GPIO_S2_RX_IDLE | ECONET_GPIO_S2_RX_ABORT
-               				| ECONET_GPIO_S2_AP))
+               				| ECONET_GPIO_S2_AP ))
     				&& econet_data->rxp
     				&& econet_data->rxp->ptr < ECONET_MAX_PACKET_SIZE
 				)
