@@ -180,7 +180,7 @@ void econet_adlc_cleardown(unsigned short in_irq)
  *
  */
 
-void econet_finish_tx(void)
+inline void econet_finish_tx(void)
 {
 
 

@@ -85,24 +85,35 @@ ssize_t econet_monitor_readfd(struct file *flip, char *buffer, size_t len, loff_
 
 int econet_monitor_open(struct inode *inode, struct file *file) {
 
+	u8 shadow_monitor_count;
+
 	/* If device is open, return busy */
 
-	if (econet_data->monitor_count)
+	spin_lock(&(econet_data->monitor_count_spinlock));
+	
+	shadow_monitor_count = econet_data->monitor_count;
+
+	if (shadow_monitor_count == 0)
+		econet_data->monitor_count++;
+
+	spin_lock(&(econet_data->open_count_spinlock));
+	
+	if (econet_data->open_count == 0 && shadow_monitor_count == 0) /* Neither was open */
+	{
+		spin_lock(&econet_irq_spin);
+		econet_set_read_mode();
+	}
+
+	spin_unlock(&(econet_data->open_count_spinlock));
+	spin_unlock(&(econet_data->monitor_count_spinlock));
+	
+	if (shadow_monitor_count)
 		return -EBUSY;
 
 	try_module_get(THIS_MODULE);
 
-	/* Increment open_count so we know we are busy */
-
-	econet_data->monitor_count++;
-
 	if (econet_data->extralogs)
 		printk (KERN_INFO "econet-fast: Monitor device opened\n");
-
-	if (!econet_data->open_count || econet_get_chipstate() == EM_TEST)
-		econet_reset();
-
-	// econet_irq_mode(1); /* Turn IRQs on if not before */
 
 	return 0;
 }
@@ -120,9 +131,22 @@ int econet_monitor_release(struct inode *inode, struct file *file) {
 
 	/* Decrement the open counter and usage count. Without this, the module would not unload. */
 
-	econet_data->monitor_count--;
+	spin_lock(&(econet_data->monitor_count_spinlock));
 
-	/* TODO: need to drain the fifo */
+	econet_data->monitor_count--;
+	
+	/* Check if RW device is open. If not, turn everything off */
+
+	spin_lock(&(econet_data->open_count_spinlock));
+	
+	if (econet_data->open_count == 0)
+		econet_write_cr(1, ECONET_GPIO_C1_RX_RESET | ECONET_GPIO_C1_TX_RESET);
+
+	spin_unlock(&(econet_data->open_count_spinlock));
+
+	spin_unlock(&(econet_data->monitor_count_spinlock));
+
+	/* drain the fifo */
 
 	while (kfifo_out(&(econet_data->monitor_fifo), &p, sizeof(struct __econet_packet *)))
 	{

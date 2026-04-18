@@ -23,7 +23,12 @@
  */
 
 #define ECONET_GPIO_MAX_BUFFERS 8
-#define ECONET_GPIO_MAX_WORK_BUFFERS 8
+#define ECONET_GPIO_MAX_WORK_BUFFERS ECONET_GPIO_MAX_BUFFERS
+
+/* Max loops in the hard IRQ section */
+
+#define ECONET_GPIO_MAX_RXTX_LOOPS 5
+
 
 
 /*
@@ -292,7 +297,7 @@ struct __econet_data {
 	/* Hybrid IRQ: top half reads FIFO bytes in EM_READ,
 	 * thread handles state transitions. IRQF_ONESHOT
 	 * serializes top half and thread — no lock needed. */
-	atomic_t fast_rx_enabled;	/* 1 when top half may read FIFO */
+	atomic_t fastpath_enabled;	/* 1 when top half may read/write FIFO */
 	u8	shadow_sr1, shadow_sr2;	/* SR snapshot from top half for thread */
 
 	/* Module type */
@@ -306,18 +311,21 @@ struct __econet_data {
 	struct cdev c_dev;
 	int major;
 	dev_t majorminor;
+	spinlock_t open_count_spinlock;
 	short open_count;
 	wait_queue_head_t rx_queue;
 	wait_queue_head_t econet_read_queue; /* Old module compat */
 	wait_queue_head_t tx_queue;
 	struct kfifo_rec_ptr_2 readfd_fifo;
 	u8 readfd_fifo_initialized;
+	struct __econet_packet_aun drain; /* Drainage storage space on release */
 
 	/* Econet monitor device */
 	struct device *monitor_dev;
 	struct cdev monitor_c_dev;
 	int monitor_major;
 	dev_t monitor_majorminor;
+	spinlock_t monitor_count_spinlock; 
 	short monitor_count; /* Number of open monitor connections */
 	wait_queue_head_t monitor_queue;
 	struct kfifo_rec_ptr_2 monitor_fifo;

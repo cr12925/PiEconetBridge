@@ -1186,6 +1186,8 @@ void econet_workqueue_handler (struct work_struct *work)
 
 	// printk (KERN_INFO "econet-fast: statemachine response 0x%02X\n", statemachine_response);
 
+	spin_lock(&(econet_data->open_count_spinlock));
+
 	if (econet_data->open_count) /* The userspace bridge code or something of that nature has our device open */
 	{
 		// If we have finished tx-ing a packet, interruptible_wake_up(&(econet_data->tx_queue)); 
@@ -1235,6 +1237,10 @@ void econet_workqueue_handler (struct work_struct *work)
 
 	}
 
+	spin_unlock(&(econet_data->open_count_spinlock));
+
+	spin_lock(&(econet_data->monitor_count_spinlock));
+
 	if (econet_data->monitor_count) /* Someone is looking at the monitor */
 	{
 		/* Copy only the used portion of the packet into a small
@@ -1255,6 +1261,8 @@ void econet_workqueue_handler (struct work_struct *work)
 				kfree(mon);
 		}
 	}
+
+	spin_unlock(&(econet_data->monitor_count_spinlock));
 
 	econet_free_pbuf(my_work->p);
 

@@ -176,12 +176,10 @@ while (!valid && (sr1 & ECONET_GPIO_S1_IRQ) && irq_loop_count++ < 5)
 		)
 #endif
 		{
-			u8	d;
-
 			if (econet_data->rxp->ptr >= ECONET_MAX_PACKET_SIZE)
 				econet_data->rxp->ptr--; /* Just let keep overwriting last byte of data TODO - discontinue() */
 	
-			econet_data->rxp->data[econet_data->rxp->ptr++] = d = econet_read_fifo();
+			econet_data->rxp->data[econet_data->rxp->ptr++] = econet_read_fifo();
 
 		}
 
@@ -189,6 +187,9 @@ while (!valid && (sr1 & ECONET_GPIO_S1_IRQ) && irq_loop_count++ < 5)
 			valid = 1;
 		else
 		{
+			if (sr2 & ECONET_GPIO_S2_AP) /* If first byte, it's special - don't try and read another one */
+				return;
+
 			sr1 = econet_read_sr(1);
 			sr2 = (sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
 		}
@@ -400,8 +401,8 @@ inline void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
  *
  * Hard-IRQ top half with fast-path FIFO drain.
  *
- * When the thread has set fast_rx_enabled (we're in EM_READ and
- * receiving frame data), the top half reads FIFO bytes directly —
+ * When the thread has set fastpath_enabled (we're in EM_READ and
+ * receiving frame data, or EM_WRITE and transmitting), the top half reads/writes FIFO bytes directly —
  * this runs in ~2-4µs vs. the ~50+µs thread scheduling latency
  * that was causing RX overruns.
  *
@@ -417,6 +418,9 @@ inline void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 irqreturn_t econet_irq_hardirq(int irq, void *ident)
 {
 	u8 hsr1, hsr2;
+	u8 max_hard_loop = ECONET_GPIO_MAX_RXTX_LOOPS;
+	u8 fastpath;
+	u8 chipstate = econet_get_chipstate();
 
 	/* Fast path: if the thread told us we're mid-frame RX,
 	 * try to grab data bytes without waking the thread.
@@ -425,42 +429,172 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 	 * handler delayed us by one byte period (~40µs), the ADLC
 	 * FIFO may have accumulated an extra byte. Reading in a
 	 * loop prevents overruns from brief scheduling delays. */
-	if (atomic_read(&econet_data->fast_rx_enabled))
+
+	/* If we're in write mode, we'll always try fastpath */
+
+	if (chipstate == EM_WRITE)
+		atomic_set(&econet_data->fastpath_enabled, 1);
+
+	fastpath = atomic_read(&econet_data->fastpath_enabled);
+
+	hsr1 = econet_read_sr(1);
+	hsr2 = (hsr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
+
+	if (fastpath && chipstate == EM_READ)
 	{
-		for (;;)
+		//if ((econet_data->rxp->ptr & 0xfffe) == 2) printk_ratelimited(KERN_INFO "econet-fast: IRQ read in fastpath\n");
+
+		while (max_hard_loop-- > 0 && (hsr1 & ECONET_GPIO_S1_IRQ))
 		{
-			hsr1 = econet_read_sr(1);
-			hsr2 = (hsr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
+			u8 bytes_to_do = (econet_data->twobytemode) ? 2 : 1;
 
-			/* Pure data byte: RDA set, no frame-end or error flags,
-			 * and NOT a new-packet AP — AP must go through the thread
-			 * so it can set EM_READ, reset rxp->ptr, and mark busy.
-			 * Otherwise a new frame would accumulate on top of the
-			 * previous one's stale data. */
-			if ((hsr1 & ECONET_GPIO_S1_RDA)
-			    && !(hsr2 & (ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_ERR
-			               | ECONET_GPIO_S2_OVERRUN | ECONET_GPIO_S2_DCD
-			               | ECONET_GPIO_S2_RX_IDLE | ECONET_GPIO_S2_RX_ABORT
-			               | ECONET_GPIO_S2_AP))
-			    && econet_data->rxp
-			    && econet_data->rxp->ptr < ECONET_MAX_PACKET_SIZE)
+			while (bytes_to_do--)
 			{
-				econet_data->rxp->data[econet_data->rxp->ptr++] = econet_read_fifo();
-
-				/* Re-check: if no more IRQ pending, we're done */
-				if (!(econet_read_sr(1) & ECONET_GPIO_S1_IRQ))
-					return IRQ_HANDLED;
-
-				/* More data pending — loop and read it */
-				continue;
+				/* Pure data byte: RDA set, no frame-end or error flags,
+ 				* and NOT a new-packet AP — AP must go through the thread
+ 				* so it can set EM_READ, reset rxp->ptr, and mark busy.
+ 				* Otherwise a new frame would accumulate on top of the
+ 				* previous one's stale data. */
+				if ((hsr1 & ECONET_GPIO_S1_RDA)
+    				&& !(hsr2 & (ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_ERR
+               				| ECONET_GPIO_S2_OVERRUN | ECONET_GPIO_S2_DCD
+               				| ECONET_GPIO_S2_RX_IDLE | ECONET_GPIO_S2_RX_ABORT
+               				| ECONET_GPIO_S2_AP))
+    				&& econet_data->rxp
+    				&& econet_data->rxp->ptr < ECONET_MAX_PACKET_SIZE
+				)
+				{
+					econet_data->rxp->data[econet_data->rxp->ptr++] = econet_read_fifo();
+				}
+				else
+				{
+					/* Not a simple data byte — fall through to wake thread */
+					econet_data->shadow_sr1 = hsr1;
+					econet_data->shadow_sr2 = hsr2;
+					return IRQ_WAKE_THREAD;
+				}
+	
+				hsr1 = econet_read_sr(1);
+				hsr2 = (hsr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
 			}
+		}
 
-			/* Not a simple data byte — fall through to wake thread */
+		if (!(hsr1 & ECONET_GPIO_S1_IRQ)) /* We've drained it */
+			return IRQ_HANDLED;
+	}
+	else if (fastpath && chipstate == EM_WRITE)
+	{
+
+		if (
+			(hsr1 & ECONET_GPIO_S1_UNDERRUN) /* TX Underrun */
+		   |	(hsr2 & ECONET_GPIO_S2_DCD) /* No clock */
+		 )
+		{
+			/* Barf to bottom half */
 			econet_data->shadow_sr1 = hsr1;
 			econet_data->shadow_sr2 = hsr2;
-			break;
+			return IRQ_WAKE_THREAD;
 		}
+
+		/* Otherwise send some data if there is data to send, we haven't exhausted our hard max loop count, and there's an IRQ */
+
+		while ((econet_data->txp->ptr < econet_data->txp->txlen) 
+		  && max_hard_loop-- && (hsr1 & ECONET_GPIO_S1_IRQ))
+		{
+			
+			u8 bytes_to_do = (econet_data->twobytemode) ? 2 : 1;
+
+			/* Do we have an IRQ & TDRA? If not, barf to the lower half */
+
+			if ((hsr1 & (ECONET_GPIO_S1_IRQ | ECONET_GPIO_S1_TDRA)) != (ECONET_GPIO_S1_IRQ | ECONET_GPIO_S1_TDRA)) /* No IRQ or no TDRA */
+			{
+				printk_ratelimited ("econet-fast: Either no IRQ or no TDRA on fastpath tx: SR1 = %02X\n", hsr1);
+				econet_data->shadow_sr1 = hsr1;
+				econet_data->shadow_sr2 = hsr2;
+				return IRQ_WAKE_THREAD;
+			}
+
+			while (bytes_to_do--)
+			{
+#if 0
+				/* Check for TDRA on (only byte || first of two) - though realistically if it's not available we're stuffed */
+
+				if (bytes_to_do || (!(econet_data->twobytemode))) /* First byte of two, or not in twobyte mode */
+				{
+					u8 	tdra = 0, tdra_counter = 0;;
+
+					/* Check TDRA available */
+
+					while (tdra_counter++ < 10 && (!tdra))
+					{
+						econet_write_cr(ECONET_GPIO_CR2,
+							(
+							ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_CLR_TX_STATUS |
+							ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE |
+							((econet_data->twobytemode) ? ECONET_GPIO_C2_2BYTES : 0)
+							)
+						);
+						tdra = ((hsr1 = econet_read_sr(1)) & ECONET_GPIO_S1_TDRA);
+					}
+
+					if (!tdra) /* Quit to lower handle */
+					{
+						econet_data->shadow_sr1 = hsr1;
+						econet_data->shadow_sr2 = hsr2;
+						return IRQ_WAKE_THREAD;
+					}
+				}
+#endif
+
+				econet_write_fifo(econet_data->txp->data[econet_data->txp->ptr]);
+
+				econet_data->txp->ptr++;
+
+				if (econet_data->txp->ptr == econet_data->txp->txlen)
+				{
+					econet_finish_tx();
+					econet_data->shadow_sr1 = econet_read_sr(1);
+
+					if (econet_data->shadow_sr1 & ECONET_GPIO_S1_IRQ) /* Another IRQ present - pass to bottom hald */
+					{
+						econet_data->shadow_sr2 = (econet_data->shadow_sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
+						printk_ratelimited(KERN_INFO "econet-fast: IRQ on fastpath write of last byte: FC is %d, SR1 = %02X, SR2 = %02X\n", !!(econet_data->shadow_sr1 & ECONET_GPIO_S1_TDRA), econet_data->shadow_sr1, econet_data->shadow_sr2);
+
+						/* Should have FC set - if not, clear TX status */
+
+						if (!(econet_data->shadow_sr1 & ECONET_GPIO_S1_TDRA))
+						{
+							econet_write_cr(2,
+								(ECONET_GPIO_C2_PSE |
+								 ECONET_GPIO_C2_FLAGIDLE |
+								 ECONET_GPIO_C2_CLR_RX_STATUS |
+								 ECONET_GPIO_C2_CLR_TX_STATUS |
+								 ((econet_data->twobytemode) ? ECONET_GPIO_C2_2BYTES : 0)
+								));
+							return IRQ_HANDLED;
+						}
+
+						return IRQ_WAKE_THREAD;
+					}
+					else
+						return IRQ_HANDLED;
+				}
+				
+			}
+
+			hsr1 = econet_read_sr(1);
+			hsr2 = (hsr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
+		}
+
+		/* We've either:
+		   Done the packet - in which case we've called econet_finish_tx() and are in write-wait, and there was no other IRQ, so it's time to quit, or we've done max loops in which case we need to relinquish 
+		*/
+
+		return IRQ_HANDLED;
 	}
+
+	econet_data->shadow_sr1 = hsr1;
+	econet_data->shadow_sr2 = hsr2;
 
 	return IRQ_WAKE_THREAD;
 }
@@ -475,9 +609,10 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 	u8		chip_state, handled = 0;
 
-	/* Disable fast-path FIFO reads while the thread runs.
+	/* Disable fast-path while the thread runs.
 	 * IRQF_ONESHOT keeps the line masked so this is safe. */
-	atomic_set(&econet_data->fast_rx_enabled, 0);
+
+	atomic_set(&econet_data->fastpath_enabled, 0);
 
 	/* Serialise against econet_writefd */
 
@@ -485,6 +620,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 	/* Use SR values snapshot by the top half if available,
 	 * otherwise re-read (e.g. first IRQ before fast_rx is set). */
+
 	if (econet_data->shadow_sr1 || econet_data->shadow_sr2)
 	{
 		sr1 = econet_data->shadow_sr1;
@@ -560,11 +696,15 @@ irqreturn_t econet_irq(int irq, void *ident)
 				econet_set_chipstate(EM_READ);
 				chip_state = EM_READ;
 				ECONET_SET_BUSY();
+
 				/* reset packet pointer */
 				econet_data->rxp->ptr = 0;
+
 				/* Enable fast-path FIFO reads in the top half
 				 * for subsequent data bytes in this frame. */
-				atomic_set(&econet_data->fast_rx_enabled, 1);
+
+				atomic_set(&econet_data->fastpath_enabled, 1);
+
 				/* Mark start of reception */
 				// econet_data->rxp->timing_start = ktime_get_ns();
 			}
@@ -654,8 +794,11 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 			econet_write_cr(ECONET_GPIO_CR1, ECONET_GPIO_C1_TX_RESET | ECONET_GPIO_C1_RX_RESET);
 			disable_irq_nosync(econet_data->irq);
+
 			econet_set_irq_state(0);
+
 			econet_set_chipstate(EM_TEST);
+
 			handled = 1;
 		}
 		
@@ -726,16 +869,16 @@ irqreturn_t econet_irq(int irq, void *ident)
 	}
 
 	/*
-	 * Sync fast_rx_enabled with the current chipstate.
+	 * Sync fastpath_enabled with the current chipstate.
 	 * Only EM_READ should allow the top half to fast-path FIFO
 	 * reads — any other state means we're between frames, in a
 	 * TX phase, or recovering from an error, and the top half
 	 * must wake the thread for proper state-machine handling.
 	 */
-	if (econet_get_chipstate() == EM_READ)
-		atomic_set(&econet_data->fast_rx_enabled, 1);
+	if (econet_get_chipstate() == EM_READ || econet_get_chipstate() == EM_WRITE)
+		atomic_set(&econet_data->fastpath_enabled, 1);
 	else
-		atomic_set(&econet_data->fast_rx_enabled, 0);
+		atomic_set(&econet_data->fastpath_enabled, 0);
 
 	/*
 	 * Unlock IRQ spinlock prior to return.

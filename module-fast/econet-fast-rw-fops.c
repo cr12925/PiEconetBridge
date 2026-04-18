@@ -379,14 +379,27 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 int econet_open(struct inode *inode, struct file *file) {
 
+	u8 shadow_open_count;
+
 	/* If device is open, return busy */
 
-	if (econet_data->open_count)
+	spin_lock(&(econet_data->open_count_spinlock));
+
+	shadow_open_count = econet_data->open_count;
+
+	if (shadow_open_count == 0) econet_data->open_count++;
+
+	spin_unlock(&(econet_data->open_count_spinlock));
+
+	if (shadow_open_count)
 		return -EBUSY;
 
-	/* Increment open_count so we know we are busy */
+	/* Set read mode */
 
-	econet_data->open_count++;
+	spin_lock(&econet_irq_spin);
+	econet_set_read_mode();
+	econet_set_chipstate(EM_IDLE);
+	spin_unlock(&econet_irq_spin);
 
 	printk (KERN_INFO "econet-fast: Read/Write device opened\n");
 
@@ -412,24 +425,37 @@ int econet_open(struct inode *inode, struct file *file) {
 
 int econet_release(struct inode *inode, struct file *file) {
 
+	u32 ret, copied;
+
 	/* Decrement the open counter and usage count. Without this, the module would not unload. */
 
+	spin_lock(&(econet_data->open_count_spinlock));
 	econet_data->open_count--;
+	spin_unlock(&(econet_data->open_count_spinlock));
 
-#if 0
-	if (!econet_data->monitor_count)
-	{
-		econet_irq_mode(0);
-	}
-#endif
+	spin_lock(&econet_irq_spin);
 
-	/* TODO : need to drain & reset any applicable fifo */
+	/* If monitor isn't open, turn IRQs off */
+
+	spin_lock(&(econet_data->monitor_count_spinlock));
+
+	if (econet_data->monitor_count == 0)
+		econet_write_cr(1, ECONET_GPIO_C1_TX_RESET | ECONET_GPIO_C1_RX_RESET); /* Reset everything and turn IRQs off */
+	spin_unlock(&(econet_data->monitor_count_spinlock));
+
+	econet_data->aun_mode = 0; /* But we do need to find a way of turning this off on a release... otherwise the module keeps doing 4-ways! */
 
 	/* Turn off AUN mode */
 
 	econet_data->aun_mode = 0; /* But we do need to find a way of turning this off on a release... otherwise the module keeps doing 4-ways! */
 
 	econet_set_aunstate(EA_IDLE);
+
+	spin_unlock(&econet_irq_spin);
+
+	/* Drain the FIFO */
+
+	while ((ret = kfifo_to_user(&(econet_data->readfd_fifo), &(econet_data->drain), sizeof(struct __econet_packet_aun), &copied)));
 
 	module_put(THIS_MODULE);
 

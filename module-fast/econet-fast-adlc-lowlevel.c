@@ -386,6 +386,8 @@ void econet_set_read_mode(void)
 
 	econet_set_chipstate(EM_IDLE);  /* 20260320 was IDLEINIT */
 
+	atomic_set(&(econet_data->fastpath_enabled), 0);
+
 	last_data_rcvd = 0; // Last time we received data off the wire. Detect stuck in read mode when we want to write
 
 	ECONET_NOT_BUSY(); /* Does what it says */

@@ -158,7 +158,8 @@ int econet_init_vars (void)
         spin_lock_init(&econet_irq_spin);
 
 	/* Hybrid IRQ state */
-	atomic_set(&econet_data->fast_rx_enabled, 0);
+
+	atomic_set(&econet_data->fastpath_enabled, 0);
 
 	/* Packet buffer init */
 
@@ -193,7 +194,13 @@ int econet_init_vars (void)
 
 	spin_lock_init(&(econet_data->workbuf_spinlock));
 
+	/* Initialize spinlocks for open_count and monitor_count */
+
+	spin_lock_init (&(econet_data->open_count_spinlock));
+	spin_lock_init (&(econet_data->monitor_count_spinlock));
+
 	return 0;
+
 }
 
 /*
@@ -589,7 +596,7 @@ int econet_probe (struct platform_device *pdev)
 		 *
 		 */
 
-		printk (KERN_INFO "econet-fast: Setting gpio4 ADLC clock (GPCLK0) to %dkHz\n", gpio4clk_rate/1000);
+		printk (KERN_INFO "econet-fast: ADLC clock set to %dkHz\n", gpio4clk_rate/1000);
 	
 		/* 
 		 * Set the rate & enable clock.
@@ -764,6 +771,10 @@ int econet_probe (struct platform_device *pdev)
 	/* IRQs are off at this stage */
 
 	econet_irq_mode(1);
+
+	/* Turn ADLC IRQs off because the two _open() routines turn them on as needed */
+
+	econet_write_cr(1, ECONET_GPIO_C1_RX_RESET | ECONET_GPIO_C1_TX_RESET);
 
 	/* Return success */
 
