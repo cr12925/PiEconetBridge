@@ -440,7 +440,6 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 	hsr1 = econet_read_sr(1);
 	hsr2 = (hsr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
 
-#if 0 /* This didn't work */
 	if (chipstate == EM_IDLE && (hsr2 & ECONET_GPIO_S2_AP)) /* New packet */
 	{
 		econet_data->rxp->ptr = 0;
@@ -448,8 +447,17 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 		fastpath = 1;
 		econet_set_chipstate(EM_READ);
 		chipstate = EM_READ;
+		econet_data->rxp->data[econet_data->rxp->ptr++] = econet_read_fifo();
+
+		hsr1 = econet_read_sr(1);
+		hsr2 = (hsr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
+
+		if (hsr1 & ECONET_GPIO_S1_RDA) /* Second byte available - probably won't happen in 1 byte mode*/
+			econet_data->rxp->data[econet_data->rxp->ptr++] = econet_read_fifo();
+
+		return IRQ_HANDLED; /* Away we go */
+
 	}
-#endif
 
 	if (fastpath && chipstate == EM_READ)
 	{
