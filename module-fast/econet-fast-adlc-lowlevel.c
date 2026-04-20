@@ -442,7 +442,7 @@ u8 econet_seize(void)
 
 	if (sr2 & ECONET_GPIO_S2_DCD) /* Clock */
 	{
-		printk (KERN_ERR "econet-fast: No clock attempting to seize line!\n");
+		printk_ratelimited (KERN_ERR "econet-fast: No clock attempting to seize line!\n");
 		econet_set_read_mode();
 		return ECONET_TX_NOCLOCK;
 	}

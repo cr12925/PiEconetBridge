@@ -222,7 +222,7 @@ u8 econet_writefd_transmit(void)
 
 	if ((seize_result = econet_seize()))
 	{
-		printk (KERN_INFO "econet-fast: writefd(): line seize failed!\n");
+		printk_ratelimited (KERN_INFO "econet-fast: writefd(): line seize failed!\n");
 
 		econet_set_tx_status(seize_result);
 		econet_free_pbuf(econet_data->txp);

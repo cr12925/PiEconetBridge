@@ -102,6 +102,7 @@ int econet_monitor_open(struct inode *inode, struct file *file) {
 	{
 		spin_lock(&econet_irq_spin);
 		econet_set_read_mode();
+		spin_unlock(&econet_irq_spin);
 	}
 
 	spin_unlock(&(econet_data->open_count_spinlock));

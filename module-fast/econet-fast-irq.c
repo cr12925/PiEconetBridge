@@ -430,33 +430,47 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 	 * FIFO may have accumulated an extra byte. Reading in a
 	 * loop prevents overruns from brief scheduling delays. */
 
+#if 0 /* I think this is causing a problem... */
+
 	/* If we're in write mode, we'll always try fastpath */
 
 	if (chipstate == EM_WRITE)
 		atomic_set(&econet_data->fastpath_enabled, 1);
+
+#endif
 
 	fastpath = atomic_read(&econet_data->fastpath_enabled);
 
 	hsr1 = econet_read_sr(1);
 	hsr2 = (hsr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
 
-	if (chipstate == EM_IDLE && (hsr2 & ECONET_GPIO_S2_AP)) /* New packet */
+	if (econet_data && econet_data->rxp && chipstate == EM_IDLE && (hsr2 & ECONET_GPIO_S2_AP)) /* New packet */
 	{
+
 		econet_data->rxp->ptr = 0;
+
 		atomic_set(&(econet_data->fastpath_enabled), 1);
-		fastpath = 1;
+
 		econet_set_chipstate(EM_READ);
-		chipstate = EM_READ;
+
 		econet_data->rxp->data[econet_data->rxp->ptr++] = econet_read_fifo();
+
+		if (econet_data->twobytemode)
+		{
+			hsr1 = econet_read_sr(1);
+			hsr2 = (hsr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
+
+ 			if  (hsr1 & ECONET_GPIO_S1_RDA) /* Second byte */
+				econet_data->rxp->data[econet_data->rxp->ptr++] = econet_read_fifo();
+		}
 
 		hsr1 = econet_read_sr(1);
 		hsr2 = (hsr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
 
-		if (hsr1 & ECONET_GPIO_S1_RDA) /* Second byte available - probably won't happen in 1 byte mode*/
-			econet_data->rxp->data[econet_data->rxp->ptr++] = econet_read_fifo();
+		if (!(hsr1 & ECONET_GPIO_S1_IRQ)) /* No more IRQ - quit */
+			return IRQ_HANDLED;
 
-		return IRQ_HANDLED; /* Away we go */
-
+		/* Otherwise, fall through and have another run at it */
 	}
 
 	if (fastpath && chipstate == EM_READ)
@@ -472,6 +486,7 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
  				* so it can set EM_READ, reset rxp->ptr, and mark busy.
  				* Otherwise a new frame would accumulate on top of the
  				* previous one's stale data. */
+
 				if ((hsr1 & ECONET_GPIO_S1_RDA)
     				&& !(hsr2 & (ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_ERR
                				| ECONET_GPIO_S2_OVERRUN | ECONET_GPIO_S2_DCD
@@ -491,15 +506,18 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 					return IRQ_WAKE_THREAD;
 				}
 	
-				hsr1 = econet_read_sr(1);
+				/* Don't need hsr1 for second byte on 2 byte transfer hsr1 = econet_read_sr(1); */
 				hsr2 = (hsr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
 			}
-		}
 
-		if (!(hsr1 & ECONET_GPIO_S1_IRQ)) /* We've drained it */
-			return IRQ_HANDLED;
+			hsr1 = econet_read_sr(1);
+			hsr2 = (hsr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
+		}
+	
+		return IRQ_HANDLED; /* Either we've done our max loops, or there was no IRQ */
+
 	}
-	else if (fastpath && chipstate == EM_WRITE)
+	else if (fastpath && chipstate == EM_WRITE && econet_data->txp)
 	{
 
 		if (
@@ -525,10 +543,14 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 
 			if ((hsr1 & (ECONET_GPIO_S1_IRQ | ECONET_GPIO_S1_TDRA)) != (ECONET_GPIO_S1_IRQ | ECONET_GPIO_S1_TDRA)) /* No IRQ or no TDRA */
 			{
+				return IRQ_HANDLED; /* Surely this is what we need to be doing?? */
+#if 0
 				printk_ratelimited ("econet-fast: Either no IRQ or no TDRA on fastpath tx: SR1 = %02X\n", hsr1);
 				econet_data->shadow_sr1 = hsr1;
 				econet_data->shadow_sr2 = hsr2;
 				return IRQ_WAKE_THREAD;
+#endif
+
 			}
 
 			while (bytes_to_do--)
@@ -563,9 +585,7 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 				}
 #endif
 
-				econet_write_fifo(econet_data->txp->data[econet_data->txp->ptr]);
-
-				econet_data->txp->ptr++;
+				econet_write_fifo(econet_data->txp->data[econet_data->txp->ptr++]);
 
 				if (econet_data->txp->ptr == econet_data->txp->txlen)
 				{
@@ -649,6 +669,14 @@ irqreturn_t econet_irq(int irq, void *ident)
 		sr1 = econet_read_sr(1);
 		sr2 = (sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
 
+		/* Let's not ask it again in case some timing issue means we in fact CLEAR an IRQ...
+		   which might be what happened in this case where TDRA was set without IRQ:
+
+[  +0.219826] econet-fast: Reporting line jammed on line seize
+[  +0.000015] econet-fast: writefd(): line seize failed!
+[  +0.000011] econet-fast: IRQ handler called but ADLC not flagging an IRQ (SR1 = 40, SR2 = 00)
+		*/
+
 		if (!(sr1 & ECONET_GPIO_S1_IRQ))
 		{
 			sr1 = econet_read_sr(1);
@@ -661,8 +689,10 @@ irqreturn_t econet_irq(int irq, void *ident)
 	if (chip_state == EM_TEST)
 	{
 		printk_ratelimited(KERN_INFO "econet-fast: IRQ handler called in test mode - disabling IRQ");
+
 		/* Turn off ADLC IRQs */
 		econet_write_cr(ECONET_GPIO_CR1, ECONET_GPIO_C1_TX_RESET | ECONET_GPIO_C1_RX_RESET);
+
 		/* Disable at the GIC too — if the ADLC doesn't de-assert
 		 * its IRQ line, level-triggered re-entry causes an IRQ storm
 		 * that saturates the GPIO bus and triggers a firmware reset.
@@ -727,16 +757,17 @@ irqreturn_t econet_irq(int irq, void *ident)
 			}
 			else if ( /* TX-Specific Errors we need to look at */
 					chip_state == EM_WRITE 
+				&&	econet_data->txp
 				&&	(sr1 & ECONET_GPIO_S1_UNDERRUN)
 				)
 			{
+				econet_set_chipstate(EM_IDLE);
+				chip_state = EM_IDLE;
+				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
 				printk (KERN_INFO "econet-fast: TX Underrun detected - SR1 = 0x%02X, SR2 = 0x%02X, txp->ptr = 0x%04X, txp->txlen = 0x%04X\n",
 						sr1, sr2, econet_data->txp->ptr, econet_data->txp->txlen);
 				econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX); /* Puts an empty packet into the monitor kfifo, but has the status in it */
 				econet_set_read_mode();
-				econet_set_chipstate(EM_IDLE);
-				chip_state = EM_IDLE;
-				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
 				handled = 1;
 			}
 			else if ( /* Errors we need to clear */
@@ -744,37 +775,37 @@ irqreturn_t econet_irq(int irq, void *ident)
 				||	(sr2 & (ECONET_GPIO_S2_RX_IDLE))
 				)
 			{
+				econet_set_chipstate(EM_IDLE);
+				chip_state = EM_IDLE;
+				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
 				if (econet_data->rxp->ptr > 0)
 					printk (KERN_INFO "econet-fast: RX Idle received at rxptr=0x%04X", econet_data->rxp->ptr);
 				econet_irq_to_workqueue(&(econet_data->rxp), sr1, sr2, EP_PACKET_RX); /* Puts an empty packet into the monitor kfifo, but has the status in it */
 				econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Just clear status
-				econet_set_chipstate(EM_IDLE);
-				chip_state = EM_IDLE;
-				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
 				handled = 1;
 			}	
 
 			if (econet_data->clock_state && (sr2 & ECONET_GPIO_S2_DCD)) /* Clock lost */
 			{
+				econet_set_chipstate(EM_IDLE);
+				chip_state = EM_IDLE;
+				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
 				printk (KERN_ERR "econet-fast: No clock\n");
 				econet_write_cr(1, C1_READ);
 				econet_write_cr(2, C2_READ);
 				econet_data->clock_state = 0;
-				econet_set_chipstate(EM_IDLE);
-				chip_state = EM_IDLE;
-				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
 				handled = 1;
 			}
 
 			if (!(econet_data->clock_state) && !(sr2 & ECONET_GPIO_S2_DCD)) /* Clock resumed */
 			{
+				econet_set_chipstate(EM_IDLE);
+				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
+				chip_state = EM_IDLE;
 				printk (KERN_INFO "econet-fast: Clock resumed\n");
 				econet_write_cr(1, C1_READ);
 				econet_write_cr(2, C2_READ);
 				econet_data->clock_state = 1;
-				econet_set_chipstate(EM_IDLE);
-				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
-				chip_state = EM_IDLE;
 			}
 
 			switch (chip_state) // Otherwise process traffic
@@ -809,12 +840,13 @@ irqreturn_t econet_irq(int irq, void *ident)
 			/* Turn the ADLC off and disable at the GIC to prevent
 			 * IRQ storm if the ADLC doesn't de-assert its line. */
 
+			econet_set_chipstate(EM_TEST);
+
 			econet_write_cr(ECONET_GPIO_CR1, ECONET_GPIO_C1_TX_RESET | ECONET_GPIO_C1_RX_RESET);
+
 			disable_irq_nosync(econet_data->irq);
 
 			econet_set_irq_state(0);
-
-			econet_set_chipstate(EM_TEST);
 
 			handled = 1;
 		}
@@ -848,6 +880,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 		if (chip_state == EM_WRITE || chip_state == EM_WRITE_WAIT)
 		{
 			econet_set_chipstate(EM_IDLE);
+
 			if (!econet_data->txp)
 				econet_data->txp = econet_alloc_pbuf();
 
@@ -864,11 +897,13 @@ irqreturn_t econet_irq(int irq, void *ident)
 		else
 		{
 			econet_set_chipstate(EM_IDLE);
+
 			if (!econet_data->rxp)
 			{
 				printk (KERN_ERR "econet-fast: RX packet buffer is null on IRQ Failure handler!\n");
 				econet_data->rxp = econet_alloc_pbuf();
 			}
+
 			if (!econet_data->rxp)
 				printk (KERN_ERR "econet-fast: RX packet buffer remained null after IRQ failure handler tried to re-allocate it. RX packet buffer starving! Failure not sent to workqueue.\n");
 			else
@@ -879,8 +914,10 @@ irqreturn_t econet_irq(int irq, void *ident)
 				econet_irq_to_workqueue(&(econet_data->rxp), sr1, sr2, EP_PACKET_RX); 
 			}
 		}
+
 		econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
 		handled = 1;
+
 		ECONET_NOT_BUSY();
 #endif
 	}
