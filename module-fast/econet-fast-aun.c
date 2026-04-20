@@ -397,6 +397,13 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 	
 	if (econet_data->aun_mode && (sr2_errors & ECONET_GPIO_S2_RX_IDLE))
 	{
+		if (p->tx == EP_PACKET_RX && p->ptr >= 4 && !(ECONET_DEV_STATION(econet_stations, __DSTNET(p), __DSTSTN(p)))) /* Not for us */
+		{
+			ECONET_NOT_BUSY();
+			econet_set_aunstate(EA_IDLE);
+			return EWAS_NOTHING;
+		}
+
 		if (
 			(p->tx == EP_PACKET_TX && econet_data->aun_packet_tx.p.aun_ttype != ECONET_AUN_BCAST && aun_state == EA_W_WRITESCOUT) /* Not listening */
 		||	(p->tx == EP_PACKET_RX && aun_state == EA_W_READFIRSTACK)
@@ -599,6 +606,12 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 		if (aun_state == EA_IDLE && p->tx == EP_PACKET_RX) /* Something arrived off the line - shouldn't be getting a TX'd packet in idle, so that's an error */
 		{
+			if (!ECONET_DEV_STATION(econet_stations, __DSTNET(p), __DSTSTN(p))) /* Not for us */
+			{
+				ECONET_NOT_BUSY();
+				return EWAS_NOTHING;
+			}
+
 			return econet_workqueue_respond_new_packet(p, sr1_errors, sr2_errors);
 		}
 		
@@ -1101,7 +1114,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			return EWAS_NOTHING;
 		}
 	}
-	else /* Raw mode - just copy incoming packets to the aun area and
+	else if (econet_data->aun_mode == 0)  /* Raw mode - just copy incoming packets to the aun area and
 		flag the length
 		*/
 	{

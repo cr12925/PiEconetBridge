@@ -397,6 +397,9 @@ inline void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 		}
 	}
 
+	if (econet_data->txp->ptr < econet_data->txp->txlen) /* Something left to transmit - switch fastpath on*/
+		atomic_set(&econet_data->fastpath_enabled, 1);
+
 	return;
 }
 
@@ -680,14 +683,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 	{
 		sr1 = econet_read_sr(1);
 		sr2 = (sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
-
-		/* Let's not ask it again in case some timing issue means we in fact CLEAR an IRQ...
-		   which might be what happened in this case where TDRA was set without IRQ:
-
-[  +0.219826] econet-fast: Reporting line jammed on line seize
-[  +0.000015] econet-fast: writefd(): line seize failed!
-[  +0.000011] econet-fast: IRQ handler called but ADLC not flagging an IRQ (SR1 = 40, SR2 = 00)
-		*/
 
 		if (!(sr1 & ECONET_GPIO_S1_IRQ))
 		{
