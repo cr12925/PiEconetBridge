@@ -312,15 +312,31 @@ inline void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 			// econet_data->txp->timing_start = ktime_get_ns();
 		}
 
+		if (sr1 & ECONET_GPIO_S1_UNDERRUN) /* TX Underrun */
+		{
+			printk (KERN_ERR "econet-fast: Underrun during transmission at byte %02X, SR1 = 0x%02X, SR2 = 0x%02X - TX aborted\n", econet_data->txp->ptr, sr1, sr2);
+			econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
+			econet_set_read_mode();
+		}
+
+		if (sr2 & ECONET_GPIO_S2_DCD) /* No clock */
+		{
+			printk (KERN_ERR "econet-fast: No clock during transmission at byte %02X, SR1 = 0x%02X, SR2 = 0x%02X - TX aborted\n", econet_data->txp->ptr, sr1, sr2);
+			econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
+			econet_set_read_mode();
+		}
+
 		while (bytes < (econet_data->twobytemode ? 2 : 1))
 		{
 
+#if 0 /* Shouldn't be necessary */
 			if (bytes > 0)  /* Re-read the SRs */
 			{
 				sr1 = econet_read_sr(1);
 
 				if (sr1 & ECONET_GPIO_S1_S2RQ) { sr2 = econet_read_sr(2); } else sr2 = 0;
 			}
+#endif
 
 			if (bytes == 0)
 			{
@@ -359,20 +375,7 @@ inline void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 	
 					return;
 				}
-			}
 
-			if (sr2 & ECONET_GPIO_S2_DCD) /* No clock */
-			{
-				printk (KERN_ERR "econet-fast: No clock during transmission at byte %02X, SR1 = 0x%02X, SR2 = 0x%02X - TX aborted\n", econet_data->txp->ptr, sr1, sr2);
-				econet_set_read_mode();
-				econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
-			}
-
-			if (sr1 & ECONET_GPIO_S1_UNDERRUN) /* TX Underrun */
-			{
-				printk (KERN_ERR "econet-fast: Underrun during transmission at byte %02X, SR1 = 0x%02X, SR2 = 0x%02X - TX aborted\n", econet_data->txp->ptr, sr1, sr2);
-				econet_set_read_mode();
-				econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
 			}
 
 			/* TDRA available - put some data in it */
@@ -517,8 +520,17 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 		return IRQ_HANDLED; /* Either we've done our max loops, or there was no IRQ */
 
 	}
-	else if (fastpath && chipstate == EM_WRITE && econet_data->txp)
+	else if (fastpath && chipstate == EM_WRITE)
 	{
+
+		if (!econet_data->txp) /* Ouch! Where's our TX data?? */
+		{
+		
+			/* Barf to bottom half */
+			econet_data->shadow_sr1 = hsr1;
+			econet_data->shadow_sr2 = hsr2;
+			return IRQ_WAKE_THREAD;
+		}
 
 		if (
 			(hsr1 & ECONET_GPIO_S1_UNDERRUN) /* TX Underrun */
