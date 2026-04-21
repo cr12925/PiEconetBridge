@@ -449,6 +449,7 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 
 	hsr1 = econet_read_sr(1);
 	hsr2 = (hsr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
+	econet_data->shadow_chipstate = chipstate;
 
 	if (econet_data && econet_data->rxp && chipstate == EM_IDLE && (hsr2 & ECONET_GPIO_S2_AP)) /* New packet */
 	{
@@ -457,7 +458,13 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 
 		atomic_set(&(econet_data->fastpath_enabled), 1);
 
+		// fastpath = 1;
+
 		econet_set_chipstate(EM_READ);
+
+		econet_data->shadow_chipstate = EM_READ;
+
+		// chipstate = EM_READ;
 
 		econet_data->rxp->data[econet_data->rxp->ptr++] = econet_read_fifo();
 
@@ -470,6 +477,7 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 				econet_data->rxp->data[econet_data->rxp->ptr++] = econet_read_fifo();
 		}
 
+#if 0
 		hsr1 = econet_read_sr(1);
 		hsr2 = (hsr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
 
@@ -477,6 +485,9 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 			return IRQ_HANDLED;
 
 		/* Otherwise, fall through and have another run at it */
+#endif
+		return IRQ_HANDLED; /* Falling through seemed to cause issues */
+
 	}
 
 	if (fastpath && chipstate == EM_READ)
@@ -644,6 +655,20 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 
 		return IRQ_HANDLED;
 	}
+	else if (chipstate == EM_WRITE_WAIT && fastpath)
+	{
+		/* Go back to read mode if FC set, fallthrough in all cases */
+	
+		if (hsr1 & ECONET_GPIO_S1_TDRA) /* FC set on this IRQ */
+		{
+			econet_set_chipstate(EM_IDLE);
+
+			econet_write_cr(2, C2_READ);
+			econet_write_cr(1, C1_READ);
+		}
+		
+		/* Code below calls the thread - NB - the lower half will inherit shadow_chipstate so it will still see this as EM_WRITE_WAIT even if we changed it above */
+	}
 
 	econet_data->shadow_sr1 = hsr1;
 	econet_data->shadow_sr2 = hsr2;
@@ -660,6 +685,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 {
 
 	u8		chip_state, handled = 0;
+	u8		was_fastpath = 0;
 
 	/* Disable fast-path while the thread runs.
 	 * IRQF_ONESHOT keeps the line masked so this is safe. */
@@ -677,7 +703,9 @@ irqreturn_t econet_irq(int irq, void *ident)
 	{
 		sr1 = econet_data->shadow_sr1;
 		sr2 = econet_data->shadow_sr2;
-		econet_data->shadow_sr1 = econet_data->shadow_sr2 = 0;
+		was_fastpath = 1;
+		chip_state = econet_data->shadow_chipstate;
+		econet_data->shadow_sr1 = econet_data->shadow_sr2 = econet_data->shadow_chipstate = 0;
 	}
 	else
 	{
@@ -689,10 +717,10 @@ irqreturn_t econet_irq(int irq, void *ident)
 			sr1 = econet_read_sr(1);
 			sr2 = (sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
 		}
+
+		chip_state = econet_get_chipstate();
 	}
 	
-	chip_state = econet_get_chipstate();
-
 	if (chip_state == EM_TEST)
 	{
 		printk_ratelimited(KERN_INFO "econet-fast: IRQ handler called in test mode - disabling IRQ");
@@ -727,25 +755,34 @@ irqreturn_t econet_irq(int irq, void *ident)
 				econet_data->pkt_since_idle++; /* We've transmitted a packet - increase our pkt count since idle */
 
 				if (!(sr1 & ECONET_GPIO_S1_TDRA)) /* On this IRQ, we should have FC set. If we don't, let's flag an error for now */
-					printk (KERN_INFO "econet-data: IRQ received in EM_WRITE_WAIT but Frame Complete not set. txp->ptr = 0x%02X, txp->txlen = 0x%02X\n", econet_data->txp->ptr, econet_data->txp->txlen);
-
-				if (
-					(econet_data->pkt_since_idle == 1 && __IS_TWOWAY(econet_data->txp)) /* We've just transmitted a two-way immediate - don't flag fill on the reply */
-				||	(econet_data->pkt_since_idle == 3) /* Must be data phase of 4-way */
-				)
 				{
-					econet_data->no_flag_fill = 1; /* Expecting next packet to be reply to immediate, or final phase of 4-way, so don't flag fill */
-					// printk (KERN_INFO "econet-fast: Setting no_flag_fill\n");
+					printk (KERN_INFO "econet-data: IRQ received in EM_WRITE_WAIT but Frame Complete not set. txp->ptr = 0x%02X, txp->txlen = 0x%02X\n", econet_data->txp->ptr, econet_data->txp->txlen);
+					handled = 1;
 				}
-					
-				econet_set_read_mode();
-				// econet_data->txp->timing_end = ktime_get_ns();
-				econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
-				econet_set_chipstate(EM_IDLE);
-				chip_state = EM_IDLE;
-			}
+				else /* Frame really has completed */
+				{
+					if (
+						(econet_data->pkt_since_idle == 1 && __IS_TWOWAY(econet_data->txp)) /* We've just transmitted a two-way immediate - don't flag fill on the reply */
+					||	(econet_data->pkt_since_idle == 3) /* Must be data phase of 4-way */
+					)
+					{
+						econet_data->no_flag_fill = 1; /* Expecting next packet to be reply to immediate, or final phase of 4-way, so don't flag fill */
+						// printk (KERN_INFO "econet-fast: Setting no_flag_fill\n");
+					}
+						
+					if (!was_fastpath) /* HardIRQ does this if FC set */
+						econet_set_read_mode();
 
-			if ((sr2 & ECONET_GPIO_S2_AP)) /* New packet */
+					// econet_data->txp->timing_end = ktime_get_ns();
+					econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
+					if (!was_fastpath) /* Fastpath handler will change this if FC set */
+						econet_set_chipstate(EM_IDLE);
+
+					chip_state = EM_IDLE;
+					handled = 1;
+				}
+			}
+			else if ((sr2 & ECONET_GPIO_S2_AP)) /* New packet */
 			{
 				econet_set_chipstate(EM_READ);
 				chip_state = EM_READ;
@@ -826,6 +863,9 @@ irqreturn_t econet_irq(int irq, void *ident)
 					handled = 1;
 					break;
 				case EM_IDLE:
+					handled = 1;
+					break;
+				case EM_WRITE_WAIT:
 					handled = 1;
 					break;
 				default:

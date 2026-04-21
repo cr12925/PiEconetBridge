@@ -299,6 +299,7 @@ struct __econet_data {
 	 * serializes top half and thread — no lock needed. */
 	atomic_t fastpath_enabled;	/* 1 when top half may read/write FIFO */
 	u8	shadow_sr1, shadow_sr2;	/* SR snapshot from top half for thread */
+	u8	shadow_chipstate; /* Chipstate on entry to the hard irq handler in case that handler changed it */
 
 	/* Module type */
 	u8	module_type;
