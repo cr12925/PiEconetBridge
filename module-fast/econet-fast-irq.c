@@ -968,7 +968,7 @@ irqreturn_t econet_irq(int irq, void *ident)
    	 * and it dumps errors back to the threadded IRQ handler.
 	 */
 
-	if (chip_state == EM_IDLE || chip_state == EM_READ || chip_state == EM_WRITE || chip_state = EM_WRITE_WAIT)
+	if (chip_state == EM_IDLE || chip_state == EM_READ || chip_state == EM_WRITE || chip_state == EM_WRITE_WAIT)
 		atomic_set(&econet_data->fastpath_enabled, 1);
 	else
 		atomic_set(&econet_data->fastpath_enabled, 0);
