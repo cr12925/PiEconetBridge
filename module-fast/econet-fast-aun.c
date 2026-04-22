@@ -889,19 +889,18 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 						__DSTNET(p),
 						__DSTSTN(p)
 				       );
-					econet_set_read_mode();	 /* Don't do this if longer than 4 bytes because irq handler will have gone into flag fill */
 				}
 				else
 				{
-					printk (KERN_ERR "econet-fast: Expecting ACK from %d.%d but got a longer frame from %d.%d, treating as scout\n",
+					printk (KERN_ERR "econet-fast: Expecting ACK from %d.%d but got a longer frame from %d.%d\n",
 						__AUN_DSTNET(econet_data->aun_packet_tx),
 						__AUN_DSTSTN(econet_data->aun_packet_tx),
 						__SRCNET(p),
 						__SRCSTN(p)
 					);
-					econet_set_read_mode(); /* We want to drop flag fill */
 				}
 
+				econet_set_read_mode(); /* We want to drop flag fill */
 				econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
 				econet_set_aunstate(EA_IDLE);
 

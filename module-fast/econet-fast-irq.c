@@ -655,8 +655,10 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 		{
 			econet_set_chipstate(EM_IDLE);
 
-			econet_write_cr(2, C2_READ);
-			econet_write_cr(1, C1_READ);
+			// econet_write_cr(2, C2_READ);
+			econet_write_cr(1, ECONET_GPIO_C1_RINT | ECONET_GPIO_C1_TX_RESET);
+
+			econet_data->pkt_since_idle++;
 		}
 		
 		/* Code below calls the thread - NB - the lower half will inherit shadow_chipstate so it will still see this as EM_WRITE_WAIT even if we changed it above */
@@ -744,7 +746,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 			if (chip_state == EM_WRITE_WAIT)
 			{
-				econet_data->pkt_since_idle++; /* We've transmitted a packet - increase our pkt count since idle */
+				if (!was_fastpath) /* Fastpath does this */
+					econet_data->pkt_since_idle++; /* We've transmitted a packet - increase our pkt count since idle */
 
 				if (!(sr1 & ECONET_GPIO_S1_TDRA)) /* On this IRQ, we should have FC set. If we don't, let's flag an error for now */
 				{
@@ -768,6 +771,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 					// econet_data->txp->timing_end = ktime_get_ns();
 					econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
+
 					if (!was_fastpath) /* Fastpath handler will change this if FC set */
 						econet_set_chipstate(EM_IDLE);
 
@@ -852,7 +856,16 @@ irqreturn_t econet_irq(int irq, void *ident)
 					handled = 1;
 					break;
 				case EM_WRITE:
-					econet_irq_write_new(sr1, sr2);
+					if (econet_data->txp)
+						econet_irq_write_new(sr1, sr2);
+					else
+					{
+						printk_ratelimited("econet-fast: Attempt to call econet_irq_write_new() from bottom half of IRQ handler when txp was null!\n");
+						econet_write_cr(1, C1_READ);
+						econet_write_cr(2, C2_READ);
+						econet_set_chipstate(EM_IDLE);
+						chip_state = EM_IDLE;
+					}
 					handled = 1;
 					break;
 				case EM_IDLE:

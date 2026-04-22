@@ -447,7 +447,7 @@ u8 econet_seize(void)
 		return ECONET_TX_NOCLOCK;
 	}
 
-	while (outercount++ < 5)
+	while (outercount++ < 10)
 	{
 		if (!(sr2 & ECONET_GPIO_S2_RX_IDLE)) /* Is the line busy ? */
 		{
