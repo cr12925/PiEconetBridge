@@ -397,7 +397,8 @@ inline void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 		}
 	}
 
-	if (econet_data->txp->ptr < econet_data->txp->txlen) /* Something left to transmit - switch fastpath on*/
+	// if (econet_data->txp->ptr < econet_data->txp->txlen) /* Something left to transmit - switch fastpath on*/
+	// Turn fastpath on either ways, because the fastpath handler now deals with WRITE_WAIT as well.
 		atomic_set(&econet_data->fastpath_enabled, 1);
 
 	return;
@@ -435,15 +436,6 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 	 * handler delayed us by one byte period (~40µs), the ADLC
 	 * FIFO may have accumulated an extra byte. Reading in a
 	 * loop prevents overruns from brief scheduling delays. */
-
-#if 0 /* I think this is causing a problem... */
-
-	/* If we're in write mode, we'll always try fastpath */
-
-	if (chipstate == EM_WRITE)
-		atomic_set(&econet_data->fastpath_enabled, 1);
-
-#endif
 
 	fastpath = atomic_read(&econet_data->fastpath_enabled);
 
@@ -757,6 +749,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 				if (!(sr1 & ECONET_GPIO_S1_TDRA)) /* On this IRQ, we should have FC set. If we don't, let's flag an error for now */
 				{
 					printk (KERN_INFO "econet-data: IRQ received in EM_WRITE_WAIT but Frame Complete not set. txp->ptr = 0x%02X, txp->txlen = 0x%02X\n", econet_data->txp->ptr, econet_data->txp->txlen);
+					atomic_set(&econet_data->fastpath_enabled, 1); /* Go back to fastpath */
 					handled = 1;
 				}
 				else /* Frame really has completed */
@@ -865,9 +858,6 @@ irqreturn_t econet_irq(int irq, void *ident)
 				case EM_IDLE:
 					handled = 1;
 					break;
-				case EM_WRITE_WAIT:
-					handled = 1;
-					break;
 				default:
 					/* Shouldn't happen - switch off! */
 					printk (KERN_ERR "econet-fast: Unhandled chip mode %02X in IRQ handler, sr1 = 0x%02X, sr2 = 0x%02X. Disabling.\n", chip_state, sr1, sr2);
@@ -969,14 +959,16 @@ irqreturn_t econet_irq(int irq, void *ident)
 #endif
 	}
 
+	chip_state = econet_get_chipstate();
+
 	/*
 	 * Sync fastpath_enabled with the current chipstate.
-	 * Only EM_READ should allow the top half to fast-path FIFO
-	 * reads — any other state means we're between frames, in a
-	 * TX phase, or recovering from an error, and the top half
-	 * must wake the thread for proper state-machine handling.
+	 * Fastpath handler can cope with EM_IDLE (new frame read potential), EM_READ (during read)
+	 * EM_WRITE (writing frame) and EM_WRITE_WAIT (awaiting frame completion)
+   	 * and it dumps errors back to the threadded IRQ handler.
 	 */
-	if (econet_get_chipstate() == EM_READ || econet_get_chipstate() == EM_WRITE)
+
+	if (chip_state == EM_IDLE || chip_state == EM_READ || chip_state == EM_WRITE || chip_state = EM_WRITE_WAIT)
 		atomic_set(&econet_data->fastpath_enabled, 1);
 	else
 		atomic_set(&econet_data->fastpath_enabled, 0);
