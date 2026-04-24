@@ -220,7 +220,7 @@ u8 econet_writefd_transmit(void)
 
 	/* Trigger TX */
 
-	if ((seize_result = econet_seize()))
+	if ((seize_result = econet_seize(0))) /* 0 = not in IRQ */
 	{
 		printk_ratelimited (KERN_INFO "econet-fast: writefd(): line seize failed!\n");
 

@@ -2557,6 +2557,8 @@ void eb_bridge_whatis_net (struct __eb_device *source, uint8_t net, uint8_t stn,
 			(ctrl == BRIDGE_ISNET /* this is wrong! && (timediffmsec(&(source->wire.last_bridge_isnet[stn]), &now) > EB_CONFIG_WIRE_BRIDGE_QUERY_INTERVAL) */)
 		)
 		{
+			// A real bridge inserts a delay before responding to a WHATNET query of ~160us + about 55us per network number
+
 			//usleep (5 * 1000 * farside); // Delay
 
 			eb_dump_packet (source, EB_PKT_DUMP_PRE_I, reply, 2);

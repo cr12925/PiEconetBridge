@@ -610,7 +610,7 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 					econet_finish_tx();
 					econet_data->shadow_sr1 = econet_read_sr(1);
 
-					if (econet_data->shadow_sr1 & ECONET_GPIO_S1_IRQ) /* Another IRQ present - pass to bottom hald */
+					if (econet_data->shadow_sr1 & ECONET_GPIO_S1_IRQ) /* Another IRQ present - pass to bottom half */
 					{
 						econet_data->shadow_sr2 = (econet_data->shadow_sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
 						printk_ratelimited(KERN_INFO "econet-fast: IRQ on fastpath write of last byte: FC is %d, SR1 = %02X, SR2 = %02X\n", !!(econet_data->shadow_sr1 & ECONET_GPIO_S1_TDRA), econet_data->shadow_sr1, econet_data->shadow_sr2);
@@ -647,16 +647,16 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 
 		return IRQ_HANDLED;
 	}
-	else if (chipstate == EM_WRITE_WAIT && fastpath)
+	else if (chipstate == EM_WRITE_WAIT && fastpath) /* Ok, ANFS does not wait for the FV IRQ. ANFS 4.08 at &871C is the equivalent of our econet_finish_tx(). It sets FC in CR2, and sets a new NMI handler. But that handler doesn't check FC - it just goes straight to read mode by writing CR1 as in the block below... So lets just comment out the test 20260424. Perhaps FC is sometimes not set, so we never get back to read mode after tx of a frame. */
 	{
 		/* Go back to read mode if FC set, fallthrough in all cases */
 	
-		if (hsr1 & ECONET_GPIO_S1_TDRA) /* FC set on this IRQ */
+		// 20260424 if (hsr1 & ECONET_GPIO_S1_TDRA) /* FC set on this IRQ */
 		{
 			econet_set_chipstate(EM_IDLE);
 
 			// econet_write_cr(2, C2_READ);
-			econet_write_cr(1, ECONET_GPIO_C1_RINT | ECONET_GPIO_C1_TX_RESET);
+			econet_write_cr(1, ECONET_GPIO_C1_RINT | ECONET_GPIO_C1_TX_RESET); /* Matches ANFS 4.08 at &8728 */
 
 			econet_data->pkt_since_idle++;
 		}
@@ -746,16 +746,18 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 			if (chip_state == EM_WRITE_WAIT)
 			{
+#if 0 /* Dump this check - 20260424 - see hardirq WRITE_WAIT handler */
 				if (!was_fastpath) /* Fastpath does this */
-					econet_data->pkt_since_idle++; /* We've transmitted a packet - increase our pkt count since idle */
-
-				if (!(sr1 & ECONET_GPIO_S1_TDRA)) /* On this IRQ, we should have FC set. If we don't, let's flag an error for now */
 				{
-					printk (KERN_INFO "econet-data: IRQ received in EM_WRITE_WAIT but Frame Complete not set. txp->ptr = 0x%02X, txp->txlen = 0x%02X\n", econet_data->txp->ptr, econet_data->txp->txlen);
-					atomic_set(&econet_data->fastpath_enabled, 1); /* Go back to fastpath */
-					handled = 1;
-				}
+
+					if (!(sr1 & ECONET_GPIO_S1_TDRA)) /* On this IRQ, we should have FC set. If we don't, let's flag an error for now */
+					{
+						printk (KERN_INFO "econet-data: IRQ received in EM_WRITE_WAIT but Frame Complete not set. txp->ptr = 0x%02X, txp->txlen = 0x%02X\n", econet_data->txp->ptr, econet_data->txp->txlen);
+						atomic_set(&econet_data->fastpath_enabled, 1); /* Go back to fastpath */
+						handled = 1;
+					}
 				else /* Frame really has completed */
+#endif /* Just assume the frame completed. That's what ANFS appears to do - ANFS 4.08 at &871C - &8741 */
 				{
 					if (
 						(econet_data->pkt_since_idle == 1 && __IS_TWOWAY(econet_data->txp)) /* We've just transmitted a two-way immediate - don't flag fill on the reply */
@@ -767,15 +769,19 @@ irqreturn_t econet_irq(int irq, void *ident)
 					}
 						
 					if (!was_fastpath) /* HardIRQ does this if FC set */
-						econet_set_read_mode();
+					{
+					
+						econet_data->pkt_since_idle++; /* We've transmitted a packet - increase our pkt count since idle */
+						econet_set_chipstate(EM_IDLE);
+						econet_write_cr(1, ECONET_GPIO_C1_TX_RESET | ECONET_GPIO_C1_RINT);
+						// econet_set_read_mode();
+					}
+
+					chip_state = EM_IDLE;
 
 					// econet_data->txp->timing_end = ktime_get_ns();
 					econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
 
-					if (!was_fastpath) /* Fastpath handler will change this if FC set */
-						econet_set_chipstate(EM_IDLE);
-
-					chip_state = EM_IDLE;
 					handled = 1;
 				}
 			}

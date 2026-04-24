@@ -68,6 +68,7 @@
 #include <linux/time64.h>
 #include <linux/ktime.h>
 #include <linux/gpio.h>
+#include <linux/io.h>
 #include <asm/uaccess.h>
 #include <linux/workqueue.h>
 
