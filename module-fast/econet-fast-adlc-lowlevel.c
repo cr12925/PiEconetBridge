@@ -414,12 +414,13 @@ void econet_set_read_mode(void)
    NEVER call this in IRQ context.
  */
 
-u8 econet_seize(void)
+u8 econet_seize(u8 in_irq)
 {
 
 	u8 outercount = 0;
+	u8 chip_state = econet_get_chipstate();
 
-	if (econet_get_chipstate() == EM_FLAGFILL)
+	if (chip_state == EM_FLAGFILL)
 	{
 		// printk (KERN_INFO "econet-fast: Set EM_WRITE since in flag fill\n");
 		econet_set_chipstate(EM_WRITE); /* Do this before turning IRQs on otherwise IRQ happens in flag fill state! */
@@ -438,6 +439,9 @@ u8 econet_seize(void)
 		return ECONET_TX_SUCCESS;
 	}
 
+	if (in_irq) /* Don't go further - this loop takes a long time, just barf out */
+		return 0;
+
 	sr2 = econet_read_sr(2);
 
 	if (sr2 & ECONET_GPIO_S2_DCD) /* Clock */
@@ -447,16 +451,46 @@ u8 econet_seize(void)
 		return ECONET_TX_NOCLOCK;
 	}
 
-	while (outercount++ < 10)
+	/* Taken from bridge diassembly at https://acornaeology.uk/acorn-econet-bridge/variant_1.html#addr-E690 */
+
+	while (outercount++ < 32)
 	{
-		if (!(sr2 & ECONET_GPIO_S2_RX_IDLE)) /* Is the line busy ? */
+
+		/* Prime CR2 */
+
+		econet_write_cr(2, ECONET_GPIO_C2_CLR_RX_STATUS
+				|  ECONET_GPIO_C2_CLR_TX_STATUS
+				|  ECONET_GPIO_C2_FLAGIDLE
+				|  ECONET_GPIO_C2_PSE
+				|  (econet_data->twobytemode ? ECONET_GPIO_C2_2BYTES : 0)
+			);
+
+		sr2 = econet_read_sr(2);
+
+		if (sr2 & ECONET_GPIO_S2_RX_IDLE)
 		{
-			udelay (1 << outercount); /* Exponential backoff */
-			sr2 = econet_read_sr(2);
-			continue;
+			/* Off we go */
+			
+			econet_set_chipstate(EM_WRITE);
+			econet_write_cr(2, ECONET_GPIO_C2_RTS
+				|	ECONET_GPIO_C2_CLR_RX_STATUS
+				|	ECONET_GPIO_C2_CLR_TX_STATUS
+				|	ECONET_GPIO_C2_PSE
+				|	ECONET_GPIO_C2_FLAGIDLE
+				|	(econet_data->twobytemode ? ECONET_GPIO_C2_2BYTES : 0)
+			);
+			econet_write_cr(1, ECONET_GPIO_C1_TINT | ECONET_GPIO_C1_RX_RESET);
+	
+			return ECONET_TX_SUCCESS; /* Not really TX success - just 0 for success */
 		}
 
-		/* Line is idle, move forwards */
+		if (sr2 & (ECONET_GPIO_S2_AP | ECONET_GPIO_S2_RDA))
+		{
+			/* Someone is transmitting - fail */
+
+			econet_set_read_mode();
+			return ECONET_TX_JAMMED;
+		}
 
 		/* Read SR1 - clear pending IRQ (apparently!) */
 
@@ -468,25 +502,8 @@ u8 econet_seize(void)
 			(econet_data->twobytemode ? ECONET_GPIO_C2_2BYTES : 0)
 		);
 
-		sr1 = econet_read_sr(1);
-
-		if (sr1 & ECONET_GPIO_S1_CTS) /* CTS set - start TX */
-		{
-			econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT2); // +RTS
-
-			econet_set_chipstate(EM_WRITE); /* Do this before turning IRQs on otherwise IRQ happens in flag fill state! */
-			econet_write_cr(ECONET_GPIO_CR1, C1_WRITE_INIT2); // + (TIE + RX Reset)
-
-			return ECONET_TX_SUCCESS;
-		}
-
-		printk (KERN_INFO "econet-fast: /CTS on line seize, trying again\n");
-
-		/* Not CTS, wait & retry */
-
 		udelay (1 << outercount); /* Exponential backoff */
 
-		sr2 = econet_read_sr(2);
 	}
 
 	econet_set_read_mode();

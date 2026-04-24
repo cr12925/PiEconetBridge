@@ -144,7 +144,7 @@ unsigned int econet_poll (struct file *, poll_table *);
 ssize_t econet_readfd(struct file *, char *, size_t, loff_t *);
 ssize_t econet_writefd(struct file *, const char *, size_t, loff_t *);
 void econet_set_read_mode(void);
-u8 econet_seize(void);
+u8 econet_seize(u8);
 void econet_free_txrx(void);
 void econet_netclock_set(uint8_t, uint8_t);
 int econet_netclock_init(struct device *);

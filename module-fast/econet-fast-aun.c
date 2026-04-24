@@ -244,7 +244,7 @@ u8 econet_workqueue_respond_new_packet(struct __econet_packet *p, u8 sr1_errors,
 
 			// printk (KERN_INFO "econet-fast: EA_R_WRITEFIRSTACK seizing line\n");
 
-			if ((seized = econet_seize()))
+			if ((seized = econet_seize(1)))
 			{
 				/* Failed. */
 				printk (KERN_INFO "econet-fast: EA_R_WRITEFIRSTACK failed line seize - abort to EA_IDLE\n");
@@ -846,7 +846,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 	
 					econet_set_aunstate(EA_W_WRITEDATA);
 	
-					if ((seized = econet_seize())) /* NB Kernel module should have put us in flag fill */
+					if ((seized = econet_seize(1))) /* NB Kernel module should have put us in flag fill */
 					{
 						/* Failed. */
 						printk (KERN_ERR "econet-fast: Failed to seize line for 4-way data phase: frame length 0x%04X\n", p->txlen);
@@ -928,8 +928,9 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 			/* Otherwise looks like we did a successful data TX */
 
-			// econet_set_read_mode(); IRQ handler should have done this
 			econet_set_aunstate (EA_W_READFINALACK);
+
+			/* Hard IRQ handler will have gone to read mode */
 
 			return EWAS_NOTHING;
 		}
@@ -1053,7 +1054,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 						econet_workqueue_build_ack(econet_data->txp);
 
-						if ((seized = econet_seize()))
+						if ((seized = econet_seize(1)))
 						{
 							/* Failed. */
 							/* But we could return the data anyway */
