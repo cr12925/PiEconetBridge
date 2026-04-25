@@ -250,11 +250,15 @@ while (!valid && (sr1 & ECONET_GPIO_S1_IRQ) && irq_loop_count++ < 5)
 	if (
 		(sr1 & ECONET_GPIO_S1_LOOP /* Which should never be enabled! */ 
 		)
-	||	(sr2 & (ECONET_GPIO_S2_RX_IDLE |
+	||	(
+		    (
+			sr2 & (ECONET_GPIO_S2_RX_IDLE |
 			ECONET_GPIO_S2_RX_ABORT |
 			ECONET_GPIO_S2_ERR |
 			ECONET_GPIO_S2_DCD |
 			ECONET_GPIO_S2_OVERRUN)
+		    ) 
+  		&&	!((sr2 & ECONET_GPIO_S2_RX_IDLE) && (econet_data->rxp && econet_data->rxp->ptr < 5)) /* Ignore early idles in packets */
 		)
 	  )
 	{
@@ -500,7 +504,7 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
     				&& !(hsr2 & (ECONET_GPIO_S2_VALID | ECONET_GPIO_S2_ERR
                				| ECONET_GPIO_S2_OVERRUN | ECONET_GPIO_S2_DCD
                				| ECONET_GPIO_S2_RX_IDLE | ECONET_GPIO_S2_RX_ABORT
-               				| ECONET_GPIO_S2_AP ))
+               				| ECONET_GPIO_S2_AP ) && !(econet_data->rxp && econet_data->rxp->ptr < 5 && (hsr2 & ECONET_GPIO_S2_RX_IDLE))) /* Don't be concerned about early RX idles - see if this helps on ACKs - ANFS doesn't check! */
     				&& econet_data->rxp
     				&& econet_data->rxp->ptr < ECONET_MAX_PACKET_SIZE
 				)
@@ -819,7 +823,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 			}
 			else if ( /* Errors we need to clear */
 				(sr1 & (ECONET_GPIO_S1_FLAG))
-				||	(sr2 & (ECONET_GPIO_S2_RX_IDLE))
+				||	((sr2 & (ECONET_GPIO_S2_RX_IDLE)) && (econet_data->rxp && (econet_data->rxp->ptr == 0 || econet_data->rxp->ptr > 4))) /* Ignore early RX Idles to see if this helps reading ACKs */
 				)
 			{
 				econet_set_chipstate(EM_IDLE);

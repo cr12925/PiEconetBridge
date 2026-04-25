@@ -372,9 +372,10 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			) /* Ignore "runts" which are just signalling packets */
 	{
 		u8 	count;
-		printk (KERN_ERR "econet-fast: Runt %s packet length 0x%02X received by workqueue from %3d.%3d to %3d.%3d, sr1 = 0x%02X, sr2 = 0x%02X, aun state = 0x%02X\n",
+		printk (KERN_ERR "econet-fast: Runt %s packet length 0x%02X at %p received by workqueue from %3d.%3d to %3d.%3d, sr1 = 0x%02X, sr2 = 0x%02X, aun state = 0x%02X\n",
 				p->tx == EP_PACKET_RX ? "RX" : "TX",
 				p->ptr,
+				p,
 				__SRCNET(p),
 				__SRCSTN(p),
 				__DSTNET(p),
@@ -1278,7 +1279,6 @@ void econet_workqueue_handler (struct work_struct *work)
 	spin_unlock(&(econet_data->monitor_count_spinlock));
 
 	econet_free_pbuf(my_work->p);
-
 
 	/* Free the work queue data, but not the packet data, which the monitor_readfd() does. */
 

@@ -453,7 +453,7 @@ u8 econet_seize(u8 in_irq)
 
 	/* Taken from bridge diassembly at https://acornaeology.uk/acorn-econet-bridge/variant_1.html#addr-E690 */
 
-	while (outercount++ < 32)
+	while (outercount++ < 256)
 	{
 
 		/* Prime CR2 */
@@ -502,7 +502,7 @@ u8 econet_seize(u8 in_irq)
 			(econet_data->twobytemode ? ECONET_GPIO_C2_2BYTES : 0)
 		);
 
-		udelay (1 << outercount); /* Exponential backoff */
+		// udelay (1 << outercount); /* Exponential backoff */
 
 	}
 
