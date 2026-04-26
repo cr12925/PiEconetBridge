@@ -204,6 +204,7 @@ struct __fs_disc {
 	uint8_t			index; /* Disc number - ready for new structure */
 	uint8_t			removable; /* 0 = fixed disc; 1 = removable - can be unmounted if free */
 	uint8_t			padding; /* Attempts to get us to a 4-byte boundary before block size */ 
+	uint32_t		inuse; /* Count of number of open handles on this disc, so we can tell whether it can be unmounted, if removable */
 	uint32_t		fs_blocksize; /* Used for quotas. bytes */
 	struct __fs_disc	*next, *prev;
 	struct __fs_station	*server; /* Upward reference */
@@ -266,6 +267,7 @@ struct path_entry {
         unsigned char unixpath[1024], unixfname[ECONET_ABS_MAX_FILENAME_LENGTH+1], acornname[ECONET_ABS_MAX_FILENAME_LENGTH+1]; // unixfname / acornname were 15, but now 81 to handle max 80 character filenames
         unsigned char day, monthyear, hour, min, sec; // Modified date / time
         unsigned char c_day, c_monthyear, c_hour, c_min, c_sec;
+	short disc; /* Host disc number */
         struct path_entry *next, *parent;
 };
 

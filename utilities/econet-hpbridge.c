@@ -13885,19 +13885,6 @@ int main (int argc, char **argv)
 			fprintf (stderr, "Cannot open debug output file %s. Quitting.", debug_path);
 	}
 	
-	/* Display machine type information */
-
-	eb_debug (0, 0, "CORE", "Identified a %s %s",
-			(eb_mfr == 0xEC) ? "Generic" 
-		:	(eb_mfr == 0xEE) ? "Raspberry Pi" : "Unknown",
-			(eb_mtype == 0xEF) ? "Pi 3"
-		:	(eb_mtype == 0xEE) ? "Pi 4"
-		:	(eb_mtype == 0xED) ? "Pi 5"
-		:	(eb_mtype == 0xE2) ? "Pi Zero 2W"
-		:	(eb_mtype == 0xE3) ? "Unknown Pi"
-		:	(eb_mtype == 0xEC) ? "ARM" 
-		: 	(eb_mtype == 0xEB) ? "Non-ARM" : "Unknown architecture");
-
 	if (max_fds.rlim_cur != 0) // User changed it
 		setrlimit (RLIMIT_NOFILE, &max_fds);
 
@@ -14037,6 +14024,19 @@ int main (int argc, char **argv)
 			case 'z':	EB_DEBUG_LEVEL++; break;
 		}
 	}
+
+	/* Display machine type information */
+
+	eb_debug (0, 1, "CORE", "Identified a %s %s",
+			(eb_mfr == 0xEC) ? "Generic" 
+		:	(eb_mfr == 0xEE) ? "Raspberry Pi" : "Unknown",
+			(eb_mtype == 0xEF) ? "Pi 3"
+		:	(eb_mtype == 0xEE) ? "Pi 4"
+		:	(eb_mtype == 0xED) ? "Pi 5"
+		:	(eb_mtype == 0xE2) ? "Pi Zero 2W"
+		:	(eb_mtype == 0xE3) ? "Unknown Pi"
+		:	(eb_mtype == 0xEC) ? "ARM" 
+		: 	(eb_mtype == 0xEB) ? "Non-ARM" : "Unknown architecture");
 
 	/* Now copy stations to stations_initial in each wire, and copy networks[] to networks_initial[] */
 

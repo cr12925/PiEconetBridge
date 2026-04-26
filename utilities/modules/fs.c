@@ -1149,7 +1149,9 @@ void fsop_dump_handle_list(FILE *out, struct __fs_station *s)
 
 	while (disc)
 	{
-		fprintf (out, "    %2d %s\n", disc->index, disc->name);
+		fprintf (out, "    %2d %-16s", disc->index, disc->name);
+		if (disc->inuse) fprintf (out, " (in use - %d handles open)", disc->inuse);
+		fprintf (out, "\n");
 		disc = disc->next;
 	}
 
@@ -1254,7 +1256,7 @@ void fsop_dump_handle_list(FILE *out, struct __fs_station *s)
 	{
 		if (!found) fprintf (out, "\n");
 
-		fprintf (out, "\n    R: %3d W: %3d %s", file->readers, file->writers, file->name);
+		fprintf (out, "\n    R: %3d W: %3d Disc: %1X %s", file->readers, file->writers, file->disc->index, file->name);
 
 		found++;
 
@@ -1821,7 +1823,7 @@ void fs_free_wildcard_list(struct path *p)
  
 #define fsop_get_wildcard_entries fs_get_wildcard_entries
 
-int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, char *needle, struct path_entry **head, struct path_entry **tail, uint8_t *max_fname_length)
+int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, char *needle, struct path_entry **head, struct path_entry **tail, uint8_t *max_fname_length, short disc)
 {
 
 	unsigned short 		counter, found;
@@ -1957,6 +1959,7 @@ int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, ch
 			p->length = statbuf.st_size;
 			p->parent_owner = oa_parent.owner;
 			p->parent_perm = oa_parent.perm;
+			p->disc = disc;
 	
 			// Parent must be a directory, so we frig the permissions to be WR/ if we own the parent and permissions are &00 (which L3FS would let us read/write to because we own it)
 			
@@ -2314,6 +2317,7 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 			}
 
 			result->tape_drive = drive;
+			result->disc = 16 + drive; /* Fudge drive numbers for tapes */
 			tape_fname_start++;
 
 			if (normalize_debug) fs_debug (0, 1, "%TAPE specifier: %s - found drive number %d, tape_fname_start = %d", path, drive, tape_fname_start);
@@ -2728,7 +2732,7 @@ int fsop_normalize_path_wildcard (struct fsop_data *f, unsigned char *received_p
 
 			num_entries = fs_get_wildcard_entries(f, a->userid, result->unixpath, // Current search dir
 					acorn_path, // Current segment in Acorn format (which the function will convert)
-					&(result->paths), &(result->paths_tail), &(result->max_fname_length));
+					&(result->paths), &(result->paths_tail), &(result->max_fname_length), result->disc);
 
 			if (normalize_debug)
 			{
@@ -3581,6 +3585,12 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 						else
 							fs_debug_full (1, 0, server, 0, 0, "Unable to statvfs() for disc %s (%d) - %s", d->name, d->index, strerror(errno));
 
+						if (entry->d_type == DT_LNK) /* Removable */
+							d->removable = 1;
+						else	d->removable = 0;
+
+						d->inuse = 0; /* Nothing open yet */
+
 						/* Put d into the list at the right place */
 
 						p = server->discs;
@@ -4278,6 +4288,9 @@ struct __fs_file * fsop_open_interlock(struct fsop_data *f, unsigned char *path,
 				if (file->writers == 0) // We can open this existing handle for reading
 				{
 					file->readers++;
+			
+					file->disc->inuse++; /* Increment use count */	
+					
 					fs_debug_full (0, 2, f->server, f->net, f->stn, "Interlock opened internal dup handle, mode %d. Readers = %d, Writers = %d, path %s", mode, file->readers, file->writers, file->name);
 					return file; // Return the index into fs_files
 				}
@@ -4320,6 +4333,8 @@ struct __fs_file * fsop_open_interlock(struct fsop_data *f, unsigned char *path,
 		fsop_write_xattr(path, f->userid, FS_PERM_PRESERVE, 0, 0, 0, f);
 	}
 	
+	file->disc->inuse++; /* Increment use count */	
+					
 	fs_debug_full (0, 2, f->server, f->net, f->stn, "Interlock opened internal handle: mode %d. Readers = %d, Writers = %d, path %s", mode, file->readers, file->writers, file->name);
 	return file;
 
@@ -4343,6 +4358,7 @@ void fsop_close_interlock(struct __fs_station *s, struct __fs_file * file, uint8
 	{
 		fs_debug_full (0, 2, s, 0, 0, "Interlock closing internal handle for %s in operating system", file->name);
 		fclose(file->handle);
+		file->disc->inuse--; /* Decrement inuse count for disc */
 		FS_LIST_SPLICEFREE(s->files,file,"FS","Freeing internal file structure");
 	}
 
