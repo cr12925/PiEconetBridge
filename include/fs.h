@@ -202,6 +202,8 @@ struct __fs_config {
 struct __fs_disc {
 	unsigned char 		name[17];
 	uint8_t			index; /* Disc number - ready for new structure */
+	uint8_t			removable; /* 0 = fixed disc; 1 = removable - can be unmounted if free */
+	uint8_t			padding; /* Attempts to get us to a 4-byte boundary before block size */ 
 	uint32_t		fs_blocksize; /* Used for quotas. bytes */
 	struct __fs_disc	*next, *prev;
 	struct __fs_station	*server; /* Upward reference */

@@ -633,6 +633,7 @@ void econet_flagfill(void)
 
 	econet_write_cr(ECONET_GPIO_CR2,	ECONET_GPIO_C2_RTS
 					|	ECONET_GPIO_C2_CLR_TX_STATUS
+					|	ECONET_GPIO_C2_CLR_RX_STATUS /* Added 20260426 as a trial to see if it avoids byte 0 RX Idles */
 					|	ECONET_GPIO_C2_FLAGIDLE /* We do this but ANFS doesn't? */
 					|	ECONET_GPIO_C2_PSE
 					|	(econet_data->twobytemode ? ECONET_GPIO_C2_2BYTES : 0)
