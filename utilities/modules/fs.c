@@ -4289,7 +4289,8 @@ struct __fs_file * fsop_open_interlock(struct fsop_data *f, unsigned char *path,
 				{
 					file->readers++;
 			
-					file->disc->inuse++; /* Increment use count */	
+					if (file->disc)
+						file->disc->inuse++; /* Increment use count */	
 					
 					fs_debug_full (0, 2, f->server, f->net, f->stn, "Interlock opened internal dup handle, mode %d. Readers = %d, Writers = %d, path %s", mode, file->readers, file->writers, file->name);
 					return file; // Return the index into fs_files
@@ -4333,7 +4334,8 @@ struct __fs_file * fsop_open_interlock(struct fsop_data *f, unsigned char *path,
 		fsop_write_xattr(path, f->userid, FS_PERM_PRESERVE, 0, 0, 0, f);
 	}
 	
-	file->disc->inuse++; /* Increment use count */	
+	if (file->disc)
+		file->disc->inuse++; /* Increment use count */	
 					
 	fs_debug_full (0, 2, f->server, f->net, f->stn, "Interlock opened internal handle: mode %d. Readers = %d, Writers = %d, path %s", mode, file->readers, file->writers, file->name);
 	return file;
@@ -4349,6 +4351,9 @@ void fsop_close_interlock(struct __fs_station *s, struct __fs_file * file, uint8
 		file->readers--;
 	else	file->writers--;
 
+	if (file->disc)
+		file->disc->inuse--; /* Decrement inuse count for disc */
+
 	fs_debug_full (0, 2, s, 0, 0, "Interlock close internal handle: mode %d. Readers now = %d, Writers now = %d, path %s", mode, file->readers, file->writers, file->name);
 
 	// Safety valve here - only close when both are 0, not <= 0
@@ -4358,7 +4363,6 @@ void fsop_close_interlock(struct __fs_station *s, struct __fs_file * file, uint8
 	{
 		fs_debug_full (0, 2, s, 0, 0, "Interlock closing internal handle for %s in operating system", file->name);
 		fclose(file->handle);
-		file->disc->inuse--; /* Decrement inuse count for disc */
 		FS_LIST_SPLICEFREE(s->files,file,"FS","Freeing internal file structure");
 	}
 

@@ -242,7 +242,7 @@ FSOP(06)
 					memcpy(&(reply.p.data[10]), &(reply.p.data[6]), 4);
 				}
 
-				fs_debug_full (0, 2, f->server, f->net, f->stn, "Opened handle %02X (%s)", userhandle, a->fhandles[userhandle].acornfullpath);
+				fs_debug_full (0, 2, f->server, f->net, f->stn, "Opened handle %02X (%s) on disc %1X", userhandle, a->fhandles[userhandle].acornfullpath, p.disc);
 				fsop_aun_send(&reply, (is_32bit ? 14 : 3), f);
 			}
 		}
@@ -274,7 +274,7 @@ FSOP(07)
 
 	if (handle != 0)
 	{
-		fs_debug_full (0, 2, f->server, f->net, f->stn, "Close handle &%02X (%s)", handle, a->fhandles[handle].acornfullpath);
+		fs_debug_full (0, 2, f->server, f->net, f->stn, "Close handle &%02X (%s) on disc %1X", handle, a->fhandles[handle].acornfullpath, a->fhandles[handle].handle->disc);
 		fsop_close_handle(f, handle);
 	}
 	else // User wants to close everything
