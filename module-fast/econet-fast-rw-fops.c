@@ -301,7 +301,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	/* Turn ADLC IRQs off and then take spinlock */
 
-	econet_write_cr(1, ECONET_GPIO_C1_RX_RESET);
+	econet_write_cr(1, 0);
 
 	spin_lock(&econet_irq_spin);
 
