@@ -189,7 +189,13 @@ u8 econet_writefd_transmit(void)
 		 */
 
 		if (econet_data->aun_packet_tx.p.aun_ttype != ECONET_AUN_IMMREP) /* Only change state if not an immediate reply, because we'll be in EA_I_WRITEREPLY if that's the case */
+		{
 			econet_set_aunstate (EA_W_WRITESCOUT); 
+		} 
+		else
+		{
+			econet_set_aunstate (EA_I_WRITEREPLY);
+		}
 	}
 	else /* Not AUN mode - i.e. raw */
 	{
@@ -199,7 +205,6 @@ u8 econet_writefd_transmit(void)
 		 * just copy the lot
 		 */
 
-		//econet_data->txp = emalloc(ECONET_PACKET_SIZE(econet_data->aun_packet_len_tx));
 		econet_data->txp = econet_alloc_pbuf();
 
 		if (!econet_data->txp)
@@ -294,6 +299,10 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	/* Grab IRQ spinlock and see if the module is busy */
 
+	/* Turn ADLC IRQs off and then take spinlock */
+
+	econet_write_cr(1, ECONET_GPIO_C1_RX_RESET);
+
 	spin_lock(&econet_irq_spin);
 
 	if (ECONET_IS_BUSY())
@@ -363,7 +372,10 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		printk (KERN_INFO "econet-fast: writefd() wait timeout expired in AUN state 0x%02X\n", econet_get_aunstate());
 		/* Free the pbuf if it's valid */
 		if (econet_data->txp)
+		{
 			econet_free_pbuf(econet_data->txp); /* Avoid the leaks */
+			econet_data->txp = NULL;
+		}
 		econet_set_aunstate(EA_IDLE);
 		econet_set_read_mode();
 		ECONET_NOT_BUSY();
