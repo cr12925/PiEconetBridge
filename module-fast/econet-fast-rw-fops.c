@@ -135,9 +135,8 @@ u8 econet_writefd_transmit(void)
 		}
 
 		/* Reset packet timing structure */
-#if 0
+
 		memset (&(econet_data->pt), 0, sizeof(struct __econet_packet_timings));
-#endif
 		
 		/* First, copy addressing */
 
@@ -239,7 +238,7 @@ u8 econet_writefd_transmit(void)
 
 	/* Timestamp line seize */
 
-	// econet_data->pt.line_seize = ktime_get_ns();
+	econet_data->pt.line_seize = ktime_get_ns();
 
 	/* Set our status to startwait, though in this version of
 	 * the module, userspace will never see it.
@@ -362,6 +361,9 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	{
 		spin_lock(&econet_irq_spin);
 		printk (KERN_INFO "econet-fast: writefd() wait timeout expired in AUN state 0x%02X\n", econet_get_aunstate());
+		/* Free the pbuf if it's valid */
+		if (econet_data->txp)
+			econet_free_pbuf(econet_data->txp); /* Avoid the leaks */
 		econet_set_aunstate(EA_IDLE);
 		econet_set_read_mode();
 		ECONET_NOT_BUSY();
