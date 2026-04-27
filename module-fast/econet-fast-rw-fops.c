@@ -299,10 +299,6 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	/* Grab IRQ spinlock and see if the module is busy */
 
-	/* Turn ADLC IRQs off and then take spinlock */
-
-	econet_write_cr(1, 0);
-
 	spin_lock(&econet_irq_spin);
 
 	if (ECONET_IS_BUSY())
@@ -311,6 +307,10 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		spin_unlock(&econet_irq_spin);
 		return -EFAULT;
 	}
+
+	/* Turn ADLC IRQs off */
+
+	econet_write_cr(1, 0);
 
 	/* Copy buffer from userspace to aun_packet
 	 * (which is used for raw transmissions as well
