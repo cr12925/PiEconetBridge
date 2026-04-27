@@ -453,7 +453,7 @@ u8 econet_seize(u8 in_irq)
 
 	/* Taken from bridge diassembly at https://acornaeology.uk/acorn-econet-bridge/variant_1.html#addr-E690 */
 
-	while (outercount++ < 256)
+	while (outercount++ < 64)
 	{
 
 		/* Prime CR2 */
