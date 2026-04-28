@@ -381,6 +381,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 			econet_free_pbuf(econet_data->txp); /* Avoid the leaks */
 			econet_data->txp = NULL;
 		}
+		econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
 		econet_set_aunstate(EA_IDLE);
 		econet_set_read_mode();
 		ECONET_NOT_BUSY();
