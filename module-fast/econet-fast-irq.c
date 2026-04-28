@@ -777,8 +777,8 @@ irqreturn_t econet_irq(int irq, void *ident)
 					
 						econet_data->pkt_since_idle++; /* We've transmitted a packet - increase our pkt count since idle */
 						econet_set_chipstate(EM_IDLE);
+						econet_write_cr(2, C2_READ); /* Clear RX Status - added back in 20260428 */
 						econet_write_cr(1, ECONET_GPIO_C1_TX_RESET | ECONET_GPIO_C1_RINT);
-						// econet_set_read_mode();
 					}
 
 					chip_state = EM_IDLE;
