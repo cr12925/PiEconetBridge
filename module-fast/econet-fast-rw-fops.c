@@ -315,6 +315,8 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	econet_write_cr(2, ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE | ECONET_GPIO_C2_CLR_TX_STATUS | ECONET_GPIO_C2_CLR_RX_STATUS |
 			(econet_data->twobytemode ? ECONET_GPIO_C2_2BYTES : 0));
 
+	/* Could release the spin lock here, but nothing should be entering the IRQ routine anyway... */
+
 	/* Copy buffer from userspace to aun_packet
 	 * (which is used for raw transmissions as well
 	 */

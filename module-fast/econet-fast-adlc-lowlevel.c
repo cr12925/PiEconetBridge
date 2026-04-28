@@ -381,10 +381,12 @@ void econet_reset(void)
 void econet_set_read_mode(void)
 {
 
-	econet_write_cr(ECONET_GPIO_CR2, C2_READ);
-	econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+	econet_write_cr(ECONET_GPIO_CR1, 0); /* IRQs off before changing chip mode */
 
 	econet_set_chipstate(EM_IDLE);  /* 20260320 was IDLEINIT */
+
+	econet_write_cr(ECONET_GPIO_CR2, C2_READ);
+	econet_write_cr(ECONET_GPIO_CR1, C1_READ);
 
 	atomic_set(&(econet_data->fastpath_enabled), 0);
 
@@ -442,6 +444,14 @@ u8 econet_seize(u8 in_irq)
 	if (in_irq) /* Don't go further - this loop takes a long time, just barf out */
 		return 0;
 
+	/* In practice, the code below is never executed unless econet_seize() is called from writefd() on
+	 * a scout write. All other invocations come from the workqueue handler, and any time it's being
+	 * called from there we should already have been put in flagfill by the IRQ handler. So it'll
+	 * quit out above. The workqueue, though it runs in process space, curiously sets in_irq=1 on
+	 * calls to this function. Not sure why I did that. The reality is it'll only ever pass through
+	 * the first if() above.
+	 */
+
 	sr2 = econet_read_sr(2);
 
 	if (sr2 & ECONET_GPIO_S2_DCD) /* Clock */
@@ -453,7 +463,11 @@ u8 econet_seize(u8 in_irq)
 
 	/* Taken from bridge diassembly at https://acornaeology.uk/acorn-econet-bridge/variant_1.html#addr-E690 */
 
-	while (outercount++ < 64)
+	/* Now that econet_seize() when called from writefd_transmit() has turned off ADLC IRQs, the line seize loop
+	 * could be a lot longer. (We shortened it because it was locking up Pi 4 machines (but not Pi 3!)
+	 */
+
+	while (outercount++ < 512) /* Was 64; but this code now never gets executed with IRQs on so we can do more tries */
 	{
 
 		/* Prime CR2 */
@@ -479,6 +493,9 @@ u8 econet_seize(u8 in_irq)
 				|	ECONET_GPIO_C2_FLAGIDLE
 				|	(econet_data->twobytemode ? ECONET_GPIO_C2_2BYTES : 0)
 			);
+
+			udelay(10); /* Let everything settle */
+
 			econet_write_cr(1, ECONET_GPIO_C1_TINT | ECONET_GPIO_C1_RX_RESET);
 	
 			return ECONET_TX_SUCCESS; /* Not really TX success - just 0 for success */
