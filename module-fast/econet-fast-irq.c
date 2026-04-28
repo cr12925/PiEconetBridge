@@ -659,7 +659,7 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 		{
 			econet_set_chipstate(EM_IDLE);
 
-			// econet_write_cr(2, C2_READ);
+			econet_write_cr(2, C2_READ); /* Uncommected 20260428 - in case there are stray RX_IDLE flags sitting in S2 which cause the failed final ACK reception on a quick line turnaround */
 			econet_write_cr(1, ECONET_GPIO_C1_RINT | ECONET_GPIO_C1_TX_RESET); /* Matches ANFS 4.08 at &8728 */
 
 			econet_data->pkt_since_idle++;
