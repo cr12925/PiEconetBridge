@@ -387,8 +387,15 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		for (count = 0; count < (p->ptr > 3 ? 4 : p->ptr); count++)
 			printk (KERN_ERR "econet-fast: Byte %d = 0x%02X\n", count, p->data[count]);
 
+		if (__AUN_TX_OPERATION(aun_state))
+			econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
+
 		econet_set_aunstate(EA_IDLE); /* Don't need to check if in aun-mode - means nothing if we're not */
 		ECONET_NOT_BUSY();
+		
+		if (__AUN_TX_OPERATION(aun_state))
+			return EWAS_DATA_WRITE;
+
 		return EWAS_NOTHING;
 	}
 
