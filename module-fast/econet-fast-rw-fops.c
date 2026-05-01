@@ -224,9 +224,9 @@ u8 econet_writefd_transmit(void)
 
 	}
 
-	// econet_set_chipstate(EM_IDLE); /* See if this makes things any better 20260501 */
-
 	/* Trigger TX */
+
+	econet_data->pkt_since_idle = 0;
 
 	if ((seize_result = econet_seize(0))) /* 0 = not in IRQ */
 	{
