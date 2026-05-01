@@ -310,6 +310,10 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	/* Turn ADLC IRQs off and clear status */
 
+	/* 20260428 Consider disable_irq() here? */
+
+	econet_irq_mode(0);
+
 	econet_write_cr(1, ECONET_GPIO_C1_RX_RESET | ECONET_GPIO_C1_TX_RESET);
 	econet_write_cr(1, 0);
 	econet_write_cr(2, ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE | ECONET_GPIO_C2_CLR_TX_STATUS | ECONET_GPIO_C2_CLR_RX_STATUS |
@@ -343,6 +347,9 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		/* No need to free txp - it isn't allocated until econet_writefd_transmit() below */
 
 		printk (KERN_ERR "econet-fast: AUN State appears to be stale - reset to EA_IDLE from 0x%02X\n", state);
+		/* 20260428 Consider enable_irq() here? */
+
+		econet_irq_mode(1);
 		spin_unlock(&econet_irq_spin);
 		return -EFAULT;
 	
@@ -352,6 +359,8 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	{
 		/* Failed! */
 
+		/* 20260428 Consider enable_irq() here? */
+		econet_irq_mode(1);
 		econet_set_read_mode();
 		spin_unlock(&econet_irq_spin);
 		return -EFAULT;
@@ -362,6 +371,10 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	ECONET_SET_BUSY();
 
 	/* Turn IRQs back on */
+
+	/* 20260428 Consider enable_irq() here? */
+
+	econet_irq_mode(1);
 
 	spin_unlock(&econet_irq_spin); /* Let the ADLC and the IRQ routine run */
 	
