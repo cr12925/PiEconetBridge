@@ -148,3 +148,10 @@ inline void econet_free_workbuf(eco_work_t *e)
 
 	spin_unlock_irqrestore(&(econet_data->workbuf_spinlock), flags);
 }
+
+/* Forcibly free all pbufs */
+
+void econet_reset_pbuf(void)
+{
+	econet_data->workbuf_inuse = 0;
+}

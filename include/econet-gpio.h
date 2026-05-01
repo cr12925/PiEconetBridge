@@ -205,6 +205,7 @@ extern struct __econet_packet * econet_alloc_pbuf(void);
 extern void econet_free_pbuf(struct __econet_packet *);
 extern eco_work_t * econet_alloc_workbuf(void);
 extern void econet_free_workbuf(eco_work_t *);
+extern void econet_reset_pbuf(void);
 
 /*
  * Some macros to make the code

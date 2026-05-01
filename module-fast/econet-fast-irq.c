@@ -64,7 +64,7 @@ void econet_irq_mode(short m)
 	{
 		if (econet_get_irq_state() == 1) // Enabled
 		{
-			disable_irq(econet_data->irq);
+			disable_irq_nosync(econet_data->irq);
 			econet_set_irq_state(0);
 		}
 	}
@@ -239,8 +239,10 @@ while (!valid && (sr1 & ECONET_GPIO_S1_IRQ) && irq_loop_count++ < 5)
 					*/
 			econet_data->no_flag_fill = 0;
 			econet_set_chipstate(EM_IDLE);
-			econet_set_read_mode();
-			ECONET_NOT_BUSY();
+			// econet_set_read_mode(); /* This is heavyweight. Sometimes we are just turning the line round to read - this may be why we're missing ACKs ? */
+			econet_write_cr(2, C2_READ);
+			econet_write_cr(1, C1_READ);
+			// ECONET_NOT_BUSY(); /* We may be mid 4-way! The AUN state machine should do this. */
 		}
 		
 	}
@@ -709,12 +711,13 @@ irqreturn_t econet_irq(int irq, void *ident)
 	{
 		sr1 = econet_read_sr(1);
 		sr2 = (sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
-
+#if 0 /* Shouldn't be required */
 		if (!(sr1 & ECONET_GPIO_S1_IRQ))
 		{
 			sr1 = econet_read_sr(1);
 			sr2 = (sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
 		}
+#endif
 
 		chip_state = econet_get_chipstate();
 	}
@@ -914,7 +917,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 	}
 	else
 	{
-		printk (KERN_INFO "econet-fast: IRQ handler called but ADLC not flagging an IRQ (SR1 = %02X, SR2 = %02X)", sr1, sr2);
+		printk (KERN_INFO "econet-fast: Bottom half IRQ handler called but ADLC not flagging an IRQ (SR1 = %02X, SR2 = %02X)", sr1, sr2);
 
 		/* Reset CRs to try and get the thing to continue */
 #if 0

@@ -356,6 +356,10 @@ void econet_reset(void)
 
 	econet_data->clock_state = !!(econet_read_sr(2) & ECONET_GPIO_S2_DCD);
 
+	/* Clear out all pbuf use */
+
+	econet_reset_pbuf();
+
 	if (econet_data->extralogs)
 		printk (KERN_INFO "econet-fast: Module reset. AUN mode off. ADLC re-initialized.\n");
 
@@ -386,7 +390,7 @@ void econet_set_read_mode(void)
 	econet_set_chipstate(EM_IDLE);  /* 20260320 was IDLEINIT */
 
 	econet_write_cr(ECONET_GPIO_CR2, C2_READ);
-	econet_write_cr(ECONET_GPIO_CR1, C1_READ);
+	econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_DISC);
 
 	atomic_set(&(econet_data->fastpath_enabled), 0);
 
@@ -467,7 +471,7 @@ u8 econet_seize(u8 in_irq)
 	 * could be a lot longer. (We shortened it because it was locking up Pi 4 machines (but not Pi 3!)
 	 */
 
-	while (outercount++ < 512) /* Was 64; but this code now never gets executed with IRQs on so we can do more tries */
+	while (outercount++ < 128) /* Was 64; but this code now never gets executed with IRQs on so we can do more tries */
 	{
 
 		/* Prime CR2 */
@@ -506,7 +510,8 @@ u8 econet_seize(u8 in_irq)
 			/* Someone is transmitting - fail */
 
 			econet_set_read_mode();
-			return ECONET_TX_JAMMED;
+
+			// return ECONET_TX_JAMMED;
 		}
 
 		/* Read SR1 - clear pending IRQ (apparently!) */
@@ -522,12 +527,14 @@ u8 econet_seize(u8 in_irq)
 	}
 
 	econet_set_read_mode();
-	printk (KERN_INFO "econet-fast: Reporting line jammed on line seize\n");
+
+	printk (KERN_INFO "econet-fast: Reporting line jammed on line seize when loop ended\n");
 	return ECONET_TX_JAMMED;
 	
 }
 
 
+#if 0
 /* Old version */
 
 u8 econet_seize_old(void)
@@ -620,6 +627,8 @@ u8 econet_seize_old(void)
 	return seize_error;
 }
 
+#endif 
+
 /* 
  * econet_flagfill()
  *
@@ -627,14 +636,10 @@ u8 econet_seize_old(void)
  *
  */
 
-void econet_flagfill(void)
+inline void econet_flagfill(void)
 {
 
-#if 0 /* Old version */
-	econet_write_cr(ECONET_GPIO_CR1, ECONET_GPIO_C1_RX_DISC | ECONET_GPIO_C1_RX_RESET); 
-	econet_set_chipstate(EM_FLAGFILL); /* This goes here because otherwise an IRQ turns up quickly and we get an IRQ in FLAGFILL before we've set the registers! */
-	econet_write_cr(ECONET_GPIO_CR2, C2_WRITE_INIT2); 
-#else /* What ANFS does - see ANFS 4.08 disassembly at &878D */
+	/* What ANFS does - see ANFS 4.08 disassembly at &878D */
 
 	/* Put RX side into reset until we're ready and turn IRQs off */
 
@@ -654,11 +659,6 @@ void econet_flagfill(void)
 					|	(econet_data->twobytemode ? ECONET_GPIO_C2_2BYTES : 0)
 					|	ECONET_GPIO_C2_FC /* Probably will stop IRQs in flag fill - we'll undo this when we seize */
 			);
-
-	/* TX Interrupts on - NO, they get turned on during line seize */
-
-	// econet_write_cr(ECONET_GPIO_CR1,	ECONET_GPIO_C1_RX_RESET | ECONET_GPIO_C1_TINT);
-#endif
 
 }
 

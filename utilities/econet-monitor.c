@@ -948,7 +948,7 @@ void econet_newdump(struct __econet_packet *p)
 		counter += 8;
 	}
 
-	if (!dumpmode_brief && pkt.ptr != 0) 
+	if (!dumpmode_brief && pkt.ptr != 0 && (counter > data_base)) 
 	{
 		if (timestamps)
 			printf ("    ");

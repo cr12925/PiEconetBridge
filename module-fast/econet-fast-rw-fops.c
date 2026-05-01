@@ -84,6 +84,8 @@ u8 econet_writefd_transmit(void)
 
 	econet_set_tx_status(ECONET_TX_NOTSTART);
 
+	ECONET_IS_BUSY();
+
 	if (econet_data->aun_mode)
 	{
 		u16	scout_data_len = 0, scout_packet_size;
@@ -222,6 +224,8 @@ u8 econet_writefd_transmit(void)
 
 	}
 
+	// econet_set_chipstate(EM_IDLE); /* See if this makes things any better 20260501 */
+
 	/* Trigger TX */
 
 	if ((seize_result = econet_seize(0))) /* 0 = not in IRQ */
@@ -251,10 +255,6 @@ u8 econet_writefd_transmit(void)
 
 	econet_set_tx_status (ECONET_TX_STARTWAIT); /* ADLC has not yet started transmitting */
 
-	/* Flag module busy */
-
-	ECONET_IS_BUSY();
-
 	return 1;
 }
 
@@ -269,6 +269,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 {
 
 	int happens;
+	u8 	aunstate = econet_get_aunstate();
 
 	econet_data->tx_status_valid = 0; /* High bit set means valid */
 
@@ -297,27 +298,40 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	 *
 	 */
 
-	econet_irq_mode(0);
+	/* Wrap this in lock/unlock in case there is already something in hardirq trying to get the lock,
+	 * because once we turn IRQs off, our unlock will let it complete, for good or ill 
+  	 */
+
+	disable_irq_nosync(econet_data->irq);
 
 	/* Grab IRQ spinlock and see if the module is busy */
 
 	spin_lock(&econet_irq_spin);
 
+#if 0 /* Shouldn't need this */
+	if (aunstate != EA_IDLE && aunstate != EA_I_WRITEREPLY && econet_aunstate_stale())
+	{
+		printk (KERN_INFO "econet-fast: econet_writefd() resetting AUN state machine after stall\n");
+		spin_unlock(&econet_irq_spin);
+		enable_irq(econet_data->irq);
+		econet_set_read_mode();
+		ECONET_NOT_BUSY();
+	}
+#endif
+
+	aunstate = econet_get_aunstate();
+
 	if (ECONET_IS_BUSY())
 	{
+		printk (KERN_INFO "econet-fast: econet_writefd() flagging module busy on TX\n");
 		econet_set_tx_status (ECONET_TX_BUSY);
 		spin_unlock(&econet_irq_spin);
-		econet_irq_mode(1);
+		enable_irq(econet_data->irq);
 		return -EFAULT;
 	}
 
 	/* Turn ADLC IRQs off and clear status */
 
-	/* 20260428 Consider disable_irq() here? */
-
-
-	econet_write_cr(1, ECONET_GPIO_C1_RX_RESET | ECONET_GPIO_C1_TX_RESET);
-	econet_write_cr(1, 0);
 	econet_write_cr(2, ECONET_GPIO_C2_PSE | ECONET_GPIO_C2_FLAGIDLE | ECONET_GPIO_C2_CLR_TX_STATUS | ECONET_GPIO_C2_CLR_RX_STATUS |
 			(econet_data->twobytemode ? ECONET_GPIO_C2_2BYTES : 0));
 
@@ -331,7 +345,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	/* Timestamp receive from user */
 
-	// econet_data->pt.packet_from_user = ktime_get_ns();
+	econet_data->pt.packet_from_user = ktime_get_ns();
 
 	/* Set AUN packet length - data bytes only if AUN mode,
 	 * otherwise whole length
@@ -339,7 +353,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	econet_data->aun_packet_len_tx = len - (econet_data->aun_mode ? 12 : 0);
 
-	if (econet_data->aun_mode && econet_aunstate_stale() && econet_get_aunstate() != EA_IDLE)
+	if (econet_data->aun_mode && econet_aunstate_stale() && aunstate != EA_IDLE && aunstate != EA_I_WRITEREPLY)
 	{
 		u8	state = econet_get_aunstate();
 
@@ -349,37 +363,39 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		/* No need to free txp - it isn't allocated until econet_writefd_transmit() below */
 
 		printk (KERN_ERR "econet-fast: AUN State appears to be stale - reset to EA_IDLE from 0x%02X\n", state);
-		/* 20260428 Consider enable_irq() here? */
 
-		econet_irq_mode(1);
 		spin_unlock(&econet_irq_spin);
+
+		enable_irq(econet_data->irq);
+
 		return -EFAULT;
 	
-	}
-
-	if (!econet_writefd_transmit()) /* Sort out the packet data to transmit */
-	{
-		/* Failed! */
-
-		/* 20260428 Consider enable_irq() here? */
-		econet_irq_mode(1);
-		econet_set_read_mode();
-		spin_unlock(&econet_irq_spin);
-		return -EFAULT;
 	}
 
 	/* If we get here, we're actually going to start transmit. */
 
 	ECONET_SET_BUSY();
 
-	/* Turn IRQs back on */
+	if (!econet_writefd_transmit()) /* Sort out the packet data to transmit */
+	{
+		/* Failed! */
 
-	/* 20260428 Consider enable_irq() here? */
+		printk_ratelimited ("econet-fast: writefd_transmit() signalled failure\n");
 
-	econet_irq_mode(1);
+		econet_set_read_mode();
+		ECONET_NOT_BUSY();
+
+		spin_unlock(&econet_irq_spin);
+
+		enable_irq(econet_data->irq);
+
+		return -EFAULT;
+	}
 
 	spin_unlock(&econet_irq_spin); /* Let the ADLC and the IRQ routine run */
 	
+	enable_irq(econet_data->irq);
+
 	/* Wait on the write_queue - the work queue will tell us when the transaction ends, good bad or indifferent */
 
 	happens = wait_event_interruptible_timeout(econet_data->tx_queue, (econet_data->tx_status_valid & 0x8000), 3 * HZ);
@@ -446,7 +462,7 @@ int econet_open(struct inode *inode, struct file *file) {
 
 	econet_reset(); 
 
-	// econet_irq_mode(1); /* IRQs on, if they weren't before */
+	econet_irq_mode(1); /* IRQs on, if they weren't before */
 
 	return 0;
 }
