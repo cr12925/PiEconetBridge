@@ -641,6 +641,8 @@ inline void econet_flagfill(void)
 
 	/* What ANFS does - see ANFS 4.08 disassembly at &878D */
 
+	/* Does a short delay here help? No, it didn't. */
+
 	/* Put RX side into reset until we're ready and turn IRQs off */
 
 	econet_write_cr(ECONET_GPIO_CR1, ECONET_GPIO_C1_RX_RESET); 
@@ -648,6 +650,8 @@ inline void econet_flagfill(void)
 	/* Set chip state now IRQs can't happen */
 
 	econet_set_chipstate(EM_FLAGFILL);
+
+	/* See if we need a gap? Does that help with failing to flagfill soemtimes? No, it didn't. */
 
 	/* Set up for TX */
 

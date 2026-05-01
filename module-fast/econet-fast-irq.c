@@ -509,7 +509,24 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 				}
 				else
 				{
+					/* Insert this here to see if it helps with our failed/late flagfilling */
+			                if ((hsr2 & (ECONET_GPIO_S2_VALID)) 
+                        		&&	(econet_data->rxp->ptr >= 3) /* not a runt */
+                			&&      (econet_data->aun_mode)
+                			&&      (ECONET_DEV_STATION(econet_stations, econet_data->rxp->data[1], econet_data->rxp->data[0])) /* Station we're handling */
+                			&&      ! (     /* Times we don't want to FF */
+                                			(econet_data->pkt_since_idle == 1 && __IS_BROADCAST(econet_data->rxp))
+                        			||      econet_data->no_flag_fill
+                        			)
+                			)
+                			{
+                        			econet_flagfill();
+                        			econet_data->rxp->flagfill = 1;
+                        			econet_data->rxp->pkt_since_idle = econet_data->pkt_since_idle;
+                			}
+
 					/* Not a simple data byte — fall through to wake thread */
+
 					econet_data->shadow_sr1 = hsr1;
 					econet_data->shadow_sr2 = hsr2;
 					return IRQ_WAKE_THREAD;
