@@ -160,7 +160,7 @@ FSOP(0a)
         alq->chunk_size = f->active->chunk_size;  /* Copy from login process */
 	alq->is_32bit = is_32bit;
 
-	usleep (500000); /* For RISC OS (and some beebs?) - Sometimes they don't have they're receiver port open fast enough and everything goes out of sync */
+	// usleep (500000); /* For RISC OS (and some beebs?) - Sometimes they don't have they're receiver port open fast enough and everything goes out of sync */
 
 	fsop_aun_send_noseq(&r, 2, f);
 
@@ -309,7 +309,7 @@ FSOP(0b)
 		r.p.data[3] = day;
 		r.p.data[4] = monthyear;
 
-		usleep (500000); /* For RISC OS (and some beebs?) */
+		// usleep (500000); /* For RISC OS (and some beebs?) */
 		fsop_aun_send (&r, 5, f);
 	}
 	else if ((incoming_port = fsop_find_bulk_port(f->server))) // Data expected - set up a bulk port
@@ -336,7 +336,7 @@ FSOP(0b)
 		r.p.data[3] = (FS_CONFIG(f->server,fs_bigchunks) ? FS_MAX_BULK_SIZE : 0x500) & 0xff; // Max trf size
 		r.p.data[4] = ((FS_CONFIG(f->server,fs_bigchunks) ? FS_MAX_BULK_SIZE : 0x500) & 0xff00) >> 8; // High byte of max trf
 
-		usleep (500000); /* For RISC OS (and some beebs?) */
+		// usleep (500000); /* For RISC OS (and some beebs?) */
 		fsop_aun_send(&r, 5, f);
 	}
 	else    fsop_error(f, 0xFF, "No channels available");
