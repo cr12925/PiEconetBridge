@@ -297,6 +297,8 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	 *
 	 */
 
+	econet_irq_mode(0);
+
 	/* Grab IRQ spinlock and see if the module is busy */
 
 	spin_lock(&econet_irq_spin);
@@ -305,6 +307,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	{
 		econet_set_tx_status (ECONET_TX_BUSY);
 		spin_unlock(&econet_irq_spin);
+		econet_irq_mode(1);
 		return -EFAULT;
 	}
 
@@ -312,7 +315,6 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	/* 20260428 Consider disable_irq() here? */
 
-	econet_irq_mode(0);
 
 	econet_write_cr(1, ECONET_GPIO_C1_RX_RESET | ECONET_GPIO_C1_TX_RESET);
 	econet_write_cr(1, 0);
