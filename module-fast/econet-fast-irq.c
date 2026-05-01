@@ -207,7 +207,7 @@ while (!valid && (sr1 & ECONET_GPIO_S1_IRQ) && irq_loop_count++ < 5)
 
 		deliver_to_workqueue = 1;
 
-		// econet_data->rxp->timing_end = ktime_get_ns();
+		econet_data->rxp->timing_end = ktime_get_ns();
 
 		/* Flag fill if the packet was destined to one our stations, UNLESS:
 		 * 1. It was a broadcast (because broadcast will be in the station map)
@@ -226,23 +226,17 @@ while (!valid && (sr1 & ECONET_GPIO_S1_IRQ) && irq_loop_count++ < 5)
 		)
 		{
 			econet_flagfill();
+			econet_data->rxp->flagfill = 1;
+			econet_data->rxp->pkt_since_idle = econet_data->pkt_since_idle;
 		}
 		else {
-			/*
-			printk (KERN_INFO "econet-fast: not flag filling: ptr = %02X, dst %d.%d (station set %s), pkt_since_idle = %d, no_flag_fill = %d\n",
-					econet_data->rxp->ptr,
-					econet_data->rxp->data[1], econet_data->rxp->data[0],
-					(ECONET_DEV_STATION(econet_stations, econet_data->rxp->data[1], econet_data->rxp->data[0]) ? "match" : "NO match"),
-					econet_data->pkt_since_idle,
-					econet_data->no_flag_fill
-					);
-					*/
 			econet_data->no_flag_fill = 0;
 			econet_set_chipstate(EM_IDLE);
-			// econet_set_read_mode(); /* This is heavyweight. Sometimes we are just turning the line round to read - this may be why we're missing ACKs ? */
-			econet_write_cr(2, C2_READ);
+			econet_write_cr(2, C2_READ); /* This has a CLR_RX_STATUS in it - in case there's any stray IDLE flags sitting around */
 			econet_write_cr(1, C1_READ);
 			// ECONET_NOT_BUSY(); /* We may be mid 4-way! The AUN state machine should do this. */
+			econet_data->rxp->flagfill = 0;
+			econet_data->rxp->pkt_since_idle = 0;
 		}
 		
 	}
@@ -315,7 +309,7 @@ inline void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 		if (econet_data->txp->ptr == 0) /* Start of fresh packet */
 		{
 			econet_set_tx_status(ECONET_TX_INPROGRESS);
-			// econet_data->txp->timing_start = ktime_get_ns();
+			econet_data->txp->timing_start = ktime_get_ns();
 		}
 
 		if (sr1 & ECONET_GPIO_S1_UNDERRUN) /* TX Underrun */
@@ -619,10 +613,15 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 					if (econet_data->shadow_sr1 & ECONET_GPIO_S1_IRQ) /* Another IRQ present - pass to bottom half */
 					{
 						econet_data->shadow_sr2 = (econet_data->shadow_sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
-						printk_ratelimited(KERN_INFO "econet-fast: IRQ on fastpath write of last byte: FC is %d, SR1 = %02X, SR2 = %02X\n", !!(econet_data->shadow_sr1 & ECONET_GPIO_S1_TDRA), econet_data->shadow_sr1, econet_data->shadow_sr2);
+
+						//printk_ratelimited(KERN_INFO "econet-fast: IRQ on fastpath write of last byte: FC is %d, SR1 = %02X, SR2 = %02X\n", !!(econet_data->shadow_sr1 & ECONET_GPIO_S1_TDRA), econet_data->shadow_sr1, econet_data->shadow_sr2);
 
 						/* Should have FC set - if not, clear TX status */
 
+						/* When we lost a final ACK, we see FC=0,SR1=90,SR2=02, but the data appears to have gone on the wire and an ACK turns up. I suspect we should just spoof FC... */
+
+						econet_data->shadow_sr1 |= ECONET_GPIO_S1_TDRA;
+#if 0
 						if (!(econet_data->shadow_sr1 & ECONET_GPIO_S1_TDRA))
 						{
 							econet_write_cr(2,
@@ -634,6 +633,7 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 								));
 							return IRQ_HANDLED;
 						}
+#endif
 
 						return IRQ_WAKE_THREAD;
 					}
@@ -657,7 +657,7 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 	{
 		/* Go back to read mode if FC set, fallthrough in all cases */
 	
-		// 20260424 if (hsr1 & ECONET_GPIO_S1_TDRA) /* FC set on this IRQ */
+		// if (hsr1 & ECONET_GPIO_S1_TDRA) /* FC set on this IRQ */
 		{
 			econet_set_chipstate(EM_IDLE);
 
@@ -666,6 +666,7 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 
 			econet_data->pkt_since_idle++;
 		}
+		// else	printk (KERN_INFO "econet-fast: IRQ handler expecting FC IRQ but this wasn't it: SR1 = 0x%02X, SR2 = 0x%02X. Passing to bottom half.\n", hsr1, hsr2);
 		
 		/* Code below calls the thread - NB - the lower half will inherit shadow_chipstate so it will still see this as EM_WRITE_WAIT even if we changed it above */
 	}
@@ -738,11 +739,26 @@ irqreturn_t econet_irq(int irq, void *ident)
 	}
 	else if (chip_state == EM_FLAGFILL) /* IRQs are supposed to be off - let's make sure thye are */
 	{
+#if 0 /* This is what we inserted when we made econet_flagfill() enable TIE instead of just waiting for econet_seize() to do it - but it didn't fix the problem of the ADLC not going into flag fill quickly sometimes, and thus ending up with sending data and not getting a final ack, and going out of sequence. */
+		/* We might get an IRQ before the workqueue has lined up the txp, so just clear status. */
+
+        		econet_write_cr(ECONET_GPIO_CR2,        ECONET_GPIO_C2_RTS
+                                        |       ECONET_GPIO_C2_CLR_TX_STATUS
+                                        |       ECONET_GPIO_C2_CLR_RX_STATUS /* Added 20260426 as a trial to see if it avoids byte 0 RX Idles */
+                                        |       ECONET_GPIO_C2_FLAGIDLE /* We do this but ANFS doesn't? */
+                                        |       ECONET_GPIO_C2_PSE
+                                        |       (econet_data->twobytemode ? ECONET_GPIO_C2_2BYTES : 0)
+                                        |       ECONET_GPIO_C2_FC /* Probably will stop IRQs in flag fill - we'll undo this when we seize */
+                        );
+
+
+#else /* Usual code */
 		/* We'll also discontinue RX just in case, and reset RX */
 
 		printk (KERN_INFO "econet-fast: IRQ in EM_FLAGFILL state - ensuring TX IRQs are off\n");
 
 		econet_write_cr(ECONET_GPIO_CR1, ECONET_GPIO_C1_RX_RESET | ECONET_GPIO_C1_RX_DISC);
+#endif
 		handled = 1;
 	}
 	else if (sr1 & ECONET_GPIO_S1_IRQ)
@@ -786,7 +802,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 					chip_state = EM_IDLE;
 
-					// econet_data->txp->timing_end = ktime_get_ns();
+					econet_data->txp->timing_end = ktime_get_ns();
 					econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
 
 					handled = 1;
@@ -807,7 +823,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 				atomic_set(&econet_data->fastpath_enabled, 1);
 
 				/* Mark start of reception */
-				// econet_data->rxp->timing_start = ktime_get_ns();
+				econet_data->rxp->timing_start = ktime_get_ns();
 			}
 			else if ( /* TX-Specific Errors we need to look at */
 					chip_state == EM_WRITE 

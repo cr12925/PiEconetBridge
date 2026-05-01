@@ -654,11 +654,13 @@ inline void econet_flagfill(void)
 	econet_write_cr(ECONET_GPIO_CR2,	ECONET_GPIO_C2_RTS
 					|	ECONET_GPIO_C2_CLR_TX_STATUS
 					|	ECONET_GPIO_C2_CLR_RX_STATUS /* Added 20260426 as a trial to see if it avoids byte 0 RX Idles */
-					|	ECONET_GPIO_C2_FLAGIDLE /* We do this but ANFS doesn't? */
+					|	ECONET_GPIO_C2_FLAGIDLE /* We do this but ANFS doesn't? (and if you don't, all hell breaks lose on flag fill... */
 					|	ECONET_GPIO_C2_PSE
 					|	(econet_data->twobytemode ? ECONET_GPIO_C2_2BYTES : 0)
 					|	ECONET_GPIO_C2_FC /* Probably will stop IRQs in flag fill - we'll undo this when we seize */
 			);
+
+	/* Wonder if just doing it twice will help the fact that sometimes we don't manage to flag fill properly and leave the line idle? No, it didn't. */
 
 }
 

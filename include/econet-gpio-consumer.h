@@ -60,6 +60,9 @@ struct __econet_packet {
 	u8	sr1, sr2; /* SR1, SR2 on completion of transaction */
 	u8	tx; /* 0 0=RX packet, 1=TX packet */
 	u8	tx_flags; /* See below */
+	u8	flagfill; /* 1 = Kernel went into FF after receiving this packet; 0 = otherwise */
+	u8	pkt_since_idle; /* Number of packets since idle - the value the IRQ handler uses to work out whether to FF */
+	u16	padding2;
 	u32	device; /* Device number 0 - 7 - which to tx on; which this packet was received on. u32 to preserve 4-byte boundary, but can be split later */
 	u64	timing_start, timing_end; /* ktime_get_ns() for start of rx/tx, and end */
 	u32	pbuf_index; /* So econet_free_pbuf() can be called with the right number. u32 for padding only - only needs u8 */

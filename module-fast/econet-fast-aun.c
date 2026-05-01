@@ -320,6 +320,21 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 	|	ECONET_GPIO_S2_OVERRUN
 		);
 
+/*
+	if (aun_state == EA_W_WRITESCOUT) printk (KERN_INFO "econet-fast: New frame TX began %d.%d to %d.%d port &%02X ctrl &%02X\n", 
+			p->data[3], p->data[2],
+			p->data[1], p->data[0],
+			p->data[5], p->data[4]);
+
+	if (aun_state == EA_W_READFINALACK && p->ptr == 4)
+		printk (KERN_INFO "econet-fast: Apparent final ACK received from %d.%d to %d.%d, SR1 = %02X, SR2 = %02X\n", p->data[3], p->data[2], p->data[1], p->data[0], sr1, sr2);
+
+	if (aun_state == EA_W_READFIRSTACK && p->ptr == 4)
+		printk (KERN_INFO "econet-fast: Apparent First ACK received from %d.%d to %d.%d, SR1 = %02X, SR2 = %02X\n", p->data[3], p->data[2], p->data[1], p->data[0], sr1, sr2);
+*/
+
+	if (aun_state == EA_W_READFIRSTACK && p->flagfill != 1)
+		printk (KERN_INFO "econet-fast: First ACK received but IRQ handler didn't go into flagfill. pkt_since_idle was %d\n", p->pkt_since_idle);
 	/* Filter errors */
 
 	if (p->tx == EP_PACKET_RX) 
@@ -358,6 +373,10 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			/* EA_W_READFINALACK - Handled below */
 		}
 
+		if (ret == EWAS_DATA_WRITE)
+			econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
+
+		econet_set_read_mode();
 		econet_set_aunstate(EA_IDLE); /* Back to idle */
 
 		if (ret == EWAS_NOTHING) ECONET_NOT_BUSY();
@@ -578,7 +597,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 						
 					} break;
-#if 0 /* 20260411 I think sometimes clients put a line idle before the final ACK and it confuses the hell out of the statemachine */
+#if 1 /* 20260411 I think sometimes clients put a line idle before the final ACK and it confuses the hell out of the statemachine - Except that when they just don't send an ACK at all, everything falls out of bed, so lets not comment this out*/
 				case EA_W_READFINALACK:
 					{
 						if (p->ptr < 4)
@@ -948,8 +967,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			{
 			
 				/* Signal successful TX */
-
-				// econet_set_read_mode(); IRQ handler should have done this
 
 				econet_set_tx_status(ECONET_TX_SUCCESS);
 				econet_set_aunstate(EA_IDLE);

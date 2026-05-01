@@ -8015,9 +8015,15 @@ static void * eb_device_despatcher (void * device)
 
 								result = write (d->wire.socket, &tx, p->length + 12);
 
+								/* module-fast puts tx status in high byte of result */
+
+								err = (result & 0xFF000000) >> 24;
+								result &= 0x00FFFFFF;
+
 								eb_add_stats (&(d->statsmutex), &(d->b_in), p->length);
 
-								err = ioctl(d->wire.socket, ECONETGPIO_IOC_TXERR);
+								if (err == 0) /* Cope with old module */
+									err = ioctl(d->wire.socket, ECONETGPIO_IOC_TXERR);
 
 								if (err == ECONET_TX_NOCLOCK || err == ECONET_TX_NOCOPY /* || err == ECONET_TX_NECOUTEZPAS */) // Catches too many other errors || (result != p->length + 12))
 								{
