@@ -224,10 +224,10 @@ u8 econet_workqueue_respond_new_packet(struct __econet_packet *p, u8 sr1_errors,
 		{
 			econet_set_aunstate(EA_I_WRITEREPLY);
 		}
-		else
-		{
-			ECONET_NOT_BUSY();
-		}
+		//else
+		//{
+			ECONET_NOT_BUSY(); /* We need writefd() to think we're not busy if we are doing WRITEREPLY */
+		//}
 
 		return EWAS_DATA_READ;
 	}
