@@ -454,6 +454,8 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 
 		// fastpath = 1;
 
+		ECONET_SET_BUSY();
+
 		econet_set_chipstate(EM_READ);
 
 		econet_data->shadow_chipstate = EM_READ;
@@ -792,9 +794,11 @@ irqreturn_t econet_irq(int irq, void *ident)
 #else /* Usual code */
 		/* We'll also discontinue RX just in case, and reset RX */
 
-		printk (KERN_INFO "econet-fast: IRQ in EM_FLAGFILL state - ensuring TX IRQs are off\n");
+		if (econet_data->extralogs) printk (KERN_INFO "econet-fast: IRQ in EM_FLAGFILL state - ensuring TX IRQs are off\n");
 
-		econet_write_cr(ECONET_GPIO_CR1, ECONET_GPIO_C1_RX_RESET | ECONET_GPIO_C1_RX_DISC);
+		econet_set_read_mode();
+		econet_set_chipstate(EM_IDLE);
+		
 #endif
 		handled = 1;
 	}

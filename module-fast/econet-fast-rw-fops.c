@@ -313,7 +313,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 #if 0 /* Shouldn't need this */
 	if (aunstate != EA_IDLE && aunstate != EA_I_WRITEREPLY && econet_aunstate_stale())
 	{
-		printk (KERN_INFO "econet-fast: econet_writefd() resetting AUN state machine after stall\n");
+		if (econet_data->extralogs) printk (KERN_INFO "econet-fast: econet_writefd() resetting AUN state machine after stall\n");
 		spin_unlock(&econet_irq_spin);
 		enable_irq(econet_data->irq);
 		econet_set_read_mode();
@@ -325,7 +325,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 
 	if (ECONET_IS_BUSY())
 	{
-		printk (KERN_INFO "econet-fast: econet_writefd() flagging module busy on TX\n");
+		if (econet_data->extralogs) printk (KERN_INFO "econet-fast: econet_writefd() flagging module busy on TX\n");
 		econet_set_tx_status (ECONET_TX_BUSY);
 		spin_unlock(&econet_irq_spin);
 		enable_irq(econet_data->irq);
