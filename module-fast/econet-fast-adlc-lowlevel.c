@@ -524,6 +524,7 @@ u8 econet_seize(u8 in_irq)
 			(econet_data->twobytemode ? ECONET_GPIO_C2_2BYTES : 0)
 		);
 
+		udelay (1 << (outercount & 0x07));
 	}
 
 	econet_set_read_mode();
