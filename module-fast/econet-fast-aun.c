@@ -333,7 +333,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		printk (KERN_INFO "econet-fast: Apparent First ACK received from %d.%d to %d.%d, SR1 = %02X, SR2 = %02X\n", p->data[3], p->data[2], p->data[1], p->data[0], sr1, sr2);
 */
 
-	if (aun_state == EA_W_READFIRSTACK && p->flagfill != 1)
+	if (aun_state == EA_W_READFIRSTACK && p->flagfill != 1 && !(__IS_BROADCAST(p)))
 		printk (KERN_INFO "econet-fast: First ACK received but IRQ handler didn't go into flagfill. pkt_since_idle was %d\n", p->pkt_since_idle);
 	/* Filter errors */
 
