@@ -513,21 +513,25 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 				}
 				else
 				{
-					/* Insert this here to see if it helps with our failed/late flagfilling */
-			                if ((hsr2 & (ECONET_GPIO_S2_VALID)) 
-                        		&&	(econet_data->rxp->ptr >= 3) /* not a runt */
-                			&&      (econet_data->aun_mode)
-                			&&      (ECONET_DEV_STATION(econet_stations, econet_data->rxp->data[1], econet_data->rxp->data[0])) /* Station we're handling */
-                			&&      ! (     /* Times we don't want to FF */
-                                			(econet_data->pkt_since_idle == 1 && __IS_BROADCAST(econet_data->rxp))
-                        			||      econet_data->no_flag_fill
-                        			)
-                			)
-                			{
-                        			econet_flagfill();
-                        			econet_data->rxp->flagfill = 1;
-                        			econet_data->rxp->pkt_since_idle = econet_data->pkt_since_idle;
-                			}
+					if (hsr2 & ECONET_GPIO_S2_VALID)
+					{
+						/* Insert this here to see if it helps with our failed/late flagfilling */
+			                	if ( 
+                        					(econet_data->rxp->ptr >= 3) /* not a runt */
+                					&&      (econet_data->aun_mode)
+                					&&      (ECONET_DEV_STATION(econet_stations, econet_data->rxp->data[1], econet_data->rxp->data[0])) /* Station we're handling */
+                					&&      ! (     /* Times we don't want to FF */
+                                					(econet_data->pkt_since_idle == 0 && __IS_BROADCAST(econet_data->rxp)) /* 0 in this version because we've not incremented pkt_since_idle like we do in the bottom half */
+                        					||      econet_data->no_flag_fill
+                        					)
+                				)
+						{
+							econet_flagfill(); /* We just do this here for speed. We do it again in the bottom half. */
+						}
+
+						/* Fall through */
+
+					}
 
 					/* Not a simple data byte — fall through to wake thread */
 
@@ -888,6 +892,9 @@ irqreturn_t econet_irq(int irq, void *ident)
 				||	((sr2 & (ECONET_GPIO_S2_RX_IDLE)) && (econet_data->rxp && (econet_data->rxp->ptr == 0 || econet_data->rxp->ptr > 4))) /* Ignore early RX Idles to see if this helps reading ACKs */
 				)
 			{
+				if (chip_state == EM_WRITE || chip_state == EM_WRITE_WAIT || chip_state == EM_FLAGFILL)
+					printk (KERN_INFO "econet-fast: S1 Flag (%d) or RX Idle (%d) detected in chip state %d\n", (sr1 & ECONET_GPIO_S1_FLAG), (sr2 & ECONET_GPIO_S2_RX_IDLE), chip_state);
+
 				econet_set_chipstate(EM_IDLE);
 				chip_state = EM_IDLE;
 				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
@@ -924,6 +931,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 			switch (chip_state) // Otherwise process traffic
 			{
 				case EM_READ:
+					
 					econet_irq_read_new(sr1, sr2);
 					handled = 1;
 					break;

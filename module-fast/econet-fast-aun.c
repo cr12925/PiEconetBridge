@@ -1235,6 +1235,11 @@ void econet_workqueue_handler (struct work_struct *work)
 
 		/* Have we finished an AUN tx operation, for good or ill ? */
 
+		if (statemachine_response) /* Unless it was "nothing", signal not busy */
+		{
+			ECONET_NOT_BUSY();
+		}
+
 		if (statemachine_response & EWAS_DATA_WRITE)
 		{
 			u8	txstatus = econet_get_tx_status();
@@ -1266,11 +1271,6 @@ void econet_workqueue_handler (struct work_struct *work)
 			}
 		}
 		
-		if (statemachine_response) /* Unless it was "nothing", signal not busy */
-		{
-			ECONET_NOT_BUSY();
-		}
-
 	}
 
 	spin_unlock(&(econet_data->open_count_spinlock));

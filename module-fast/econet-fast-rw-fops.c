@@ -86,7 +86,7 @@ u8 econet_writefd_transmit(void)
 
 	econet_set_tx_status(ECONET_TX_NOTSTART);
 
-	ECONET_IS_BUSY();
+	ECONET_SET_BUSY();
 
 	if (econet_data->aun_mode)
 	{
