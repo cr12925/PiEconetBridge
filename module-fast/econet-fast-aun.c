@@ -18,6 +18,8 @@
 
 #include "../include/econet-gpio.h"
 
+#define EMF_PBUF_FILE	EMF_PBUF_AUN
+
 /* State machine responses */
 
 #define EWAS_DATA_READ 1 /* Packet to readfd queue and wake */
@@ -233,7 +235,6 @@ u8 econet_workqueue_respond_new_packet(struct __econet_packet *p, u8 sr1_errors,
 	{
 		econet_set_aunstate(EA_R_WRITEFIRSTACK);
 
-		//econet_data->txp = emalloc(ECONET_ACK_PACKET_SIZE);
 		econet_data->txp = econet_alloc_pbuf();
 
 		if (econet_data->txp)
@@ -247,6 +248,8 @@ u8 econet_workqueue_respond_new_packet(struct __econet_packet *p, u8 sr1_errors,
 			if ((seized = econet_seize(1)))
 			{
 				/* Failed. */
+				econet_free_pbuf(econet_data->txp);
+				econet_data->txp = NULL;
 				printk (KERN_INFO "econet-fast: EA_R_WRITEFIRSTACK failed line seize - abort to EA_IDLE\n");
 				econet_set_aunstate(EA_IDLE);
 				econet_set_read_mode();
