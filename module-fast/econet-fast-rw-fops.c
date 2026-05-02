@@ -19,6 +19,8 @@
 
 #include "../include/econet-gpio.h"
 
+#define EMF_PBUF_FILE	EMF_PBUF_RWF
+
 struct __econet_packet_aun	aun_tmp;
 
 /* Prototypes */
@@ -401,7 +403,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	happens = wait_event_interruptible_timeout(econet_data->tx_queue, (econet_data->tx_status_valid & 0x8000), 3 * HZ);
 
 	if (happens >= 1) /* TX VAlid - because either that happened before or after elapse of timeout */
-		return ((econet_get_tx_status() << 24) | len); /* We accepted the whole packet, userspace can work out what happened by getting the status */
+		return len; /* We accepted the whole packet, userspace can work out what happened by getting the status */
 	else /* Timeout and condition not true */
 	{
 		spin_lock(&econet_irq_spin);

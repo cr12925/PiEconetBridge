@@ -31,7 +31,7 @@
  * Find a spare pbuf and return it, or NULL for failure.
  */
 
-inline struct __econet_packet * econet_alloc_pbuf(void)
+inline struct __econet_packet * __econet_alloc_pbuf(u8 file, uint32_t line)
 {
 	u8	pbuf_count;
 	struct __econet_packet *r = NULL;
@@ -50,6 +50,10 @@ inline struct __econet_packet * econet_alloc_pbuf(void)
 			econet_data->pbuf_inuse |= (1 << pbuf_count);
 			r->ptr = 0; /* Reset pointer */
 			r->sr1 = r->sr2 = r->tx = r->tx_flags = 0;
+			r->file = file;
+			r->line = line;
+			r->alloc_time = ktime_get_ns();
+			r->lastseen = 0;
 
 			break;
 		}
@@ -62,7 +66,40 @@ inline struct __econet_packet * econet_alloc_pbuf(void)
 	printk (KERN_ERR "econet-fast: Allocate pbuf    %d at %p\n", pbuf_count, r);
 #endif
 
+	if (!r) econet_dump_pbuf(); /* Tell the user what leaked */
+
 	return r;
+}
+
+/* Dump pbuf usage to ring buffer in case we run out - we can see what leaked */
+
+void econet_dump_pbuf(void)
+{
+
+	u8	pbuf_count;
+
+	for (pbuf_count = 0; pbuf_count < ECONET_GPIO_MAX_BUFFERS; pbuf_count++)
+	{
+		printk (KERN_INFO "econet-fast: pbuf[%d] allocated by %s:%d %lld ns ago, last seen in %s\n",
+			pbuf_count,
+			(econet_data->pbuf[pbuf_count]->file == EMF_PBUF_OPS ? "module-ops" :
+			 econet_data->pbuf[pbuf_count]->file == EMF_PBUF_RWF ? "rw-fops" : 
+			 econet_data->pbuf[pbuf_count]->file == EMF_PBUF_IRQ ? "irq" : 
+			 econet_data->pbuf[pbuf_count]->file == EMF_PBUF_AUN ? "aun" : "unknown"),
+			econet_data->pbuf[pbuf_count]->line,
+			(ktime_get_ns() - econet_data->pbuf[pbuf_count]->alloc_time),
+			(
+			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_WORKQUEUE_EXIT ? "workqueue exit" :
+			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_WORKQUEUE_ENTRY ? "workqueue entry" :
+			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD ? "irq hard" :
+			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT ? "irq soft" :
+			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT_UNDERRUN ? "irq soft underrun" :
+			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT_WRITER ? "irq soft writer" :
+			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT_WRITE_WAIT ? "irq soft write wait" :
+			"unknown"
+			)
+		);
+	}
 }
 
 /* 

@@ -201,7 +201,23 @@ extern u8 econet_rx_queue_initialized, econet_tx_queue_initialized, monitor_rx_q
 
 extern spinlock_t econet_irq_spin, econet_tx_spin, econet_irqstate_spin;
 
-extern struct __econet_packet * econet_alloc_pbuf(void);
+#define EMF_PBUF_RWF	0x01
+#define EMF_PBUF_IRQ	0x02
+#define EMF_PBUF_AUN	0x03
+#define EMF_PBUF_OPS	0x04
+
+#define EMF_PBUF_LASTSEEN_WORKQUEUE_EXIT 	0x01
+#define EMF_PBUF_LASTSEEN_WORKQUEUE_ENTRY	0x02
+#define EMF_PBUF_LASTSEEN_IRQ_HARD		0x03
+#define EMF_PBUF_LASTSEEN_IRQ_SOFT		0x04
+#define EMF_PBUF_LASTSEEN_IRQ_SOFT_UNDERRUN	0x05
+#define EMF_PBUF_LASTSEEN_IRQ_SOFT_WRITER	0x06
+#define EMF_PBUF_LASTSEEN_IRQ_SOFT_WRITE_WAIT	0x07
+
+#define econet_alloc_pbuf() __econet_alloc_pbuf(EMF_PBUF_FILE, __LINE__)
+
+extern void econet_dump_pbuf(void);
+extern struct __econet_packet * __econet_alloc_pbuf(u8, u32);
 extern void econet_free_pbuf(struct __econet_packet *);
 extern eco_work_t * econet_alloc_workbuf(void);
 extern void econet_free_workbuf(eco_work_t *);

@@ -239,13 +239,9 @@ u8 econet_workqueue_respond_new_packet(struct __econet_packet *p, u8 sr1_errors,
 
 		if (econet_data->txp)
 		{
-			u8 seized = 0;
-
 			econet_workqueue_build_ack(econet_data->txp);
 
-			// printk (KERN_INFO "econet-fast: EA_R_WRITEFIRSTACK seizing line\n");
-
-			if ((seized = econet_seize(1)))
+			if (econet_seize(1))
 			{
 				/* Failed. */
 				econet_free_pbuf(econet_data->txp);
@@ -254,8 +250,6 @@ u8 econet_workqueue_respond_new_packet(struct __econet_packet *p, u8 sr1_errors,
 				econet_set_aunstate(EA_IDLE);
 				econet_set_read_mode();
 			}
-
-			// printk (KERN_INFO "econet-fast: EA_R_WRITEFIRSTACK: Line seized - TX should begin\n");
 		}
 		else
 		{
@@ -1058,7 +1052,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 					/* Build Ack */
 
-					//econet_data->txp = emalloc(ECONET_ACK_PACKET_SIZE);
 					econet_data->txp = econet_alloc_pbuf();
 
 					if (!econet_data->txp)
@@ -1214,6 +1207,8 @@ void econet_workqueue_handler (struct work_struct *work)
 		return;
 	}
 	
+	my_work->p->lastseen = EMF_PBUF_LASTSEEN_WORKQUEUE_ENTRY;
+
 	// printk (KERN_INFO "econet-fast: workqueue handler invoked with aun_mode = %d, my_work->p = %p, sr1 = %02X, s2 = %02X, ptr = %04x, tx = %1X, txlen = 0x%04X\n", econet_data->aun_mode, my_work->p, my_work->p->sr1, my_work->p->sr2, my_work->p->ptr, my_work->p->tx, my_work->p->txlen);
 
 	statemachine_response = econet_workqueue_aun_statemachine(p);
@@ -1232,7 +1227,6 @@ void econet_workqueue_handler (struct work_struct *work)
 		{
 			u8	txstatus = econet_get_tx_status();
 
-			// printk (KERN_INFO "econet-fast: Waking up R/W TX Queue with TX state 0x%02X\n", txstatus);
 			econet_data->tx_status_valid = txstatus | 0x8000; /* Top bit makes it valid */
 			wake_up_interruptible(&(econet_data->tx_queue));
 		}
@@ -1246,8 +1240,6 @@ void econet_workqueue_handler (struct work_struct *work)
 			 * overall length in raw mode
 			 */
 
-			// printk (KERN_INFO "econet-fast: Attempting to put packet length 0x%04X on user fifo\n", econet_data->aun_packet_len_rx + (econet_data->aun_mode ? 12 : 0));
-
 			if (!kfifo_in(&(econet_data->readfd_fifo), &(econet_data->aun_packet_rx), econet_data->aun_packet_len_rx + (econet_data->aun_mode ? 12 : 0)))
 			{
 				printk (KERN_ERR "econet-fast: Error putting packet onto RX FIFO, length 0x%04X, %s mode\n",
@@ -1257,8 +1249,6 @@ void econet_workqueue_handler (struct work_struct *work)
 			else
 			{
 				/* Wake up the poller */
-
-				//printk (KERN_INFO "AUN state machine waking up RW poller\n");
 
 				wake_up (&(econet_data->rx_queue));
 			}
@@ -1297,6 +1287,8 @@ void econet_workqueue_handler (struct work_struct *work)
 	}
 
 	spin_unlock(&(econet_data->monitor_count_spinlock));
+
+	my_work->p->lastseen = EMF_PBUF_LASTSEEN_WORKQUEUE_EXIT;
 
 	econet_free_pbuf(my_work->p);
 

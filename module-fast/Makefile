@@ -1,6 +1,6 @@
 ifneq ($(KERNELRELEASE),)
 
-#MY_CFLAGS += -g 
+MY_CFLAGS += -g 
 ccflags-y += ${MY_CFLAGS}
 CC += ${MY_CFLAGS}
 

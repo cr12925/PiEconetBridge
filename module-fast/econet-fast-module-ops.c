@@ -19,6 +19,8 @@
 
 #include "../include/econet-gpio.h"
 
+#define EMF_PBUF_FILE EMF_PBUF_OPS
+
 /* Internal data */
 struct __econet_data *econet_data = NULL;
 

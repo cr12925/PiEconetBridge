@@ -26,6 +26,8 @@
  *
  */
 
+#define EMF_PBUF_FILE	EMF_PBUF_IRQ
+
 spinlock_t econet_irq_spin;
 
 /* Prototypes */
@@ -129,7 +131,6 @@ inline void econet_irq_to_workqueue(struct __econet_packet **p, u8 sr1, u8 sr2, 
 	if (dir == EP_PACKET_RX)
 		*p = econet_alloc_pbuf();
 	else	*p = NULL; /* will be econet_data->txp */
-	//else	econet_data->txp = NULL;
 
 }
 
@@ -555,6 +556,8 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 			return IRQ_WAKE_THREAD;
 		}
 
+		econet_data->txp->lastseen = EMF_PBUF_LASTSEEN_IRQ_HARD;
+
 		if (
 			(hsr1 & ECONET_GPIO_S1_UNDERRUN) /* TX Underrun */
 		   |	(hsr2 & ECONET_GPIO_S2_DCD) /* No clock */
@@ -786,6 +789,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 
 			if (chip_state == EM_WRITE_WAIT)
 			{
+				econet_data->txp->lastseen = EMF_PBUF_LASTSEEN_IRQ_SOFT_WRITE_WAIT;
 #if 0 /* Dump this check - 20260424 - see hardirq WRITE_WAIT handler */
 				if (!was_fastpath) /* Fastpath does this */
 				{
@@ -848,6 +852,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 				&&	(sr1 & ECONET_GPIO_S1_UNDERRUN)
 				)
 			{
+				econet_data->txp->lastseen = EMF_PBUF_LASTSEEN_IRQ_SOFT_UNDERRUN;
 				econet_set_chipstate(EM_IDLE);
 				chip_state = EM_IDLE;
 				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
@@ -903,7 +908,10 @@ irqreturn_t econet_irq(int irq, void *ident)
 					break;
 				case EM_WRITE:
 					if (econet_data->txp)
+					{
+						econet_data->txp->lastseen = EMF_PBUF_LASTSEEN_IRQ_SOFT_WRITER;
 						econet_irq_write_new(sr1, sr2);
+					}
 					else
 					{
 						printk_ratelimited("econet-fast: Attempt to call econet_irq_write_new() from bottom half of IRQ handler when txp was null!\n");
