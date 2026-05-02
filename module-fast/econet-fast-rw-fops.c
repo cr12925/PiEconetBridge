@@ -362,7 +362,12 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 		econet_set_aunstate(EA_IDLE);
 		econet_adlc_cleardown(0); /* was set_read_mode - let's reset it completely now */
 
-		/* No need to free txp - it isn't allocated until econet_writefd_transmit() below */
+		/* In case what was stale was a read operation, and we were trying to send an ACK, free it up */
+
+		if (econet_data->txp)
+			econet_free_pbuf(econet_data->txp);
+
+		econet_data->txp=NULL;
 
 		printk (KERN_ERR "econet-fast: AUN State appears to be stale - reset to EA_IDLE from 0x%02X\n", state);
 
@@ -382,7 +387,10 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	{
 		/* Failed! */
 
-		printk_ratelimited ("econet-fast: writefd_transmit() signalled failure\n");
+		// printk_ratelimited ("econet-fast: writefd_transmit() signalled failure\n");
+
+		if (econet_data->txp)
+			econet_free_pbuf(econet_data->txp);
 
 		econet_set_read_mode();
 		ECONET_NOT_BUSY();

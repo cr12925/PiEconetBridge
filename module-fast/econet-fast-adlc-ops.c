@@ -197,10 +197,6 @@ inline void econet_finish_tx(void)
 
         econet_write_cr(ECONET_GPIO_CR2, ECONET_GPIO_C2_TXLAST | /* 20260424 */ ECONET_GPIO_C2_CLR_RX_STATUS | ECONET_GPIO_C2_FC | ECONET_GPIO_C2_FLAGIDLE | ECONET_GPIO_C2_PSE | ((econet_data && econet_data->twobytemode) ? ECONET_GPIO_C2_2BYTES : 0)); // No RX status reset - Curious - ANFS *does* reset RX status here? Maybe that clears a stale RX Idle that causes problems on line turnaround? Inserted to test. ANFS disassembly notes there is no RTS high here (we want to stop tx) and no clr-tx-status.
 	
-#ifdef ECONET_GPIO_DEBUG_TX
-        econet_get_sr();
-        printk (KERN_INFO "econet-fast: econet_finish_tx(): SR after C2_WRITE_EOF: SR1 = 0x%02x, SR2 = 0x%02x\n", sr1, sr2);
-#endif
 
 }
 

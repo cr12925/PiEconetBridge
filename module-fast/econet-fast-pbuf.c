@@ -34,13 +34,23 @@
 inline struct __econet_packet * __econet_alloc_pbuf(u8 file, uint32_t line)
 {
 	u8	pbuf_count;
+	u32	inverse;
+	u64 	staletime;
 	struct __econet_packet *r = NULL;
 	unsigned long	flags;
 
 	spin_lock_irqsave(&(econet_data->pbuf_spinlock), flags);
 
+	staletime = (u64) (ktime_get_ns() - 15000000000);
+
 	for (pbuf_count = 0; pbuf_count < ECONET_GPIO_MAX_BUFFERS; pbuf_count++)
 	{
+		if ((econet_data->pbuf_inuse & (1 << pbuf_count)) && econet_data->pbuf[pbuf_count]->alloc_time < staletime) /* Stale if more than 15s old */
+		{
+			inverse = ~(1 << pbuf_count);
+			econet_data->pbuf_inuse &= inverse;
+		}
+
 		if (!(econet_data->pbuf_inuse & (1 << pbuf_count)))
 		{
 			/* Found */
@@ -93,9 +103,15 @@ void econet_dump_pbuf(void)
 			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_WORKQUEUE_ENTRY ? "workqueue entry" :
 			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD ? "irq hard" :
 			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT ? "irq soft" :
+			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT_WRITER_LASTBYTE ? "irq soft writer last byte" :
 			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT_UNDERRUN ? "irq soft underrun" :
 			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT_WRITER ? "irq soft writer" :
 			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT_WRITE_WAIT ? "irq soft write wait" :
+			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD_WRITE_WAIT ? "irq hard write wait" :
+			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD_WRITER ? "irq hard writer" :
+			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD_WRITER_LASTBYTE ? "irq hard writer last byte" :
+			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD_WRITER_LASTBYTE_NEXTIRQ ? "irq hard writer last byte next irq" :
+			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD_WRITER_LASTBYTE_NEXTIRQ_NOFC ? "irq hard writer last byte next irq but no fc" :
 			"unknown"
 			)
 		);

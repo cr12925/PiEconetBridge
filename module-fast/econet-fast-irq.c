@@ -388,6 +388,7 @@ inline void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 			if (econet_data->txp->ptr == econet_data->txp->txlen)
 			{
 				//printk (KERN_INFO "econet-data: TX of 0x%04X bytes complete; sending to workqueue\n", econet_data->txp->ptr);
+				econet_data->txp->lastseen = EMF_PBUF_LASTSEEN_IRQ_SOFT_WRITER_LASTBYTE;
 				econet_finish_tx();
 				break;
 				return;
@@ -577,6 +578,8 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 			
 			u8 bytes_to_do = (econet_data->twobytemode) ? 2 : 1;
 
+			econet_data->txp->lastseen = EMF_PBUF_LASTSEEN_IRQ_HARD_WRITER;
+
 			/* Do we have an IRQ & TDRA? If not, barf to the lower half */
 
 			if ((hsr1 & (ECONET_GPIO_S1_IRQ | ECONET_GPIO_S1_TDRA)) != (ECONET_GPIO_S1_IRQ | ECONET_GPIO_S1_TDRA)) /* No IRQ or no TDRA */
@@ -628,10 +631,12 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 				if (econet_data->txp->ptr == econet_data->txp->txlen)
 				{
 					econet_finish_tx();
+					econet_data->txp->lastseen = EMF_PBUF_LASTSEEN_IRQ_HARD_WRITER_LASTBYTE;
 					econet_data->shadow_sr1 = econet_read_sr(1);
 
 					if (econet_data->shadow_sr1 & ECONET_GPIO_S1_IRQ) /* Another IRQ present - pass to bottom half */
 					{
+						econet_data->txp->lastseen = EMF_PBUF_LASTSEEN_IRQ_HARD_WRITER_LASTBYTE_NEXTIRQ;
 						econet_data->shadow_sr2 = (econet_data->shadow_sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
 
 						//printk_ratelimited(KERN_INFO "econet-fast: IRQ on fastpath write of last byte: FC is %d, SR1 = %02X, SR2 = %02X\n", !!(econet_data->shadow_sr1 & ECONET_GPIO_S1_TDRA), econet_data->shadow_sr1, econet_data->shadow_sr2);
@@ -644,6 +649,7 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 #if 0
 						if (!(econet_data->shadow_sr1 & ECONET_GPIO_S1_TDRA))
 						{
+							econet_data->txp->lastseen = EMF_PBUF_LASTSEEN_IRQ_HARD_WRITER_LASTBYTE_NEXTIRQ_NOFC;
 							econet_write_cr(2,
 								(ECONET_GPIO_C2_PSE |
 								 ECONET_GPIO_C2_FLAGIDLE |
@@ -658,7 +664,16 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 						return IRQ_WAKE_THREAD;
 					}
 					else
+					{
+#if 1
+						/* Experience suggests the WRITE_WAIT IRQ never comes, so we'll spoof it. The lack of that IRQ means we leak PBUFs because the workqueue never sees the frame complete (typically an ACK) */
+						econet_data->shadow_sr1 |= (ECONET_GPIO_S1_IRQ | ECONET_GPIO_S1_TDRA);
+						econet_data->shadow_sr2 = (econet_data->shadow_sr1 & ECONET_GPIO_S1_S2RQ) ? econet_read_sr(2) : 0;
+						return IRQ_WAKE_THREAD; /* Because some of our stale pbufs were last seen in this section without another IRQ being flagged, so maybe no other IRQ turned up, so let's pass this to the thread */
+#else
 						return IRQ_HANDLED;
+#endif
+					}
 				}
 				
 			}
@@ -677,6 +692,8 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 	{
 		/* Go back to read mode if FC set, fallthrough in all cases */
 	
+		econet_data->txp->lastseen = EMF_PBUF_LASTSEEN_IRQ_HARD_WRITE_WAIT;
+
 		// if (hsr1 & ECONET_GPIO_S1_TDRA) /* FC set on this IRQ */
 		{
 			econet_set_chipstate(EM_IDLE);
@@ -981,7 +998,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 				}
 		}
 #else
-		if (chip_state == EM_WRITE || chip_state == EM_WRITE_WAIT)
+		if (chip_state == EM_WRITE || chip_state == EM_WRITE_WAIT || chip_state == EM_FLAGFILL)
 		{
 			econet_set_chipstate(EM_IDLE);
 

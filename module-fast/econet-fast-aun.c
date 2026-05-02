@@ -330,8 +330,18 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		printk (KERN_INFO "econet-fast: Apparent First ACK received from %d.%d to %d.%d, SR1 = %02X, SR2 = %02X\n", p->data[3], p->data[2], p->data[1], p->data[0], sr1, sr2);
 */
 
+	/* If we should have gone into flag fill and didn't, barf the packet */
+
 	if (aun_state == EA_W_READFIRSTACK && p->flagfill != 1 && !(__IS_BROADCAST(p)))
+	{
 		printk (KERN_INFO "econet-fast: First ACK received but IRQ handler didn't go into flagfill. pkt_since_idle was %d\n", p->pkt_since_idle);
+		econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
+		p->tx_flags |=  EP_IRQHANDLER_FAILED;
+		econet_set_aunstate(EA_IDLE); /* Don't need to check if in aun-mode - means nothing if we're not */
+		ECONET_NOT_BUSY();
+		return EWAS_DATA_WRITE;	
+	}
+
 	/* Filter errors */
 
 	if (p->tx == EP_PACKET_RX) 
@@ -872,7 +882,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 						econet_set_aunstate(EA_IDLE);
 						econet_set_tx_status(seized);
 						econet_set_read_mode();
-						return EWAS_DATA_WRITE; /* Notify userspace writefd so it can return and report error */
+						return EWAS_DATA_WRITE; /* Notify userspace writefd so it can return and report error. This will free the txp */
 					}
 				}
 				else /* Correct source, wrong length - e.g. we sent a scout for port &XX, and there was no idle, but the sender was sending us a scout in reply instead of an ACK */
@@ -1071,10 +1081,12 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 						if ((seized = econet_seize(1)))
 						{
 							/* Failed. */
-							/* But we could return the data anyway */
+							/* But we could return the data anyway - 20260502 we probably shouldn't now we've sorted out our flag fill issue */
 							econet_set_aunstate(EA_IDLE);
 							econet_set_read_mode();
-							return EWAS_DATA_READ;
+							econet_free_pbuf(econet_data->txp);
+							econet_data->txp = NULL;
+							// DOn't return the data return EWAS_DATA_READ; /* This will free the txp */
 						}
 					}
 
