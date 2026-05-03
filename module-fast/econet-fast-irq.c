@@ -896,8 +896,9 @@ irqreturn_t econet_irq(int irq, void *ident)
 				||	((sr2 & (ECONET_GPIO_S2_RX_IDLE)) && (econet_data->rxp && (econet_data->rxp->ptr == 0 || econet_data->rxp->ptr > 4))) /* Ignore early RX Idles to see if this helps reading ACKs */
 				)
 			{
-				if (chip_state == EM_WRITE || chip_state == EM_WRITE_WAIT || chip_state == EM_FLAGFILL)
-					printk (KERN_INFO "econet-fast: S1 Flag (%d) or RX Idle (%d) detected in chip state %d\n", (sr1 & ECONET_GPIO_S1_FLAG), (sr2 & ECONET_GPIO_S2_RX_IDLE), chip_state);
+
+				//if (chip_state == EM_WRITE || chip_state == EM_WRITE_WAIT || chip_state == EM_FLAGFILL)
+					//printk (KERN_INFO "econet-fast: S1 Flag (%d) or RX Idle (%d) detected in chip state %d\n", (sr1 & ECONET_GPIO_S1_FLAG), (sr2 & ECONET_GPIO_S2_RX_IDLE), chip_state);
 
 				econet_set_chipstate(EM_IDLE);
 				chip_state = EM_IDLE;
@@ -1035,6 +1036,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 			}
 		}
 
+		econet_set_aunstate(EA_IDLE);
 		ECONET_NOT_BUSY();
 	}
 

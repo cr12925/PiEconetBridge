@@ -317,18 +317,6 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		{ 0, 0 }
 	};
 
-	/* Debug whether pkt_since_idle was right */
-
-	count = 0;
-
-	while (aunstatepkts[count].aunstate)
-	{
-		if (aunstatepkts[count].aunstate == aun_state && aunstatepkts[count].pkt_since_idle != p->pkt_since_idle)
-			printk (KERN_INFO "econet-fast: State machine received packet in AUN state %02X with %d packets since idle, when it should be %d\n",
-				aun_state, p->pkt_since_idle, aunstatepkts[count].pkt_since_idle);
-		count++;
-	}
-	
 	// printk (KERN_INFO "econet-fast: AUN state %02X, dir %1d, pkt_since_idle = %d, flag fill = %d\n", aun_state, p->tx, p->pkt_since_idle, p->flagfill);
 
 	if (p->tx != EP_PACKET_RX && p->tx != EP_PACKET_TX)
@@ -352,31 +340,18 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 	|	ECONET_GPIO_S2_OVERRUN
 		);
 
-/*
-	if (aun_state == EA_W_WRITESCOUT) printk (KERN_INFO "econet-fast: New frame TX began %d.%d to %d.%d port &%02X ctrl &%02X\n", 
-			p->data[3], p->data[2],
-			p->data[1], p->data[0],
-			p->data[5], p->data[4]);
+	/* Debug whether pkt_since_idle was right */
 
-	if (aun_state == EA_W_READFINALACK && p->ptr == 4)
-		printk (KERN_INFO "econet-fast: Apparent final ACK received from %d.%d to %d.%d, SR1 = %02X, SR2 = %02X\n", p->data[3], p->data[2], p->data[1], p->data[0], sr1, sr2);
+	count = 0;
 
-	if (aun_state == EA_W_READFIRSTACK && p->ptr == 4)
-		printk (KERN_INFO "econet-fast: Apparent First ACK received from %d.%d to %d.%d, SR1 = %02X, SR2 = %02X\n", p->data[3], p->data[2], p->data[1], p->data[0], sr1, sr2);
-*/
-
-	/* If we should have gone into flag fill and didn't, barf the packet */
-
-	if (aun_state == EA_W_READFIRSTACK && p->flagfill != 1 && !(__IS_BROADCAST(p)))
+	if (!sr1_errors && !sr2_errors) while (aunstatepkts[count].aunstate)
 	{
-		printk (KERN_INFO "econet-fast: First ACK received but IRQ handler didn't go into flagfill. pkt_since_idle was %d\n", p->pkt_since_idle);
-		econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
-		p->tx_flags |=  EP_IRQHANDLER_FAILED;
-		econet_set_aunstate(EA_IDLE); /* Don't need to check if in aun-mode - means nothing if we're not */
-		ECONET_NOT_BUSY();
-		return EWAS_DATA_WRITE;	
+		if (aunstatepkts[count].aunstate == aun_state && aunstatepkts[count].pkt_since_idle != p->pkt_since_idle)
+			printk (KERN_INFO "econet-fast: State machine received packet in AUN state %02X with %d packets since idle, when it should be %d\n",
+				aun_state, p->pkt_since_idle, aunstatepkts[count].pkt_since_idle);
+		count++;
 	}
-
+	
 	/* Filter errors */
 
 	if (p->tx == EP_PACKET_RX) 
@@ -389,6 +364,18 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 	else
 	{
 		sr2_errors &= (ECONET_GPIO_S2_DCD | ECONET_GPIO_S2_RX_IDLE);
+	}
+
+	/* If we should have gone into flag fill and didn't, barf the packet */
+
+	if (aun_state == EA_W_READFIRSTACK && p->flagfill != 1 && !(__IS_BROADCAST(p)) && !(sr1_errors == 0 || sr2_errors == 0))
+	{
+		printk (KERN_INFO "econet-fast: First ACK received but IRQ handler didn't go into flagfill. pkt_since_idle was %d\n", p->pkt_since_idle);
+		econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
+		p->tx_flags |=  EP_IRQHANDLER_FAILED;
+		econet_set_aunstate(EA_IDLE); /* Don't need to check if in aun-mode - means nothing if we're not */
+		ECONET_NOT_BUSY();
+		return EWAS_DATA_WRITE;	
 	}
 
 	/* See if we had an IRQ Handler fail */
