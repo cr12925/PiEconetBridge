@@ -64,6 +64,7 @@ inline struct __econet_packet * __econet_alloc_pbuf(u8 file, uint32_t line)
 			r->line = line;
 			r->alloc_time = ktime_get_ns();
 			r->lastseen = 0;
+			r->flagfill = 0;
 
 			break;
 		}

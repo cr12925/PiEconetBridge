@@ -201,6 +201,10 @@ int econet_init_vars (void)
 	spin_lock_init (&(econet_data->open_count_spinlock));
 	spin_lock_init (&(econet_data->monitor_count_spinlock));
 
+	/* pkt_since_idle counter */
+
+	econet_data->pkt_since_idle = 0;
+
 	return 0;
 
 }

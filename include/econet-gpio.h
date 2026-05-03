@@ -283,7 +283,7 @@ enum econet_modes {
 
 #define ECONET_IS_BUSY()	atomic_read(&(econet_data->busy))
 #define ECONET_SET_BUSY()	atomic_set(&(econet_data->busy), 1)
-#define ECONET_NOT_BUSY()	atomic_set(&(econet_data->busy), 0)
+#define ECONET_NOT_BUSY()	{ econet_data->pkt_since_idle = 0; atomic_set(&(econet_data->busy), 0); }
 
 /* Pin numbering index */
 

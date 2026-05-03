@@ -113,7 +113,7 @@ struct __econet_packet {
 
 /* Packet direction - for use in tx field */
 
-#define EP_PACKET_RX	0
+#define EP_PACKET_RX	2
 #define EP_PACKET_TX	1
 
 /* Tx flags - for use in tx_flags field */

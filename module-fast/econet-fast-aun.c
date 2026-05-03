@@ -246,6 +246,7 @@ u8 econet_workqueue_respond_new_packet(struct __econet_packet *p, u8 sr1_errors,
 				/* Failed. */
 				econet_free_pbuf(econet_data->txp);
 				econet_data->txp = NULL;
+				econet_data->pkt_since_idle = 0;
 				printk (KERN_INFO "econet-fast: EA_R_WRITEFIRSTACK failed line seize - abort to EA_IDLE\n");
 				econet_set_aunstate(EA_IDLE);
 				econet_set_read_mode();
@@ -254,6 +255,7 @@ u8 econet_workqueue_respond_new_packet(struct __econet_packet *p, u8 sr1_errors,
 		else
 		{
 			econet_set_aunstate(EA_IDLE);
+			econet_data->pkt_since_idle = 0;
 
 			printk (KERN_ERR "econet-fast: Unable to allocate packet memory for first ACK having received 4-way from %d.%d to %d.%d\n",
 				__SRCNET(p),
@@ -298,6 +300,39 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 	u8 	sr1_errors = 0, sr2_errors = 0;
 
 	u8 	aun_state = econet_get_aunstate();
+
+	u8	count;
+
+	static struct {	u8 aunstate; u8 pkt_since_idle; } aunstatepkts[] =
+	{
+		{ EA_W_WRITESCOUT, 1 },
+		{ EA_W_READFIRSTACK, 2 },
+		{ EA_W_WRITEDATA, 3 },
+		{ EA_W_READFINALACK, 4 },
+		{ EA_R_WRITEFIRSTACK, 2 },
+		{ EA_R_READDATA, 3 },
+		{ EA_R_WRITEFINALACK, 4 },
+		{ EA_I_WRITEREPLY, 1 }, /* This is 1 not 2 because after we get an immediate *in*, we do ECONET_NOT_BUSY() so that writefd() will write, which puts pkt_since_idle back to 0 */
+		{ EA_I_READREPLY, 1 }, /* This feels like it should be 2, but 1 is correct because we go back to an idle state after writing an immediate out to the wire */
+		{ 0, 0 }
+	};
+
+	/* Debug whether pkt_since_idle was right */
+
+	count = 0;
+
+	while (aunstatepkts[count].aunstate)
+	{
+		if (aunstatepkts[count].aunstate == aun_state && aunstatepkts[count].pkt_since_idle != p->pkt_since_idle)
+			printk (KERN_INFO "econet-fast: State machine received packet in AUN state %02X with %d packets since idle, when it should be %d\n",
+				aun_state, p->pkt_since_idle, aunstatepkts[count].pkt_since_idle);
+		count++;
+	}
+	
+	// printk (KERN_INFO "econet-fast: AUN state %02X, dir %1d, pkt_since_idle = %d, flag fill = %d\n", aun_state, p->tx, p->pkt_since_idle, p->flagfill);
+
+	if (p->tx != EP_PACKET_RX && p->tx != EP_PACKET_TX)
+		printk (KERN_INFO "econet-fast: AUN statemachine invoked with unorthodox packet direction: aun_mode = %d, p = %p, sr1 = %02X, s2 = %02X, ptr = %04x, tx = %1X, txlen = 0x%04X\n", econet_data->aun_mode, p, p->sr1, p->sr2, p->ptr, p->tx, p->txlen);
 
 #if 0
 	if (aun_state != EA_IDLE && (sr2 & ECONET_GPIO_S2_RX_IDLE))
@@ -384,6 +419,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 			econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
 
 		econet_set_read_mode();
+		econet_data->pkt_since_idle = 0;
 		econet_set_aunstate(EA_IDLE); /* Back to idle */
 
 		if (ret == EWAS_NOTHING) ECONET_NOT_BUSY();
@@ -1080,13 +1116,13 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 
 						if ((seized = econet_seize(1)))
 						{
-							/* Failed. */
+							printk (KERN_INFO "econet-fast: Failed to seize line to transmit final ACK\n");
 							/* But we could return the data anyway - 20260502 we probably shouldn't now we've sorted out our flag fill issue */
 							econet_set_aunstate(EA_IDLE);
 							econet_set_read_mode();
 							econet_free_pbuf(econet_data->txp);
 							econet_data->txp = NULL;
-							// DOn't return the data return EWAS_DATA_READ; /* This will free the txp */
+							ECONET_NOT_BUSY();
 						}
 					}
 
@@ -1219,6 +1255,9 @@ void econet_workqueue_handler (struct work_struct *work)
 		return;
 	}
 	
+	if (p->tx != EP_PACKET_RX && p->tx != EP_PACKET_TX)
+		printk (KERN_INFO "econet-fast: workqueue handler invoked with unorthodox packet direction: aun_mode = %d, my_work->p = %p, sr1 = %02X, s2 = %02X, ptr = %04x, tx = %1X, txlen = 0x%04X\n", econet_data->aun_mode, my_work->p, my_work->p->sr1, my_work->p->sr2, my_work->p->ptr, my_work->p->tx, my_work->p->txlen);
+
 	my_work->p->lastseen = EMF_PBUF_LASTSEEN_WORKQUEUE_ENTRY;
 
 	// printk (KERN_INFO "econet-fast: workqueue handler invoked with aun_mode = %d, my_work->p = %p, sr1 = %02X, s2 = %02X, ptr = %04x, tx = %1X, txlen = 0x%04X\n", econet_data->aun_mode, my_work->p, my_work->p->sr1, my_work->p->sr2, my_work->p->ptr, my_work->p->tx, my_work->p->txlen);
@@ -1244,6 +1283,7 @@ void econet_workqueue_handler (struct work_struct *work)
 		{
 			u8	txstatus = econet_get_tx_status();
 
+			econet_data->pkt_since_idle = 0;
 			econet_data->tx_status_valid = txstatus | 0x8000; /* Top bit makes it valid */
 			wake_up_interruptible(&(econet_data->tx_queue));
 		}
@@ -1256,6 +1296,8 @@ void econet_workqueue_handler (struct work_struct *work)
 			 * data length aun_packet_len, or that's the 
 			 * overall length in raw mode
 			 */
+
+			econet_data->pkt_since_idle = 0;
 
 			if (!kfifo_in(&(econet_data->readfd_fifo), &(econet_data->aun_packet_rx), econet_data->aun_packet_len_rx + (econet_data->aun_mode ? 12 : 0)))
 			{

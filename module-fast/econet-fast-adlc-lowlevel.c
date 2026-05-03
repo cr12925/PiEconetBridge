@@ -392,7 +392,7 @@ void econet_set_read_mode(void)
 	econet_write_cr(ECONET_GPIO_CR2, C2_READ);
 	econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_DISC);
 
-	atomic_set(&(econet_data->fastpath_enabled), 0);
+	atomic_set(&(econet_data->fastpath_enabled), 1);
 
 	last_data_rcvd = 0; // Last time we received data off the wire. Detect stuck in read mode when we want to write
 
