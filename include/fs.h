@@ -137,6 +137,21 @@ struct __fs_machine_peek_reg {
 	struct __fs_machine_peek_reg	*next, *prev;
 };
 			
+/* FS Disc subsystem typedef */
+
+typedef struct {
+	int (*scandir) (const char *, struct dirent ***, int (*) (const struct dirent *), int (*) (const struct dirent **, const struct dirent **));
+} __fs_engine_funcs;
+
+struct __fs_engine_proto {
+	char 			*engine_name;
+	__fs_engine_funcs	engine_funcs;
+	uint8_t			engine_acorn; /* 1 = this storage system already uses Acorn-converted filenames - e.g. an ADFS disc image. Saves converting back and forth */
+	struct __fs_engine_proto	*next;
+};
+
+typedef struct __fs_engine_proto __fs_engine;
+
 /* __fs_station - instance information about a fileserver instance */
 
 struct __fs_station {
@@ -158,6 +173,7 @@ struct __fs_station {
 	struct __fs_bulk_port	*bulkports; // Pointer to list of bulk ports
 	struct __fs_machine_peek_reg	*peeks; // List of pending machine peeks
 	struct __fs_backup	*backup; // Auto backup config
+	__fs_engine		*engines; // Pointer to linked list of storage engines available on this server
 	pthread_mutex_t		fs_backup_mutex; // Locks the backup jobs list
 	pthread_cond_t		fs_backup_cond; // Used by the backup scheduler to be woken up to check the jobs list
 	pthread_t		fs_backup_thread; // the backup thread
@@ -206,6 +222,8 @@ struct __fs_disc {
 	uint8_t			padding; /* Attempts to get us to a 4-byte boundary before block size */ 
 	uint32_t		inuse; /* Count of number of open handles on this disc, so we can tell whether it can be unmounted, if removable */
 	uint32_t		fs_blocksize; /* Used for quotas. bytes */
+	char *			full_path; /* Full path to root directory. If this pointer is null, root directory is {fs_root}/{index}{name} */
+	__fs_engine		*engine; /* Which disc storage engine this is. NULL is ordinary system; Others are user-supplied systems (e.g. floppy disc readers) */
 	struct __fs_disc	*next, *prev;
 	struct __fs_station	*server; /* Upward reference */
 };
