@@ -7015,6 +7015,7 @@ static void * eb_device_despatcher (void * device)
 
 						if (packet.p.dstnet == 0)
 							packet.p.dstnet = d->net;
+
 					}
 				}
 
@@ -8083,22 +8084,16 @@ static void * eb_device_despatcher (void * device)
 										/* Collect kernel packet timings */
 
 										ioctl(d->wire.socket, ECONETGPIO_IOC_GETTIMINGS, &pt);
-										/* Shouldn't need to - pt.time_on_queue = p->time_on_queue; */
 
-										if (tx.p.aun_ttype == ECONET_AUN_DATA && pt.data_end > pt.data_start) /* Attempt to discern clock rate from time taken to transmit 3rd part of 4-way handshake (the data portion, which will usually be the longest) */
+										if (tx.p.aun_ttype == ECONET_AUN_DATA && p->length > 500 && pt.data_end > pt.data_start) /* Attempt to discern clock rate from time taken to transmit 3rd part of 4-way handshake (the data portion, which will usually be the longest) - but we don't bother if it's a short-ish packet (<= 500 bytes) */
 										{
 											uint64_t	data_tx_time;
 
 											data_tx_time = pt.data_end - pt.data_start;
 
-											data_tx_time /=  (p->length + 4); /* data_tx_time now contains ns per byte, accounting for the 4 byte header */
+											data_tx_time = (1000000000 / data_tx_time) * (p->length * 8); /* Calculates how many bits would have been transmitted in 1 second */
 
-											/* 1 kHz would be 1000000ns per bit, I think */
-
-											data_tx_time = 1000000000 / data_tx_time; /* Bytes per second */
-
-											data_tx_time *= 8; /* Bits/second */
-											data_tx_time /= 1000; /* kbits/second, or kHz */
+											data_tx_time /= 1000; /* Convert to kb/s */
 
 											if (d->wire.perceived_clock == 0)
 												d->wire.perceived_clock = data_tx_time;
@@ -15147,15 +15142,13 @@ static void * eb_statistics (void *nothing)
                                 } break;
 				case EB_DEF_WIRE:
 					sprintf (trunkdest, "%s", device->wire.device);
-					/* This bit doesn't work - i.e. the measurement from the kernel seems wrong 
+					strcpy(clockratestring, "");
 					pthread_mutex_lock(&(device->qmutex_in));
 					if (device->wire.perceived_clock)
-						snprintf(clockratestring, 39, " Measured clock %d kHz", device->wire.perceived_clock);
+						snprintf(clockratestring, 39, " Measured clock ~%d kHz", device->wire.perceived_clock);
 					else
 						strcpy(clockratestring, " Clock not yet measured");
 					pthread_mutex_unlock(&(device->qmutex_in));
-					*/
-					strcpy(clockratestring, "");
 					if (device->im)
 						snprintf (ig_data, 89, " (Group %s priority %d)%s", device->im->ig->ig_name, device->im->priority, clockratestring);
 					else	snprintf (ig_data, 89, "%s", clockratestring);
