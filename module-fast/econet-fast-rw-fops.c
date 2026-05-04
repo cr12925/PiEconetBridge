@@ -517,7 +517,7 @@ int econet_release(struct inode *inode, struct file *file) {
 
 	/* Drain the FIFO */
 
-	while ((ret = kfifo_to_user(&(econet_data->readfd_fifo), &(econet_data->drain), sizeof(struct __econet_packet_aun), &copied)));
+	kfifo_free(&(econet_data->readfd_fifo));
 
 	module_put(THIS_MODULE);
 
