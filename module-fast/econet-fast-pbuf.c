@@ -27,6 +27,8 @@
 
 #include "../include/econet-gpio.h"
 
+void econet_dump_pbuf_inner(u8, char *);
+
 /* 
  * Find a spare pbuf and return it, or NULL for failure.
  */
@@ -47,6 +49,7 @@ inline struct __econet_packet * __econet_alloc_pbuf(u8 file, uint32_t line)
 	{
 		if ((econet_data->pbuf_inuse & (1 << pbuf_count)) && econet_data->pbuf[pbuf_count]->alloc_time < staletime) /* Stale if more than 15s old */
 		{
+			econet_dump_pbuf_inner(pbuf_count, "garbage collecting ");
 			inverse = ~(1 << pbuf_count);
 			econet_data->pbuf_inuse &= inverse;
 		}
@@ -90,33 +93,38 @@ void econet_dump_pbuf(void)
 	u8	pbuf_count;
 
 	for (pbuf_count = 0; pbuf_count < ECONET_GPIO_MAX_BUFFERS; pbuf_count++)
-	{
-		printk (KERN_INFO "econet-fast: pbuf[%d] allocated by %s:%d %lld ns ago, last seen in %s\n",
-			pbuf_count,
-			(econet_data->pbuf[pbuf_count]->file == EMF_PBUF_OPS ? "module-ops" :
-			 econet_data->pbuf[pbuf_count]->file == EMF_PBUF_RWF ? "rw-fops" : 
-			 econet_data->pbuf[pbuf_count]->file == EMF_PBUF_IRQ ? "irq" : 
-			 econet_data->pbuf[pbuf_count]->file == EMF_PBUF_AUN ? "aun" : "unknown"),
-			econet_data->pbuf[pbuf_count]->line,
-			(ktime_get_ns() - econet_data->pbuf[pbuf_count]->alloc_time),
-			(
-			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_WORKQUEUE_EXIT ? "workqueue exit" :
-			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_WORKQUEUE_ENTRY ? "workqueue entry" :
-			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD ? "irq hard" :
-			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT ? "irq soft" :
-			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT_WRITER_LASTBYTE ? "irq soft writer last byte" :
-			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT_UNDERRUN ? "irq soft underrun" :
-			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT_WRITER ? "irq soft writer" :
-			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT_WRITE_WAIT ? "irq soft write wait" :
-			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD_WRITE_WAIT ? "irq hard write wait" :
-			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD_WRITER ? "irq hard writer" :
-			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD_WRITER_LASTBYTE ? "irq hard writer last byte" :
-			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD_WRITER_LASTBYTE_NEXTIRQ ? "irq hard writer last byte next irq" :
-			econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD_WRITER_LASTBYTE_NEXTIRQ_NOFC ? "irq hard writer last byte next irq but no fc" :
-			"unknown"
-			)
-		);
-	}
+		econet_dump_pbuf_inner(pbuf_count, "");
+
+}
+
+void econet_dump_pbuf_inner(u8 pbuf_count, char *tag)
+{
+	printk (KERN_INFO "econet-fast: %spbuf[%d] allocated by %s:%d %lld ns ago, last seen in %s\n",
+		tag,
+		pbuf_count,
+		(econet_data->pbuf[pbuf_count]->file == EMF_PBUF_OPS ? "module-ops" :
+		 econet_data->pbuf[pbuf_count]->file == EMF_PBUF_RWF ? "rw-fops" : 
+		 econet_data->pbuf[pbuf_count]->file == EMF_PBUF_IRQ ? "irq" : 
+		 econet_data->pbuf[pbuf_count]->file == EMF_PBUF_AUN ? "aun" : "unknown"),
+		econet_data->pbuf[pbuf_count]->line,
+		(ktime_get_ns() - econet_data->pbuf[pbuf_count]->alloc_time),
+		(
+		econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_WORKQUEUE_EXIT ? "workqueue exit" :
+		econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_WORKQUEUE_ENTRY ? "workqueue entry" :
+		econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD ? "irq hard" :
+		econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT ? "irq soft" :
+		econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT_WRITER_LASTBYTE ? "irq soft writer last byte" :
+		econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT_UNDERRUN ? "irq soft underrun" :
+		econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT_WRITER ? "irq soft writer" :
+		econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_SOFT_WRITE_WAIT ? "irq soft write wait" :
+		econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD_WRITE_WAIT ? "irq hard write wait" :
+		econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD_WRITER ? "irq hard writer" :
+		econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD_WRITER_LASTBYTE ? "irq hard writer last byte" :
+		econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD_WRITER_LASTBYTE_NEXTIRQ ? "irq hard writer last byte next irq" :
+		econet_data->pbuf[pbuf_count]->lastseen == EMF_PBUF_LASTSEEN_IRQ_HARD_WRITER_LASTBYTE_NEXTIRQ_NOFC ? "irq hard writer last byte next irq but no fc" :
+		"unknown"
+		)
+	);
 }
 
 /* 
