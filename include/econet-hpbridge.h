@@ -250,6 +250,7 @@ extern pthread_mutex_t	loopdetect_mutex;
 struct __eb_device_module {
 	unsigned char	module_name[9]; /* 8 characters, used in findserver */
 	void 		* module_ws; /* Pointer to module workspace */
+	uint8_t		module_port; /* Port to report with FindServer */
 	uint8_t		module_started; /* Bridge will set this to 1 or 0 depending on whether module_start() has been called and succeeded, or module_stop() has been successful. */
 	uint8_t		module_autostart; /* init() must set this. 0 = do not auto start (e.g. wait to be started using a *FAST menu or some other way); > 0 = start automatically. */
 	uint8_t (*module_init) (void *, struct json_object *); /* Function to be called to initialize the module - grab ports, workspace, etc. This will only ever be called once per device in the bridge execution flow, and it will be during the config_read phase. */
