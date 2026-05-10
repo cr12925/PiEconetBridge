@@ -280,7 +280,7 @@ while (!valid && (sr1 & ECONET_GPIO_S1_IRQ) && irq_loop_count++ < 5)
 			printk (KERN_INFO "econet-fast: No clock during RX at ptr = %04X\n", econet_data->rxp->ptr);
 		if (sr2 & ECONET_GPIO_S2_OVERRUN)
 			printk (KERN_INFO "econet-fast: RX Overrun at ptr = %04X\n", econet_data->rxp->ptr);
-		if ((sr2 & ECONET_GPIO_S2_RX_IDLE) && (econet_data->rxp->ptr != 0))
+		if (!valid && (sr2 & ECONET_GPIO_S2_RX_IDLE) && (econet_data->rxp->ptr != 0))
 			printk (KERN_INFO "econet-fast: RX Idle received during frame RX at ptr = %04X\n", econet_data->rxp->ptr);
 
 		if (!deliver_to_workqueue) /* Only discontinue if we don't have FV above */
@@ -328,6 +328,7 @@ inline void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 			printk (KERN_ERR "econet-fast: Underrun during transmission at byte %02X, SR1 = 0x%02X, SR2 = 0x%02X - TX aborted\n", econet_data->txp->ptr, sr1, sr2);
 			econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
 			econet_set_read_mode();
+			return;
 		}
 
 		if (sr2 & ECONET_GPIO_S2_DCD) /* No clock */
@@ -335,6 +336,7 @@ inline void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 			printk (KERN_ERR "econet-fast: No clock during transmission at byte %02X, SR1 = 0x%02X, SR2 = 0x%02X - TX aborted\n", econet_data->txp->ptr, sr1, sr2);
 			econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
 			econet_set_read_mode();
+			return;
 		}
 
 		while (bytes < (econet_data->twobytemode ? 2 : 1))
