@@ -133,6 +133,6 @@ typedef struct {
 } __fs_device_funcs;
 
 
-#define FSDEVICE_REGISTER(p) { 0 } /* Dummy define - the string is picked up by the fsdevice_list.h builder */
+#define FSDEVICE_REGISTER(p) void __p(void) {  }; /* Dummy define - the string is picked up by the fsdevice_list.h builder */
 
 #endif
