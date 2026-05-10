@@ -36,10 +36,10 @@
  * Returns: fs_device * ready populated, or NULL on failure.
  */
 
-FSDEVICE_REGISTER(fsd_ramdisk_register);
-
 #include "fs.h"
 #include "econet-hpbridge.h"
+
+FSDEVICE_REGISTER(fsd_ramdisk_register);
 
 /* Driver name & description */
 
