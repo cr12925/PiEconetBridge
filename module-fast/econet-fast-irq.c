@@ -749,6 +749,9 @@ irqreturn_t econet_irq_hardirq(int irq, void *ident)
 		econet_write_cr(1, ECONET_GPIO_C1_RINT | ECONET_GPIO_C1_TX_RESET); /* Matches ANFS 4.08 at &8728 */
 
 		/* Code below calls the thread - NB - the lower half will inherit shadow_chipstate so it will still see this as EM_WRITE_WAIT even if we changed it above */
+
+		/* 20260510 - See if this clears up the bottom half stalls, in case we get an IRQ here with no IRQ set and we treat it as a dummy WRITE_WAIT and move on */
+		econet_data->shadow_sr1 |= (ECONET_GPIO_S1_IRQ | ECONET_GPIO_S1_TDRA);
 	}
 
 	econet_data->shadow_sr1 = hsr1;

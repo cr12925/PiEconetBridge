@@ -320,7 +320,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 	// printk (KERN_INFO "econet-fast: AUN state %02X, dir %1d, pkt_since_idle = %d, flag fill = %d\n", aun_state, p->tx, p->pkt_since_idle, p->flagfill);
 
 	if (p->tx != EP_PACKET_RX && p->tx != EP_PACKET_TX)
-		printk (KERN_INFO "econet-fast: AUN statemachine invoked with unorthodox packet direction: aun_mode = %d, p = %p, sr1 = %02X, s2 = %02X, ptr = %04x, tx = %1X, txlen = 0x%04X\n", econet_data->aun_mode, p, p->sr1, p->sr2, p->ptr, p->tx, p->txlen);
+		printk (KERN_INFO "econet-fast: AUN statemachine invoked with unorthodox packet direction: aun_mode = %d, p = %p, sr1 = %02X, s2 = %02X, ptr = %04x, tx = %1X, txlen = 0x%04X, tx_flags = 0x%08X\n", econet_data->aun_mode, p, p->sr1, p->sr2, p->ptr, p->tx, p->txlen, p->tx_flags);
 
 #if 0
 	if (aun_state != EA_IDLE && (sr2 & ECONET_GPIO_S2_RX_IDLE))
