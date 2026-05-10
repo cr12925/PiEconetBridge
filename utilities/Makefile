@@ -5,6 +5,7 @@ CFLAGS=-g -O2 -I../include $(shell pkg-config --cflags glib-2.0) -I/usr/include/
 econet_hpb_objects := $(patsubst %.c,%.o,$(wildcard econet-hpbridge*.c))
 econet_hpb_modules := $(patsubst %.c,%.o,$(wildcard modules/*.c))
 fsop_objects := $(patsubst %.c,%.o,$(wildcard modules/fsop/*.c))
+fsdevice_objects := $(patsubst %.c,%.o,$(wildcard modules/fsdevice/*.c))
 libs := -lpthread -lssl -lcrypto -ljson-c -lglib-2.0 -lssh2 $(EXTRALIBS)
 
 all:	econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers econet-poke econet-isnets unix2beeb
@@ -18,18 +19,21 @@ unix2beeb:	unix2beeb.c
 econet-hpbridge:	pre-build
 	@$(MAKE) real-hpb-build
 	
-real-hpb-build: Makefile $(fsop_objects) $(econet_hpb_objects) $(econet_hpb_modules)
-	if [ -f .noexplain ]; then cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) $(econet_hpb_modules) $(fsop_objects) $(libs); else cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) $(econet_hpb_modules) $(fsop_objects) $(libs) -lexplain; fi
+real-hpb-build: Makefile $(fsop_objects) $(econet_hpb_objects) $(econet_hpb_modules) $(fsdevice_objects)
+	if [ -f .noexplain ]; then cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) $(econet_hpb_modules) $(fsop_objects) $(fsdevice_objects) $(libs); else cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) $(econet_hpb_modules) $(fsop_objects) $(fsdevice_objects) $(libs) -lexplain; fi
 	-chgrp econet econet-hpbridge
 	#-sudo setcap CAP_NET_RAW=ep ${CURDIR}/econet-hpbridge
+
+$(fsdevice_objects): %.o: %.c Makefile ../include/fs.h ../include/fsdevice.h ../include/fsdevice_list.h
+	cc $(CFLAGS) -DGIT_VERSION=\"$(GIT_VERSION)\" -I../include -c $< -Wall -Wno-pointer-sign -o $@
 
 $(fsop_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h
 	cc $(CFLAGS) -DGIT_VERSION=\"$(GIT_VERSION)\" -I../include -c $< -Wall -Wno-pointer-sign -o $@
 
-$(econet_hpb_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-hpbridge-modules.h
+$(econet_hpb_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-hpbridge-modules.h ../include/fsdevice_list.h
 	cc $(CFLAGS) -DGIT_VERSION=\"$(GIT_VERSION)\" -I/usr/include/json-c -I../include -c $< -Wall -Wno-pointer-sign -o $@
 
-$(econet_hpb_modules): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-hpbridge-modules.h
+$(econet_hpb_modules): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-hpbridge-modules.h ../include/fsdevice_list.h
 	cc $(CFLAGS) -DGIT_VERSION=\"$(GIT_VERSION)\" -I/usr/include/json-c -I../include -c $< -Wall -Wno-pointer-sign -o $@
 
 fast-test.o: Makefile econet-hpbridge-fast.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/fs.h 

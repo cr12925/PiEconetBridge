@@ -129,12 +129,13 @@ void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, 
 
 		m = d->local.modules;
 
-		if (!m)
-			eb_debug (0, 2, "FIND", "Local    %3d.%3d No modules to reply for", d->net, d->local.stn);
+		//if (!m)
+			//eb_debug (0, 2, "FIND", "Local    %3d.%3d No modules to reply for", d->net, d->local.stn);
 
 		while (m)
 		{
-			reply->p.data[1] = 0;
+			reply->p.data[1] = m->module_port;
+
 			memcpy(&(reply->p.data[3]), m->module_name, 8);
 
 			if (m->module_started)

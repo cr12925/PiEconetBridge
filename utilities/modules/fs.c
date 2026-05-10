@@ -3570,7 +3570,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 	
 						d->index = index;
 						d->full_path = NULL; /* Reserved for later use */
-						d->engine = NULL; /* System engine */
+						d->device = NULL; /* System engine */
 
 						count = 0;
 
@@ -3746,7 +3746,7 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 	
 	/* Initialize list of storage engines */
 
-	server->engines = NULL;
+	server->devices = NULL;
 
 	/* If told to, set bridge priv on SYST user */
 

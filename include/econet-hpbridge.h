@@ -77,6 +77,8 @@
 
 #include "econet-gpio-consumer.h"
 
+#include "fsdevice.h"
+
 #define DEVINIT_DEBUG(_fmt, ...) if (dumpconfig) eb_debug (0, 0, "CONFIG", "%-16s " _fmt, "Core", __VA_ARGS__)
 
 // Server version number advertised
@@ -1491,10 +1493,12 @@ extern void eb_fast_send_data (struct __eb_fast_client *, uint8_t *, uint16_t);
 extern void * eb_fast_start_fast_service (void *);
 extern void eb_port_a0_handler (struct __econet_packet_aun *, uint16_t, void *);
 
+#if 0 /* Teletext modularized */
 /* Teletext extern */
 
 extern void teletext_init (struct __eb_device *);
 extern uint8_t eb_device_init_teletext (uint8_t, uint8_t, const char *, uint8_t);
+#endif
 
 /* JSON */
 
@@ -1514,4 +1518,10 @@ void eb_broadcast_handler (struct __eb_device *, struct __econet_packet_aun *, u
 #define eb_thread_ready() { pthread_mutex_lock(&threadcount_mutex); threads_ready++; pthread_mutex_unlock(&threadcount_mutex); }
 
 /* Default tape handler - requires for FS device init */
+
 #define FS_DEFAULT_TAPE_HANDLER "/etc/econet-gpio/tapes.sh"
+
+/* Disc device driver list */
+
+extern fs_device	*fs_devices;
+

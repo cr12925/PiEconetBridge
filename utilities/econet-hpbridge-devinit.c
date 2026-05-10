@@ -287,6 +287,7 @@ uint8_t eb_device_init_virtual (uint8_t net)
 
 }
 
+#if 0 /* Teletext modularized */
 /* eb_device_init_teletext
  *
  * Set up teletext server
@@ -311,6 +312,7 @@ uint8_t eb_device_init_teletext (uint8_t net, uint8_t stn, const char *dir, uint
 	return 1;
 
 }
+#endif
 
 /* eb_device_init_fast
  *

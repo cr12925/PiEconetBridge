@@ -47,6 +47,7 @@
 #endif
 
 #include "econet-gpio-consumer.h"
+#include "fsdevice.h"
 #include "econet-hpbridge.h"
 #include "econet-fs-hpbridge-common.h"
 
@@ -127,6 +128,15 @@
 
 /* Various important struct definitions */
 
+/* Object attributes definition - Moved here because it's used in fsdevice.h */
+
+struct objattr {
+        unsigned short perm;
+        unsigned short owner;
+        unsigned long load, exec;
+        unsigned short homeof;
+};
+
 /* Structure to be passed to the machine registration thread */
 
 struct __fs_machine_peek_reg {
@@ -137,20 +147,7 @@ struct __fs_machine_peek_reg {
 	struct __fs_machine_peek_reg	*next, *prev;
 };
 			
-/* FS Disc subsystem typedef */
-
-typedef struct {
-	int (*scandir) (const char *, struct dirent ***, int (*) (const struct dirent *), int (*) (const struct dirent **, const struct dirent **));
-} __fs_engine_funcs;
-
-struct __fs_engine_proto {
-	char 			*engine_name;
-	__fs_engine_funcs	engine_funcs;
-	uint8_t			engine_acorn; /* 1 = this storage system already uses Acorn-converted filenames - e.g. an ADFS disc image. Saves converting back and forth */
-	struct __fs_engine_proto	*next;
-};
-
-typedef struct __fs_engine_proto __fs_engine;
+	//int (*scandir) (const char *, struct dirent ***, int (*) (const struct dirent *), int (*) (const struct dirent **, const struct dirent **));
 
 /* __fs_station - instance information about a fileserver instance */
 
@@ -173,7 +170,7 @@ struct __fs_station {
 	struct __fs_bulk_port	*bulkports; // Pointer to list of bulk ports
 	struct __fs_machine_peek_reg	*peeks; // List of pending machine peeks
 	struct __fs_backup	*backup; // Auto backup config
-	__fs_engine		*engines; // Pointer to linked list of storage engines available on this server
+	fs_device		*devices; // Pointer to linked list of storage engines available on this server
 	pthread_mutex_t		fs_backup_mutex; // Locks the backup jobs list
 	pthread_cond_t		fs_backup_cond; // Used by the backup scheduler to be woken up to check the jobs list
 	pthread_t		fs_backup_thread; // the backup thread
@@ -223,7 +220,7 @@ struct __fs_disc {
 	uint32_t		inuse; /* Count of number of open handles on this disc, so we can tell whether it can be unmounted, if removable */
 	uint32_t		fs_blocksize; /* Used for quotas. bytes */
 	char *			full_path; /* Full path to root directory. If this pointer is null, root directory is {fs_root}/{index}{name} */
-	__fs_engine		*engine; /* Which disc storage engine this is. NULL is ordinary system; Others are user-supplied systems (e.g. floppy disc readers) */
+	fs_device		*device; /* Which disc storage engine this is. NULL is ordinary system; Others are user-supplied systems (e.g. floppy disc readers) */
 	struct __fs_disc	*next, *prev;
 	struct __fs_station	*server; /* Upward reference */
 };
@@ -232,7 +229,10 @@ struct __fs_disc {
 
 struct __fs_file {
         unsigned char 	name[1024];
-        FILE 		*handle;
+	union {
+        	FILE 		*handle; /* Handle for files on system devices */
+		void		*handle_device; /* Handle for non-system device drivers */
+	};
 	uint8_t		is_tape, tape_drive;
 	struct __fs_disc *disc; /* Disc number where this file is located  - not implemented 20240524. For quotas. */
 	uint16_t	owner; /* User ID of owner - not implemented 20240524. For quotas. */
@@ -287,15 +287,6 @@ struct path_entry {
         unsigned char c_day, c_monthyear, c_hour, c_min, c_sec;
 	short disc; /* Host disc number */
         struct path_entry *next, *parent;
-};
-
-/* Object attributes definition */
-
-struct objattr {
-        unsigned short perm;
-        unsigned short owner;
-        unsigned long load, exec;
-        unsigned short homeof;
 };
 
 #define FS_PATH_ERR_NODIR 0x01 // Path searched for had a directory that did not exist
@@ -1206,3 +1197,4 @@ uint8_t fsop_check_update_user_quota (struct __fs_user *, int32_t);
 int32_t fsop_diff_blocksize (uint32_t, struct __fs_disc *, int32_t bytes);
 void fsop_update_quota (struct __fs_user *, int32_t);
 #define FS_DEFAULT_NEW_USER_QUOTA 10485760
+

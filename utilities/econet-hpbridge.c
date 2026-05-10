@@ -24,6 +24,7 @@
 #include "econet-pserv.h"
 #include "econet-fs-hpbridge-common.h"
 #include "fs.h"
+#include "fsdevice_list.h"
 #include "econet-hpbridge-modules.h"
 
 // Moved to header
@@ -43,6 +44,10 @@ extern short normalize_debug;
 extern uint8_t fs_set_syst_bridgepriv;
 
 uint8_t		eb_mfr = 0x00, eb_mtype = 0x00;
+
+/* Disc device drivers */
+
+fs_device	*fs_devices = NULL;
 
 /* Test thread return */
 
@@ -1335,12 +1340,13 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 			EB_PORT_SET(existing, ports, EB_PORT_FAST, eb_port_a0_handler, existing);
 
 			existing->local.fast_menu = NULL;
-
+#if 0 /* Teletext modularized */
 			/* Initialize teletext */
 
 			existing->local.teletext_root = NULL;
 			existing->local.teletext_active = 0;
 			existing->local.teletext_queue = NULL;
+#endif
 
 			/* And the FINDSERVER handler */
 			EB_PORT_SET(existing, ports, EB_PORT_FINDSERVER, eb_handle_findserver_traffic, existing);
@@ -6365,8 +6371,10 @@ static void * eb_device_despatcher (void * device)
 				
 			}
 
+#if 0 /* Teletext modularized */
 			if (d->local.teletext_root)
 				teletext_init(d);
+#endif
 
 			ECONET_INIT_STATIONS(d->local.fast_priv_stns); // Clear the privileged station bitmap
 
@@ -6400,10 +6408,13 @@ static void * eb_device_despatcher (void * device)
 				{
 					if (m->module_autostart)
 					{
-						if (!((m->module_start) ((void *) d, m))) /* Failed to start */
+						if (((m->module_start) ((void *) d, m))) /* Failed to start */
 							eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d Module '%s' failed to start", "Local", d->net, d->local.stn, m->module_name);
 						else
+						{
+							m->module_started = 1;
 							eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d Module '%s' started by despatcher", "Local", d->net, d->local.stn, m->module_name);
+						}
 
 					}
 					m = m->next;
@@ -9690,7 +9701,9 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 	uint8_t		net, stn;
 	uint16_t	jcount, jlength;
 	struct json_object	*jdiverts, *jstation, *jstation_number, *jprinters, *jfs, *jips, *jpipepath, *jnetclock;
+#if 0 /* Teletext modularized */
 	struct json_object	*jteletextdir, *jteletexthdr;
+#endif
 	char		device[128];
 	FILE		* clock_speed_stream = NULL;
 
@@ -9795,8 +9808,10 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 			json_object_object_get_ex(jstation, "printers", &jprinters);
 			json_object_object_get_ex(jstation, "ipservers", &jips);
+#if 0 /* Teletext modularized */
 			json_object_object_get_ex(jstation, "teletext-dir", &jteletextdir);
 			json_object_object_get_ex(jstation, "teletext-header-broadcast", &jteletexthdr);
+#endif
 
 			/* Printers */
 
@@ -9910,7 +9925,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 					icount++;	
 				}
 			}
-
+#if 0 /* Teletext server modularized */
 			/* Teletext server */
 
 			if (jteletextdir)
@@ -9921,6 +9936,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 				eb_device_init_teletext(net, stn,  json_object_get_string(jteletextdir), teletext_hdr_broadcast);
 			}
+#endif
 
 			if (json_object_object_get_ex(jstation, "fileserver-path", &jfs))
 			{
@@ -9985,9 +10001,10 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 						d = eb_new_local(net, stn, EB_DEF_LOCAL);
 
+						eb_debug (0, 2, "DESPATCH", "%-8s %3d.%3d Attempting to initialize '%s' module", "Local", d->net, d->local.stn, eb_module_table[count].module_json_key);
 						/* Call it's init function */
 
-						if (!((eb_module_table[count].module_init) ((void *) d, jo))) /* Failed to start */
+						if (((eb_module_table[count].module_init) ((void *) d, jo))) /* Failed to initialize */
 							eb_debug (0, 0, "DESPATCH", "%-8s %3d.%3d Module with JSON key '%s' failed to initialize", "Local", d->net, d->local.stn, eb_module_table[count].module_json_key);
 						else
 							eb_debug (0, 0, "DESPATCH", "%-8s %3d.%3d Module with JSON key '%s' initialized", "Local", d->net, d->local.stn, eb_module_table[count].module_json_key);
@@ -15234,6 +15251,7 @@ static void * eb_statistics (void *nothing)
 					if (divert)
 					{
 						uint8_t stn;
+						struct __eb_device_module *m;
 
 						char info[128];
 
@@ -15245,7 +15263,7 @@ static void * eb_statistics (void *nothing)
 							case EB_DEF_LOCAL:	stn = divert->local.stn; sprintf(info, "%c%c%c%c%c", ((divert->local.printers) ? 'P' : ' '),
 								(fsop_is_enabled(divert->local.fs.server) ? 'F' : ' '),
 								((divert->local.ip.tunif[0] != '\0') ? 'I' : ' '),
-								(divert->local.teletext_root ? 'T' : ' '),
+								((m = eb_module_get_data(divert, "TELETEXT")) ? (m->module_started ? 'T': 't') : ' '),
 								(divert->local.fast_menu ? 'M' : ' ')
 								); break;
 							case EB_DEF_PIPE:	stn = divert->pipe.stn; sprintf(info, "%s", divert->pipe.base); break;

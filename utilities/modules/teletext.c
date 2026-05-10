@@ -15,6 +15,8 @@
 
 */
 
+/* Now converted to a module */
+
 #include "econet-hpbridge.h"
 
 #define EB_TELETEXT_CTRL_VERS		0x80
@@ -31,6 +33,23 @@
 #define EB_TELETEXT_ERR_CHANBUSY	0x03
 #define EB_TELETEXT_ERR_TIMEUNAV	0x04
 #define EB_TELETEXT_ERR_BADPORT		0x05
+
+uint8_t teletext_exit(void *device, struct __eb_device_module *m);
+uint8_t teletext_init (void *device, struct json_object *j);
+uint8_t teletext_start(void *device, struct __eb_device_module *me);
+uint8_t teletext_stop (void *device, struct __eb_device_module *module);
+
+struct eb_teletext_private {
+	char *	directory;
+	uint8_t	header_broadcast;
+	uint8_t running;
+	uint16_t channel_entries[10]; /* Valid entries per channel in teletext_channels; signed because it stores the return val from scandir */
+	struct dirent           **channels[10]; /* Files matching [1-9][0-9]{2} in each channel dir */
+	int16_t                 channel_topbit[10]; /* Which bit number in teletext_broadcast is the last one for this channel */
+	int16_t                 channel_startbit[10]; /* First bit number in teletext_broadcast which is part of this channel */
+	uint32_t                channel_broadcast[320]; /* Bitfield of broadcast frames - see teletext.c in eb_teletext_server */
+	struct __eb_teletext_queue	*queue; /* Queue of station requests */
+};
 
 /* Teletext server module.
  *
@@ -69,24 +88,26 @@ uint16_t eb_teletext_rescan (struct __eb_device *d)
 	uint8_t		channel;
 	char		filename[1024];
 	uint32_t	total_pages = 0;
+	struct __eb_device_module *m = eb_module_get_data(d, "TELETEXT");
+	struct eb_teletext_private *tt = (struct eb_teletext_private *) m->module_ws;
 
-	eb_debug (0, 3, "TELETEXT", "Local    %3d.%3d Rescanning %s", d->net, d->local.stn, d->local.teletext_root);
+	eb_debug (0, 3, "TELETEXT", "Local    %3d.%3d Rescanning %s", d->net, d->local.stn, tt->directory);
 
 	/* First, set the broadcast flags */
 
-	memset (&(d->local.teletext_broadcast), 0xFF, 320 * sizeof(uint32_t));
+	memset (&(tt->channel_broadcast), 0xFF, 320 * sizeof(uint32_t));
 
 	/* Now the counters */
 
-	memset (&(d->local.teletext_channel_entries), 0, 10 * sizeof(uint16_t));
+	memset (&(tt->channel_entries), 0, 10 * sizeof(uint16_t));
 
-	d->local.teletext_channel_startbit[0] = 0;
+	tt->channel_startbit[0] = 0;
 
 	for (channel = 0; channel < 9; channel++)
 	{
 		DIR 	*directory;
 
-		snprintf (filename, 1023, "%s/%c", d->local.teletext_root, (char) (channel + '1'));
+		snprintf (filename, 1023, "%s/%c", tt->directory, (char) (channel + '1'));
 
 		eb_debug (0, 3, "TELETEXT", "Local    %3d.%3d Rescanning channel %c directory %s", d->net, d->local.stn, channel + '1', filename);
 
@@ -94,34 +115,34 @@ uint16_t eb_teletext_rescan (struct __eb_device *d)
 
 		/* Init */
 
-		d->local.teletext_channels[channel] = NULL;
-		d->local.teletext_channel_entries[channel] = 0;
+		tt->channels[channel] = NULL;
+		tt->channel_entries[channel] = 0;
 
 		if (directory) /* Exists */
 		{
 			closedir(directory);
-			d->local.teletext_channel_entries[channel] = scandir (filename,
-										&(d->local.teletext_channels[channel]),
+			tt->channel_entries[channel] = scandir (filename,
+										&(tt->channels[channel]),
 										eb_teletext_pagename_filter,
 										alphasort);
-			eb_debug (0, 3, "TELETEXT", "Local    %3d.%3d Rescanning channel %c directory %s - found %d entries", d->net, d->local.stn, channel + '1', filename, d->local.teletext_channel_entries[channel]);
+			eb_debug (0, 3, "TELETEXT", "Local    %3d.%3d Rescanning channel %c directory %s - found %d entries", d->net, d->local.stn, channel + '1', filename, tt->channel_entries[channel]);
 		}
 
-		if (d->local.teletext_channel_entries[channel] == -1)
-			d->local.teletext_channel_entries[channel] = 0;
+		if (tt->channel_entries[channel] == -1)
+			tt->channel_entries[channel] = 0;
 
 		if (channel > 0)
-			d->local.teletext_channel_startbit[channel] = d->local.teletext_channel_topbit[channel-1] + d->local.teletext_channel_entries[channel];
+			tt->channel_startbit[channel] = tt->channel_topbit[channel-1] + tt->channel_entries[channel];
 		else
-			d->local.teletext_channel_startbit[0] = 0;
+			tt->channel_startbit[0] = 0;
 
-		d->local.teletext_channel_topbit[channel] = d->local.teletext_channel_startbit[channel] + d->local.teletext_channel_entries[channel]; /* So if topbit[channel] == startbit[channel] then there are 0 entries for this channel */
+		tt->channel_topbit[channel] = tt->channel_startbit[channel] + tt->channel_entries[channel]; /* So if topbit[channel] == startbit[channel] then there are 0 entries for this channel */
 
-		eb_debug (0, 3, "TELETEXT", "Local    %3d.%3d Scanned channel %c directory %s - found %d entries, first bit %d, last bit %d", d->net, d->local.stn, channel + '1', filename, d->local.teletext_channel_entries[channel],
-				d->local.teletext_channel_startbit[channel],
-				d->local.teletext_channel_topbit[channel]);
+		eb_debug (0, 3, "TELETEXT", "Local    %3d.%3d Scanned channel %c directory %s - found %d entries, first bit %d, last bit %d", d->net, d->local.stn, channel + '1', filename, tt->channel_entries[channel],
+				tt->channel_startbit[channel],
+				tt->channel_topbit[channel]);
 
-		total_pages += d->local.teletext_channel_entries[channel];
+		total_pages += tt->channel_entries[channel];
 	}
 	
 	/* Clear the broadcast flags for the number of pages we have */
@@ -131,7 +152,7 @@ uint16_t eb_teletext_rescan (struct __eb_device *d)
 		uint16_t 	whole_words = (total_pages / 32);
 
 		if (whole_words > 0)
-			memset (&(d->local.teletext_broadcast[0]), 0, whole_words * 4);
+			memset (&(tt->channel_broadcast[0]), 0, whole_words * 4);
 
 		if ((total_pages % 32) > 0)
 		{
@@ -143,12 +164,12 @@ uint16_t eb_teletext_rescan (struct __eb_device *d)
 
 			bits = ~bits; /* Invert */
 
-			d->local.teletext_broadcast[whole_words] = (bits & 0xFFFFFFFF);
+			tt->channel_broadcast[whole_words] = (bits & 0xFFFFFFFF);
 		 }
 
 	}
 
-	eb_debug (0, 3, "TELETEXT", "Local    %3d.%3d Rescanned %s - total pages found %d", d->net, d->local.stn, d->local.teletext_root, total_pages);
+	eb_debug (0, 3, "TELETEXT", "Local    %3d.%3d Rescanned %s - total pages found %d", d->net, d->local.stn, tt->directory, total_pages);
 
 	return total_pages;
 }
@@ -158,16 +179,25 @@ uint16_t eb_teletext_rescan (struct __eb_device *d)
 void * eb_teletext_server (void *i)
 {
 	struct __eb_device 		*d = (struct __eb_device *) i;
+	struct __eb_device_module	*m;
 	struct timespec 		when;
 	struct	__econet_packet_aun 	*p;
 	struct dirent			*directory_pointer;
 	struct __eb_teletext_queue	*q, *qprev;
+	struct eb_teletext_private	*tt;
 
 	uint16_t	total_pages, search_count;
 	uint8_t		channel;
 	uint16_t	page;
 
-	eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Server starting", d->net, d->local.stn);
+	eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Server thread starting", d->net, d->local.stn);
+
+	m = eb_module_get_data(d, "TELETEXT");
+
+	if (!m)
+		return NULL;
+
+	tt = (struct eb_teletext_private *) m->module_ws;
 
 	p = eb_malloc (__FILE__, __LINE__, "TELETEXT", "New teletext broadcast or frame packet", 12 + 1024); /* 12 header + 1024 max frame length */
 
@@ -192,15 +222,15 @@ void * eb_teletext_server (void *i)
 					  Round that up to 10240 bits, which is 320 x 32 bit values
 					  */
 
-	if (pthread_mutex_init(&(d->local.teletext_queue_mutex), NULL) != 0)
+	if (pthread_mutex_init(&(m->module_mutex), NULL) != 0)
 		eb_debug (1, 0, "TELETEXT", "Local    %3d.%3d Failed to initialize queue mutex", d->net, d->local.stn);
 
-	if (pthread_cond_init(&(d->local.teletext_queue_cond), NULL) != 0)
+	if (pthread_cond_init(&(m->module_cond), NULL) != 0)
 		eb_debug (1, 0, "TELETEXT", "Local    %3d.%3d Failed to initialize queue condition", d->net, d->local.stn);
 
 	EB_PORT_SET(d, ports, EB_PORT_TELETEXT_S_CMD, eb_port_teletext_handler, d);
 
-	pthread_mutex_lock (&(d->local.teletext_queue_mutex));
+	pthread_mutex_lock (&(m->module_mutex));
 
 	total_pages = eb_teletext_rescan (d);
 
@@ -211,16 +241,14 @@ void * eb_teletext_server (void *i)
 		clock_gettime(CLOCK_REALTIME, &when);
 		when.tv_sec++;
 
-		pthread_cond_timedwait (&(d->local.teletext_queue_cond),
-				&(d->local.teletext_queue_mutex), &when);
+		pthread_cond_timedwait (&(m->module_cond),
+				&(m->module_mutex), &when);
 
 		/* Re-scan if appropriate - use next_page temporarily */
 
 		for (next_page = 0 ; next_page < 320 ; next_page++)
 		{
-			//fprintf (stderr, "\nteletext_broadcast[%d] = 0x%08X\n", next_page, d->local.teletext_broadcast[next_page]);
-
-			if (d->local.teletext_broadcast[next_page] != 0xFFFFFFFF) /* Not all broadcast, or unuused */
+			if (tt->channel_broadcast[next_page] != 0xFFFFFFFF) /* Not all broadcast, or unuused */
 				break;
 		}
 
@@ -230,11 +258,11 @@ void * eb_teletext_server (void *i)
 
 			for (uint8_t c = 0; c < 10; c++)
 			{
-				uint16_t entries = d->local.teletext_channel_entries[c];
+				uint16_t entries = tt->channel_entries[c];
 
 				while (entries--)
-					free(d->local.teletext_channels[c][entries]);
-				free(d->local.teletext_channels[c]);
+					free(tt->channels[c][entries]);
+				free(tt->channels[c]);
 			}
 
 			total_pages = eb_teletext_rescan (d);
@@ -247,7 +275,7 @@ void * eb_teletext_server (void *i)
 
 			/* Broadcast next page */
 	
-			next_page = random() % d->local.teletext_channel_topbit[8]; /* topbit[9] will contain the last bit number */
+			next_page = random() % tt->channel_topbit[8]; /* topbit[9] will contain the last bit number */
 	
 			/* See if that page has already been broadcast and, if so, pick the next one */
 	
@@ -255,7 +283,7 @@ void * eb_teletext_server (void *i)
 	
 			while (search_count < total_pages)
 			{
-				if ((d->local.teletext_broadcast[next_page / 32] & (1 << (next_page % 32))) == 0x00)
+				if ((tt->channel_broadcast[next_page / 32] & (1 << (next_page % 32))) == 0x00)
 					break;
 	
 				search_count++;
@@ -268,12 +296,12 @@ void * eb_teletext_server (void *i)
 	
 			channel = 0;
 	
-			while (d->local.teletext_channel_topbit[channel] < next_page)
+			while (tt->channel_topbit[channel] < next_page)
 				channel++;
 	
-			page = d->local.teletext_channel_startbit[channel] + (next_page - (channel == 0 ? 0 : d->local.teletext_channel_topbit[channel-1]));
+			page = tt->channel_startbit[channel] + (next_page - (channel == 0 ? 0 : tt->channel_topbit[channel-1]));
 	
-			directory_pointer = d->local.teletext_channels[channel][page];
+			directory_pointer = tt->channels[channel][page];
 	
 			// eb_debug (0, 2, "TELETEXT", "Local    %3d.%3d Broadcasting channel %c page %s (master index %d)", d->net, d->local.stn, channel + '1', directory_pointer->d_name, next_page);
 	
@@ -287,7 +315,7 @@ void * eb_teletext_server (void *i)
 			p->p.data[0] = channel + '1';
 			memcpy (&(p->p.data[1]), directory_pointer->d_name, 3);
 	
-			if (d->local.teletext_hdr_broadcast)
+			if (tt->header_broadcast)
 				eb_broadcast_handler(d, p, 4);
 	
 			/* Flag that page as having been broadcast */
@@ -296,11 +324,11 @@ void * eb_teletext_server (void *i)
 
 			bit_bit = (1 << (next_page % 32));
 
-			d->local.teletext_broadcast[word_bit] |= bit_bit;
+			tt->channel_broadcast[word_bit] |= bit_bit;
 
 			/* Process queue */
 
-			q = d->local.teletext_queue;
+			q = tt->queue;
 			qprev = NULL;
 
 			while (q)
@@ -316,7 +344,7 @@ void * eb_teletext_server (void *i)
 				p->p.ctrl = 0x80;
 
 				snprintf (filename, 1023, "%s/%c/%s",
-						d->local.teletext_root,
+						tt->directory,
 						q->channel,
 						q->page);
 
@@ -345,7 +373,7 @@ void * eb_teletext_server (void *i)
 			if (qprev)
 				eb_free (__FILE__, __LINE__, "TELETEXT", "Free queue entry", qprev);
 
-			d->local.teletext_queue = NULL;
+			tt->queue = NULL;
 		}
 
 	}
@@ -356,48 +384,183 @@ void * eb_teletext_server (void *i)
 
 /* teletext_init - starts up the server thread */
 
-void teletext_init (struct __eb_device *d)
+uint8_t teletext_init (void *device, struct json_object *j)
 {
 
-	if (d->local.teletext_active == 1)
-	{
-		eb_debug (1, 0, "TELETEXT", "Local    %3d.%3d Attempt to start teletext server when already active", d->net, d->local.stn);
-		return;
-	}
-
-	if (pthread_create(&(d->local.teletext_thread), NULL, eb_teletext_server, d) != 0)
-		eb_debug (1, 0, "TELETEXT", "Local    %3d.%3d Thread creation for teletext server failed", d->net, d->local.stn);
-
-	pthread_detach(d->local.teletext_thread);
-
-	d->local.teletext_active = 1;
+	struct __eb_device *d = (struct __eb_device *) device;
+	struct __eb_device_module *me;
+	struct eb_teletext_private *tt;
+	char	root_directory[256];
+	char	*root_ptr;
+	uint8_t	header_broadcast = 1, autostart = 1;
+	struct json_object *jo;
 
 	eb_debug (0, 2, "TELETEXT", "Local    %3d.%3d Server initializing", d->net, d->local.stn);
-}
 
-/* teletext_shutdown - stop the server thread */
+	/* First check the JSON to see if it's valid, otherwise no point doing anything else */
 
-void teletext_shutdown (struct __eb_device *d)
-{
-	if (d->local.teletext_active == 0)
+	if (json_object_object_get_ex(j, "directory", &jo)) /* directory key */
 	{
-		eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Attempt to stop teletext server when not active", d->net, d->local.stn);
-		return;
+		strncpy (root_directory, json_object_get_string(jo), 255);
+		root_ptr = eb_malloc(__FILE__, __LINE__, "TELETEXT", "Root directory storage", strlen(root_directory)+1);
+		if (!root_ptr)
+		{
+			eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Server failed to initialize - no directory provided in config", d->net, d->local.stn);
+			return 1;
+		}
+		strcpy(root_ptr, root_directory);
+	}
+	else
+	{
+		eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Server failed to initialize - no directory provided in config", d->net, d->local.stn);
+		return 1;
 	}
 
-	d->local.teletext_active = 0;
-	pthread_cancel(d->local.teletext_thread);
+	if (json_object_object_get_ex(j, "autostart", &jo))
+	{
+		if (json_object_get_boolean(jo))
+			autostart = 1;
+		else	autostart = 0;
+	}
+
+	if (json_object_object_get_ex(j, "header-broadcast", &jo))
+	{
+		if (json_object_get_boolean(jo))
+			header_broadcast = 1;
+		else	header_broadcast = 0;
+	}
+		
+	me = eb_module_register(d, "TELETEXT", sizeof(struct eb_teletext_private));
+
+	if (d->local.modules)
+		eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Module appears to be registered", d->net, d->local.stn);
+	else
+		eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Module NOT registered", d->net, d->local.stn);
+
+	if (!me)
+	{
+		eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Server failed to initialize - module did not register", d->net, d->local.stn);
+		return 1;
+	}
+
+	me->module_init = teletext_init;
+	me->module_start = teletext_start;
+	me->module_stop = teletext_stop;
+	me->module_exit = teletext_exit;
+	me->module_autostart = autostart;
+	me->module_port = EB_PORT_TELETEXT_S_REPLY;
+	
+	tt = (struct eb_teletext_private *) me->module_ws;
+
+	tt->running = 0;
+	tt->header_broadcast = header_broadcast;
+	tt->directory = root_ptr;
+	
+	/* Reserve our port */
+
+	EB_PORT_SET(d, reserved_ports, EB_PORT_TELETEXT_S_CMD, NULL, NULL); /* Teletext commands from clients */
+
+	return 0; /* Success */
+
+}
+
+/* 
+ * Start the server if initialized 
+ */
+
+uint8_t teletext_start(void *device, struct __eb_device_module *me)
+{
+
+	struct eb_teletext_private *tt = (struct eb_teletext_private *) me->module_ws;
+	struct __eb_device *d = (struct __eb_device *) device;
+
+	if (tt->running)
+	{
+		eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Unable to start teletext server - already running", d->net, d->local.stn);
+		return 1;
+	}
+
+	if (pthread_mutex_init(&(me->module_mutex), NULL) != 0)
+	{
+		eb_debug (1, 0, "TELETEXT", "Local    %3d.%3d Failed to initialize queue mutex", d->net, d->local.stn);
+		return 1;
+	}
+
+	if (pthread_cond_init(&(me->module_cond), NULL) != 0)
+	{
+		eb_debug (1, 0, "TELETEXT", "Local    %3d.%3d Failed to initialize queue condition", d->net, d->local.stn);
+		return 1;
+	}
+
+	if (pthread_create(&(me->module_thread), NULL, eb_teletext_server, d) != 0) /* non-zero is failure */
+	{
+		eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Unable to start teletext server - thread creation failed", d->net, d->local.stn);
+		return 1;
+	}
+
+	pthread_detach(me->module_thread);
+
+	EB_PORT_SET(d, ports, EB_PORT_TELETEXT_S_CMD, eb_port_teletext_handler, d);
+
+	eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Server started", d->net, d->local.stn);
+
+	return 0;
+
+}
+
+/* teletext_stop - stop the server thread */
+
+uint8_t teletext_stop (void *device, struct __eb_device_module *module)
+{
+	struct __eb_device *d = (struct __eb_device *) device;
+	struct eb_teletext_private *tt = (struct eb_teletext_private *) module->module_ws;
+
+	if (tt->running == 0) /* Not running - can't stop */
+	{
+		eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Attempt to stop teletext server when not active", d->net, d->local.stn);
+		return 1;
+	}
 
 	eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Server shutting down", d->net, d->local.stn);
 
+	/* KIll our thread */
+
+	pthread_cancel(module->module_thread);
+
+	/* Flag not running */
+
+	tt->running = 0;
+
 	for (uint8_t c = 0; c < 10; c++)
 	{
-		uint16_t entries = d->local.teletext_channel_entries[c];
+		uint16_t entries = tt->channel_entries[c];
 
 		while (entries--)
-			free(d->local.teletext_channels[c][entries]);
-		free(d->local.teletext_channels[c]);
+			free(tt->channels[c][entries]);
+		free(tt->channels[c]);
 	}
+
+	EB_PORT_CLR(d, ports, EB_PORT_TELETEXT_S_CMD);
+
+	return 0;
+}
+
+uint8_t teletext_exit(void *device, struct __eb_device_module *m)
+{
+	struct eb_teletext_private *tt = (struct eb_teletext_private *) m->module_ws;
+	struct __eb_device *d = (struct __eb_device *) device;
+
+	if (tt->running)
+	{
+		eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Server module exit called, but server is running", d->net, d->local.stn);
+		return 1;
+	}
+
+	eb_module_deregister(d, m);
+
+	eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Server module exited", d->net, d->local.stn);
+
+	return 0;
 }
 
 /* 
@@ -408,13 +571,15 @@ void teletext_shutdown (struct __eb_device *d)
  * Note that *page has 3 bytes and will not be null terminated 
  */
 
-uint8_t	eb_teletext_page_exists (struct __eb_device *d, uint8_t channel, char *page)
+uint8_t	eb_teletext_page_exists (struct __eb_device_module *m, uint8_t channel, char *page)
 {
+
+	struct eb_teletext_private *tt = (struct eb_teletext_private *) m->module_ws;
 
 	unsigned char	pathname[1024];
 
 	snprintf (pathname, 1023, "%s/%c/%c%c%c",
-			d->local.teletext_root,
+			tt->directory,
 			channel,
 			*(page),
 			*(page+1),
@@ -429,11 +594,16 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 {
 
 	struct __eb_device *d = (struct __eb_device *) i;
+	struct __eb_device_module *m = eb_module_get_data(d, "TELETEXT");
+	struct eb_teletext_private *tt = (struct eb_teletext_private *) m->module_ws;
 
 	struct __econet_packet_aun	*reply;
 
-	//if (p->p.srcnet == 0)
-		//p->p.srcnet = d->net;
+	if (!m) /* No module data! */
+	{
+		eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Traffic handler called without module data present", d->net, d->local.stn);
+		return;
+	}
 
 	reply = eb_malloc(__FILE__, __LINE__, "TELETEXT", "Reply packet", 12 + 18); // Max data length given
 
@@ -446,7 +616,7 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 	reply->p.ctrl = p->p.ctrl; /* Always mirrors the request ctrl */
 	/* pad & seq filled in by sender routing */
 
-	pthread_mutex_lock (&(d->local.teletext_queue_mutex));
+	pthread_mutex_lock (&(m->module_mutex));
 
 	switch (p->p.ctrl)
 	{
@@ -477,7 +647,7 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 						p->p.data[3],
 						(p->p.ctrl == EB_TELETEXT_CTRL_DELAY_PAGEREQ ? " (delayed)" : ""));
 
-				if (!eb_teletext_page_exists(d, p->p.data[0], &p->p.data[1]))
+				if (!eb_teletext_page_exists(m, p->p.data[0], &p->p.data[1]))
 				{
 					reply->p.data[0] = EB_TELETEXT_ERR_BADPAGE;
 					reply->p.data[1] = 0;
@@ -488,7 +658,7 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 
 				/* See if we can find an existing request from this station, overwrite it if there is. */
 
-				q = d->local.teletext_queue;
+				q = tt->queue;
 
 				prev = NULL;
 
@@ -510,7 +680,7 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 					if (prev)
 						prev->next = q;
 					else
-						d->local.teletext_queue = q;
+						tt->queue = q;
 
 					index++;
 				}
@@ -533,7 +703,7 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 			{
 				struct __eb_teletext_queue 	*q;
 
-				q = d->local.teletext_queue;
+				q = tt->queue;
 
 				while (q)
 				{
@@ -559,7 +729,7 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 					if (q->prev) /* Not first in line */
 						q->prev->next = q->next;
 					else /* First in line */
-						d->local.teletext_queue = q->next;
+						tt->queue = q->next;
 
 					if (q->next) /* Not last in line - update next one */
 						q->next->prev = q->prev;
@@ -619,10 +789,10 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 
 	}
 
-	pthread_mutex_unlock (&(d->local.teletext_queue_mutex));
+	pthread_mutex_unlock (&(m->module_mutex));
 
 	if (p->p.ctrl == EB_TELETEXT_CTRL_DELAY_PAGEREQ || p->p.ctrl == EB_TELETEXT_CTRL_PAGEREQ) /* Wake up the main loop */
-		pthread_cond_signal(&(d->local.teletext_queue_cond));
+		pthread_cond_signal(&(m->module_cond));
 
 	eb_free(__FILE__, __LINE__, "TELETEXT", "Free reply packet", reply);
 
