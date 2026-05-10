@@ -1526,3 +1526,6 @@ void eb_broadcast_handler (struct __eb_device *, struct __econet_packet_aun *, u
 
 extern fs_device	*fs_devices;
 
+#define fsd_malloc(d,s) eb_malloc(__FILE__, __LINE__, DRIVERNAME, d, s)
+#define fsd_free(d,p) eb_free(__FILE__, __LINE__, DRIVERNAME, d, p)
+
