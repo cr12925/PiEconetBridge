@@ -68,7 +68,7 @@ typedef struct __fs_device_proto fs_device;
  *
  */
 
-typedef void * fs_device_instance;
+typedef void fs_device_instance;
 
 /* fs_device_mount is the return value from the device's mount function
  * and must uniquely identify a device. It is passed back to the
@@ -79,7 +79,7 @@ typedef void * fs_device_instance;
  * each one.
  */
 
-typedef void * fs_device_mount;
+typedef void fs_device_mount;
 
 /* fs_device_handle is the return value from a successful open. 
  * It is a pointer to a struct which is then passed back to the driver
@@ -93,7 +93,7 @@ typedef void * fs_device_mount;
  *
  */
 
-typedef void * fs_device_handle;
+typedef void fs_device_handle;
 
 /* FS Mountable device prototypes */
 
@@ -133,6 +133,6 @@ typedef struct {
 } __fs_device_funcs;
 
 
-#define FSDEVICE_REGISTER(p) { } /* Dummy define - the string is picked up by the fsdevice_list.h builder */
+#define FSDEVICE_REGISTER(p) { 0 } /* Dummy define - the string is picked up by the fsdevice_list.h builder */
 
 #endif

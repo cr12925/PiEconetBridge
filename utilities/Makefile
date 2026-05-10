@@ -10,7 +10,8 @@ libs := -lpthread -lssl -lcrypto -ljson-c -lglib-2.0 -lssh2 $(EXTRALIBS)
 
 all:	econet-monitor econet-imm econet-test pipe-eg econet-notify econet-ipgw econet-remote econet-hpbridge econet-fslist econet-ledtest econet-clock econet-trace econet-servers econet-poke econet-isnets unix2beeb
 
-pre-build:
+pre-build: 
+	./fsdevice_list_build
 	rm -f modules/fsop/fsop_00_bridge.o # Otherwise it doesn't update GIT_VERSION
 
 unix2beeb:	unix2beeb.c
@@ -33,7 +34,7 @@ $(fsop_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consum
 $(econet_hpb_objects): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-hpbridge-modules.h ../include/fsdevice_list.h
 	cc $(CFLAGS) -DGIT_VERSION=\"$(GIT_VERSION)\" -I/usr/include/json-c -I../include -c $< -Wall -Wno-pointer-sign -o $@
 
-$(econet_hpb_modules): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-hpbridge-modules.h ../include/fsdevice_list.h
+$(econet_hpb_modules): %.o: %.c Makefile ../include/fs.h ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/econet-hpbridge-modules.h 
 	cc $(CFLAGS) -DGIT_VERSION=\"$(GIT_VERSION)\" -I/usr/include/json-c -I../include -c $< -Wall -Wno-pointer-sign -o $@
 
 fast-test.o: Makefile econet-hpbridge-fast.c ../include/econet-gpio-consumer.h ../include/econet-hpbridge.h ../include/fs.h 
