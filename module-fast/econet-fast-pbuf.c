@@ -99,9 +99,10 @@ void econet_dump_pbuf(void)
 
 void econet_dump_pbuf_inner(u8 pbuf_count, char *tag)
 {
-	printk (KERN_INFO "econet-fast: %spbuf[%d] allocated by %s:%d %lld ns ago, last seen in %s\n",
+	printk (KERN_INFO "econet-fast: %spbuf[%d] (%p) allocated by %s:%d %lld ns ago, last seen in %s\n",
 		tag,
 		pbuf_count,
+		econet_data->pbuf[pbuf_count],
 		(econet_data->pbuf[pbuf_count]->file == EMF_PBUF_OPS ? "module-ops" :
 		 econet_data->pbuf[pbuf_count]->file == EMF_PBUF_RWF ? "rw-fops" : 
 		 econet_data->pbuf[pbuf_count]->file == EMF_PBUF_IRQ ? "irq" : 
