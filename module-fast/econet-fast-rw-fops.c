@@ -487,8 +487,6 @@ int econet_open(struct inode *inode, struct file *file) {
 
 int econet_release(struct inode *inode, struct file *file) {
 
-	u32 ret, copied;
-
 	/* Decrement the open counter and usage count. Without this, the module would not unload. */
 
 	spin_lock(&(econet_data->open_count_spinlock));
