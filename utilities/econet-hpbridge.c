@@ -7067,7 +7067,10 @@ static void * eb_device_despatcher (void * device)
 
 						// Make the Sequence Number match if this was an immediate reply we were expecting
 						if (	(packet.p.aun_ttype == ECONET_AUN_IMMREP)
-						&&	(packet.p.srcnet == d->wire.last_imm_dest_net)
+						&&	(
+								(d->wire.last_imm_dest_net == 0 && packet.p.srcnet == d->net)
+							   ||	packet.p.srcnet == d->wire.last_imm_dest_net
+							)
 						&&	(packet.p.srcstn == d->wire.last_imm_dest_stn)
 						)
 						{
