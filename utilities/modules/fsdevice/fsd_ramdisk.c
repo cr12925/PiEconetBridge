@@ -907,8 +907,9 @@ int		fsd_ramdisk_normalize_wildcard (	fs_device_mount *mount,
 							unsigned short wildcard
 						)
 {
-	struct path *res = (struct path *) result;
-	struct path_entry *pe; /* Used to create new entries */
+	// COmmented for now to avoid unused variable warnings
+	//struct path *res = (struct path *) result;
+	//struct path_entry *pe; /* Used to create new entries */
 	int ret = -1;
 
 
