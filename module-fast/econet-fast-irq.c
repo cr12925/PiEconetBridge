@@ -316,6 +316,7 @@ inline void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 	{
 		u8	bytes = 0;
 		u8	tdra_counter;
+		u8	error_quit = 0;
 
 		if (econet_data->txp->ptr == 0) /* Start of fresh packet */
 		{
@@ -323,17 +324,24 @@ inline void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 			econet_data->txp->timing_start = ktime_get_ns();
 		}
 
+		/* 20260511 Modifications here to ensure a return if we are dumping an error into the workqueue, otherwise we
+		 * could be left with a NULL txp (after the ..._to_workqueue() call which something tries to read/write to.
+		 */
+
 		if (sr1 & ECONET_GPIO_S1_UNDERRUN) /* TX Underrun */
 		{
 			printk (KERN_ERR "econet-fast: Underrun during transmission at byte %02X, SR1 = 0x%02X, SR2 = 0x%02X - TX aborted\n", econet_data->txp->ptr, sr1, sr2);
-			econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
-			econet_set_read_mode();
-			return;
+			error_quit = 1;
 		}
 
 		if (sr2 & ECONET_GPIO_S2_DCD) /* No clock */
 		{
 			printk (KERN_ERR "econet-fast: No clock during transmission at byte %02X, SR1 = 0x%02X, SR2 = 0x%02X - TX aborted\n", econet_data->txp->ptr, sr1, sr2);
+			error_quit = 1;
+		}
+
+		if (error_quit)
+		{
 			econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
 			econet_set_read_mode();
 			return;
@@ -386,6 +394,12 @@ inline void econet_irq_write_new (u8 i_sr1, u8 i_sr2)
 						econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
 					}
 	
+					/* TODO: Do we need an econet_set_read_mode() here given that the ADLC will be in write mode and we've just dumped txp to the workqueue and set it to NULL? */
+
+					/* Let's try. */
+
+					econet_set_read_mode();
+
 					return;
 				}
 
@@ -862,6 +876,10 @@ irqreturn_t econet_irq(int irq, void *ident)
 				handled = 1;
 				econet_data->txp->timing_end = ktime_get_ns();
 				econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX);
+
+				/* NB the above has put us back to read mode, so this is safe, having dump txp - because nothing will try to look at it */
+
+				/* WORKQUEUE LOCATION 1 */
 			}
 			else if ((sr2 & ECONET_GPIO_S2_AP)) /* New packet */
 			{
@@ -887,13 +905,15 @@ irqreturn_t econet_irq(int irq, void *ident)
 				)
 			{
 				econet_data->txp->lastseen = EMF_PBUF_LASTSEEN_IRQ_SOFT_UNDERRUN;
-				econet_set_chipstate(EM_IDLE);
-				chip_state = EM_IDLE;
+				econet_set_read_mode(); // Moved here. 20260511
+				// econet_set_chipstate(EM_IDLE); // Not needed given the move of econet_set_read_mode()
+				chip_state = EM_IDLE; // Update local copy
 				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
 				printk (KERN_INFO "econet-fast: TX Underrun detected - SR1 = 0x%02X, SR2 = 0x%02X, txp->ptr = 0x%04X, txp->txlen = 0x%04X\n",
 						sr1, sr2, econet_data->txp->ptr, econet_data->txp->txlen);
 				econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX); /* Puts an empty packet into the monitor kfifo, but has the status in it */
-				econet_set_read_mode();
+				/* LOCATION 2 - Correctly goes back to read mode TODO: Should we not do this prior to the workqueue dump? Let's try. */
+				// econet_set_read_mode(); // Moved above
 				handled = 1;
 			}
 			else if ( /* Errors we need to clear */
@@ -908,10 +928,12 @@ irqreturn_t econet_irq(int irq, void *ident)
 				econet_set_chipstate(EM_IDLE);
 				chip_state = EM_IDLE;
 				econet_data->pkt_since_idle = econet_data->no_flag_fill = 0;
+				econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Just clear status - Moved here 20250611
 				if (econet_data->rxp->ptr > 0)
 					printk (KERN_INFO "econet-fast: RX Idle received at rxptr=0x%04X", econet_data->rxp->ptr);
 				econet_irq_to_workqueue(&(econet_data->rxp), sr1, sr2, EP_PACKET_RX); /* Puts an empty packet into the monitor kfifo, but has the status in it */
-				econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Just clear status
+				/* LOCATION 3 */
+				// econet_write_cr(ECONET_GPIO_CR2, C2_READ); // Just clear status - Moved above
 				handled = 1;
 			}	
 
@@ -1016,10 +1038,13 @@ irqreturn_t econet_irq(int irq, void *ident)
 				printk (KERN_ERR "econet-fast: No available packet structure for txp! Failure not logged to workqueue.\n");
 			else
 			{
+				econet_set_read_mode(); // 20260511 Added so that nothing tries to look at txp given we're about to dump it to the workqueue and it will get set to NULL below
+				// And I think the workqueue will reset the AUN state machine
 				econet_data->txp->sr1 = sr1;
 				econet_data->txp->sr2 = sr2;
 				econet_data->txp->tx_flags = EP_IRQHANDLER_FAILED;
 				econet_irq_to_workqueue(&(econet_data->txp), sr1, sr2, EP_PACKET_TX); 
+				/* LOCATION 4 */
 			}
 		}
 		else
@@ -1034,10 +1059,12 @@ irqreturn_t econet_irq(int irq, void *ident)
 				printk (KERN_ERR "econet-fast: RX packet buffer remained null after IRQ failure handler tried to re-allocate it. RX packet buffer starving! Failure not sent to workqueue.\n");
 			else
 			{
+				econet_set_read_mode(); // 20260511 Added to ensure everything gets reset
 				econet_data->rxp->sr1 = sr1;
 				econet_data->rxp->sr2 = sr2;
 				econet_data->rxp->tx_flags = EP_IRQHANDLER_FAILED;
 				econet_irq_to_workqueue(&(econet_data->rxp), sr1, sr2, EP_PACKET_RX); 
+				/* LOCATION 5 */
 			}
 		}
 
