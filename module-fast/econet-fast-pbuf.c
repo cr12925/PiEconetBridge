@@ -49,9 +49,9 @@ inline struct __econet_packet * __econet_alloc_pbuf(u8 file, uint32_t line)
 	{
 		if ((econet_data->pbuf_inuse & (1 << pbuf_count)) && econet_data->pbuf[pbuf_count]->alloc_time < staletime) /* Stale if more than 15s old */
 		{
-			econet_dump_pbuf_inner(pbuf_count, "garbage collecting ");
-			inverse = ~(1 << pbuf_count);
-			econet_data->pbuf_inuse &= inverse;
+			econet_dump_pbuf_inner(pbuf_count, "but for Mr Royle disabling it, I would be garbage collecting ");
+			//inverse = ~(1 << pbuf_count);
+			//econet_data->pbuf_inuse &= inverse;
 		}
 
 		if (!(econet_data->pbuf_inuse & (1 << pbuf_count)))
