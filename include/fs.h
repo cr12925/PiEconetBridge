@@ -216,11 +216,13 @@ struct __fs_disc {
 	unsigned char 		name[17];
 	uint8_t			index; /* Disc number - ready for new structure */
 	uint8_t			removable; /* 0 = fixed disc; 1 = removable - can be unmounted if free */
+	uint8_t			readonly; /* 0 = R/W, 1 = RO */
 	uint8_t			padding; /* Attempts to get us to a 4-byte boundary before block size */ 
 	uint32_t		inuse; /* Count of number of open handles on this disc, so we can tell whether it can be unmounted, if removable */
 	uint32_t		fs_blocksize; /* Used for quotas. bytes */
 	char *			full_path; /* Full path to root directory. If this pointer is null, root directory is {fs_root}/{index}{name} */
 	fs_device		*device; /* Which disc storage engine this is. NULL is ordinary system; Others are user-supplied systems (e.g. floppy disc readers) */
+	fs_device_mount		*mount; /* Mount point on device, if device is not null */
 	struct __fs_disc	*next, *prev;
 	struct __fs_station	*server; /* Upward reference */
 };
@@ -228,11 +230,13 @@ struct __fs_disc {
 /* __fs_file - open file information for a particular server */
 
 struct __fs_file {
-        unsigned char 	name[1024];
+        unsigned char 	name[1024]; /* *think* this will be path from / for system devices, and path below mount for other devices */
 	union {
         	FILE 		*handle; /* Handle for files on system devices */
 		void		*handle_device; /* Handle for non-system device drivers */
 	};
+	fs_device	*device; /* == NULL for system driver, or points to FS device driver */
+	fs_device_mount	*mount; /* mount pointer provided by FS device driver if device != NULL */
 	uint8_t		is_tape, tape_drive;
 	struct __fs_disc *disc; /* Disc number where this file is located  - not implemented 20240524. For quotas. */
 	uint16_t	owner; /* User ID of owner - not implemented 20240524. For quotas. */
@@ -286,6 +290,8 @@ struct path_entry {
         unsigned char day, monthyear, hour, min, sec; // Modified date / time
         unsigned char c_day, c_monthyear, c_hour, c_min, c_sec;
 	short disc; /* Host disc number */
+	fs_device	*device; /* Device this file is on ; NULL = system files driver (native) */
+	fs_device_mount	*mount; /* Mount point within device */
         struct path_entry *next, *parent;
 };
 
@@ -326,6 +332,8 @@ struct path {
         unsigned char hour, min, sec; // Hours mins sec of modification time
         unsigned char c_day, c_monthyear, c_hour, c_min, c_sec; // Date/time of Creation
 	uint8_t max_fname_length; // Maximum length of any filename matching this query
+	fs_device	*device; /* Device this file is on ; NULL = system files driver (native) */
+	fs_device_mount	*mount; /* Mount point within device */
         struct path_entry *paths, *paths_tail; // pointers to head and tail of a linked like of path_entry structs. These are dynamically malloced by the wildcard normalize function and must be freed by the caller. If FS_FTYPE_NOTFOUND, then both will be NULL.
 };
 
