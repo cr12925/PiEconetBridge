@@ -66,6 +66,8 @@ FSDEVICE_REGISTER(fsd_ramdisk_register);
 struct fsd_ramdisk_handle {
 	off_t		cursor; /* Current cursor */
 	void *		file; /* Upward pointer; requires cast */
+	void *		mount; /* Which mountpoint this file is underneath */
+	uint8_t		mode; /* Matches the FS internal mode values 1: OPENIN, 2: OPENUP (must exist), 3: OPENOUT */
 	struct fsd_ramdisk_handle *prev, *next; /* Next handle to this file */
 };
 

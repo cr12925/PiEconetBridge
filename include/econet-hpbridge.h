@@ -248,18 +248,22 @@ extern pthread_mutex_t	loopdetect_mutex;
 /* void * in the function prototypes are because eb_device is defined below, but needs this struct in its definition... seems a bit chicken and egg - functions should cast that first parameter to (struct __eb_device *) */
 
 struct __eb_device_module {
-	unsigned char	module_name[9]; /* 8 characters, used in findserver */
+	unsigned char	module_name[9]; /* 8 characters, used in debug and to find module worksapce */
+	unsigned char	module_findserver_name[9]; /* name used in findserver, copied from module name if not supplied on init */
 	void 		* module_ws; /* Pointer to module workspace */
 	uint8_t		module_port; /* Port to report with FindServer */
 	uint8_t		module_started; /* Bridge will set this to 1 or 0 depending on whether module_start() has been called and succeeded, or module_stop() has been successful. */
 	uint8_t		module_autostart; /* init() must set this. 0 = do not auto start (e.g. wait to be started using a *FAST menu or some other way); > 0 = start automatically. */
+	uint8_t		module_exiting; /* Set to 1 when we want the module thread to kill itself */
+	uint8_t		module_has_exited; /* Set to 1 when the module thread has killed itself */
 	uint8_t (*module_init) (void *, struct json_object *); /* Function to be called to initialize the module - grab ports, workspace, etc. This will only ever be called once per device in the bridge execution flow, and it will be during the config_read phase. */
-	uint8_t (*module_start) (void *, struct __eb_device_module *); /* Function to be called when the device is ready for the module to start working - starts a thread, etc. */
-	uint8_t (*module_stop) (void *, struct __eb_device_module *); /* Function to be called when the device wants the module to stop, but not exit - ie. the module could be restarted later by calling start() again */
+	uint8_t (*module_start) (void *, struct __eb_device_module *); /* Function to be called when the device is ready for the module to start working - starts a thread, etc. 20260514 Called under module_mutex lock. */
+	uint8_t (*module_stop) (void *, struct __eb_device_module *); /* Function to be called when the device wants the module to stop, but not exit - ie. the module could be restarted later by calling start() again . 20260514 Called under module_mutex lock. Must either stop the service so that mutex & cond are initialized and mutex is unlocked (i.e. don't just kill the thread - tell it to exit) */
 	uint8_t (*module_exit) (void *, struct __eb_device_module *); /* Function to be called when the device wants the module to exit and clean up - release workspace, etc. */
 	pthread_t	module_thread; /* Since most modules will start a thread, this is helpful to have here */
 	pthread_mutex_t	module_mutex; /* Similarly, most modules will want to avoid having two threads in their critical section at once, so helpful to have this here */
 	pthread_cond_t	module_cond; /* For the thread to use */
+	struct __eb_packetqueue 	*module_queue; /* Inbound packet queue */
 	struct __eb_device_module	*next; /* Next module in chain */
 };
 
@@ -270,10 +274,16 @@ struct __eb_module_table {
 	uint8_t	(*module_init) (void *, struct json_object *); /* init function for a module */
 };
 
+/* Module json copier prototypes - return 0 for success; 1 for format error (e.g. too long); 2 for not present */
+
+extern uint8_t eb_module_json_copy_string(struct json_object *, char *, char *, uint32_t); /* char * is pointer to data area - here, char *; uint32_t is a generic parameter; here, max length */
+extern uint8_t eb_module_json_copy_boolean(struct json_object *, char *, uint8_t *); 
+extern uint8_t eb_module_json_copy_int(struct json_object *, char *, uint32_t *);
+
 /* Module infrastructure prototypes. Workspace get/put return > 0 for success, 0 for failure. */
 
 /* For each key within the diverts JSON for a virtual station which is listed in the table of __eb_module_tables in the modules header, the bridge will call the associated init() function. That function should then register the module with the bridge using the eb_module_reigster function, and do any other initialization (barring starting the module and its thread, or grabbing ports - which are part of the start() phase) which it needs to do. Thereafter the bridge will call start() or stop() as appropriate - e.g. automatically when the device starts, or on request from a *FAST menu. When the bridge is exiting, it will call the module's exit function. */
-struct __eb_device_module * eb_module_register (void *, unsigned char *, uint32_t); /* Function to register a module. Should be called by its init() function. Parameters:
+struct __eb_device_module * eb_module_register (void *, unsigned char *, unsigned char *, uint32_t); /* Function to register a module. Should be called by its init() function. Parameters:
 										       1. void * pointer to struct __eb_device
 										       2. unsigned char * module name (up to 8 characters; will be truncated oetherwise; must be unique in the virtual server). This will be the string reported by the FindServer module when this module is active on a server.
 										       3. size of private worksapce requested.
@@ -281,7 +291,299 @@ struct __eb_device_module * eb_module_register (void *, unsigned char *, uint32_
 
 void eb_module_deregister (void *, struct __eb_device_module *); /* To be called by the module's exit function as its last act before death. Will cause the bridge to free the private workspace, de-link the eb_device_module struct, and free it's storage space. It is the module exit function's responsibility to kill of any threads and free any other workspace it holds, including any it has eb_malloc()ed and holds pointers to within the private workspace. Thereafter, the pointer to eb_device_module will be invalid */
 
+uint8_t eb_module_start_byname (void *, unsigned char *); /* Start a module by its name. Takes the module's lock, calls its start function, returns 0 for success; else failure */
+uint8_t eb_module_start (void *, struct __eb_device_module *); /* Start a module by pointer to its module data - Same returns as eb_module_start_byname */
+
+uint8_t eb_module_stop_byname (void *, unsigned char *); /* Stop a module by name. Same idea as start_byname */
+uint8_t eb_module_stop (void *, struct __eb_device_module *); /* Stop a module by pointer; same idea as stop */
+
 struct __eb_device_module * eb_module_get_data (void *, unsigned char *); /* Get address of this module's struct __eb_device_module; returns NULL if not found. Gives access to all the info above, including address of private workspace */
+
+/* EB module generic debug */
+
+#define eb_module_debug_params(L,M,D,T,...) eb_debug (0,L, M, "Local    %3d.%3d " T, D->net, D->local.stn, ...)
+#define eb_module_debug(L,M,D,T) eb_debug (0,L, M, "Local    %3d.%3d " T, D->net, D->local.stn)
+
+/* EB module memory allocation shortcut */
+
+#define eb_module_alloc(M,S,L) eb_malloc(__FILE__, __LINE__, M, S, L)
+
+/* EB module memory free shortcut */
+
+#define eb_module_free(M,S,P) eb_free(__FILE__, __LINE__, M, S, P)
+
+/* Generic init function, assuming one port and a given data type for the private workspace, and a function to initialize the private workspace from the JSON */
+
+#define eb_module_init_def(MODULE,funcname,privtype,port,privinit); \
+	uint8_t funcname (void *device, struct json_object *j) \
+	{ \
+		\
+		struct __eb_device *d = (struct __eb_device *) device; \
+		struct __eb_device_module *me; \
+		uint8_t autostart = 1; \
+		\
+		eb_module_debug (2, MODULE, d, "Server initializing"); \
+		\
+		me = eb_module_register(d, MODULE, NULL, sizeof(privtype)); \
+		\
+		if (!me) \
+		{ \
+			eb_module_debug (1, MODULE, d, "Server failed to initialize - module did not register!"); \
+			return 1; \
+		} \
+		\
+		if (port != 0z00) EB_PORT_SET (d, reserved_ports, port, NULL, NULL); /* Reserve port if not 0 */ \
+		\
+		if (json_object_object_get_ex(j) && json_object_is_type(j,json_type_boolean)) \
+		{ \
+			if (json_object_get_boolean(j)) autostart = 1; \
+			else autostart = 0; \
+		} \
+		\
+		me->module_autostart = autostart; \
+		me->module_queue = NULL; \
+		\
+		privinit(d, me, j); /* Set up our functions and private data */ \
+		\
+		return 0; /* Success */ \
+	}
+
+/* Generic module exit function, assuming only one port to deregister */
+
+#define eb_module_exit_def(MODULE,funcname,port); \
+	uint8_t funcname (void *device, struct __eb_device_module *m) \
+	{  \
+		struct __eb_device *d = (struct __eb_device *) device; \
+		\
+		pthread_mutex_lock (&(m->module_mutex)); \
+		\
+		if (m->module_started) \
+		{ \
+			pthread_mutex_unlock (&(m->module_mutex)); \
+			eb_module_debug (1, MODULE, d, "Server module exit called when server running!"); \
+			return 1; \
+		} \
+		\
+		pthread_mutex_unlock (&(m->module_mutex)); \
+		\
+		EB_PORT_CLR (d, reserved_ports, port); \
+		\
+		eb_module_deregister(d, m); \
+		\
+		eb_module_debug (1, MODULE, d, "Server module deregistered"); \
+		\
+		return 0; \
+		\
+	} 
+
+/* Generic start function */
+
+#define eb_module_start_def(MODULE,funcname,port,threadfunc,traffichandlerfunc); \
+	uint8_t funcname (void *device, struct __eb_device_module *me) \
+	{ \
+		struct __eb_device *d = (struct __eb_device *) device; \
+		\
+		if (me->module_started) /* Already running! */ \
+		{ \
+			eb_module_debug (1, MODULE, d, "Attempt to start when already running"); \
+			return 1; /* Failure */ \
+		} \
+		\
+		/* Create thread */ \
+		\
+		if (pthread_create(&(me->module_thread), NULL, threadfunc, d) != 0) /* Non-zero is failure */ \
+		{ \
+			eb_module_debug (1, MODULE, d, "Unable to start server - thread creation failed"); \
+			return 1; \
+		} \
+		\
+		pthread_detach(me->module_thread); \
+		\
+		EB_PORT_SET(d, ports, port, traffichandlerfunc, d); /* Make port active */ \
+		\
+		eb_module_debug (1, MODULE, d, "Server started"); \
+		\
+		return 0; \
+		\
+	}
+
+/* Generic function to drain and free the packet queue for a module */
+
+#define eb_module_drain_queue(MODULE,funcname); \
+	void funcname (struct __eb_device *device, struct __eb_device_module *me) \
+	{ \
+		struct __eb_packetqueue *q, *qn; \
+		\
+		q = me->module_queue; \
+		if (q) qn = q->n; else qn = NULL; \
+		\
+		while (q) \
+		{ \
+			qn = q->n; \
+			if (q->p) eb_module_free(MODULE, "Free packet on " MODULE "queue whilst draining queue", q->p); \
+			eb_module_free(MODULE, "Free packet queue entry for " MODULE " whilst draining queue", q); \
+			q = qn; \
+		} \
+		me->module_queue = NULL; \
+	} \
+
+
+/* Generic stop function - calls cleanup function if not NULL */
+
+#define eb_module_stop_def(MODULE,funcname,port,queuedrainfunc,cleanup); \
+	uint8_t funcname (void *device, struct __eb_device_module *me) \
+	{ \
+		struct __eb_device *d = (struct __eb_device *) device; \
+		void (*cleanup_func) (struct __eb_device *, struct __eb_device_module *) = cleanup; \
+		void (*queue_func) (struct __eb_device *, struct __eb_device_module *) = queuedrainfunc; \
+		\
+		if (!(me->module_started)) /* Not running - barf */ \
+		{ \
+			eb_module_debug (1, MODULE, d, "Attempt to stop when not running"); \
+			return 1; \
+		} \
+		me->module_started = 0; /* Get the handler to stop - probably does nothing */ \
+		\
+		EB_PORT_CLR(d, ports, port); \
+		\
+		pthread_cancel (me->module_thread); /* Safe because it cannot be in critical section - this function is called under lock */ \
+		\
+		if (queue_func) queue_func (d, me); \
+		\
+		if (cleanup_func)	cleanup_func(d, me); \
+		\
+		eb_module_debug (1, MODULE, d, "Server stopped"); \
+		\
+		return 0; \
+	} \
+
+		
+/* Generic traffic handler for a module */
+
+#define eb_module_handle_traffic(MODULE,funcname); \
+	void funcname (struct __econet_packet_aun *p, uint16_t length, void *param) \
+	{ \
+		struct __econet_packet_aun	*mypacket; \
+		struct __eb_packetqueue		*q, *new_q; \
+		struct __eb_device_module	*me; \
+		struct __eb_device		*d = (struct __eb_device *) param; \
+		uint8_t				started; \
+		\
+		if (!(me = eb_module_get_data(d, MODULE))) \
+			return; /* Quit out */ \
+			\
+		mypacket = eb_module_alloc(MODULE,"New packet structure for " MODULE "packet", length); \
+		new_q = eb_module_alloc(MODULE,"New structure for " MODULE "packet queue", sizeof(struct __eb_packetqueue)); \
+		\
+		if (!mypacket) \
+			eb_module_debug(0, MODULE, d, "Unable to allocate memory for packet to process!"); \
+		if (!new_q) \
+			eb_module_debug(0, MODULE, d, "Unable to allocate memory for packet queue structure!"); \
+		\
+		if (!mypacket || !new_q) eb_debug (1, 0, MODULE, "Exiting on memory allocation failure."); \
+		\
+		memcpy (mypacket, p, length); \
+		\
+		new_q->p = mypacket; \
+		new_q->length = length; \
+		new_q->n = NULL; \
+		\
+		pthread_mutex_lock(&(me->module_mutex)); \
+		\
+		if ((started = me->module_started)) \
+		{ \
+			/* Put traffic on our packet queue */ \
+			\
+			q = me->module_queue; \
+			\
+			while (q && q->n) /* Skip to end */ \
+				q = q->n; \
+				\
+			if (!q) /* Nothing on queue */ \
+				me->module_queue = new_q; \
+			else	q->n = new_q; /* Add to end */ \
+			\
+			eb_debug (0, 3, MODULE, "%3d.%3d from %3d.%3d Traffic received, length %d", \
+					p->p.dststn, p->p.dstnet, \
+					p->p.srcstn, p->p.srcnet, \
+					length); \
+			\
+		} \
+		else \
+		{ \
+			/* Quit out - module not running - do not add to queue */ \
+			eb_module_free(MODULE,"Free packet structure for " MODULE " packet - module not started", mypacket); \
+			eb_module_free(MODULE,"Free packet queue structure for " MODULE " queue - module not started", new_q); \
+		} \
+		\
+		pthread_mutex_unlock(&(me->module_mutex)); \
+		\
+		if (started) pthread_cond_signal(&(me->module_cond)); \
+		\
+		return; \
+	}
+
+/* Template module thread function - pulls traffic off the queue, calls a processing function (prototype void (* func) (struct __eb_device *d, struct __eb_device_module *m, struct __econet_aun_packet *p, uint16_t length))
+ */
+
+#define eb_module_thread_def(MODULE,funcname,actionfunc); \
+	void * funcname (void *p) \
+	{ \
+		struct __eb_device *d = (struct __eb_device *) p; \
+		\
+		struct __eb_device_module *me; \
+		\
+		me = eb_module_get_data(d, MODULE); \
+		\
+		if (!me) /* No data */ \
+		{ \
+			eb_module_debug(1, MODULE, d, "Module thread cannot locate module data - exiting"); \
+			return NULL; \
+		} \
+		\
+		pthread_mutex_lock(&(me->module_mutex)); \
+		\
+		/* Lock and wait for traffic */ \
+		\
+		while (!(me->module_exiting)) \
+		{ \
+			struct __eb_packetqueue *q, *qn; \
+			struct __econet_packet_aun *packet; \
+			\
+			eb_module_debug(3, MODULE, d, "Working"); \
+			q = me->module_queue; \
+			\
+			while (q) \
+			{ \
+				/* Traffic to process */ \
+				qn = q->n; \
+				packet = q->p; \
+				if (!packet) eb_module_debug (0, MODULE, d, "Module thread found NULL packet!"); \
+				actionfunc(d, me, packet, q->length); \
+				eb_module_free(MODULE, "Free packet structure after processing", packet); \
+				eb_module_free(MODULE, "Free packet queue structure after processing", q); \
+				q = qn; \
+			} \
+			me->module_queue = NULL; /* Queue now empty */ \
+			\
+			if (!(me->module_exiting)) \
+			{ \
+				eb_module_debug(3, MODULE, d, "Sleeping"); \
+				\
+				pthread_cond_wait(&(me->module_cond), &(me->module_mutex)); \
+			}\
+			\
+		} \
+		\
+		eb_module_debug (2, MODULE, d, "Service thread exiting"); \
+		\
+		me->module_has_exited = 1; \
+		\
+		pthread_mutex_unlock(&(me->module_mutex)); \
+		\
+		pthread_exit(NULL); \
+	}
+
 
 /* Callback function 
  *

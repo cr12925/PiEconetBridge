@@ -6400,23 +6400,15 @@ static void * eb_device_despatcher (void * device)
 				m = d->local.modules;
 
 				if (m)
-					eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d Starting modules", "Local", d->net, d->local.stn);
+					eb_debug (0, 2, "DESPATCH", "%-8s %3d.%3d Starting modules", "Local", d->net, d->local.stn);
 				else
-					eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d No modules to start", "Local", d->net, d->local.stn);
+					eb_debug (0, 3, "DESPATCH", "%-8s %3d.%3d No modules to start", "Local", d->net, d->local.stn);
 
 				while (m)
 				{
 					if (m->module_autostart)
-					{
-						if (((m->module_start) ((void *) d, m))) /* Failed to start */
-							eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d Module '%s' failed to start", "Local", d->net, d->local.stn, m->module_name);
-						else
-						{
-							m->module_started = 1;
-							eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d Module '%s' started by despatcher", "Local", d->net, d->local.stn, m->module_name);
-						}
+						eb_module_start ((void *) d, m);
 
-					}
 					m = m->next;
 				}
 
@@ -9996,6 +9988,9 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 				while (eb_module_table[count].module_json_key != NULL)
 				{
+					if (count == 0)
+						eb_debug (0, 1, "DESPATCH", "%-8s         Initializing modules", "Local");
+
 					/* Does module's key exist ? */
 
 					if (json_object_object_get_ex(jstation, eb_module_table[count].module_json_key, &jo))
@@ -10010,7 +10005,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 						if (((eb_module_table[count].module_init) ((void *) d, jo))) /* Failed to initialize */
 							eb_debug (0, 0, "DESPATCH", "%-8s %3d.%3d Module with JSON key '%s' failed to initialize", "Local", d->net, d->local.stn, eb_module_table[count].module_json_key);
 						else
-							eb_debug (0, 0, "DESPATCH", "%-8s %3d.%3d Module with JSON key '%s' initialized", "Local", d->net, d->local.stn, eb_module_table[count].module_json_key);
+							eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d Module with JSON key '%s' initialized", "Local", d->net, d->local.stn, eb_module_table[count].module_json_key);
 
 					}
 
@@ -14042,7 +14037,7 @@ int main (int argc, char **argv)
 
 	/* Display machine type information */
 
-	eb_debug (0, 1, "CORE", "Identified a %s %s",
+	eb_debug (0, 1, "CORE", "                 Identified a %s %s",
 			(eb_mfr == 0xEC) ? "Generic" 
 		:	(eb_mfr == 0xEE) ? "Raspberry Pi" : "Unknown",
 			(eb_mtype == 0xEF) ? "Pi 3"

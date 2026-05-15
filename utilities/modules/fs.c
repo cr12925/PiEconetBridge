@@ -4269,7 +4269,7 @@ struct __fs_file * fsop_open_interlock(struct fsop_data *f, unsigned char *path,
 
 	*err = 0; /* initialize */
 
-	fs_debug_full (0, 2, f->server, f->net, f->stn, "Interlock attempting to open path %s, mode %d, userid %04X", path, mode, f->userid);
+	fs_debug_full (0, 3, f->server, f->net, f->stn, "Interlock attempting to open path %s, mode %d, userid %04X", path, mode, f->userid);
 
 	if (is_tape && mode >= 2) // Fail if we try to write to a tape
 	{
@@ -4298,7 +4298,7 @@ struct __fs_file * fsop_open_interlock(struct fsop_data *f, unsigned char *path,
 					if (file->disc)
 						file->disc->inuse++; /* Increment use count */	
 					
-					fs_debug_full (0, 2, f->server, f->net, f->stn, "Interlock opened internal dup handle, mode %d. Readers = %d, Writers = %d, path %s", mode, file->readers, file->writers, file->name);
+					fs_debug_full (0, 3, f->server, f->net, f->stn, "Interlock opened internal dup handle, mode %d. Readers = %d, Writers = %d, path %s", mode, file->readers, file->writers, file->name);
 					return file; // Return the index into fs_files
 				}
 				else // We can't open for reading because someone else has it open for writing
@@ -4343,7 +4343,7 @@ struct __fs_file * fsop_open_interlock(struct fsop_data *f, unsigned char *path,
 	if (file->disc)
 		file->disc->inuse++; /* Increment use count */	
 					
-	fs_debug_full (0, 2, f->server, f->net, f->stn, "Interlock opened internal handle: mode %d. Readers = %d, Writers = %d, path %s", mode, file->readers, file->writers, file->name);
+	fs_debug_full (0, 3, f->server, f->net, f->stn, "Interlock opened internal handle: mode %d. Readers = %d, Writers = %d, path %s", mode, file->readers, file->writers, file->name);
 	return file;
 
 }
@@ -4360,14 +4360,14 @@ void fsop_close_interlock(struct __fs_station *s, struct __fs_file * file, uint8
 	if (file->disc)
 		file->disc->inuse--; /* Decrement inuse count for disc */
 
-	fs_debug_full (0, 2, s, 0, 0, "Interlock close internal handle: mode %d. Readers now = %d, Writers now = %d, path %s", mode, file->readers, file->writers, file->name);
+	fs_debug_full (0, 3, s, 0, 0, "Interlock close internal handle: mode %d. Readers now = %d, Writers now = %d, path %s", mode, file->readers, file->writers, file->name);
 
 	// Safety valve here - only close when both are 0, not <= 0
 	// Otherwise we sometimes overclose - e.g. in the fs_garbage_collect() routine
 	
 	if (file->readers == 0 && file->writers == 0)
 	{
-		fs_debug_full (0, 2, s, 0, 0, "Interlock closing internal handle for %s in operating system", file->name);
+		fs_debug_full (0, 3, s, 0, 0, "Interlock closing internal handle for %s in operating system", file->name);
 		fclose(file->handle);
 		FS_LIST_SPLICEFREE(s->files,file,"FS","Freeing internal file structure");
 	}
@@ -5303,6 +5303,8 @@ void fsop_setup(void)
 	FSOP_OSCLI(SETOPT,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 5);
 	FSOP_OSCLI(SETOWNER,(FSOP_00_ANON), 1, 2, 5);
 	FSOP_OSCLI(SETPASS,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 4);
+	FSOP_OSCLI(SRVSTART,(FSOP_00_LOGGEDIN | FSOP_00_BRIDGE), 1, 2, 6);
+	FSOP_OSCLI(SRVSTOP,(FSOP_00_LOGGEDIN | FSOP_00_BRIDGE), 1, 2, 6);
 	FSOP_OSCLI(TAPEMOUNT, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 1, 2, 5); /* <tapename> [<drive no.>] */
 	FSOP_OSCLI(TAPEDISMOUNT, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 0, 1, 5); /* <drive no.> */
 	FSOP_OSCLI(TAPESELECT, (FSOP_00_LOGGEDIN | FSOP_00_MDFS | FSOP_00_SYSTEM), 1, 1, 5); /* <drive no.> */

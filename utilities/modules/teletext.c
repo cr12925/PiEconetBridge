@@ -234,7 +234,7 @@ void * eb_teletext_server (void *i)
 
 	total_pages = eb_teletext_rescan (d);
 
-	while (1)
+	while (!(m->module_exiting))
 	{
 		uint16_t	next_page;
 
@@ -243,6 +243,9 @@ void * eb_teletext_server (void *i)
 
 		pthread_cond_timedwait (&(m->module_cond),
 				&(m->module_mutex), &when);
+
+		if (m->module_exiting) /* Die if we are being asked to shut down */
+			break;
 
 		/* Re-scan if appropriate - use next_page temporarily */
 
@@ -378,6 +381,10 @@ void * eb_teletext_server (void *i)
 
 	}
 
+	m->module_has_exited = 1;
+
+	pthread_mutex_unlock (&(m->module_mutex));
+
 	return NULL;
 
 }
@@ -430,12 +437,7 @@ uint8_t teletext_init (void *device, struct json_object *j)
 		else	header_broadcast = 0;
 	}
 		
-	me = eb_module_register(d, "TELETEXT", sizeof(struct eb_teletext_private));
-
-	if (d->local.modules)
-		eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Module appears to be registered", d->net, d->local.stn);
-	else
-		eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Module NOT registered", d->net, d->local.stn);
+	me = eb_module_register(d, "TELETEXT", NULL, sizeof(struct eb_teletext_private));
 
 	if (!me)
 	{
@@ -449,6 +451,8 @@ uint8_t teletext_init (void *device, struct json_object *j)
 	me->module_exit = teletext_exit;
 	me->module_autostart = autostart;
 	me->module_port = EB_PORT_TELETEXT_S_REPLY;
+	me->module_queue = NULL; /* Empty packet queue */
+	me->module_started = 0;
 	
 	tt = (struct eb_teletext_private *) me->module_ws;
 
@@ -474,21 +478,11 @@ uint8_t teletext_start(void *device, struct __eb_device_module *me)
 	struct eb_teletext_private *tt = (struct eb_teletext_private *) me->module_ws;
 	struct __eb_device *d = (struct __eb_device *) device;
 
+	me->module_has_exited = 0;
+
 	if (tt->running)
 	{
 		eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Unable to start teletext server - already running", d->net, d->local.stn);
-		return 1;
-	}
-
-	if (pthread_mutex_init(&(me->module_mutex), NULL) != 0)
-	{
-		eb_debug (1, 0, "TELETEXT", "Local    %3d.%3d Failed to initialize queue mutex", d->net, d->local.stn);
-		return 1;
-	}
-
-	if (pthread_cond_init(&(me->module_cond), NULL) != 0)
-	{
-		eb_debug (1, 0, "TELETEXT", "Local    %3d.%3d Failed to initialize queue condition", d->net, d->local.stn);
 		return 1;
 	}
 
@@ -499,6 +493,8 @@ uint8_t teletext_start(void *device, struct __eb_device_module *me)
 	}
 
 	pthread_detach(me->module_thread);
+
+	tt->running = 1;
 
 	EB_PORT_SET(d, ports, EB_PORT_TELETEXT_S_CMD, eb_port_teletext_handler, d);
 
@@ -523,7 +519,7 @@ uint8_t teletext_stop (void *device, struct __eb_device_module *module)
 
 	eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Server shutting down", d->net, d->local.stn);
 
-	/* KIll our thread */
+	/* Can't be in critical section because _stop is called under lock */
 
 	pthread_cancel(module->module_thread);
 
@@ -555,6 +551,8 @@ uint8_t teletext_exit(void *device, struct __eb_device_module *m)
 		eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Server module exit called, but server is running", d->net, d->local.stn);
 		return 1;
 	}
+
+	EB_PORT_CLR(d, reserved_ports, EB_PORT_TELETEXT_S_CMD);
 
 	eb_module_deregister(d, m);
 

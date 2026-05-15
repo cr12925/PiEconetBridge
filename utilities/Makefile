@@ -51,6 +51,8 @@ econet-test: econet-test.o
  
 econet-ledtest: econet-ledtest.o
 
+econet-hello: econet-hello.o econet-pipe.o
+
 econet-notify: econet-notify.o econet-pipe.o
 
 econet-remote: econet-remote.o econet-pipe.o
@@ -92,6 +94,8 @@ econet-fslist.o: econet-fslist.c econet-pipe.c ../include/econet-gpio-consumer.h
 econet-isnets.o: econet-isnets.c econet-pipe.c ../include/econet-gpio-consumer.h
 
 econet-servers.o: econet-servers.c econet-pipe.c ../include/econet-gpio-consumer.h
+
+econet-hello.o: econet-hello.c econet-pipe.c ../include/econet-gpio-consumer.h
 
 econet-ipgw.o: econet-ipgw.c econet-pipe.c ../include/econet-gpio-consumer.h
 
