@@ -28,11 +28,10 @@ struct __eb_device * srv_parse_stn (char *station)
 	struct __eb_device *d = NULL;
 	uint8_t	net, stn;
 
-	printf ("Parsing station %s - isdigit() = %d\n", station, isdigit(*station));
 	if (
 		isdigit(*station)
 	&& 	(sscanf(station, "%hhd.%hhd", &net, &stn) == 2)
-	&&	(net == 0 || net > 254 || stn == 0 || stn > 254)
+	&&	!(net == 0 || net > 254 || stn == 0 || stn > 254)
 	)
 	{
 		d = eb_find_station_internal (net, stn);
@@ -64,7 +63,7 @@ FSOP_00(SRVSTART)
 		FSOP_EXTRACT(f,0,module,8);
 	else	FSOP_EXTRACT(f,1,module,8);
 
-	fs_debug_full (0, 1, f->server, f->active->net, f->active->stn, "Requested start up of %s module", module);
+	fs_debug_full (0, 1, f->server, f->active->net, f->active->stn, "Requested start up of %s module on %d.%d", module, device->net, device->local.stn);
 
 	if (eb_module_start_byname(device,module))
 		fsop_error(f, 0xff, "Service failed to start");
@@ -92,7 +91,7 @@ FSOP_00(SRVSTOP)
 		FSOP_EXTRACT(f,0,module,8);
 	else	FSOP_EXTRACT(f,1,module,8);
 
-	fs_debug_full (0, 1, f->server, f->active->net, f->active->stn, "Requested stop of %s module", module);
+	fs_debug_full (0, 1, f->server, f->active->net, f->active->stn, "Requested stop of %s module on %d.%d", module, device->net, device->local.stn);
 
 	if (device == f->server->fs_device && !strcasecmp(module,"FS")) /* Attempt to stop local fileserver */
 	{
