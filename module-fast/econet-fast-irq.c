@@ -824,7 +824,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 	
 	if (chip_state == EM_TEST)
 	{
-		printk_ratelimited(KERN_INFO "econet-fast: IRQ handler called in test mode - disabling IRQ");
+		printk_ratelimited(KERN_INFO "econet-fast: IRQ handler called in test mode - disabling IRQ, rxp = %p, txp = %p", econet_data->rxp, econet_data->txp);
 
 		/* Turn off ADLC IRQs */
 		econet_write_cr(ECONET_GPIO_CR1, ECONET_GPIO_C1_TX_RESET | ECONET_GPIO_C1_RX_RESET);
@@ -1019,7 +1019,7 @@ irqreturn_t econet_irq(int irq, void *ident)
 	}
 	else
 	{
-		printk (KERN_INFO "econet-fast: Bottom half IRQ handler called but ADLC not flagging an IRQ (SR1 = %02X, SR2 = %02X)", sr1, sr2);
+		printk (KERN_INFO "econet-fast: Bottom half IRQ handler called but ADLC not flagging an IRQ (SR1 = %02X, SR2 = %02X), rxp = %p, txp = %p", sr1, sr2, econet_data->rxp, econet_data->txp);
 
 		/* Reset CRs to try and get the thing to continue */
 
