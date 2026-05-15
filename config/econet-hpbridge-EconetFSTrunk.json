@@ -9,6 +9,7 @@
       "diverts":[
         {
           "station":254,
+	  "hellow":{ "msg":"Hello there, " },
           "printers":[
           ],
           "ipservers":[
