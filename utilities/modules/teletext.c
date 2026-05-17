@@ -402,6 +402,12 @@ uint8_t teletext_init (void *device, struct json_object *j)
 	uint8_t	header_broadcast = 1, autostart = 1;
 	struct json_object *jo;
 
+	if (!j)
+	{
+		eb_debug (0, 2, "TELETEXT", "Local    %3d.%3d Server has no configuration - not initializing", d->net, d->local.stn);
+		return 1;
+	}
+
 	eb_debug (0, 2, "TELETEXT", "Local    %3d.%3d Server initializing", d->net, d->local.stn);
 
 	/* First check the JSON to see if it's valid, otherwise no point doing anything else */

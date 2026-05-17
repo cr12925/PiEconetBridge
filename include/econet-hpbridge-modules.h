@@ -18,11 +18,17 @@
 #ifndef __ECONETBRIDGEMODULES_H__
 #define __ECONETBRIDGEMODULES_H__
 
+#define init_proto(M) extern uint8_t M ## _init(void *, struct json_object *)
+
 //extern uint8_t eb_module_fooserver_init(void *, struct json_object *);
 //extern uint8_t setp_module_init(void *, struct json_object *);
-extern uint8_t teletext_init(void *, struct json_object *);
-extern uint8_t hellow_init(void *, struct json_object *); /* Hello, World! sample module */
-extern uint8_t IPGW_init(void *, struct json_object *); /* Hello, World! sample module */
+init_proto(teletext);
+init_proto(hellow);
+init_proto(IPGW);
+init_proto(FINDSRVR);
+//extern uint8_t teletext_init(void *, struct json_object *);
+//extern uint8_t hellow_init(void *, struct json_object *); /* Hello, World! sample module */
+//extern uint8_t IPGW_init(void *, struct json_object *); /* Hello, World! sample module */
 
 /* Please see struct definition in econet-hpbridge.h */
 /* Essentially first entry is the name of an object which must exist in the diverts[] array for a virtual server to which the module is attached, the second is 
@@ -37,6 +43,7 @@ static struct __eb_module_table eb_module_table[] = {
 	{ "teletext", teletext_init },
 	{ "hellow", hellow_init },
 	{ "ipservers", IPGW_init },
+	{ "findserver", FINDSRVR_init },
 	{	NULL, NULL }
 };
 

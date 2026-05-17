@@ -189,7 +189,10 @@ void eb_module_deregister (void *d_in, struct __eb_device_module *m)
 	else
 		pprev->next = p->next;
 
-	eb_free (__FILE__, __LINE__, "MODULE", "Free module private workspace", m);
+	if (m->module_ws) /* Free module workspace */
+		eb_free (__FILE__, __LINE__, "MODULE", "Free module private space", m->module_ws);
+
+	eb_free (__FILE__, __LINE__, "MODULE", "Free module workspace", m);
 
 	pthread_mutex_unlock (&(d->local.modules_mutex));
 
@@ -234,6 +237,35 @@ struct __eb_device_module * eb_module_get_data (void *d_in, unsigned char *modna
 
 	return workspace;
 
+}
+
+/* Find workspace address but only return it if module started, leave module locked if specified */
+
+struct __eb_device_module * eb_module_get_data_started_internal (void *d_in, unsigned char *modname, uint8_t leavelocked)
+{
+	struct __eb_device_module *m;
+
+	m = eb_module_get_data(d_in, modname);
+
+	if (!m) return NULL; /* Not found */
+
+	pthread_mutex_lock(&(m->module_mutex));
+
+	if (!(m->module_started)) /* Not started - unlock & return */
+	{
+		pthread_mutex_unlock(&(m->module_mutex));
+		return NULL;
+	}
+
+	if (!leavelocked)
+		pthread_mutex_unlock(&(m->module_mutex));
+
+	return m;
+}
+
+void eb_module_unlock (struct __eb_device_module *m)
+{
+	pthread_mutex_unlock(&(m->module_mutex));
 }
 
 /*

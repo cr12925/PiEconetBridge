@@ -69,7 +69,9 @@ uint8_t hellow_init (void *device, struct json_object *j)
 
 	eb_module_debug (1, MYMODULE, d, "Server initializing");
 
-	if ((jsonret = eb_module_json_copy_string(j,"msg",mytext,127)) != 0)
+	/* j can be NULL, signifying no config block in the JSON */
+
+	if (j && (jsonret = eb_module_json_copy_string(j,"msg",mytext,127)) != 0)
 	{
 		/* String too long, or wasn't there */
 

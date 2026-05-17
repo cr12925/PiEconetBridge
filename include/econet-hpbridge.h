@@ -298,6 +298,10 @@ uint8_t eb_module_stop_byname (void *, unsigned char *); /* Stop a module by nam
 uint8_t eb_module_stop (void *, struct __eb_device_module *); /* Stop a module by pointer; same idea as stop */
 
 struct __eb_device_module * eb_module_get_data (void *, unsigned char *); /* Get address of this module's struct __eb_device_module; returns NULL if not found. Gives access to all the info above, including address of private workspace */
+struct __eb_device_module * eb_module_get_data_started_internal (void *, unsigned char *, uint8_t); /* Get address of this module's struct __eb_device_module; returns NULL if not found or not started, leaves the module struct locked if last parameter is none-zero. Gives access to all the info above, including address of private workspace */
+#define eb_module_get_data_started(d,m) eb_module_get_data_started_internal(d,m,0)
+#define eb_module_get_data_started_locked(d,m) eb_module_get_data_started_internal(d,m,1)
+void eb_module_unlock(struct __eb_device_module *); /* Unlocks module mutex */
 
 /* EB module generic debug */
 
@@ -336,7 +340,8 @@ struct __eb_device_module * eb_module_get_data (void *, unsigned char *); /* Get
 		if (port != 0x00) EB_PORT_SET (d, reserved_ports, port, NULL, NULL); /* Reserve port if not 0 */ \
 		me->module_port = port; \
 		\
-		if (json_object_object_get_ex(j,"autostart",&jo) && json_object_is_type(jo,json_type_boolean)) \
+		/* NB: j can be NULL when calling _init */ \
+		if (j && json_object_object_get_ex(j,"autostart",&jo) && json_object_is_type(jo,json_type_boolean)) \
 		{ \
 			if (json_object_get_boolean(jo)) autostart = 1; \
 			else autostart = 0; \
@@ -349,7 +354,13 @@ struct __eb_device_module * eb_module_get_data (void *, unsigned char *); /* Get
 		me->module_stop = stopfunc; \
 		me->module_exit = exitfunc; \
 		\
-		privinit(d, me, j); /* Set up our functions and private data */ \
+		if (privinit(d, me, j)) /* Set up our functions and private data */ \
+		{ \
+			/* Init failed - undo everything above */ \
+			EB_PORT_CLR (d, reserved_ports, port); \
+			eb_module_deregister (d, me); \
+			return 1; /* Failure */ \
+		} \
 		\
 		return 0; /* Success */ \
 	}
@@ -1800,9 +1811,11 @@ void ipgw_handle_traffic_internal (struct __econet_packet_aun *, uint16_t, void 
 /* This still required as IP is a device we read from! */
 void eb_ipgw_incoming_ip (struct __eb_device *, struct __eb_device_module *, struct __eb_ipgw *);
 
+#if 0 /* Findserver modularized */
 /* FINDSERVER externs */
 
 void eb_handle_findserver_traffic (struct __econet_packet_aun *, uint16_t, void *);
+#endif
 
 /* *FAST externs */
 

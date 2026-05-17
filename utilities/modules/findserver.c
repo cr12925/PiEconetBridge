@@ -21,12 +21,21 @@
 #include "econet-pserv.h"
 #include "fs.h"
 
-void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, void *param)
+struct __eb_findserver_no_advertise {
+	char	module_name[9];
+	struct __eb_findserver_no_advertise *next;
+};
+
+struct __eb_findserver_config {
+	struct __eb_findserver_no_advertise *no_advertise;
+};
+
+//void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, void *param)
+void eb_handle_findserver_traffic (struct __eb_device *d, struct __eb_device_module *me, struct __econet_packet_aun *p, uint16_t len)
 {
 
-	struct __eb_device * d = (struct __eb_device *) param;
-
 	struct __eb_device_module *m;
+	struct __eb_findserver_config *config = (struct __eb_findserver_config *) me->module_ws;
 
 	if (d->type != EB_DEF_LOCAL) /* Only deal with this for local servers */
 		return;
@@ -86,19 +95,6 @@ void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, 
 				eb_raw_send (d, reply, my_length);
 			}
 		}
-#if 0 /* Modularized */
-		if (d->local.ip.tunif[0]) // Non-null tunnel - IP server
-		{
-
-			strcpy (server_type, "IPGW    ");	
-
-			if (!strcasecmp(findserver_type, "IPGW    ") || !strcasecmp(findserver_type, "        "))
-			{
-				memcpy (&(reply->p.data[3]), server_type, 8);
-				eb_raw_send (d, reply, my_length);
-			}
-		}
-#endif
 							
 		if (d->local.printers) // Print server
 		{
@@ -112,20 +108,6 @@ void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, 
 			}
 
 		}
-#if 0 /* Modularized */
-		if (d->local.teletext_active) // Teletext server
-		{
-			strcpy (server_type, "TELETEXT");	
-
-			if (!strcasecmp(findserver_type, "TELETEXT") || !strcasecmp(findserver_type, "        "))
-			{
-				reply->p.data[1] = EB_PORT_TELETEXT_S_REPLY;
-				memcpy (&(reply->p.data[3]), server_type, 8);
-				eb_raw_send (d, reply, my_length);
-			}
-
-		}
-#endif
 
 		pthread_mutex_lock (&(d->local.modules_mutex));
 
@@ -136,21 +118,37 @@ void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, 
 
 		while (m)
 		{
-			pthread_mutex_lock (&(m->module_mutex));
+			struct __eb_findserver_no_advertise *na_check = config->no_advertise;
+			uint8_t no_advertise = 0;
 
-			reply->p.data[1] = m->module_port;
+			/* Is it in our no advertise list? */
 
-			memcpy(&(reply->p.data[3]), m->module_name, 8);
-
-			if (m->module_started)
+			while (na_check)
 			{
-				eb_debug (0, 2, "FIND", "Local    %3d.%3d Send findserver reply for '%s' module", d->net, d->local.stn, m->module_name);
-				eb_raw_send (d, reply, my_length);
+				if (!strcasecmp(na_check->module_name, m->module_findserver_name)) /* In the list */
+					no_advertise = 1;
+				na_check = na_check->next;
 			}
-			else
-				eb_debug (0, 2, "FIND", "Local    %3d.%3d No findserver reply for '%s' - module not started", d->net, d->local.stn, m->module_name);
 
-			pthread_mutex_unlock (&(m->module_mutex));
+			if (m != me && !no_advertise) /* Don't announce findserver! (and things where our advertising is turned off */
+			{
+
+				pthread_mutex_lock (&(m->module_mutex));
+	
+				reply->p.data[1] = m->module_port;
+	
+				memcpy(&(reply->p.data[3]), m->module_name, 8);
+	
+				if (m->module_started)
+				{
+					eb_debug (0, 2, "FIND", "Local    %3d.%3d Send findserver reply for '%s' module", d->net, d->local.stn, m->module_name);
+					eb_raw_send (d, reply, my_length);
+				}
+				else
+					eb_debug (0, 2, "FIND", "Local    %3d.%3d No findserver reply for '%s' - module not started", d->net, d->local.stn, m->module_name);
+	
+				pthread_mutex_unlock (&(m->module_mutex));
+			}
 
 			m = m->next;
 		}
@@ -161,3 +159,61 @@ void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, 
 
 	}
 }
+
+/* Read in the list of services we don't advertize and store it */
+
+uint8_t findserver_init_private(struct __eb_device *d, struct __eb_device_module *m, struct json_object *j)
+{
+	struct json_object *noad;
+	struct __eb_findserver_config *config = (struct __eb_findserver_config *) m->module_ws;
+	struct __eb_findserver_no_advertise *na = NULL;
+	uint16_t	length, count;
+
+	if (!config)
+	{
+		eb_debug (0, 1, "FINDSRVR", "No private workspace allocated - refusing to initialize");
+		return 1;
+	}
+
+	config->no_advertise = NULL; /* Initialize list */
+
+	if (!j) /* No key in JSON */
+		return 0; /* Success - no config, so nothing to not advertise */
+
+	if (json_object_object_get_ex(j, "no-advertize", &noad) && json_object_is_type (noad, json_type_array))
+	{
+		length = json_object_array_length(noad);
+		count = 0;
+
+		while (count < length)
+		{
+			struct json_object *array_entry;
+
+			array_entry = json_object_array_get_idx(noad, count);
+
+			if (array_entry && json_object_is_type (array_entry, json_type_string))
+			{
+				na = eb_module_alloc("FINDSRVR", "New no-advertize structure", sizeof(struct __eb_findserver_no_advertise));
+				if (!na)
+					eb_debug (1, 0, "FINDSRVR", "Unable to allocate memory for a no-advertize struct!");
+				strncpy (na->module_name, json_object_get_string(array_entry), 8);
+				na->module_name[8] = '\0'; /* Force terminate, just in case */
+
+				na->next = config->no_advertise;
+				config->no_advertise = na; /* Put on front of list */
+			}
+
+			count++;
+		}
+	}
+
+	return 1;
+}
+
+void findserver_cleanup(struct __eb_device *d, struct __eb_device_module *m)
+{
+	/* Do nothing - the no advertize list does not need freeing */
+}
+
+eb_module_funcs_def(FINDSRVR,struct __eb_findserver_config,EB_PORT_FINDSERVER,findserver_init_private,eb_handle_findserver_traffic,findserver_cleanup);
+

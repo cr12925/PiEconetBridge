@@ -1339,16 +1339,11 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 			EB_PORT_SET(existing, ports, EB_PORT_FAST, eb_port_a0_handler, existing);
 
 			existing->local.fast_menu = NULL;
-#if 0 /* Teletext modularized */
-			/* Initialize teletext */
 
-			existing->local.teletext_root = NULL;
-			existing->local.teletext_active = 0;
-			existing->local.teletext_queue = NULL;
-#endif
-
+#if 0 /* Modularized */
 			/* And the FINDSERVER handler */
 			EB_PORT_SET(existing, ports, EB_PORT_FINDSERVER, eb_handle_findserver_traffic, existing);
+#endif
 
 			DEVINIT_DEBUG("Created new local device on station %d.%d", net, stn);
 
@@ -6407,7 +6402,7 @@ static void * eb_device_despatcher (void * device)
 
 			//fprintf (stderr, "%d.%d - m_ip = %p, m_ip_ws = %p\n", d->net, d->local.stn, m_ip, m_ip_ws);
 
-			if (m_ip) // Active tunnel config
+			if (m_ip) // Active tunnel config - NB we open the tunnel even if the module was not auto started - we only open it once, we don't close it if the module is stopped.
 			{
 				int 			handle, err;
 				struct ifreq 		mine;
@@ -8396,13 +8391,15 @@ static void * eb_device_despatcher (void * device)
 									yline += 2 + (found / 4);	
 								}
 	
-								if (m_ip) // Is an IP gateway
+								if ((m_ip = eb_module_get_data_started_locked(d, "IPGW"))) // Is an IP gateway
 								{
 									char addr_string[40];
-
+									struct __eb_ipgw *m_ip_ws = (struct __eb_ipgw *) m_ip->module_ws;
 									snprintf(addr_string, 39, "IP Gateway at%c%s", 129, m_ip_ws->addr);
 									beeb_print (yline, 0, addr_string);
 									yline += 2;
+
+									eb_module_unlock(m_ip);
 
 								}
 							}
@@ -8500,95 +8497,6 @@ static void * eb_device_despatcher (void * device)
 							eb_enqueue_output (d, &ack, 4, NULL);
 							new_output = 1;
 
-						}
-						/* Moved to separate handler 
-						else if (p->p->p.port == 0x9f && (p->p->p.aun_ttype == ECONET_AUN_DATA || p->p->p.aun_ttype == ECONET_AUN_BCAST)) // Print server query
-						{
-							uint8_t		querytype;
-							unsigned char	pname[7];
-							uint8_t		count, found;
-							struct __econet_packet_aun	*reply;
-							struct __eb_printer *printer;
-								
-							reply = eb_malloc (__FILE__, __LINE__, "PRINTER", "Allocate status query reply packet", 18);
-
-							if (!reply)
-								eb_debug (1, 0, "PRINTER", "Unable to malloc() new printer status reply packet");
-
-							querytype = p->p->p.data[6]; // See #defines for the types
-
-							for (count = 0; count < 6; count++) // Copy printer name
-								pname[count] = p->p->p.data[count];
-
-							pname[6] = '\0'; // NULL terminate
-
-							eb_debug (0, 2, "PRINTER", "Local    %3d.%3d from %3d.%3d Printer %s query for printer %s", 
-								d->net, d->local.stn,
-								p->p->p.srcnet, p->p->p.srcstn,	
-								(querytype == PRN_QUERY_STATUS) ? "status" : "name",
-								pname);
-
-							reply->p.srcnet = d->net;
-							reply->p.srcstn = d->local.stn;
-							reply->p.dstnet = p->p->p.srcnet;
-							reply->p.dststn = p->p->p.srcstn;
-							reply->p.aun_ttype = ECONET_AUN_DATA;
-							reply->p.port = 0x9e;
-							reply->p.ctrl = 0x80;
-							reply->p.seq = eb_get_local_seq(d);
-							reply->p.data[0] = reply->p.data[1] = reply->p.data[2] = 0;
-
-							if (reply->p.dstnet == 0)
-								reply->p.dstnet = d->net;
-
-							if (querytype == PRN_QUERY_STATUS)
-							{
-								found = 0;
-
-								printer = d->local.printers;
-
-								while (printer && !found)
-								{
-									//eb_debug (0, 3, "PRINTER", "Looking at printer named %s", printer->acorn_name);
-									if (!strcasecmp(printer->acorn_name, (char *) pname) || !strcasecmp("PRINT ", (char *) pname))
-										found = 1;
-									else printer = printer->next;
-								}
-
-								if (found) 
-								{
-									eb_debug (0, 3, "PRINTER", "Local    %3d.%3d from %3d.%3d Printer %s query for printer %s - found at %p", 
-										d->net, d->local.stn,
-										p->p->p.srcnet, p->p->p.srcstn,	
-										(querytype == PRN_QUERY_STATUS) ? "status" : "name",
-										pname, printer);
-
-									eb_enqueue_output (d, reply, 3, NULL);	
-									new_output = 1;
-								}
-								else eb_debug (0, 2, "PRINTER", "Local    %3d.%3d from %3d.%3d Printer %s query for printer %s NOT FOUND",
-                                                                	d->net, d->local.stn,
-                                                                	p->p->p.srcnet, p->p->p.srcstn,
-                                                                	(querytype == PRN_QUERY_STATUS) ? "status" : "name",
-                                                                	pname);
-
-							}
-							else if (querytype == PRN_QUERY_NAME)
-							{
-								printer = d->local.printers;
-
-								while (printer)
-								{
-									snprintf ((char * restrict) &(reply->p.data[0]), 7, "%6s", printer->acorn_name);
-									eb_enqueue_output (d, reply, 6, NULL);
-									new_output = 1;
-									printer = printer->next;
-									reply->p.seq = eb_get_local_seq(d);
-								}
-
-							}
-
-							eb_free (__FILE__, __LINE__, "PRINTER", "Freeing printer reply packet", reply);
 						}
 						else if (p->p->p.port == 0xD1 && p->p->p.aun_ttype == ECONET_AUN_DATA) // Print server data
 						{
@@ -8764,153 +8672,6 @@ static void * eb_device_despatcher (void * device)
 							}
 
 						}
-						*/
-						/* Moved to external file
-						else if (p->p->p.port == 0xB0 && p->p->p.ctrl == 0x80 && (p->p->p.aun_ttype == ECONET_AUN_DATA || p->p->p.aun_ttype == ECONET_AUN_BCAST)) // FindServer query
-						{
-
-							char	findserver_type[9], server_type[9];
-							uint8_t	my_length;
-							struct __econet_packet_aun	*reply;
-								
-							reply = eb_malloc (__FILE__, __LINE__, "FINDSRV", "Allocate status query reply packet", 128);
-
-							if (!reply)
-								eb_debug (1, 0, "FINDSRVR", "Unable to malloc() new FindServer reply packet");
-							reply->p.srcnet = d->net;
-							reply->p.srcstn = d->local.stn;
-							reply->p.dstnet = p->p->p.srcnet;
-							reply->p.dststn = p->p->p.srcstn;
-							reply->p.aun_ttype = ECONET_AUN_DATA;
-							reply->p.port = 0xb1;
-							reply->p.ctrl = p->p->p.ctrl;
-							reply->p.seq = eb_get_local_seq(d);
-			
-							reply->p.data[0] = 0;
-							reply->p.data[2] = EB_VERSION;
-							strcpy ((char *) &(reply->p.data[12]), EB_SERVERID);
-							reply->p.data[11] = strlen(EB_SERVERID);
-
-							my_length = 12 + strlen(EB_SERVERID);
-
-							if (reply->p.dstnet == 0)
-								reply->p.dstnet = d->net;
-
-							memset (findserver_type, 0, 9);
-
-							memcpy (findserver_type, p->p->p.data, 8);
-
-							eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
-
-							eb_debug (0, 1, "FIND", "%-8s %3d.%3d FindServer request received - type '%-8s'",
-								eb_type_str(d->type), d->net, d->local.stn, findserver_type);
-
-							if (fsop_is_enabled(d->local.fs.server)) // Is fileserver
-							{
-								strcpy (server_type, "FILE    ");	
-								if (!strcasecmp(findserver_type, "FILE    ") || !strcasecmp(findserver_type, "        "))
-								{
-									memcpy (&(reply->p.data[3]), server_type, 8);
-									eb_enqueue_output (d, reply, my_length, NULL);
-									new_output = 1;
-								}
-							}
-
-							if (d->local.ip.tunif[0]) // Non-null tunnel - IP server
-							{
-
-								strcpy (server_type, "IPGW    ");	
-
-								if (!strcasecmp(findserver_type, "IPGW    ") || !strcasecmp(findserver_type, "        "))
-								{
-									memcpy (&(reply->p.data[3]), server_type, 8);
-									eb_enqueue_output (d, reply, my_length, NULL);
-									new_output = 1;
-								}
-							}
-							
-							if (d->local.printers) // Print server
-							{
-
-								strcpy (server_type, "PRINT   ");	
-
-								if (!strcasecmp(findserver_type, "PRINT   ") || !strcasecmp(findserver_type, "        "))
-								{
-									memcpy (&(reply->p.data[3]), server_type, 8);
-									eb_enqueue_output (d, reply, my_length, NULL);
-									new_output = 1;
-
-								}
-
-							}
-
-							eb_free (__FILE__, __LINE__, "FINDSRVR", "Freeing FindServer reply packet", reply);
-
-						}
-						*/
-						/* Moved to external file
-						else if (p->p->p.port == 0xD2 && d->local.ip.tunif[0] && (p->p->p.aun_ttype == ECONET_AUN_DATA || p->p->p.aun_ttype == ECONET_AUN_BCAST)) // IP/Econet
-						{
-							uint32_t src_ip, dst_ip;
-						
-							src_ip = *((uint32_t *) &(p->p->p.data[0]));
-							dst_ip = *((uint32_t *) &(p->p->p.data[4]));
-
-							eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
-							switch (p->p->p.ctrl)
-							{
-								case 0xA1: // Incoming ARP request
-								{
-									// Well, first we can update our ARP cache since we have just discovered a station (potentially)
-
-									eb_ipgw_set_arp (d, src_ip, (p->p->p.srcnet == 0 ? d->net : p->p->p.srcnet), p->p->p.srcstn);
-
-									if (ntohl(dst_ip) == d->local.ip.addresses->ip)
-									{
-										struct __econet_packet_aun *arp_reply;
-
-										arp_reply = eb_malloc(__FILE__, __LINE__, "IPGW", "Arp Reply", 20);
-
-										if (!arp_reply) eb_debug (1, 0, "IPGW", "Unable to malloc() for ARP reply!");
-
-										arp_reply->p.aun_ttype = ECONET_AUN_DATA;
-										arp_reply->p.port = 0xd2;
-										arp_reply->p.ctrl = 0xA2;
-										arp_reply->p.srcnet = d->net;
-										arp_reply->p.srcstn = d->local.stn;
-										arp_reply->p.dstnet = p->p->p.srcnet;
-										arp_reply->p.dststn = p->p->p.srcstn;
-
-										memcpy(&(arp_reply->p.data[0]), &(p->p->p.data[4]), 4);
-										memcpy(&(arp_reply->p.data[4]), &(p->p->p.data[0]), 4);
-
-										eb_debug (0, 3, "IPGW", "%-8s %3d.%3d Attempting to send ARP reply to %3d.%3d for our address",
-											eb_type_str(d->type), d->net, d->local.stn, arp_reply->p.dstnet, arp_reply->p.dststn);
-
-										eb_enqueue_output(d, arp_reply, 8, NULL);
-										new_output = 1;
-
-										eb_free(__FILE__, __LINE__, "IPGW", "Freeing ARP reply after transmission", arp_reply);
-									}
-
-									new_output = eb_ipgw_transmit (d, src_ip);
-
-								} break;
-
-								case 0xA2: // Incoming ARP reply
-								{
-									eb_ipgw_set_arp (d, src_ip, (p->p->p.srcnet == 0 ? d->net : p->p->p.srcnet), p->p->p.srcstn);
-									new_output = eb_ipgw_transmit (d, src_ip);
-
-								} break;
-	
-								case 0x81: // Incoming IP traffic
-								{
-									write(d->local.ip.socket, (char *) &(p->p->p.data), p->length);
-								} break;
-							}
-						}
-						*/
 						else
 						{
 							/* Check to see if this is a handled port */
@@ -9711,7 +9472,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 	uint8_t		net, stn;
 	uint16_t	jcount, jlength;
-	struct json_object	*jdiverts, *jstation, *jstation_number, *jprinters, *jfs, *jips, *jpipepath, *jnetclock;
+	struct json_object	*jdiverts, *jstation, *jstation_number, *jprinters, *jfs, /* *jips, */ *jpipepath, *jnetclock;
 #if 0 /* Teletext modularized */
 	struct json_object	*jteletextdir, *jteletexthdr;
 #endif
@@ -9810,6 +9571,8 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 		while (jcount < jlength)
 		{
+			uint8_t	is_pipe = 0;
+
 			jstation = json_object_array_get_idx(jdiverts, jcount);	
 
 			if (!json_object_object_get_ex(jstation, "station", &jstation_number))
@@ -9818,7 +9581,9 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 			stn = json_object_get_int(jstation_number);
 
 			json_object_object_get_ex(jstation, "printers", &jprinters);
+#if 0 /* IPGW modularized */
 			json_object_object_get_ex(jstation, "ipservers", &jips);
+#endif
 #if 0 /* Teletext modularized */
 			json_object_object_get_ex(jstation, "teletext-dir", &jteletextdir);
 			json_object_object_get_ex(jstation, "teletext-header-broadcast", &jteletexthdr);
@@ -9984,11 +9749,12 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 				pipebase = eb_malloc (__FILE__, __LINE__, "JSON", "Create pipe base path string", json_object_get_string_len(jpipepath) + 1);
 				strcpy (pipebase, json_object_get_string(jpipepath));
 				eb_device_init_pipe(net, stn, pipebase, flags);
+				is_pipe = 1;
 			}
 
 			/* *FAST handler */
 
-			if (json_object_object_get_ex(jstation, "fast-menu", &jfastmenu)) /* Re-use of jfw; this is the starting menu for *FAST connections */
+			if (!is_pipe && json_object_object_get_ex(jstation, "fast-menu", &jfastmenu)) /* Re-use of jfw; this is the starting menu for *FAST connections */
 			{
 				char *	menuname;
 
@@ -9999,19 +9765,21 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 			/* Check for modules */
 
+			if (!is_pipe)
 			{
 				uint16_t	count = 0;
 				struct 		__eb_device *d;
 				struct json_object	*jo;
+				uint8_t		key_exists;
 
 				while (eb_module_table[count].module_json_key != NULL)
 				{
 					if (count == 0)
 						eb_debug (0, 1, "DESPATCH", "%-8s         Initializing modules", "Local");
 
-					/* Does module's key exist ? */
+					/* Does module's key exist ? Or we fake it, if it's findserver because that always needs to start */
 
-					if (json_object_object_get_ex(jstation, eb_module_table[count].module_json_key, &jo))
+					if ((key_exists = json_object_object_get_ex(jstation, eb_module_table[count].module_json_key, &jo)) || !strcasecmp(eb_module_table[count].module_json_key, "findserver"))
 					{
 						/* Create new local, or get address if exists */
 
@@ -10020,7 +9788,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 						eb_debug (0, 2, "DESPATCH", "%-8s %3d.%3d Attempting to initialize '%s' module", "Local", d->net, d->local.stn, eb_module_table[count].module_json_key);
 						/* Call it's init function */
 
-						if (((eb_module_table[count].module_init) ((void *) d, jo))) /* Failed to initialize */
+						if (((eb_module_table[count].module_init) ((void *) d, key_exists ? jo : NULL))) /* Failed to initialize */
 							eb_debug (0, 0, "DESPATCH", "%-8s %3d.%3d Module with JSON key '%s' failed to initialize", "Local", d->net, d->local.stn, eb_module_table[count].module_json_key);
 						else
 							eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d Module with JSON key '%s' initialized", "Local", d->net, d->local.stn, eb_module_table[count].module_json_key);
