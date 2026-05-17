@@ -86,7 +86,7 @@ void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, 
 				eb_raw_send (d, reply, my_length);
 			}
 		}
-
+#if 0 /* Modularized */
 		if (d->local.ip.tunif[0]) // Non-null tunnel - IP server
 		{
 
@@ -98,6 +98,7 @@ void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, 
 				eb_raw_send (d, reply, my_length);
 			}
 		}
+#endif
 							
 		if (d->local.printers) // Print server
 		{
@@ -111,7 +112,7 @@ void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, 
 			}
 
 		}
-
+#if 0 /* Modularized */
 		if (d->local.teletext_active) // Teletext server
 		{
 			strcpy (server_type, "TELETEXT");	
@@ -124,6 +125,7 @@ void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, 
 			}
 
 		}
+#endif
 
 		pthread_mutex_lock (&(d->local.modules_mutex));
 
@@ -134,6 +136,8 @@ void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, 
 
 		while (m)
 		{
+			pthread_mutex_lock (&(m->module_mutex));
+
 			reply->p.data[1] = m->module_port;
 
 			memcpy(&(reply->p.data[3]), m->module_name, 8);
@@ -145,6 +149,8 @@ void eb_handle_findserver_traffic (struct __econet_packet_aun *p, uint16_t len, 
 			}
 			else
 				eb_debug (0, 2, "FIND", "Local    %3d.%3d No findserver reply for '%s' - module not started", d->net, d->local.stn, m->module_name);
+
+			pthread_mutex_unlock (&(m->module_mutex));
 
 			m = m->next;
 		}
