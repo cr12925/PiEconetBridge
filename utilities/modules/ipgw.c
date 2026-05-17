@@ -1,5 +1,5 @@
 /*
-  (c) 2024 Chris Royle
+  (c) 2026 Chris Royle
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
@@ -19,6 +19,8 @@
 
 #include "econet-hpbridge.h"
 
+extern char eb_tunnel_interface_list[512];
+
 /* IP Gateway functions  */
 
 /*
@@ -27,13 +29,11 @@
  * for it
  */
 
-uint16_t eb_ipgw_arp_dest(struct __eb_device *d, uint32_t addr)
+uint16_t eb_ipgw_arp_dest(struct __eb_device *d, struct __eb_ipgw *me, uint32_t addr)
 {
 
-	struct __eip_arp 	*a;
+	struct __eip_arp 	*a = me->addresses->arp;
 	struct timeval		now;
-
-	a = d->local.ip.addresses->arp;
 
 	eb_gettimeofday(&now, 0);
 
@@ -54,16 +54,16 @@ uint16_t eb_ipgw_arp_dest(struct __eb_device *d, uint32_t addr)
  *
  */
 
-void eb_ipgw_set_arp(struct __eb_device *d, uint32_t addr, uint8_t net, uint8_t stn)
+void eb_ipgw_set_arp(struct __eb_device *d, struct __eb_ipgw *me, uint32_t addr, uint8_t net, uint8_t stn)
 {
 
 	struct __eip_arp	*a;
 	uint8_t			found = 0;
 
-	if (!d->local.ip.addresses)
-		return; // IP not configured on this emulator
+	if (!me->addresses)
+		return;
 
-	a = d->local.ip.addresses->arp;
+	a = me->addresses->arp;
 
 	while (!found && a)
 	{
@@ -79,8 +79,8 @@ void eb_ipgw_set_arp(struct __eb_device *d, uint32_t addr, uint8_t net, uint8_t 
 		if (!a)
 			eb_debug (1, 0, "IPGW", "Local    %3d.%3d Unable to malloc() for IPGW ARP entry", d->net, d->local.stn);
 
-		a->next = d->local.ip.addresses->arp;
-		d->local.ip.addresses->arp = a;
+		a->next = me->addresses->arp;
+		me->addresses->arp = a;
 	}
 
 	a->ip = addr;
@@ -97,7 +97,7 @@ void eb_ipgw_set_arp(struct __eb_device *d, uint32_t addr, uint8_t net, uint8_t 
    This is called when we've updated the arp cache
 */
 
-uint8_t eb_ipgw_transmit (struct __eb_device *d, uint32_t addr)
+uint8_t eb_ipgw_transmit (struct __eb_device *d, struct __eb_ipgw *me, uint32_t addr)
 {
 	// TODO. Look through d->local.ip.addresses->ipq looking for packets
  	// to transmit to this IP address. Transmit the unexpired ones, and
@@ -108,11 +108,11 @@ uint8_t eb_ipgw_transmit (struct __eb_device *d, uint32_t addr)
 	uint16_t			arp_dest;
 	uint8_t				result = 0;
 
-	if (!(arp_dest = eb_ipgw_arp_dest(d, addr)))
+	if (!(arp_dest = eb_ipgw_arp_dest(d, me, addr)))
 		return 0; // Something badly wrong - we've been called because there was an arp entry, but there wasn't!
 
 	parent = NULL;
-	q = d->local.ip.addresses->ipq;
+	q = me->addresses->ipq;
 
 	eb_debug (0, 3, "IPGW", "%-8s %3d.%3d Examining transmit queue after ARP reply received for network order address %08X",
 		eb_type_str(d->type), d->net, d->local.stn, addr);
@@ -148,7 +148,7 @@ uint8_t eb_ipgw_transmit (struct __eb_device *d, uint32_t addr)
 	
 			if (parent)
 				parent->next = q->next;
-			else	d->local.ip.addresses->ipq = q->next;
+			else	me->addresses->ipq = q->next;
 				
 			
 			eb_free (__FILE__, __LINE__, "IPGW", "Freeing outgoing IP packet heading to Econet after ARP reply", q->p);
@@ -156,7 +156,7 @@ uint8_t eb_ipgw_transmit (struct __eb_device *d, uint32_t addr)
 			eb_free (__FILE__, __LINE__, "IPGW", "Freeing outgoing IP packet queue structure for packet heading to Econet after ARP reply", q);
 
 			if (parent)	q = parent->next;
-			else		q = d->local.ip.addresses->ipq;
+			else		q = me->addresses->ipq;
 
 		}
 		else	
@@ -174,18 +174,28 @@ uint8_t eb_ipgw_transmit (struct __eb_device *d, uint32_t addr)
  * eb_ipgw_incoming_ip
  */
 
-void eb_ipgw_incoming_ip(struct __eb_device *d)
+void eb_ipgw_incoming_ip(struct __eb_device *d, struct __eb_device_module *m, struct __eb_ipgw *me)
 {
 
 	struct __econet_packet_ip	incoming;
 	struct __econet_packet_aun	*outgoing;
 	int 				length;
 
-	length = read(d->local.ip.socket, &incoming, ECONET_MAX_PACKET_SIZE);
+	length = read(me->socket, &incoming, ECONET_MAX_PACKET_SIZE);
+
+	pthread_mutex_lock (&m->module_mutex);
+	if (!(m->module_started))
+	{
+		/* IPGW disabled */
+		pthread_mutex_unlock (&m->module_mutex);
+		eb_debug (0, 2, "IPGW", "%3d.%3d Traffic dropped - gateway not active", d->net, d->local.stn);
+
+		return;
+	}
 
 	if (length > 0)
 	{
-		eb_add_stats (&(d->local.ip.statsmutex), &(d->local.ip.b_in), length);
+		eb_add_stats (&(me->statsmutex), &(me->b_in), length);
 
 		outgoing = eb_malloc (__FILE__, __LINE__, "IPGW", "Econet AUN packet for incoming IP transmission", length + 12);
 
@@ -204,7 +214,7 @@ void eb_ipgw_incoming_ip(struct __eb_device *d)
 			outgoing->p.srcnet = d->net;
 			outgoing->p.srcstn = d->local.stn;
 
-			if ((arp_dest = eb_ipgw_arp_dest(d, incoming.destination)))
+			if ((arp_dest = eb_ipgw_arp_dest(d, me, incoming.destination)))
 			{
 				outgoing->p.dstnet = (arp_dest & 0xff00) >> 8;
 				outgoing->p.dststn = (arp_dest & 0xff);
@@ -233,7 +243,7 @@ void eb_ipgw_incoming_ip(struct __eb_device *d)
 				arp->p.ctrl = 0xa1;
 
 				*((uint32_t *)&(arp->p.data[4])) = incoming.destination;
-				*((uint32_t *)&(arp->p.data[0])) = htonl(d->local.ip.addresses->ip);
+				*((uint32_t *)&(arp->p.data[0])) = htonl(me->addresses->ip);
 
 #pragma GCC diagnostic warning "-Warray-bounds"
 				eb_raw_send (d, arp, 8);
@@ -255,12 +265,12 @@ void eb_ipgw_incoming_ip(struct __eb_device *d)
 				q->expiry.tv_sec += 2;
 				q->next = NULL;
 
-				tail = d->local.ip.addresses->ipq;
+				tail = me->addresses->ipq;
 
 				while (tail && tail->next)	tail = tail->next;
 
 				if (tail)	tail->next = q;
-				else		d->local.ip.addresses->ipq = q;
+				else		me->addresses->ipq = q;
 						
 			}
 		}
@@ -268,18 +278,20 @@ void eb_ipgw_incoming_ip(struct __eb_device *d)
 
 	}
 
+	pthread_mutex_unlock(&(m->module_mutex));
 }
 
 /*
  * Handle IP traffic appearing on port &D2 over the Econet sphere
  */
 
-void eb_handle_ipgw_traffic (struct __econet_packet_aun *p, uint16_t len, void *param)
+//void eb_handle_ipgw_traffic (struct __econet_packet_aun *p, uint16_t len, void *param)
+void ipgw_handle_traffic_internal (struct __eb_device *d, struct __eb_device_module *m, struct __econet_packet_aun *p, uint16_t len) /* Modularized version */
 {
-	struct __eb_device *d = (struct __eb_device *) param;
 	uint32_t src_ip, dst_ip;
+	struct __eb_ipgw *me = (struct __eb_ipgw *) m->module_ws;
 
-	if (!(d->local.ip.tunif[0])) /* No IPGW here! */
+	if (!(me->tunif[0])) /* No IPGW here! */
 		return;
 
 	/* Accept DATA, or BROADCAST if it's ctrl A1 (ARP request) */
@@ -301,9 +313,9 @@ void eb_handle_ipgw_traffic (struct __econet_packet_aun *p, uint16_t len, void *
 		{
 			// Well, first we can update our ARP cache since we have just discovered a station (potentially)
 
-			eb_ipgw_set_arp (d, src_ip, p->p.srcnet, p->p.srcstn);
+			eb_ipgw_set_arp (d, me, src_ip, p->p.srcnet, p->p.srcstn);
 
-			if (ntohl(dst_ip) == d->local.ip.addresses->ip)
+			if (ntohl(dst_ip) == me->addresses->ip)
 			{
 				struct __econet_packet_aun *arp_reply;
 
@@ -332,22 +344,148 @@ void eb_handle_ipgw_traffic (struct __econet_packet_aun *p, uint16_t len, void *
 				eb_free (__FILE__, __LINE__, "IPGW", "Free Arp Reply", arp_reply); 
 			}
 
-			eb_ipgw_transmit (d, src_ip);
+			eb_ipgw_transmit (d, me, src_ip);
 
 		} break;
 
 		case 0xA2: // Incoming ARP reply
 		{
-			eb_ipgw_set_arp (d, src_ip, p->p.srcnet, p->p.srcstn);
-			eb_ipgw_transmit (d, src_ip);
+			eb_ipgw_set_arp (d, me, src_ip, p->p.srcnet, p->p.srcstn);
+			eb_ipgw_transmit (d, me, src_ip);
 
 		} break;
 	
 		case 0x81: // Incoming IP traffic
 		{
 			/* Set ARP just in case this is traffic to us that the client already had an ARP entry for. */
-			eb_ipgw_set_arp (d, src_ip, p->p.srcnet, p->p.srcstn);
-			write(d->local.ip.socket, (char *) &(p->p.data), len);
+			eb_ipgw_set_arp (d, me, src_ip, p->p.srcnet, p->p.srcstn);
+			write(me->socket, (char *) &(p->p.data), len);
 		} break;
 	}
 }
+
+/* Modularized code */
+
+void ipgw_init_private (struct __eb_device *d, struct __eb_device_module *m, struct json_object *j)
+{
+	// Parse JSON config - which is an array of objects { "interface":"tun0", "ip":"1.2.3.4/24" } for example - which we store in our private data
+	// Which is probably not helpful - because our private data is an interface and a list of addresses, not a list of the pair of both of them.
+	
+	uint16_t		icount, ilength;
+	struct __eb_ipgw	*me = (struct __eb_ipgw *) m->module_ws;
+
+	icount = 0;
+
+	ilength = json_object_array_length (j);
+
+	if (ilength == 0) /* Malformed JSON */
+		eb_debug (1, 0, "IPGW", "Malformed JSON configuration for station %d.%d - if your config block is empty, please delete it.", d->net, d->local.stn);
+
+	while (ilength == 1 && icount == 0) /* We're only doing 1 */ 
+	{
+		struct json_object      *jip, *jipinterface, *jipaddress;
+		uint8_t		 ip[4], masklen;
+		uint32_t		ip_host, mask_host;
+		char		    address[30];
+
+		jip = json_object_array_get_idx (j, icount);
+
+		if (!json_object_object_get_ex(jip, "interface", &jipinterface))
+		{
+			eb_debug (1, 0, m->module_name, "Malformed IP interface configuration on %d.%d index %d - no tunnel interface specified", d->net, d->local.stn, icount);
+			continue;
+		}
+
+		if (!json_object_object_get_ex(jip, "ip", &jipaddress))
+			eb_debug (1, 0, m->module_name, "Malformed IP interface configuration on %d.%d index %d - no ip address specified", d->net, d->local.stn, icount);
+
+		strncpy (address, json_object_get_string(jipaddress), 29);
+
+		/* Parse the address / mask */
+
+		if (sscanf(address, "%hhd.%hhd.%hhd.%hhd/%hhd",
+			&(ip[3]), &(ip[2]), &(ip[1]), &(ip[0]), &masklen) != 5)
+			eb_debug(1, 0, m->module_name, "Bad network and/or mask for IP gateway on %d.%d index %d", d->net, d->local.stn, icount);
+					
+		ip_host = (ip[3] << 24) | (ip[2] << 16) | (ip[1] << 8) | ip[0];
+
+		mask_host = 0;
+	
+		while (masklen-- > 0)
+			mask_host = (mask_host >> 1) | 0x80000000;
+
+		if (strlen(eb_tunnel_interface_list) == 0)
+			strcat(eb_tunnel_interface_list, ":");
+	
+		strcat(eb_tunnel_interface_list, json_object_get_string(jipinterface));
+		strcat(eb_tunnel_interface_list, ":");
+
+		/* Finish init here */
+
+		strcpy (me->tunif, json_object_get_string(jipinterface));
+		strcpy (me->addr, address);
+
+		me->b_in = me->b_out = 0; /* Initialize traffic counter */
+
+		if (pthread_mutex_init(&(me->statsmutex), NULL) == -1)
+			eb_debug (1, 0, m->module_name, "Unable to initialize stats mutex for IP gateway on %d.%d", d->net, d->local.stn);
+
+		me->addresses = eb_module_alloc(m->module_name, "Local IP address structure", sizeof (struct __eip_addr));
+
+		if (!me->addresses)
+			eb_debug (1, 0, m->module_name, "Cannot allocate IP address structure for gateway on %d.%d", d->net, d->local.stn);
+
+		me->addresses->next = NULL;
+		me->addresses->arp = NULL;
+		me->addresses->ip = ip_host;
+		me->addresses->mask = mask_host;
+		me->addresses->ipq = NULL;	
+
+		icount++;       
+	}
+
+}
+
+/*
+ * ipgw_cleanup
+ *
+ * Releases memory allocated by the IPGW when the service stops.
+ */
+
+void ipgw_cleanup (struct __eb_device *d, struct __eb_device_module *m)
+{
+	struct __eb_ipgw *me = (struct __eb_ipgw *) m->module_ws;
+	struct __eip_arp *arp = me->addresses->arp;
+	struct __eip_arp *arp_next = NULL;
+
+	/* Our addresses stuff stays live because that's configuration. We're just
+	 * freeing packet data and stuff.
+	 *
+	 * We don't close the socket, because we need to use that again, and in the
+	 * basic template macros below, there's presently no startup function that 
+	 * we might use to open it
+	 */
+
+	while (arp)
+	{
+		arp_next = arp->next;
+		eb_free (__FILE__, __LINE__, "IPGW", "Free ARP entry on module shutdown", arp);
+		arp = arp_next;
+	}
+
+	me->addresses->arp = NULL; /* Clear out */
+}
+
+/* We use the templates */
+
+/*
+eb_module_init_def("IPGW",ipgw_init,struct __eb_ipgw,EB_PORT_IP,ipgw_init_private);
+eb_module_exit_def("IPGW",ipgw_exit,EB_PORT_IP);
+eb_module_handle_traffic("IPGW",ipgw_handle_traffic);
+eb_module_thread_def("IPGW", ipgw_thread_main, ipgw_handle_traffic_internal);
+eb_module_start_def("IPGW",ipgw_start,EB_PORT_IP,ipgw_thread_main,ipgw_handle_traffic); // NB we have a traffic handler above, but the handle traffic just puts on queue now 
+eb_module_drain_queue("IPGW",ipgw_queue_drain);
+eb_module_stop_def("IPGW",ipgw_stop,EB_PORT_IP,ipgw_queue_drain,NULL);
+*/
+
+eb_module_funcs_def(IPGW,struct __eb_ipgw,EB_PORT_IP,ipgw_init_private,ipgw_handle_traffic_internal,ipgw_cleanup);

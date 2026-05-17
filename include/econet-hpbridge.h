@@ -314,13 +314,14 @@ struct __eb_device_module * eb_module_get_data (void *, unsigned char *); /* Get
 
 /* Generic init function, assuming one port and a given data type for the private workspace, and a function to initialize the private workspace from the JSON */
 
-#define eb_module_init_def(MODULE,funcname,privtype,port,privinit); \
+#define eb_module_init_def(MODULE,funcname,privtype,port,privinit,startfunc,stopfunc,exitfunc); \
 	uint8_t funcname (void *device, struct json_object *j) \
 	{ \
 		\
 		struct __eb_device *d = (struct __eb_device *) device; \
 		struct __eb_device_module *me; \
 		uint8_t autostart = 1; \
+		struct json_object *jo; \
 		\
 		eb_module_debug (2, MODULE, d, "Server initializing"); \
 		\
@@ -332,16 +333,21 @@ struct __eb_device_module * eb_module_get_data (void *, unsigned char *); /* Get
 			return 1; \
 		} \
 		\
-		if (port != 0z00) EB_PORT_SET (d, reserved_ports, port, NULL, NULL); /* Reserve port if not 0 */ \
+		if (port != 0x00) EB_PORT_SET (d, reserved_ports, port, NULL, NULL); /* Reserve port if not 0 */ \
+		me->module_port = port; \
 		\
-		if (json_object_object_get_ex(j) && json_object_is_type(j,json_type_boolean)) \
+		if (json_object_object_get_ex(j,"autostart",&jo) && json_object_is_type(jo,json_type_boolean)) \
 		{ \
-			if (json_object_get_boolean(j)) autostart = 1; \
+			if (json_object_get_boolean(jo)) autostart = 1; \
 			else autostart = 0; \
 		} \
 		\
 		me->module_autostart = autostart; \
 		me->module_queue = NULL; \
+		me->module_init = funcname; \
+		me->module_start = startfunc; \
+		me->module_stop = stopfunc; \
+		me->module_exit = exitfunc; \
 		\
 		privinit(d, me, j); /* Set up our functions and private data */ \
 		\
@@ -585,11 +591,21 @@ struct __eb_device_module * eb_module_get_data (void *, unsigned char *); /* Get
 	}
 
 
+/* Generic module assuming you have only one port to listen on, and all you want to provide is (1) an _init private function which reads the JSON fed to it, and (2) a traffic handler function */
+#define eb_module_funcs_def(MODULE,privatetype,port,init_private,traffichandler,cleanupfunc); \
+	eb_module_exit_def(#MODULE, MODULE ## _exit,port); \
+	eb_module_handle_traffic(#MODULE,MODULE ## _handle_traffic); \
+	eb_module_thread_def(#MODULE, MODULE ## _thread_main, traffichandler); \
+	eb_module_start_def(#MODULE, MODULE ## _start,port,MODULE ## _thread_main,MODULE ## _handle_traffic); \
+	eb_module_drain_queue(#MODULE,MODULE ## _queue_drain); \
+	eb_module_stop_def(#MODULE,MODULE ## _stop,port,MODULE ## _queue_drain,cleanupfunc); \
+	eb_module_init_def(#MODULE,MODULE ## _init,privatetype,port,init_private,MODULE ## _start,MODULE ## _stop,MODULE ## _exit); 
+
 /* Callback function 
  *
  * If set on a packet queue entry, the despatcher will call this
  * function with a set of timings, but only for packets sent on
- * Econet. We might extend that later. See the timing struct in
+ * Econet. We might extend that later. See the timing struct i#n
  * the consumer header. 
  *
  * The AUN packet header will point to the packet transmitted so as to identify
@@ -1315,7 +1331,9 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			struct __eb_printer 	*printers;	
 			char			*print_handler; // Full path to printer handler script
 			struct __eb_fileserver	fs; // Not a pointer, this one
+#if 0 /* Modularized */
 			struct __eb_ipgw	ip; // Not a pointer, this one
+#endif
 			uint32_t		seq; // AUN sequence number
 			pthread_mutex_t		ports_mutex; // Locks ports[]
 			uint32_t		ports[8]; // Ports in use by devices attached to this local server
@@ -1334,7 +1352,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			struct __eb_notify	*notify; // List of stuff received via *notify to a local server
 			pthread_mutex_t		notify_mutex; // Mutex to lock the notify list
 			pthread_t		notify_thread; // Notify watcher thread for this device
-
+#if 0 /* Modularized */
 			// Teletext server
 			char 			*teletext_root; // Root dir (which can be part of PiFS storage) containing one dir per "channel" (e.g. "1", "2", etc.) and then files named with 3 digit page numbers thereunder - e.g. "100".
 			uint8_t			teletext_hdr_broadcast; // 1 = we do broadcast the current page header, 0 = we don't (we don't think it's necessary to do so and it causes a lot of traffic, so default is not to)
@@ -1348,7 +1366,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			int16_t			teletext_channel_topbit[10]; /* Which bit number in teletext_broadcast is the last one for this channel */
 			int16_t			teletext_channel_startbit[10]; /* First bit number in teletext_broadcast which is part of this channel */
 			uint32_t		teletext_broadcast[320]; /* Bitfield of broadcast frames - see teletext.c in eb_teletext_server */
-
+#endif
 			pthread_mutex_t		modules_mutex;
 			struct __eb_device_module	*modules;
 
@@ -1775,8 +1793,12 @@ extern void send_printjob (char *, uint8_t, uint8_t, uint8_t, uint8_t, char *, c
 
 /* IPGW externs */
 
-void eb_handle_ipgw_traffic (struct __econet_packet_aun *, uint16_t, void *);
-void eb_ipgw_incoming_ip (struct __eb_device *);
+#if 0 /* Modularized */
+void ipgw_handle_traffic_internal (struct __econet_packet_aun *, uint16_t, void *); /* Modularized version below */
+//void eb_handle_ipgw_traffic (struct __eb_device *, struct __eb_device_module *, struct __econet_packet_aun *, uint16_t len);
+#endif
+/* This still required as IP is a device we read from! */
+void eb_ipgw_incoming_ip (struct __eb_device *, struct __eb_device_module *, struct __eb_ipgw *);
 
 /* FINDSERVER externs */
 

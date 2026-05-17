@@ -1317,9 +1317,8 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 			existing->local.printers = NULL;
 			existing->local.print_handler = NULL;
 			existing->local.seq = 0x4000;
-			strcpy (existing->local.ip.tunif, ""); // Rogue for uninitialized
+			// Now modularized strcpy (existing->local.ip.tunif, ""); // Rogue for uninitialized
 			existing->local.fs.server = NULL; // No station
-			strcpy(existing->local.ip.tunif, ""); // Flag as no IP gateway
 			pthread_mutex_init(&existing->local.ports_mutex, NULL);
 			pthread_mutex_init(&existing->local.fast_client_list_lock, NULL);
 			memset(&(existing->local.ports), 0, sizeof(existing->local.ports)); // Clear ports in use
@@ -4306,13 +4305,19 @@ static void * eb_device_listener (void * device)
 	struct __eb_device	*d = device;	// Us
 	struct pollfd		*p, *p_reset;
 	uint16_t		numfd = 1; // Number of descriptors we're listening for - initially just the one
+	struct __eb_device_module	*m_ip;
 
 	p = eb_malloc (__FILE__, __LINE__, "LISTEN", "Allocate pollfd struct", sizeof(struct pollfd));
 	p_reset = eb_malloc (__FILE__, __LINE__, "LISTEN", "Allocate pollfd reset struct", sizeof(struct pollfd));
 
 	memcpy (p_reset, &(d->p_reset), sizeof(struct pollfd));
 
-	if ((d->type == EB_DEF_LOCAL && d->local.ip.tunif[0] != '\0') || d->type == EB_DEF_PIPE)
+	m_ip = eb_module_get_data(d, "IPGW");
+
+	if (m_ip && d->type == EB_DEF_LOCAL) 
+		eb_debug (0, 2, "LISTEN", "%-8s %3d.%3d IP Gateway active", eb_type_str(d->type), d->net, d->local.stn);
+
+	if ((d->type == EB_DEF_LOCAL && m_ip) || d->type == EB_DEF_PIPE)
 		eb_debug (0, 2, "LISTEN", "%-8s %3d.%3d Device listener started (fd %d)", eb_type_str(d->type), d->net, (d->type == EB_DEF_LOCAL ? d->local.stn : d->pipe.stn), d->p_reset.fd);
 	else if (d->type == EB_DEF_TRUNK)
 		eb_debug (0, 2, "LISTEN", "%-8s %7d Device listener started (fd %d)", eb_type_str(d->type), d->trunk.local_port, d->p_reset.fd);
@@ -4326,7 +4331,7 @@ static void * eb_device_listener (void * device)
 	// If we are a local device, we have no need of a listener unless we're an IP gateway, So unless the IP gateway is live, die.
 	// We do this after signalling ready so we don't get a threadcount mismatch. (Sounds like bedding...)
 
-	if (d->type == EB_DEF_LOCAL && d->local.ip.tunif[0] == '\0')
+	if (d->type == EB_DEF_LOCAL && !m_ip)
 		return NULL;
 	
 	if (d->type == EB_DEF_WIRE && !strcasecmp(d->wire.device, "/dev/null")) // Don't even bother
@@ -6193,6 +6198,8 @@ static void * eb_device_despatcher (void * device)
 	pthread_t			flash_read_thread, flash_write_thread;
 	void 				*flash_read_return, *flash_write_return;
 	struct __eb_imm_clear 		*imm_sleeper; // Control structure for imm_clear sleeper thread to reset ADLC if no immediate arrives
+	struct __eb_device_module	*m_ip = NULL; // IP Gateway module data
+	struct __eb_ipgw		*m_ip_ws = NULL;
 
 	// Initializes and starts a device.
 	
@@ -6348,28 +6355,6 @@ static void * eb_device_despatcher (void * device)
 					eb_debug (1, 0, "BRIDGE", "FS       %3d.%3d Fileserver at %s FAILED to initialize", d->net, d->local.stn, d->local.fs.rootpath);
 			}
 
-			if (d->local.ip.tunif[0] != '\0') // Active tunnel config
-			{
-				int 			handle, err;
-				struct ifreq 		mine;
-
-				if ((handle = open("/dev/net/tun", O_RDWR)) == -1) // Failure
-					eb_debug (1, 0, "IPGW", "%-8s %3d.%3d Cannot open /dev/net/tun to start IPGW tunnel on %s", eb_type_str(d->type), d->net, d->local.stn, d->local.ip.tunif);	
-				
-				memset (&mine, 0, sizeof(mine));
-
-				mine.ifr_flags = IFF_TUN | IFF_NO_PI;
-
-				strncpy(mine.ifr_name, d->local.ip.tunif, IFNAMSIZ); // Ask for the tunnel we want
-
-				if ((err = ioctl(handle, TUNSETIFF, (void *) &mine)) == -1) // Failure
-					eb_debug (1, 0, "IPGW", "%-8s %3d.%3d Cannot select %s for IPGW", eb_type_str(d->type), d->net, d->local.stn, d->local.ip.tunif);
-
-				eb_debug (0, 2, "IPGW", "%-8s %3d.%3d Tunnel interface %s opened", eb_type_str(d->type), d->net, d->local.stn, d->local.ip.tunif);
-
-				d->local.ip.socket = handle;
-				
-			}
 
 #if 0 /* Teletext modularized */
 			if (d->local.teletext_root)
@@ -6415,6 +6400,35 @@ static void * eb_device_despatcher (void * device)
 				pthread_mutex_unlock (&(d->local.modules_mutex));
 			}
 
+			/* Now set up IP GW if it was initialized */
+
+			m_ip = eb_module_get_data(d, "IPGW");
+			m_ip_ws = (m_ip) ? (struct __eb_ipgw *) m_ip->module_ws : NULL; /* If IP gateway is there, find its private data, else set it to NULL */
+
+			//fprintf (stderr, "%d.%d - m_ip = %p, m_ip_ws = %p\n", d->net, d->local.stn, m_ip, m_ip_ws);
+
+			if (m_ip) // Active tunnel config
+			{
+				int 			handle, err;
+				struct ifreq 		mine;
+
+				if ((handle = open("/dev/net/tun", O_RDWR)) == -1) // Failure
+					eb_debug (1, 0, "IPGW", "%-8s %3d.%3d Cannot open /dev/net/tun to start IPGW tunnel on %s", eb_type_str(d->type), d->net, d->local.stn, m_ip_ws->tunif);	
+				
+				memset (&mine, 0, sizeof(mine));
+
+				mine.ifr_flags = IFF_TUN | IFF_NO_PI;
+
+				strncpy(mine.ifr_name, m_ip_ws->tunif, IFNAMSIZ); // Ask for the tunnel we want
+
+				if ((err = ioctl(handle, TUNSETIFF, (void *) &mine)) == -1) // Failure
+					eb_debug (1, 0, "IPGW", "%-8s %3d.%3d Cannot select %s for IPGW", eb_type_str(d->type), d->net, d->local.stn, m_ip_ws->tunif);
+
+				eb_debug (0, 2, "IPGW", "%-8s %3d.%3d Tunnel interface %s opened", eb_type_str(d->type), d->net, d->local.stn, m_ip_ws->tunif);
+
+				m_ip_ws->socket = handle;
+				
+			}
 
 		} break;
 
@@ -6583,7 +6597,9 @@ static void * eb_device_despatcher (void * device)
 			d->p_reset.events |= POLLHUP; // Detect client wandering off // This is probably unnecessary - looks like POLLHUP ignored in events
 			break;
 		case EB_DEF_LOCAL:
-			l_socket = d->local.ip.socket;
+			//l_socket = d->local.ip.socket;
+			// if (!m_ip_ws) fprintf (stderr, "m_ip_ws was NULL!\n");
+			l_socket = (m_ip) ? m_ip_ws->socket : 0;
 			break;
 		case EB_DEF_POOL:
 		case EB_DEF_NULL:
@@ -6755,7 +6771,7 @@ static void * eb_device_despatcher (void * device)
 
 		// To receive traffic after a poll(), must be not local, or if it is local then it's an IP gateway. Otherwise there should be no traffic arriving at all from a local, because the FS and PS put their stuff straight into the queues! // NB the while below is guarded by the if on this line, but not indented
 
-		if (!(d->type == EB_DEF_WIRE && wire_null) && /* 20250713 */ d->type != EB_DEF_NULL  && (d->type != EB_DEF_POOL) && ((d->type != EB_DEF_LOCAL) || (d->local.ip.tunif[0] != '\0'))) while (poll(&p, 1, 0) && (p.revents & POLLIN)) // A 0-time poll() apparently works
+		if (!(d->type == EB_DEF_WIRE && wire_null) && /* 20250713 */ d->type != EB_DEF_NULL  && (d->type != EB_DEF_POOL) && ((d->type != EB_DEF_LOCAL) || (m_ip))) while (poll(&p, 1, 0) && (p.revents & POLLIN)) // A 0-time poll() apparently works
 		{
 
 			uint8_t		packetreceived = 0; // Default state. Trunk serial receiver sets to 0 unless a whole packet has arrived
@@ -7116,9 +7132,9 @@ static void * eb_device_despatcher (void * device)
 				}
 				// Otherwise ditch the runt
 			}
-			else if (d->type == EB_DEF_LOCAL) // Must be an IP gateway - this is tunnel interface traffic arriving (i.e. IP)
+			else if (d->type == EB_DEF_LOCAL && m_ip) // Must be an IP gateway - this is tunnel interface traffic arriving (i.e. IP)
 			{
-				eb_ipgw_incoming_ip(d);
+				eb_ipgw_incoming_ip(d, m_ip, m_ip_ws);
 /* Moved to external file
 				struct __econet_packet_ip	incoming;
 				struct __econet_packet_aun	*outgoing;
@@ -8380,11 +8396,11 @@ static void * eb_device_despatcher (void * device)
 									yline += 2 + (found / 4);	
 								}
 	
-								if (d->local.ip.tunif[0]) // Is an IP gateway
+								if (m_ip) // Is an IP gateway
 								{
 									char addr_string[40];
 
-									snprintf(addr_string, 39, "IP Gateway at%c%s", 129, d->local.ip.addr);
+									snprintf(addr_string, 39, "IP Gateway at%c%s", 129, m_ip_ws->addr);
 									beeb_print (yline, 0, addr_string);
 									yline += 2;
 
@@ -9572,8 +9588,8 @@ struct json_object *eb_json_get_divert_makenew(struct json_object *d, uint8_t st
 
 		res = json_object_new_object();
 		json_object_object_add(res, "station", json_object_new_int(stn));
-		json_object_object_add(res, "printers", json_object_new_array());
-		json_object_object_add(res, "ipservers", json_object_new_array());
+		//json_object_object_add(res, "printers", json_object_new_array());
+		//json_object_object_add(res, "ipservers", json_object_new_array());
 		json_object_array_add(d, res);
 	}
 
@@ -9869,7 +9885,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 			}
 
 			/* IP gateways */
-
+#if 0 /* Modularized */
 			if (jips)
 			{
 				struct json_object	*jip;
@@ -9920,6 +9936,8 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 					icount++;	
 				}
 			}
+#endif
+
 #if 0 /* Teletext server modularized */
 			/* Teletext server */
 
@@ -10006,7 +10024,6 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 							eb_debug (0, 0, "DESPATCH", "%-8s %3d.%3d Module with JSON key '%s' failed to initialize", "Local", d->net, d->local.stn, eb_module_table[count].module_json_key);
 						else
 							eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d Module with JSON key '%s' initialized", "Local", d->net, d->local.stn, eb_module_table[count].module_json_key);
-
 					}
 
 					count++;
@@ -12341,6 +12358,11 @@ int eb_readconfig(char *f, char *json)
 				json_object_object_get_ex(jnet, "diverts", &diverts);
 				divert = eb_json_get_divert_makenew(diverts, stn);
 				json_object_object_get_ex(divert, "printers", &jps);
+				if (!jps) 
+				{
+					json_object_object_add(divert, "printers", json_object_new_array());
+					json_object_object_get_ex(divert, "printers", &jps);
+				}	
 				jprinter = json_object_new_object();
 				json_object_object_add(jprinter, "acorn-name", json_object_new_string(acorn_printer));
 				json_object_object_add(jprinter, "unix-name", json_object_new_string(unix_printer));
@@ -12482,7 +12504,11 @@ int eb_readconfig(char *f, char *json)
 				divert = eb_json_get_divert_makenew(diverts, stn);
 
 				if (!json_object_object_get_ex(divert, "ipservers", &ipservers))
-					eb_debug (1, 0, "JSON", "ipservers key missing from divert for %d.%d", net, stn);
+				{
+					json_object_object_add(divert, "ipservers", json_object_new_array());
+					if (!json_object_object_get_ex(divert, "ipservers", &ipservers))
+						eb_debug (1, 0, "JSON", "ipservers key missing from divert for %d.%d", net, stn);
+				}
 
 				json_object_array_add(ipservers, jipaddr);
 #endif
@@ -14142,6 +14168,8 @@ int main (int argc, char **argv)
 							char			info[512], tmp[128];
 							uint8_t			prev_info = 0;
 							char			fw_in[128], fw_out[128];
+							struct __eb_device_module *m_ip = NULL;
+							struct __eb_ipgw	*m_ip_ws = NULL;
 
 							d = (p->type == EB_DEF_WIRE) ? p->wire.divert[count] : p->null.divert[count];
 
@@ -14189,14 +14217,18 @@ int main (int argc, char **argv)
 
 							}
 
-							if (d && d->type == EB_DEF_LOCAL && d->local.ip.tunif[0] != '\0') // Tunnel config
+							m_ip = eb_module_get_data (d, "IPGW");
+
+							if (d && d->type == EB_DEF_LOCAL && m_ip)
 							{
+
+								m_ip_ws = (struct __eb_ipgw *) m_ip->module_ws;
 
 								if (prev_info) strcat(info, ", IP gw on ");
 
-								strcat(info, d->local.ip.tunif);
+								strcat(info, m_ip_ws->tunif);
 								strcat(info, " (");
-								strcat(info, d->local.ip.addr);
+								strcat(info, m_ip_ws->addr);
 								strcat(info, ")");
 
 								prev_info = 1;
@@ -15249,7 +15281,7 @@ static void * eb_statistics (void *nothing)
 					if (divert)
 					{
 						uint8_t stn;
-						struct __eb_device_module *m;
+						struct __eb_device_module *m_ip, *m_teletext;
 
 						char info[128];
 
@@ -15260,8 +15292,8 @@ static void * eb_statistics (void *nothing)
 							case EB_DEF_AUN:	stn = divert->aun->stn; if (divert->aun->port == -1) sprintf (info, "Inactive"); else sprintf(info, "%d.%d.%d.%d:%d%s", (divert->aun->addr & 0xff000000) >> 24, (divert->aun->addr & 0x00ff0000) >> 16, (divert->aun->addr & 0x0000ff00) >> 8, (divert->aun->addr & 0x000000ff), divert->aun->port, ((divert->aun->gateway_compatible && !divert->aun->uses_gateway) ? "(GW primed)" : (divert->aun->uses_gateway ? "(GW Active)" : ""))); break;
 							case EB_DEF_LOCAL:	stn = divert->local.stn; sprintf(info, "%c%c%c%c%c", ((divert->local.printers) ? 'P' : ' '),
 								(fsop_is_enabled(divert->local.fs.server) ? 'F' : ' '),
-								((divert->local.ip.tunif[0] != '\0') ? 'I' : ' '),
-								((m = eb_module_get_data(divert, "TELETEXT")) ? (m->module_started ? 'T': 't') : ' '),
+								((m_ip = eb_module_get_data(divert, "IPGW")) ? (m_ip->module_started ? 'I' : 'i') : ' '),
+								((m_teletext = eb_module_get_data(divert, "TELETEXT")) ? (m_teletext->module_started ? 'T': 't') : ' '),
 								(divert->local.fast_menu ? 'M' : ' ')
 								); break;
 							case EB_DEF_PIPE:	stn = divert->pipe.stn; sprintf(info, "%s", divert->pipe.base); break;

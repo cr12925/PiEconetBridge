@@ -514,6 +514,7 @@ uint8_t eb_device_init_ps_handler (uint8_t net, uint8_t stn, char * acorn_name, 
  *
  */
 
+/* Modularized 
 uint8_t	eb_device_init_ip (uint8_t net, uint8_t stn, char * tunif, uint32_t ip_host, uint32_t mask_host)
 {
 
@@ -542,7 +543,7 @@ uint8_t	eb_device_init_ip (uint8_t net, uint8_t stn, char * tunif, uint32_t ip_h
 	if (pthread_mutex_init(&(existing->statsmutex), NULL) == -1)
 		eb_debug (1, 0, "CONFIG", "Cannot initialize stats mutex for IP server at %d.%d", net, stn);
 
-	/* Put this in all wire station[] maps */
+	// Put this in all wire station[] maps 
 
 	eb_set_single_wire_host (net, stn);
 
@@ -559,13 +560,14 @@ uint8_t	eb_device_init_ip (uint8_t net, uint8_t stn, char * tunif, uint32_t ip_h
 
 	existing->local.ip.addresses = local;
 	
-	EB_PORT_SET(existing, ports, EB_PORT_IP, eb_handle_ipgw_traffic, existing);
+	EB_PORT_SET(existing, ports, EB_PORT_IP, ipgw_handle_traffic_internal, existing);
 
 	DEVINIT_DEBUG("Created IP server on %d.%d via interface %s with IP address %s", net, stn, tunif, addr);
 
 	return 1;
 
 }
+*/
 
 /*
  * eb_device_init_pipe
