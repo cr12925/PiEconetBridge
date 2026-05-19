@@ -1339,8 +1339,10 @@ struct __eb_device { // Structure holding information about a "physical" device 
 
 		struct { // A locally emulated server
 			uint8_t			stn; // Station number
+#if 0 /* Modularized */
 			struct __eb_printer 	*printers;	
 			char			*print_handler; // Full path to printer handler script
+#endif
 			struct __eb_fileserver	fs; // Not a pointer, this one
 #if 0 /* Modularized */
 			struct __eb_ipgw	ip; // Not a pointer, this one

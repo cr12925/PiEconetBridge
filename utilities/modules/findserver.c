@@ -95,7 +95,7 @@ void eb_handle_findserver_traffic (struct __eb_device *d, struct __eb_device_mod
 				eb_raw_send (d, reply, my_length);
 			}
 		}
-							
+#if 0	/* Printers modularized */
 		if (d->local.printers) // Print server
 		{
 
@@ -108,7 +108,7 @@ void eb_handle_findserver_traffic (struct __eb_device *d, struct __eb_device_mod
 			}
 
 		}
-
+#endif
 		pthread_mutex_lock (&(d->local.modules_mutex));
 
 		m = d->local.modules;
@@ -137,8 +137,8 @@ void eb_handle_findserver_traffic (struct __eb_device *d, struct __eb_device_mod
 	
 				reply->p.data[1] = m->module_port;
 	
-				memcpy(&(reply->p.data[3]), m->module_name, 8);
-	
+				memcpy(&(reply->p.data[3]), m->module_findserver_name, 8);
+
 				if (m->module_started)
 				{
 					eb_debug (0, 2, "FIND", "Local    %3d.%3d Send findserver reply for '%s' module", d->net, d->local.stn, m->module_name);

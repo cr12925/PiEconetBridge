@@ -1480,13 +1480,15 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 							} break;
 						case EB_FAST_MENU_FSPRINTERS:
 							{
+								struct __eb_device_module *m;
+
 								f_printf (fc, "\n\r\n");
 
-								if (!fc->parent->local.printers)
+								if (!(m = eb_module_get_data_started(fc->parent, "PS")))
 									f_printf (fc, "No printers defined.");
 								else
 								{
-									struct __eb_printer *p = fc->parent->local.printers;
+									struct __eb_printer *p = (struct __eb_printer *) m->module_ws;
 									uint8_t	index = 1;
 
 									f_printf (fc, "Printer list:\r\n\n");

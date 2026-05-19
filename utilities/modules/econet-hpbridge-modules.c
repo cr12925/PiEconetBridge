@@ -112,8 +112,8 @@ struct __eb_device_module * eb_module_register (void *d_in, unsigned char *modna
 
 	workspace = eb_malloc(__FILE__, __LINE__, ucmodname, "Allocate module space", sizeof (struct __eb_device_module));
 
-	snprintf (workspace->module_name, 9, "%-8s", ucmodname);
-	snprintf (workspace->module_findserver_name, 9, "%-8s", ucfindservername);
+	strcpy (workspace->module_name, ucmodname);
+	strcpy (workspace->module_findserver_name, ucfindservername);
 
 	workspace->module_ws = NULL;
 

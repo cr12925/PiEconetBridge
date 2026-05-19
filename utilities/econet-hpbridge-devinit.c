@@ -405,6 +405,7 @@ uint8_t eb_device_init_fs (uint8_t net, uint8_t stn, char *rootpath, char *tapeh
 	return 1;
 }
 
+#if 0 /* PS modularized */
 /* 
  * eb_device_init_ps
  *
@@ -506,6 +507,7 @@ uint8_t eb_device_init_ps_handler (uint8_t net, uint8_t stn, char * acorn_name, 
 	return 1;
 
 }
+#endif
 
 /*
  * eb_device_init_ip

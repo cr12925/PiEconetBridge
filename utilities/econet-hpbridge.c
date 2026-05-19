@@ -86,6 +86,10 @@ char		eb_tunnel_interface_list[512];
 
 char		clock_speed_filename[128] = "/tmp/econet-hpbridge.clock";
 
+/* Prototype for a local printer function */
+
+struct __eb_printer * is_printserver(unsigned char, unsigned char);
+
 // Some globals
 
 char	hostname[255];
@@ -1314,8 +1318,10 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 		if (newtype == EB_DEF_LOCAL)
 		{
 			existing->local.stn = stn;
+#if 0 /* PS modularized */
 			existing->local.printers = NULL;
 			existing->local.print_handler = NULL;
+#endif
 			existing->local.seq = 0x4000;
 			// Now modularized strcpy (existing->local.ip.tunif, ""); // Rogue for uninitialized
 			existing->local.fs.server = NULL; // No station
@@ -1326,13 +1332,17 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 			existing->local.last_port = 0;
 			/* Insert some reserved ports to the port allocator */
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_FS, NULL, NULL); /* FS */
+#if 0 /* Modularized */
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_PS, NULL, NULL); /* PS ? */
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_PS_QUERY, NULL, NULL); /* PS Query */
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_PS_DATA, NULL, NULL); /* PS Data */
+#endif
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_FAST, NULL, NULL); /* *FAST */
+#if 0 /* Modularized */
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_FINDSERVER, NULL, NULL); /* FindServer */
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_IP, NULL, NULL); /* IP/Econet */
 			EB_PORT_SET(existing, reserved_ports, EB_PORT_TELETEXT_S_CMD, NULL, NULL); /* Teletext commands from clients */
+#endif
 
 			/* Include the FAST data handler */
 
@@ -8368,7 +8378,7 @@ static void * eb_device_despatcher (void * device)
 									pthread_mutex_unlock(&(d->local.fs.server->fs_mutex));
 								}
 
-								if ((printer = d->local.printers)) // Is a print server
+								if ((printer = is_printserver(d->net, d->local.stn))) // Is a print server
 								{
 									//uint8_t printer_count = 0;
 									char p[10];
@@ -8498,6 +8508,7 @@ static void * eb_device_despatcher (void * device)
 							new_output = 1;
 
 						}
+#if 0 /* PS modularized ** HERE ** Copy to ps.c ? */
 						else if (p->p->p.port == 0xD1 && p->p->p.aun_ttype == ECONET_AUN_DATA) // Print server data
 						{
 							struct __eb_printjob	*job;
@@ -8672,6 +8683,7 @@ static void * eb_device_despatcher (void * device)
 							}
 
 						}
+#endif
 						else
 						{
 							/* Check to see if this is a handled port */
@@ -9589,6 +9601,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 			json_object_object_get_ex(jstation, "teletext-header-broadcast", &jteletexthdr);
 #endif
 
+#if 0 /* PS modularized */
 			/* Printers */
 
 			if (jprinters)
@@ -9648,7 +9661,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 					pcount++;
 				}
 			}
-
+#endif
 			/* IP gateways */
 #if 0 /* Modularized */
 			if (jips)
@@ -13922,6 +13935,7 @@ int main (int argc, char **argv)
 					uint8_t			found = 0;
 					uint8_t			count;
 					struct __eb_aun_exposure	*exposed;
+					struct __eb_printer	*prn;
 					
 					for (count = 1; count < 255; count++)
 					{
@@ -13957,9 +13971,8 @@ int main (int argc, char **argv)
 								prev_info = 1;
 							}
 				
-							if (d && d->type == EB_DEF_LOCAL && d->local.printers)
+							if (d && d->type == EB_DEF_LOCAL && (prn = is_printserver(d->net, d->local.stn))) 
 							{
-								struct __eb_printer *prn = d->local.printers;
 								uint8_t first = 1;
 
 								if (prev_info) strcat(info, ", ");
@@ -14604,10 +14617,11 @@ uint32_t eb_get_local_seq (struct __eb_device *d)
 /* Determine if a station is a print server
 */
 
-struct __eb_device * is_printserver(unsigned char net, unsigned char stn)
+struct __eb_printer * is_printserver(unsigned char net, unsigned char stn)
 {
 
 	struct __eb_device 	*p, *r;
+	struct __eb_device_module *m;
 
 	// Is this a print server?
 
@@ -14629,25 +14643,23 @@ struct __eb_device * is_printserver(unsigned char net, unsigned char stn)
 	if (r->type != EB_DEF_LOCAL) // Not a local emulator
 		return NULL;
 
-	if (!(r->local.printers)) // Not a print server
-		return NULL;
+	m = eb_module_get_data_started(r, "PS"); // If not started, not a print server
 
-	return r;
+	if (m)
+		return (struct __eb_printer *) m->module_ws;
+
+	return NULL;
 }
 
 int8_t get_printer(unsigned char net, unsigned char stn, char *pname)
 {
 
-	struct __eb_device	*p;
 	struct __eb_printer	*printer;
 	int8_t			count;
 
-	p = is_printserver(net, stn);
-
-	if (!p) return -1;
+	printer = is_printserver(net, stn);
 
 	count = 0;
-	printer = p->local.printers;
 
 	while (printer)
 	{
@@ -14666,16 +14678,14 @@ int8_t get_printer(unsigned char net, unsigned char stn, char *pname)
 uint8_t get_printer_info(unsigned char net, unsigned char stn, uint8_t printer_id, char *pname, char *banner, uint8_t *control, uint8_t *status, short *user, uint8_t *printertype)
 {
 
-	struct __eb_device	*p;
 	struct __eb_printer	*printer;
 	int8_t			count;
 
-	p = is_printserver(net, stn);
+	printer = is_printserver(net, stn);
 
-	if (!p)	return 0; // Not a print server
+	if (!printer)	return 0; // Not a print server
 
 	count = 0;
-	printer = p->local.printers;
 
 	while (count < printer_id)
 	{
@@ -14702,16 +14712,14 @@ uint8_t get_printer_info(unsigned char net, unsigned char stn, uint8_t printer_i
 uint8_t set_printer_info(unsigned char net, unsigned char stn, uint8_t printer_id, char *pname, char *banner, uint8_t control, ushort user, uint8_t printertype)
 {
 
-        struct __eb_device      *p;
         struct __eb_printer     *printer;
         int8_t                  count;
 
-        p = is_printserver(net, stn);
+        printer = is_printserver(net, stn);
 
-        if (!p) return 0; // Not a print server
+        if (!printer) return 0; // Not a print server
 
         count = 0;
-        printer = p->local.printers;
 
         while (count < printer_id)
         {
@@ -15049,7 +15057,7 @@ static void * eb_statistics (void *nothing)
 					if (divert)
 					{
 						uint8_t stn;
-						struct __eb_device_module *m_ip, *m_teletext;
+						struct __eb_device_module *m_ip, *m_teletext, *m_ps;
 
 						char info[128];
 
@@ -15058,11 +15066,14 @@ static void * eb_statistics (void *nothing)
 						switch (divert->type)
 						{
 							case EB_DEF_AUN:	stn = divert->aun->stn; if (divert->aun->port == -1) sprintf (info, "Inactive"); else sprintf(info, "%d.%d.%d.%d:%d%s", (divert->aun->addr & 0xff000000) >> 24, (divert->aun->addr & 0x00ff0000) >> 16, (divert->aun->addr & 0x0000ff00) >> 8, (divert->aun->addr & 0x000000ff), divert->aun->port, ((divert->aun->gateway_compatible && !divert->aun->uses_gateway) ? "(GW primed)" : (divert->aun->uses_gateway ? "(GW Active)" : ""))); break;
-							case EB_DEF_LOCAL:	stn = divert->local.stn; sprintf(info, "%c%c%c%c%c", ((divert->local.printers) ? 'P' : ' '),
-								(fsop_is_enabled(divert->local.fs.server) ? 'F' : ' '),
-								((m_ip = eb_module_get_data(divert, "IPGW")) ? (m_ip->module_started ? 'I' : 'i') : ' '),
-								((m_teletext = eb_module_get_data(divert, "TELETEXT")) ? (m_teletext->module_started ? 'T': 't') : ' '),
-								(divert->local.fast_menu ? 'M' : ' ')
+							case EB_DEF_LOCAL:	
+								stn = divert->local.stn; 
+								sprintf(info, "%c%c%c%c%c", 
+									((m_ps = eb_module_get_data(divert, "PS")) ? (m_ps->module_started ? 'P' : 'p') : ' '),
+									(fsop_is_enabled(divert->local.fs.server) ? 'F' : ' '),
+									((m_ip = eb_module_get_data(divert, "IPGW")) ? (m_ip->module_started ? 'I' : 'i') : ' '),
+									((m_teletext = eb_module_get_data(divert, "TELETEXT")) ? (m_teletext->module_started ? 'T': 't') : ' '),
+									(divert->local.fast_menu ? 'M' : ' ')
 								); break;
 							case EB_DEF_PIPE:	stn = divert->pipe.stn; sprintf(info, "%s", divert->pipe.base); break;
 							default:		stn = 0; break;

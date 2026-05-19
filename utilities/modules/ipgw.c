@@ -366,7 +366,7 @@ void ipgw_handle_traffic_internal (struct __eb_device *d, struct __eb_device_mod
 
 /* Modularized code */
 
-void ipgw_init_private (struct __eb_device *d, struct __eb_device_module *m, struct json_object *j)
+uint8_t ipgw_init_private (struct __eb_device *d, struct __eb_device_module *m, struct json_object *j)
 {
 	// Parse JSON config - which is an array of objects { "interface":"tun0", "ip":"1.2.3.4/24" } for example - which we store in our private data
 	// Which is probably not helpful - because our private data is an interface and a list of addresses, not a list of the pair of both of them.
@@ -374,12 +374,21 @@ void ipgw_init_private (struct __eb_device *d, struct __eb_device_module *m, str
 	uint16_t		icount, ilength;
 	struct __eb_ipgw	*me = (struct __eb_ipgw *) m->module_ws;
 
+	if (!j)
+	{
+		eb_debug (0, 1, "IPGW", "Gateway has no configuration for station %d.%d - refusing to initialize", d->net, d->local.stn);
+		return 1;
+	}
+
 	icount = 0;
 
 	ilength = json_object_array_length (j);
 
 	if (ilength == 0) /* Malformed JSON */
-		eb_debug (1, 0, "IPGW", "Malformed JSON configuration for station %d.%d - if your config block is empty, please delete it.", d->net, d->local.stn);
+	{
+		eb_debug (0, 1, "IPGW", "Malformed JSON configuration for station %d.%d - if your config block is empty, please delete it.", d->net, d->local.stn);
+		return 1;
+	}
 
 	while (ilength == 1 && icount == 0) /* We're only doing 1 */ 
 	{
@@ -444,6 +453,7 @@ void ipgw_init_private (struct __eb_device *d, struct __eb_device_module *m, str
 		icount++;       
 	}
 
+	return 0;
 }
 
 /*

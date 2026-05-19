@@ -26,6 +26,7 @@ init_proto(teletext);
 init_proto(hellow);
 init_proto(IPGW);
 init_proto(FINDSRVR);
+init_proto(ps);
 //extern uint8_t teletext_init(void *, struct json_object *);
 //extern uint8_t hellow_init(void *, struct json_object *); /* Hello, World! sample module */
 //extern uint8_t IPGW_init(void *, struct json_object *); /* Hello, World! sample module */
@@ -44,6 +45,7 @@ static struct __eb_module_table eb_module_table[] = {
 	{ "hellow", hellow_init },
 	{ "ipservers", IPGW_init },
 	{ "findserver", FINDSRVR_init },
+	{ "printers", ps_init },
 	{	NULL, NULL }
 };
 
