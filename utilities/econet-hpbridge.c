@@ -1324,7 +1324,7 @@ struct __eb_device * eb_new_local(uint8_t net, uint8_t stn, uint16_t newtype)
 #endif
 			existing->local.seq = 0x4000;
 			// Now modularized strcpy (existing->local.ip.tunif, ""); // Rogue for uninitialized
-			existing->local.fs.server = NULL; // No station
+			// Now modularized existing->local.fs.server = NULL; // No station
 			pthread_mutex_init(&existing->local.ports_mutex, NULL);
 			pthread_mutex_init(&existing->local.fast_client_list_lock, NULL);
 			memset(&(existing->local.ports), 0, sizeof(existing->local.ports)); // Clear ports in use
@@ -6349,6 +6349,7 @@ static void * eb_device_despatcher (void * device)
 
 		case EB_DEF_LOCAL:
 		{
+#if 0 /* Modularized */
 			// Initialize fileserver, printerserver, ipserver, etc.
 
 			if (d->local.fs.rootpath) // Active FS
@@ -6359,7 +6360,7 @@ static void * eb_device_despatcher (void * device)
 				else
 					eb_debug (1, 0, "BRIDGE", "FS       %3d.%3d Fileserver at %s FAILED to initialize", d->net, d->local.stn, d->local.fs.rootpath);
 			}
-
+#endif
 
 #if 0 /* Teletext modularized */
 			if (d->local.teletext_root)
@@ -8322,6 +8323,7 @@ static void * eb_device_despatcher (void * device)
 							//struct __eb_device *l;
 							struct __econet_packet_aun *reply;
 							struct utsname u;
+							struct __fs_station *server;
 
 							//uint8_t counter;
 							uint8_t yline = 8;
@@ -8370,12 +8372,17 @@ static void * eb_device_despatcher (void * device)
 
 								yline += (2 + (found / 10));
 
-								if (fsop_is_enabled(d->local.fs.server))
+								// Now modularized if (fsop_is_enabled(d->local.fs.server))
+								if ((server = fsop_is_started(d)))
 								{
 									beeb_print (yline++, 0, "FS Discs:");
-									pthread_mutex_lock(&(d->local.fs.server->fs_mutex));
-									yline += 1 + fsop_writedisclist (d->local.fs.server, &(beebmem[0x7c00 + (yline * 40)]));
-									pthread_mutex_unlock(&(d->local.fs.server->fs_mutex));
+									// Modularized version
+									yline += 1 + fsop_writedisclist (server, &(beebmem[0x7c00 + (yline * 40)]));
+
+									// Old non-modularized version
+									//pthread_mutex_lock(&(d->local.fs.server->fs_mutex));
+									//yline += 1 + fsop_writedisclist (d->local.fs.server, &(beebmem[0x7c00 + (yline * 40)]));
+									//pthread_mutex_unlock(&(d->local.fs.server->fs_mutex));
 								}
 
 								if ((printer = is_printserver(d->net, d->local.stn))) // Is a print server
@@ -8686,17 +8693,27 @@ static void * eb_device_despatcher (void * device)
 #endif
 						else
 						{
+
 							/* Check to see if this is a handled port */
 
 							eb_debug (0, 3, "BRIDGE", "%-8s %3d.%3d Looking for handler for port &%02X (ports list says 0x%02X)", eb_type_str(d->type), d->net, d->local.stn,p->p->p.port, (EB_PORT_ISSET(d,ports,p->p->p.port)));
 
 							/* Is it an ACK? If so, if we have a fileserver we must send a copy there, because the ACKs only have the port number in that they're acknowledging data sent to, so because we don't track which data came from which server type, and because fileservers use the ACKs to work out when to send more data on Load/GBPB transactions, they need all the ACKs... */
 
+#if 0 /* Now modularized */
 							if ((p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK) && (d->local.fs.server && fsop_is_enabled(d->local.fs.server) && EB_PORT_ISSET(d,ports,0x99)))
 							{
 								eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
 								(d->local.port_funcs[0x99])(p->p, p->length + 12, d->local.port_param[0x99]);
 							}
+#endif
+							/* Send ACKs and NAKs to a local FS if there is one, to trigger bulk transfers */
+							if ((p->p->p.aun_ttype == ECONET_AUN_ACK || p->p->p.aun_ttype == ECONET_AUN_NAK) && fsop_is_started(d))
+							{
+								eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
+								(d->local.port_funcs[0x99])(p->p, p->length + 12, d->local.port_param[0x99]);
+							}
+
 
 							if (EB_PORT_ISSET(d,ports,p->p->p.port))
 							{
@@ -8704,24 +8721,41 @@ static void * eb_device_despatcher (void * device)
 								eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
 								(d->local.port_funcs[p->p->p.port])(p->p, p->length + 12, d->local.port_param[p->p->p.port]);
 							}
-							else if (p->p->p.aun_ttype == ECONET_AUN_IMMREP && d->local.fs.server)
+							// Now modularized else if (p->p->p.aun_ttype == ECONET_AUN_IMMREP && d->local.fs.server)
+							else if (p->p->p.aun_ttype == ECONET_AUN_IMMREP)// && (fs = fsop_is_started(d)))
 							{
+								//struct __fs_station *s = fs;
 								struct __fs_machine_peek_reg *m;
+								struct __eb_device_module *module;
 
-								eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
-								m = eb_malloc(__FILE__, __LINE__, "Core", "New machine peek registration struct", sizeof (struct __fs_machine_peek_reg));
+								module = eb_module_get_data(d, "FS");
 
-								m->s = d->local.fs.server;
-								m->net = p->p->p.srcnet;
-								m->stn = p->p->p.srcstn;
-								m->mtype = (p->p->p.data[0] << 24) 
-									|  (p->p->p.data[1] << 16) 
-									|  (p->p->p.data[2] << 8) 
-									|  (p->p->p.data[3]);
+								if (module) /* If there's a module, it will at least have been initialized.
+									       So there will be a valid server struct in module_ws->server.
+									       All we want to do is lock the mpeek_mutex in there. We don't
+									       want to lock the whole module. That server may be shut down,
+									       but it's data will be there. */
+								{
+									struct __eb_fileserver *ef = (struct __eb_fileserver *) module->module_ws;
+									struct __fs_station *fs = ef->server;
 
-								eb_debug (0, 3, "BRIDGE", "%-8s %3d.%3d from %3d.%3d MachinePeek reply received - sending type %08X to FS", eb_type_str(d->type), d->net, d->local.stn, m->net, m->stn, m->mtype);
-
-								fsop_register_machine (m); /* this function will free the struct */
+									eb_dump_packet (d, EB_PKT_DUMP_POST_O, p->p, p->length);
+									m = eb_malloc(__FILE__, __LINE__, "Core", "New machine peek registration struct", sizeof (struct __fs_machine_peek_reg));
+	
+	
+									// Now modularized m->s = d->local.fs.server;
+									m->s = fs;
+									m->net = p->p->p.srcnet;
+									m->stn = p->p->p.srcstn;
+									m->mtype = (p->p->p.data[0] << 24) 
+										|  (p->p->p.data[1] << 16) 
+										|  (p->p->p.data[2] << 8) 
+										|  (p->p->p.data[3]);
+	
+									eb_debug (0, 3, "BRIDGE", "%-8s %3d.%3d from %3d.%3d MachinePeek reply received - sending type %08X to FS", eb_type_str(d->type), d->net, d->local.stn, m->net, m->stn, m->mtype);
+	
+									fsop_register_machine (m); /* this function will free the struct */
+								}
 
 							}
 							else if (p->p->p.aun_ttype == ECONET_AUN_DATA || p->p->p.aun_ttype == ECONET_AUN_BCAST)
@@ -9484,7 +9518,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 	uint8_t		net, stn;
 	uint16_t	jcount, jlength;
-	struct json_object	*jdiverts, *jstation, *jstation_number, *jprinters, *jfs, /* *jips, */ *jpipepath, *jnetclock;
+	struct json_object	*jdiverts, *jstation, *jstation_number, *jprinters, /* *jfs,*/  /* *jips, */ *jpipepath, *jnetclock;
 #if 0 /* Teletext modularized */
 	struct json_object	*jteletextdir, *jteletexthdr;
 #endif
@@ -9729,6 +9763,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 			}
 #endif
 
+#if 0 /* Modularized */
 			if (json_object_object_get_ex(jstation, "fileserver-path", &jfs))
 			{
 				struct json_object	*jtapehandler;
@@ -9749,6 +9784,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 				else
 					eb_device_init_fs(net, stn, (char *) json_object_get_string(jfs), (char *) FS_DEFAULT_TAPE_HANDLER, fs_new_user_quota, (strlen(fs_tape_completion_handler) ? fs_tape_completion_handler : NULL));
 			}
+#endif 
 
 			if (json_object_object_get_ex(jstation, "pipe-path", &jpipepath))
 			{
@@ -9805,6 +9841,7 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 							eb_debug (0, 0, "DESPATCH", "%-8s %3d.%3d Module with JSON key '%s' failed to initialize", "Local", d->net, d->local.stn, eb_module_table[count].module_json_key);
 						else
 							eb_debug (0, 1, "DESPATCH", "%-8s %3d.%3d Module with JSON key '%s' initialized", "Local", d->net, d->local.stn, eb_module_table[count].module_json_key);
+
 					}
 
 					count++;
@@ -10437,8 +10474,10 @@ int eb_parse_json_config(struct json_object *jc)
 							mtype = EB_FAST_MENU_DISCONNECT;
 						else if (!strcasecmp(typestr, "SCRIPT"))
 							mtype = EB_FAST_MENU_SCRIPT;
+#if 0 /* Retired in favour of module start / stop */
 						else if (!strcasecmp(typestr, "FSSTOPSTART"))
 							mtype = EB_FAST_MENU_FSSTOPSTART;
+#endif
 						else if (!strcasecmp(typestr, "FSTOGGLEOPTIONS"))
 							mtype = EB_FAST_MENU_FSTOGGLEOPTIONS;
 						else if (!strcasecmp(typestr, "FSPRINTERS"))
@@ -10459,6 +10498,11 @@ int eb_parse_json_config(struct json_object *jc)
 							mtype = EB_FAST_MENU_HOMEMENU;
 						else if ((!strcasecmp(typestr, "BLANKLINE") || !strcasecmp(typestr, "BLANK")))
 							mtype = EB_FAST_MENU_BLANKLINE;
+						else if (!strcasecmp(typestr, "MODULESTART"))
+							mtype = EB_FAST_MENU_MODULE_START;
+						else if (!strcasecmp(typestr, "MODULESTOP"))
+							mtype = EB_FAST_MENU_MODULE_STOP;
+								
 						else	eb_debug (1, 0, "JSON", "Menu item %d in menu %s has unknown type string %s - error", jitem_count, jmenu_name, typestr);
 
 						mi = eb_fast_mkmenuitem(fm, description, timeout, mtype, key, priv, priv2);
@@ -10693,6 +10737,21 @@ int eb_parse_json_config(struct json_object *jc)
 
 							} break;
 
+							case EB_FAST_MENU_MODULE_STOP: /* Deliberate fall-through */
+							case EB_FAST_MENU_MODULE_START:
+							{
+								char *modulename;
+
+								if (json_object_object_get_ex(jmenuitem, "module", &jtmp))
+								{
+									modulename = (char *) json_object_get_string(jtmp);
+									mi->fm_module.fm_module_name = eb_malloc(__FILE__, __LINE__, "JSON", "Space for module name in FAST menu", strlen(modulename)+1);
+									strcpy(mi->fm_module.fm_module_name, modulename);
+								}
+								else
+									eb_debug (1, 0, "JSON", "Menu item %d in menu %s is of type MODULE{START/STOP} but has no module element.", jitem_count, jmenu_name);
+								
+							}
 						}
 
 
@@ -12108,10 +12167,16 @@ int eb_readconfig(char *f, char *json)
 
 				json_object_object_get_ex(jnet, "diverts", &diverts);
 				divert = eb_json_get_divert_makenew(diverts, stn);
-				if (json_object_object_get_ex(divert, "fileserver-path", &jfs))
+				// Now moduarized if (json_object_object_get_ex(divert, "fileserver-path", &jfs))
+				
+				if (json_object_object_get_ex(divert, "fileserver", &jfs))
 					eb_debug (1, 0, "JSON", "Fileserver already exists on %d.%d", net, stn);
 
-				json_object_object_add(divert, "fileserver-path", json_object_new_string(eb_getstring(line, &matches[2])));
+				jfs = json_object_new_object();
+
+				json_object_object_add(divert, "fileserver", jfs);
+				// Now modularized json_object_object_add(divert, "fileserver-path", json_object_new_string(eb_getstring(line, &matches[2])));
+				json_object_object_add(jfs, "directory", json_object_new_string(eb_getstring(line, &matches[2])));
 #else
 				eb_device_init_fs (net, stn, eb_getstring(line, &matches[2]), FS_DEFAULT_TAPE_HANDLER, FS_DEFAULT_NEW_USER_QUOTA, NULL);
 #endif
@@ -13947,10 +14012,10 @@ int main (int argc, char **argv)
 						{
 				
 							struct __eb_device	*d;
-							char			info[512], tmp[128];
+							char			info[512], tmp[280];
 							uint8_t			prev_info = 0;
 							char			fw_in[128], fw_out[128];
-							struct __eb_device_module *m_ip = NULL;
+							struct __eb_device_module *m_ip = NULL, *m_fs = NULL;
 							struct __eb_ipgw	*m_ip_ws = NULL;
 
 							d = (p->type == EB_DEF_WIRE) ? p->wire.divert[count] : p->null.divert[count];
@@ -13964,9 +14029,12 @@ int main (int argc, char **argv)
 							
 							strcpy (info, "");
 
-							if (d && d->type == EB_DEF_LOCAL && d->local.fs.rootpath)
+							// Now modularized if (d && d->type == EB_DEF_LOCAL && d->local.fs.rootpath)
+							if (d && d->type == EB_DEF_LOCAL && (m_fs = eb_module_get_data(d, "FS")))
 							{
-								sprintf (tmp, "Fileserver at %s", d->local.fs.rootpath);
+								struct __eb_fileserver * ef = (struct __eb_fileserver *) m_fs->module_ws;
+								//sprintf (tmp, "Fileserver at %s", d->local.fs.rootpath);
+								sprintf (tmp, "Fileserver at %s", ef->server->directory);
 								strcat (info, tmp);
 								prev_info = 1;
 							}
@@ -14823,10 +14891,16 @@ static void * eb_fs_statistics (void *nothing)
 
 					if (local && local->type == EB_DEF_LOCAL)
 					{
+						struct __fs_station *server = fsop_is_started(local);
+
+						if (server)	fsop_dump_handle_list(output, server);
+
+#if 0 /* Now modularized */
 						if (fsop_is_enabled(local->local.fs.server))
 						{
 							fsop_dump_handle_list (output, local->local.fs.server);
 						}
+#endif
 
 					}
 				}
@@ -15057,7 +15131,7 @@ static void * eb_statistics (void *nothing)
 					if (divert)
 					{
 						uint8_t stn;
-						struct __eb_device_module *m_ip, *m_teletext, *m_ps;
+						struct __eb_device_module *m_ip, *m_teletext, *m_ps, *m_fs;
 
 						char info[128];
 
@@ -15070,7 +15144,8 @@ static void * eb_statistics (void *nothing)
 								stn = divert->local.stn; 
 								sprintf(info, "%c%c%c%c%c", 
 									((m_ps = eb_module_get_data(divert, "PS")) ? (m_ps->module_started ? 'P' : 'p') : ' '),
-									(fsop_is_enabled(divert->local.fs.server) ? 'F' : ' '),
+									((m_fs = eb_module_get_data(divert, "FS")) ? (m_fs->module_started ? 'F' : 'f') : ' '),
+									// Now modularized (fsop_is_enabled(divert->local.fs.server) ? 'F' : ' '),
 									((m_ip = eb_module_get_data(divert, "IPGW")) ? (m_ip->module_started ? 'I' : 'i') : ' '),
 									((m_teletext = eb_module_get_data(divert, "TELETEXT")) ? (m_teletext->module_started ? 'T': 't') : ' '),
 									(divert->local.fast_menu ? 'M' : ' ')

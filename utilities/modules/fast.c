@@ -88,6 +88,18 @@ uint8_t eb_fast_printdiscs (struct __eb_fast_client *fc)
         uint8_t         count;
         uint8_t         max_discs;
 	struct __eb_device	*d = fc->parent;
+	struct __eb_device_module	*module;
+	struct __eb_fileserver		*ef;
+
+	module = eb_module_get_data_started(d, "FS");
+
+	if (!module)
+	{
+		f_printf (fc, "\n\rFileserver not running\r\n\n");
+		return 0;
+	}
+
+	ef = (struct __eb_fileserver *) module->module_ws;
 
         max_discs = fs_get_maxdiscs();
 
@@ -97,7 +109,8 @@ uint8_t eb_fast_printdiscs (struct __eb_fast_client *fc)
         {
                 unsigned char   discname[128];
 
-                fsop_get_disc_name (d->local.fs.server, count, discname);
+                // Now modularized fsop_get_disc_name (d->local.fs.server, count, discname);
+                fsop_get_disc_name (ef->server, count, discname);
 
                 if (discname[0]) f_printf (fc, "%1x: %02d - %s\r\n", count, count, discname);
         }
@@ -881,6 +894,38 @@ char * eb_fast_ssh_strerr(uint8_t res)
 		res == EB_FAST_SSH_CONNECT_PTYFAIL ? "Could not create PTY" :
 		res == EB_FAST_SSH_CONNECT_SHELLFAIL ? "Could not create shell" : "Unknown error";
 }
+
+/*
+ * Return success (1) if either (i) not a module start/stop op, or (ii) it is, and the module is stopped and the operation is start, or vice versa - i.e. this is a valid operation to do 
+ */
+
+uint8_t eb_fast_valid_module_op(struct __eb_fast_client *fc, struct __eb_fast_menu_item *i)
+{
+	uint8_t	ret = 1; /* Default is everything is OK */
+
+	if (i->fm_type == EB_FAST_MENU_MODULE_START || i->fm_type == EB_FAST_MENU_MODULE_STOP)
+	{
+		struct __eb_device_module *m;
+
+		m = eb_module_get_data(fc->parent, i->fm_module.fm_module_name);
+
+		if (!m)
+			ret = 0; /* No such module */
+		else
+		{
+			uint8_t started = eb_module_is_started(m);
+
+			if (
+				(i->fm_type == EB_FAST_MENU_MODULE_START && started)
+			|| 	(i->fm_type == EB_FAST_MENU_MODULE_STOP && !started)
+			   ) 
+				ret = 0; /* Start op when already started, and vice versa */
+		}
+	}
+
+	return ret;
+}
+
 /* Mediate traffic between sock -> fc->fc_socket[EB_FAST_TO_NETWORK][1]   and fc->fc_socket[EB_FAST_TO_SERVER][0] -> sock */
 
 void eb_fast_run_connection (struct __eb_fast_client *fc, int sock, uint8_t type)
@@ -1081,12 +1126,14 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 		{
 			uint8_t		key = 0;
 			uint8_t		priv, priv2;
-			struct		__fs_station *s;
+			struct		__fs_station *s = NULL;
 
 			priv = priv2 = 0;
 
-			s = fc->parent->local.fs.server;
+			// Now modularized s = fc->parent->local.fs.server;
 
+			s = fsop_is_started(fc->parent);
+			
 			if (s)
 			{
 				struct __fs_active	*a;
@@ -1127,16 +1174,22 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 						if (fc->menu_current->item->next)  /* This is checking if this is a one-item menu */
 							f_printf (fc, "\r\n");
 					}
+#if 0 /* This function has been retired */
 					else if (mi->fm_type == EB_FAST_MENU_FSSTOPSTART && s && fc->menu_current->item->next) /* Only available if part of a menu, and we have a defined fileserver */
 					{
 						f_printf (fc, "%c. %s\r\n", mi->keypress, fsop_is_enabled(s) ? "STOP the fileserver" : "Start the fileserver");
 						valid_keys[vk_count++] = mi->keypress;
 					}
+#endif
 					else if (mi->fm_type != EB_FAST_MENU_HEADING)
 					{
-						if (fc->menu_current->item->next)
-							f_printf (fc, "%c. %s\r\n", mi->keypress, mi->fm_description);
-						valid_keys[vk_count++] = mi->keypress;
+						if (eb_fast_valid_module_op(fc, mi))
+						{
+						
+							if (fc->menu_current->item->next)
+								f_printf (fc, "%c. %s\r\n", mi->keypress, mi->fm_description);
+							valid_keys[vk_count++] = mi->keypress;
+						}
 					}
 					else if (fc->menu_current->item->next)
 						f_printf (fc, "\r\n%s\r\n", mi->fm_description);
@@ -1179,7 +1232,7 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 			{
 	
 				struct __eb_fast_menu_item 	*i;
-	
+
 				if (fc->menu_current->item->next) 
 					f_printf (fc, "%c\r\r\n", key);
 	
@@ -1187,7 +1240,10 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 	
 				i = fc->menu_current->item;
 	
-				while (i && i->keypress != key)
+				while ((i && i->keypress != key)
+					||
+					((i->fm_type == EB_FAST_MENU_MODULE_START || i->fm_type == EB_FAST_MENU_MODULE_STOP)  && !eb_fast_valid_module_op(fc, i)) /* Even if th key matches, ignore it if it's a module op & the relevant service is already started/stopped */
+				      )
 					i = i->next;
 	
 				if (i)
@@ -1199,6 +1255,7 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 	
 					switch (i->fm_type)
 					{
+#if 0 /* Retired in favour of module stop/start */
 						case EB_FAST_MENU_FSSTOPSTART: /* Sort out fileserver */
 							{
 								if (!s)
@@ -1248,7 +1305,7 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 
 								} 
 							} break;
-
+#endif
 						case EB_FAST_MENU_SUBMENU: /* Move to submenu */
 							{
 								eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - new menu %s", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_submenu.fm_submenu->menu_name);
@@ -1485,7 +1542,7 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 								f_printf (fc, "\n\r\n");
 
 								if (!(m = eb_module_get_data_started(fc->parent, "PS")))
-									f_printf (fc, "No printers defined.");
+									f_printf (fc, "Print server not running");
 								else
 								{
 									struct __eb_printer *p = (struct __eb_printer *) m->module_ws;
@@ -1518,12 +1575,14 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 								if (!s)
 								{
 									eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Request FS disc list, but no FS defined", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn);
+									f_printf(fc, "Fileserver not running");
 									break;
 								}
 
 								f_printf (fc, "Disc list on %d.%d (Blocksize in [bytes]):\r\n\n", fc->parent->net, fc->parent->local.stn);
 
-								f = fc->parent->local.fs.server->discs;
+								// Use s from above f = fc->parent->local.fs.server->discs;
+								f = s->discs;
 
 								while (f)
 								{
@@ -1539,16 +1598,86 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 								f_printf (fc, "\r\n\n");
 
 							} break;
+						case EB_FAST_MENU_MODULE_STOP: /* Deliberate fall through */
+						case EB_FAST_MENU_MODULE_START:
+							{
+								struct __eb_device_module *m;
+								
+								m = eb_module_get_data(fc->parent, i->fm_module.fm_module_name);
+
+								if (!m)
+								{
+									eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client tried to start/stop a module which was not found! (%s)",
+										eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_module.fm_module_name);
+									f_printf (fc, "\r\n\nError: Module not found on this host.\n\n");
+								}
+								else if (!strcasecmp(i->fm_module.fm_module_name, "FAST"))
+								{
+									eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client tried to start/stop the FAST module!",
+										eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn);
+									f_printf (fc, "\r\n\nError: Stopping/Starting the FAST module not allowed\r\n\n");
+								}
+								else
+								{
+									uint8_t ret;
+
+									f_printf (fc, "\n\r\n%s module ", i->fm_module.fm_module_name);
+									if (i->fm_type == EB_FAST_MENU_MODULE_STOP)
+									{
+										eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client stopping %s module",
+											eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_module.fm_module_name);
+										ret = eb_module_stop(fc->parent, m);
+
+										if (ret) f_printf(fc, "failed to ");
+
+										f_printf(fc, "stop");
+
+										if (!ret) f_printf(fc, "p");
+									}
+									else
+									{
+										eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client starting %s module",
+											eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn, i->fm_module.fm_module_name);
+										ret = eb_module_start(fc->parent, m);
+
+										if (ret) f_printf(fc, "failed to ");
+
+										f_printf (fc, "start");
+									}
+
+									if (!ret) f_printf (fc, "ed");
+
+									f_printf (fc, ".\r\n\n");
+								}
+
+								f_printf (fc, "\r\n\nPress a key...");
+								key = eb_fast_getc(fc, 5000);
+
+								if (key == -2) break;
+
+								f_printf (fc, "\r\n\n");
+
+
+							} break;
 						case EB_FAST_MENU_FSTOGGLEOPTIONS:
 							{
 								uint8_t	fstoggle_quit = 0;
 								uint32_t params;
 								uint8_t	fnlength;
+								struct __eb_device_module *m;
 
 								eb_debug (0, 1, "FAST", "%-8s %3d.%3d from %3d.%3d FAST client - Toggle FS Options", eb_type_str(fc->parent->type), fc->parent->net, fc->parent->local.stn, fc->net, fc->stn);
-								pthread_mutex_lock (&(s->fs_mutex));
+								//pthread_mutex_lock (&(s->fs_mutex));
+								m = eb_module_get_data_started_locked(s->fs_device, "FS");
+								if (!m)
+								{
+									f_printf (fc, "\r\nFileserver not running.\r\n\n");
+									break;
+								}
+
 								fsop_get_parameters (s, &params, &fnlength);
-								pthread_mutex_unlock (&(s->fs_mutex));
+								eb_module_unlock(m);
+								//pthread_mutex_unlock (&(s->fs_mutex));
 
 								while (!fstoggle_quit)
 								{
@@ -1605,9 +1734,12 @@ void eb_fast_display_menu(struct __eb_fast_client *fc)
 
 											if (p == 'Y')
 											{
-												pthread_mutex_lock(&s->fs_mutex);
+												struct __eb_device_module *m;
+												m = eb_module_get_data_started_locked(s->fs_device, "FS");
+												// pthread_mutex_lock(&s->fs_mutex);
 												fsop_set_parameters(s, params, fnlength);
-												pthread_mutex_unlock(&s->fs_mutex);
+												eb_module_unlock(m);
+												//pthread_mutex_unlock(&s->fs_mutex);
 											}
 
 											fstoggle_quit = 1;

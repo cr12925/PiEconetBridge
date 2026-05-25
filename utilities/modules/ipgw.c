@@ -392,7 +392,7 @@ uint8_t ipgw_init_private (struct __eb_device *d, struct __eb_device_module *m, 
 
 	while (ilength == 1 && icount == 0) /* We're only doing 1 */ 
 	{
-		struct json_object      *jip, *jipinterface, *jipaddress;
+		struct json_object      *jip, *jipinterface, *jipaddress, *jautostart;
 		uint8_t		 ip[4], masklen;
 		uint32_t		ip_host, mask_host;
 		char		    address[30];
@@ -450,6 +450,13 @@ uint8_t ipgw_init_private (struct __eb_device *d, struct __eb_device_module *m, 
 		me->addresses->mask = mask_host;
 		me->addresses->ipq = NULL;	
 
+		/* If any of the entries has autostart:false, set it globally - our parameters are an array, so that will
+		 * have to do!
+		 */
+
+		if (json_object_object_get_ex(jip, "autostart", &jautostart) && json_object_is_type(jautostart, json_type_boolean))
+			m->module_autostart = json_object_get_boolean(jautostart);
+
 		icount++;       
 	}
 
@@ -487,15 +494,5 @@ void ipgw_cleanup (struct __eb_device *d, struct __eb_device_module *m)
 }
 
 /* We use the templates */
-
-/*
-eb_module_init_def("IPGW",ipgw_init,struct __eb_ipgw,EB_PORT_IP,ipgw_init_private);
-eb_module_exit_def("IPGW",ipgw_exit,EB_PORT_IP);
-eb_module_handle_traffic("IPGW",ipgw_handle_traffic);
-eb_module_thread_def("IPGW", ipgw_thread_main, ipgw_handle_traffic_internal);
-eb_module_start_def("IPGW",ipgw_start,EB_PORT_IP,ipgw_thread_main,ipgw_handle_traffic); // NB we have a traffic handler above, but the handle traffic just puts on queue now 
-eb_module_drain_queue("IPGW",ipgw_queue_drain);
-eb_module_stop_def("IPGW",ipgw_stop,EB_PORT_IP,ipgw_queue_drain,NULL);
-*/
 
 eb_module_funcs_def(IPGW,struct __eb_ipgw,EB_PORT_IP,ipgw_init_private,ipgw_handle_traffic_internal,ipgw_cleanup);

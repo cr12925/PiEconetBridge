@@ -263,6 +263,22 @@ struct __eb_device_module * eb_module_get_data_started_internal (void *d_in, uns
 	return m;
 }
 
+/* Find if module started 
+ * Must be an extant module!
+ */
+
+uint8_t	eb_module_is_started (struct __eb_device_module *m)
+{
+	uint8_t	ret;
+
+	if (!m) return 0; /* Just in case */
+
+	pthread_mutex_lock(&(m->module_mutex));
+	ret = m->module_started;
+	pthread_mutex_unlock(&(m->module_mutex));
+	return ret;
+}
+
 void eb_module_unlock (struct __eb_device_module *m)
 {
 	pthread_mutex_unlock(&(m->module_mutex));

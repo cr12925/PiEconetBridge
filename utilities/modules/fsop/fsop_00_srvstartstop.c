@@ -95,13 +95,19 @@ FSOP_00(SRVSTOP)
 
 	if (device == f->server->fs_device && !strcasecmp(module,"FS")) /* Attempt to stop local fileserver */
 	{
+		struct __eb_device_module *m;
+
 		/* Don't call eb_module_stop on our own server - it
 		 * will try to take module_mutex, which we already hold.
 		 */
 
-		f->server->enabled = 1; /* Ask the main thread to shut down */
-		fs_debug_full (0, 1, f->server, 0, 0, "Requested shutdown of local fileserver");
-		fsop_reply_ok(f);
+		if ((m = eb_module_get_data(device, "FS")))
+		{
+			m->module_exiting = 1;
+			fs_debug_full (0, 1, f->server, 0, 0, "Requested shutdown of local fileserver");
+			fsop_reply_ok(f);
+		}
+		else	fsop_error(f, 0xff, "Internal error");
 	}
 	else
 	{

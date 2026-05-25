@@ -177,11 +177,13 @@ FSOP(60)
                 case 0x13:
                 {
                         char shutdown_msg[128];
+			struct __eb_device_module *m;
 
                         snprintf (shutdown_msg, 127, "Fileserver at %d.%d shutting down\x0d", f->server->net, f->server->stn);
                         fs_debug_full (0, 2, f->server, f->net, f->stn, "FS PiBridge call arg = 19 - Shut down fileserver");
                         fsop_reply_ok_with_data(f, (unsigned char *) shutdown_msg, strlen(shutdown_msg));
-			f->server->enabled = 0; /* The fsop_thread() routine does the actual shutdown */
+			m = eb_module_get_data(f->server->fs_device, "FS"); /* We're under lock during traffic anyway */
+			m->module_exiting = 1; /* This causes the thread to exit */
 
                 } break;
 

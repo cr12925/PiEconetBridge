@@ -455,10 +455,10 @@ FSOP(24)
         		user->home_disc = disc_index;
 			user->priv = FS_PRIV_USER;
         		user->priv2 = 0x00; // clear priv2 byte
-        		user->quota_free[0] = (f->server->fs_device->local.fs.new_user_quota & 0xff);
-        		user->quota_free[1] = (f->server->fs_device->local.fs.new_user_quota & 0xff00) >> 8;
-        		user->quota_free[2] = (f->server->fs_device->local.fs.new_user_quota & 0xff0000) >> 16;
-        		user->quota_free[3] = (f->server->fs_device->local.fs.new_user_quota & 0xff000000) >> 24;
+        		user->quota_free[0] = (f->server->new_user_quota & 0xff);
+        		user->quota_free[1] = (f->server->new_user_quota & 0xff00) >> 8;
+        		user->quota_free[2] = (f->server->new_user_quota & 0xff0000) >> 16;
+        		user->quota_free[3] = (f->server->new_user_quota & 0xff000000) >> 24;
 			
 			fsop_reply_ok(f);
 

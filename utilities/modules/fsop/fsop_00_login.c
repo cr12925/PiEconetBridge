@@ -348,7 +348,8 @@ FSOP_00(LOGIN)
 	/* Uses separate mutex in case there are consistency issues with using the main fs_mutex */
 
 	pthread_mutex_lock(&(f->server->fs_mpeek_mutex));
-	pthread_cond_timedwait(&(f->server->fs_condition), &(f->server->fs_mpeek_mutex), &peek_timeout);
+	// Now modularized pthread_cond_timedwait(&(f->server->fs_condition), &(f->server->fs_mpeek_mutex), &peek_timeout);
+	pthread_cond_timedwait(&(f->server->fs_mpeek_condition), &(f->server->fs_mpeek_mutex), &peek_timeout);
 	pthread_mutex_unlock(&(f->server->fs_mpeek_mutex));
 
 	mtype = stnpeek->mtype; /* If we got no reply, it'll be 0x0000 */

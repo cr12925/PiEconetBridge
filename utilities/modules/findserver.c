@@ -48,7 +48,7 @@ void eb_handle_findserver_traffic (struct __eb_device *d, struct __eb_device_mod
 	if (p->p.ctrl == 0x80)
 	{
 
-		char	findserver_type[9], server_type[9];
+		char	findserver_type[9]; // Modularized , server_type[9];
 		uint8_t	my_length;
 		struct __econet_packet_aun	*reply;
 								
@@ -82,9 +82,10 @@ void eb_handle_findserver_traffic (struct __eb_device *d, struct __eb_device_mod
 
 		eb_dump_packet (d, EB_PKT_DUMP_POST_O, p, len);
 
-		eb_debug (0, 1, "FIND", "%-8s %3d.%3d FindServer request received - type '%-8s'",
+		eb_debug (0, 3, "FIND", "%-8s %3d.%3d FindServer request received - type '%-8s'",
 			eb_type_str(d->type), d->net, d->local.stn, findserver_type);
 
+#if 0 /* FS Modularized */
 		if (fsop_is_enabled(d->local.fs.server)) // Is fileserver
 		{
 			strcpy (server_type, "FILE    ");	
@@ -95,6 +96,7 @@ void eb_handle_findserver_traffic (struct __eb_device *d, struct __eb_device_mod
 				eb_raw_send (d, reply, my_length);
 			}
 		}
+#endif
 #if 0	/* Printers modularized */
 		if (d->local.printers) // Print server
 		{
@@ -139,13 +141,14 @@ void eb_handle_findserver_traffic (struct __eb_device *d, struct __eb_device_mod
 	
 				memcpy(&(reply->p.data[3]), m->module_findserver_name, 8);
 
-				if (m->module_started)
+				if (m->module_started && (!strcmp(findserver_type, "        ") || !memcmp(findserver_type, m->module_findserver_name, 8)))
 				{
 					eb_debug (0, 2, "FIND", "Local    %3d.%3d Send findserver reply for '%s' module", d->net, d->local.stn, m->module_name);
+					if (strcmp(findserver_type, "        ")) /* If not an "any type" query, insert short delay - sometimes they are not listening... */
+						usleep(100000);
+
 					eb_raw_send (d, reply, my_length);
 				}
-				else
-					eb_debug (0, 2, "FIND", "Local    %3d.%3d No findserver reply for '%s' - module not started", d->net, d->local.stn, m->module_name);
 	
 				pthread_mutex_unlock (&(m->module_mutex));
 			}

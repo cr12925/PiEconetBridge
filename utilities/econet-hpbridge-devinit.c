@@ -354,6 +354,7 @@ uint8_t eb_device_init_fast (uint8_t net, uint8_t stn, char *menuname)
 
 }
 
+#if 0 /* Modularized */
 /*
  * eb_device_init_fs
  *
@@ -404,6 +405,7 @@ uint8_t eb_device_init_fs (uint8_t net, uint8_t stn, char *rootpath, char *tapeh
 
 	return 1;
 }
+#endif
 
 #if 0 /* PS modularized */
 /* 

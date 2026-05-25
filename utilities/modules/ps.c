@@ -263,6 +263,7 @@ void ps_handle_traffic_internal (struct __eb_device *d, struct __eb_device_modul
 		{
 			char		template[128];
 			int		spooldescriptor;
+			struct __fs_station *myfs;
 
 			strncpy (template, PRN_SPOOL_TEMPLATE, 126);
 
@@ -294,7 +295,8 @@ void ps_handle_traffic_internal (struct __eb_device *d, struct __eb_device_modul
 
 				printerindex = 0xff;
 
-				if (fsop_is_enabled(d->local.fs.server) && (a = fsop_stn_logged_in_lock(d->local.fs.server, (job->net == d->net ? 0 : job->net), job->stn))) // Is fileserver
+				// Now modularized if (fsop_is_enabled(d->local.fs.server) && (a = fsop_stn_logged_in_lock(d->local.fs.server, (job->net == d->net ? 0 : job->net), job->stn))) // Is fileserver
+				if ((myfs = fsop_is_started(d)) && (a = fsop_stn_logged_in_lock(myfs, (job->net == d->net ? 0 : job->net), job->stn))) // Is fileserver
 				{
 					fsop_get_username_lock(a, job->username);
 					printerindex = fsop_get_user_printer(a);
@@ -443,7 +445,7 @@ uint8_t ps_init_private (struct __eb_device *d, struct __eb_device_module *me, s
 
 	while (pcount < plength)
 	{
-		struct json_object      *jprinter, *jacorn, *junix, *jpriority, *jdefault, *jhandler, *jusers, *juser, *jptype;
+		struct json_object      *jprinter, *jacorn, *junix, *jpriority, *jdefault, *jhandler, *jusers, *juser, *jptype, *jautostart;
 		uint8_t	 priority = 1, pdefault = 1, printertype = EB_PRINTER_OTHER;
 
 		jprinter = json_object_array_get_idx(j, pcount);
@@ -492,6 +494,13 @@ pdefault = 0;
 		if (json_object_object_get_ex(jprinter, "handler", &jhandler))
 			strncpy (printer->handler, json_object_get_string(jhandler), 126);
 		else	strcpy (printer->handler, ""); /* NULL handler */
+
+                /* If any of the entries has autostart:false, set it globally - our parameters are an array, so that will
+                 * have to do!
+                 */
+
+                if (json_object_object_get_ex(jprinter, "autostart", &jautostart) && json_object_is_type(jautostart, json_type_boolean))
+                        me->module_autostart = json_object_get_boolean(jautostart);
 
 		pcount++;
 
@@ -619,8 +628,8 @@ uint8_t ps_start(void *device, struct __eb_device_module *me)
 	
 	pthread_detach(me->module_thread); 
 	
-	EB_PORT_SET(d, ports, EB_PORT_PS_DATA, ps_module_handle_traffic, d); /* Make port active */ 
-	EB_PORT_SET(d, ports, EB_PORT_PS_QUERY, ps_module_handle_traffic, d); /* Make port active */ 
+	eb_port_allocate(d,EB_PORT_PS_DATA, ps_module_handle_traffic, d); /* Make port active */ 
+	eb_port_allocate(d, EB_PORT_PS_QUERY, ps_module_handle_traffic, d); /* Make port active */ 
 	
 	eb_module_debug (1, "PRINT", d, "Server started"); 
 	
@@ -635,7 +644,7 @@ void ps_stop_cleanup (struct __eb_device *d, struct __eb_device_module *me)
 	struct __eb_printer *printer;
 	
 	/* Clear out extra port */
-	EB_PORT_CLR(d, ports, EB_PORT_PS_DATA); 
+	eb_port_deallocate (d, EB_PORT_PS_DATA); 
 	
 	printer = (struct __eb_printer *) me->module_ws;
 

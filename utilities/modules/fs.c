@@ -29,6 +29,16 @@
 
 #include "fs.h"
 
+#define MODULE "FS"
+
+/* Modularized init, start, stop, etc. */
+
+eb_module_drain_queue(MODULE, FS_module_drainqueue);
+eb_module_handle_traffic(MODULE, FS_module_handle_traffic);
+eb_module_init_def(MODULE, FS_module_init, struct __eb_fileserver, 0x99, FS_module_init_private, FS_module_start, FS_module_stop, FS_module_exit);
+
+void FS_handle_traffic_shutdown (struct __econet_packet_aun *, uint16_t, void *);
+
 extern void * thread_return;
 
 uint8_t fs_set_syst_bridgepriv = 0; // If set to 1 by the HP Bridge, then on initialization, each FS will enable the bridge priv on its SYST user
@@ -47,8 +57,6 @@ uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
  */
 
 struct fsop_list fsops[255]; 
-
-//regex_t r_discname; // , r_wildcard;
 
 extern void eb_debug_fmt (uint8_t, uint8_t, char *, char *);
 
@@ -664,9 +672,19 @@ void fsop_get_username_base (struct __fs_station *s, int userid, char *username)
 
 void fsop_get_username_lock (struct __fs_active *a, char *username)
 {
-	pthread_mutex_lock(&(a->server->fs_mutex));
-	fsop_get_username_base (a->server, a->userid, username);
-	pthread_mutex_unlock(&(a->server->fs_mutex));
+	struct __eb_device_module *m;
+
+	m = eb_module_get_data_started_locked(a->server->fs_device, "FS");
+
+	if (m)
+	{
+		//pthread_mutex_lock(&(a->server->fs_mutex));
+		fsop_get_username_base (a->server, a->userid, username);
+		//pthread_mutex_unlock(&(a->server->fs_mutex));
+
+		pthread_mutex_unlock(&(m->module_mutex));
+	}
+
 	return;
 }
 
@@ -1129,17 +1147,19 @@ void fsop_dump_handle_list(FILE *out, struct __fs_station *s)
 	struct __fs_disc	*disc;
 	struct __fs_active	*active;
 	struct __fs_file	*file;
+	struct __eb_device	*device;
+	struct __eb_device_module	*module;
 
 	if (!s) // bad
 		return;
 
-	pthread_mutex_lock(&(s->fs_mutex));
+	device = s->fs_device;
+	module = eb_module_get_data_started_locked(device, "FS");
 
-	fprintf (out, "\n\nServer at %3d.%3d is %s\n\n", s->net, s->stn, s->enabled ? "RUNNING" : "SHUT DOWN");
+	fprintf (out, "\n\nServer at %3d.%3d is %s\n\n", s->net, s->stn, (module && module->module_started) ? "RUNNING" : "SHUT DOWN");
 
-	if (!s->enabled) // Nothing to do
+	if (!module) // Nothing to do
 	{
-		pthread_mutex_unlock(&(s->fs_mutex));
 		return;
 	}
 
@@ -1266,7 +1286,9 @@ void fsop_dump_handle_list(FILE *out, struct __fs_station *s)
 	if (!found) fprintf (out, "None");
 	fprintf (out, "\n");
 
-	pthread_mutex_unlock(&(s->fs_mutex));
+	//pthread_mutex_unlock(&(s->fs_mutex));
+	eb_module_unlock(module);
+
 	return;	
 
 }
@@ -3234,8 +3256,13 @@ uint8_t fsop_clear_syst_pw(struct __fs_station *server)
 
 	int	count;
 	uint8_t	ret = 0;
+	struct __eb_device_module *m;
 
-	pthread_mutex_lock(&(server->fs_mutex));
+	m = eb_module_get_data_started_locked(server->fs_device, "FS");
+
+	if (!m) return ret;
+
+	//pthread_mutex_lock(&(server->fs_mutex));
 
 	for (count = 0; count < ECONET_MAX_FS_USERS; count++)
 	{
@@ -3246,11 +3273,36 @@ uint8_t fsop_clear_syst_pw(struct __fs_station *server)
 		}
 	}
 
-	pthread_mutex_unlock(&(server->fs_mutex));
+	//pthread_mutex_unlock(&(server->fs_mutex));
+	eb_module_unlock(m);
 
 	return ret;
 }
 
+/*
+ * fsop_is_started returns the pointer to the
+ * server struct if the given station has 
+ * an active FS on it
+ */
+
+struct __fs_station * fsop_is_started(struct __eb_device *d)
+{
+	struct __fs_station *s = NULL;
+	struct __eb_device_module *m;
+	struct __eb_fileserver *ef;
+
+	m = eb_module_get_data_started(d, "FS");
+
+	if (m)
+	{
+		ef = (struct __eb_fileserver *) m->module_ws;
+		s = ef->server;
+	}
+
+	return s;
+}
+
+#if 0 /* Modularized */
 // Tell the bridge if a particular FS is active
 
 uint8_t fsop_is_enabled(struct __fs_station *s)
@@ -3266,7 +3318,194 @@ uint8_t fsop_is_enabled(struct __fs_station *s)
 
 	return ret;
 }
+#endif
 
+/* FS_private_init
+ *
+ * Modularized initialization routine 
+ *
+ * We use the standard template _init routine, this is our private config reader.
+ *
+ * And we enable the port as well, because we'll reply with an error if the FS
+ * isn't running.
+ *
+ * By the time this is called, we have a module struct allocated with some workspace
+ * which is a struct __eb_fileserver. (Note that that won't have a struct __fs_station
+ * int the *server element of that struct, so we need to alloate that.)
+ *
+ */
+
+uint8_t FS_module_init_private (struct __eb_device *device, struct __eb_device_module *m, struct json_object *j)
+{
+
+	struct __fs_station 	*server;
+	struct __eb_fileserver	*ebf;
+	struct json_object *jtmp;
+	char regex[512];
+	char tapehandler[280];
+	char tapecompletionhandler[280];
+
+	/* Set out findserver name */
+
+	strcpy (m->module_findserver_name, "FILE    ");
+
+	/* First, grab a server struct so we can initialize it, but
+	 * we'll leave it with NULL pointers for disks etc, which can be
+	 * initialized on startup, so that if someone shuts their
+	 * FS down, puts a new disc in place, and restarts it then it'll
+	 * find the new discs.
+	 */
+
+	server = eb_malloc (__FILE__, __LINE__, "FS", "Allocate server struct", sizeof(struct __fs_station));
+
+	if (!server)
+		eb_debug (1, 0, "FS", "No memory for server struct");
+
+	ebf = (struct __eb_fileserver *) m->module_ws;
+
+	ebf->server = server;
+
+	server->net = device->net;
+	server->stn = device->local.stn;
+	server->use_xattr = 1;
+	server->fs_device = device;
+
+	/* Read JSON */
+
+	/* Main FS directory */
+
+	if (j && json_object_object_get_ex(j, "directory", &jtmp) && json_object_is_type(jtmp, json_type_string))
+		strncpy(server->directory, json_object_get_string(jtmp), 255);
+	else
+		eb_debug (1, 0, "FS", "Cannot initialize - no directory configured");
+
+	if (ebf->server->directory[0] != '/')
+	{
+		eb_free(__FILE__, __LINE__, "FS","Destroy FS struct on failed init", server);
+		fs_debug (0, 1, "Bad directory name %s", ebf->server->directory);
+		return 1;
+	}
+
+	server->tapehandler = server->tapecompletionhandler = NULL;
+
+#if 0 /* Debug */
+
+	/* Tape handler */
+
+	if (j && json_object_object_get_ex(j, "tape-handler", &jtmp) && json_object_is_type(jtmp, json_type_string))
+		strncpy(tapehandler, json_object_get_string(jtmp), 275);
+	else	strncpy(tapehandler, FS_DEFAULT_TAPE_HANDLER, 275);
+
+	fprintf (stderr, "\n\n*** tapehandler = '%s', length %d ***\n\n", tapehandler, strlen(tapehandler));
+
+	server->tapehandler = eb_malloc(__FILE__, __LINE__, "FS", "Tape completion handler string", strlen(tapehandler) + 1);
+	if (!server->tapehandler)
+		eb_debug (1, 0, "FS", "Cannot initialize - no memory for tape handler string");
+	strncpy(server->tapehandler, tapehandler, 274);
+
+	fprintf (stderr, "\n\n*** tapehandler = '%s' (%d), server->tapehandler = '%s' (%d) ***\n\n",
+			tapehandler, strlen(tapehandler),
+			server->tapehandler, strlen(server->tapehandler));
+
+	/* Tape completion handler - initialized to NULL above if we don't set it here */
+
+	if (j && json_object_object_get_ex(j, "tape-completion-handler", &jtmp) && json_object_is_type(jtmp, json_type_string))
+	{
+		strncpy(tapecompletionhandler, json_object_get_string(jtmp), 275);
+		server->tapecompletionhandler = eb_malloc(__FILE__, __LINE__, "FS", "Tape completion handler string", strlen(tapecompletionhandler) + 1);
+		if (!server->tapecompletionhandler)
+			eb_debug (1, 0, "FS", "Cannot initialize - no memory for tape completion handler string");
+		strncpy(server->tapecompletionhandler, tapecompletionhandler, 274);
+	}
+
+#endif	
+	/* Default user quota */
+
+	server->new_user_quota = FS_DEFAULT_NEW_USER_QUOTA;
+
+	if (j && json_object_object_get_ex(j, "default-quota", &jtmp) && json_object_is_type(jtmp, json_type_int))
+		server->new_user_quota = json_object_get_int(jtmp);
+
+	// fprintf (stderr, "\n\n*** server stn = %d.%d, dir = %s, tapehandler = %s, tapecompletionhandler = %s, quota = %d ***\n\n", server->net, server->stn, server->directory, server->tapehandler, server->tapecompletionhandler, server->new_user_quota);
+	sprintf(regex, "^(%s{1,16})", FSREGEX);
+
+	if (regcomp(&(server->r_discname), regex, REG_EXTENDED) != 0)
+		fs_debug (1, 0, "Unable to compile regex for disc names.");
+
+	server->bridge_force = NULL;
+
+	if (j && json_object_object_get_ex(j, "bridge-force", &jtmp) && json_object_is_type (jtmp, json_type_array))
+	{
+		uint16_t	ucount, ulength;
+		struct __fs_bridge_force	*bf;
+
+		ulength = json_object_array_length(jtmp);
+
+		for (ucount = 0; ucount < ulength; ucount++)
+		{
+			struct json_object	*juser;
+
+			juser = json_object_array_get_idx(jtmp, ucount);
+
+			if (juser)
+			{
+				if (json_object_is_type(juser, json_type_string))
+				{
+					char	username[11];
+					uint8_t	count = 9;
+
+					strncpy (username, json_object_get_string(juser), 10);
+
+					username[10] = '\0';
+
+					/* Pad to 10 characters with spaces */
+
+					while (count > 0 && username[count] == '\0')
+						username[count--] = ' ';
+
+					FS_LIST_MAKENEW(struct __fs_bridge_force,server->bridge_force,1,bf,"FS","New bridge force user struct");
+
+					strncpy(bf->username, username, 10);
+
+				}
+				else
+					eb_debug (0, 1, "FS", "Non-string entry in bridge force user list");
+			}
+		}
+	}
+
+        if (pthread_mutex_init(&server->fs_mpeek_mutex, NULL) == -1)
+        {
+		eb_free(__FILE__, __LINE__, "FS","Destroy FS struct on failed mpeek mutex init", server);
+                return 0;
+        }
+
+        if (pthread_cond_init(&server->fs_mpeek_condition, NULL) == -1)
+        {
+		eb_free(__FILE__, __LINE__, "FS","Destroy FS struct on failed backup condition init", server);
+                return 1;
+        }
+
+	if (pthread_mutex_init(&server->fs_backup_mutex, NULL) == -1)
+	{
+		eb_free(__FILE__, __LINE__, "FS", "Destroy FS struct on failed backup mutex init", server);
+		return 0;
+	}
+
+        if (pthread_cond_init(&server->fs_backup_cond, NULL) == -1)
+        {
+		eb_free(__FILE__, __LINE__, "FS","Destroy FS struct on failed backup condition init", server);
+                return 1;
+        }
+
+	//eb_port_allocate(device,0x99,FS_module_handle_traffic,device);
+	eb_port_allocate(device,0x99,FS_handle_traffic_shutdown,server); /* This handler needs the server pointer, not a device pointer */
+
+	return 0;
+
+}
+
+#if 0 /* Modularized */
 /*
  * fsop_initialize()
  *
@@ -3950,6 +4189,8 @@ void fsop_shutdown (struct __fs_station *s)
 
 }
 
+#endif  /* Modularized */
+
 // Used when we must be able to specify a ctrl byte
 
 void fsop_error_ctrl(struct fsop_data *f, uint8_t ctrl, uint8_t error, char *msg)
@@ -4088,10 +4329,14 @@ struct __fs_active * fsop_stn_logged_in(struct __fs_station *s, uint8_t net, uin
 struct __fs_active * fsop_stn_logged_in_lock(struct __fs_station *s, uint8_t net, uint8_t stn)
 {
 	struct __fs_active	*a;
+	struct __eb_device_module *m;
 
-	pthread_mutex_lock (&(s->fs_mutex));
+	//pthread_mutex_lock (&(s->fs_mutex));
+	m = eb_module_get_data_started_locked(s->fs_device, "FS");
+	if (!m) return NULL;
 	a = fsop_stn_logged_in(s, net, stn);
-	pthread_mutex_unlock (&(s->fs_mutex));
+	eb_module_unlock(m);
+	//pthread_mutex_unlock (&(s->fs_mutex));
 
 	return a;
 }
@@ -4543,10 +4788,14 @@ void fsop_bulk_dequeue (struct __fs_station *s, uint8_t net, uint8_t stn, uint32
 int8_t fsop_get_user_printer(struct __fs_active *a)
 {
 	uint8_t	p;
+	struct __eb_device_module *m;
 
-	pthread_mutex_lock(&(a->server->fs_mutex));
+	m = eb_module_get_data_started_locked(a->server->fs_device, "FS");
+	if (!m) return 0;
+	//pthread_mutex_lock(&(a->server->fs_mutex));
 	p = a->printer;
-	pthread_mutex_unlock(&(a->server->fs_mutex));
+	eb_module_unlock(m);
+	//pthread_mutex_unlock(&(a->server->fs_mutex));
 
 	return p;
 }
@@ -4599,6 +4848,8 @@ short fsop_find_new_user(struct __fs_station *s)
  * This is a handler routine registered with the HPB
  * when we get & register a bulk port. So it will not have
  * the fs_mutex lock held when called.
+ *
+ * Now that this is modularized, it needs to acquire the module lock
  */
 
 void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t len, void *param)
@@ -4607,6 +4858,7 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t len, void 
 	struct __econet_packet_udp	r;
 	struct __fs_bulk_port	*bp;
 	struct __fs_station 	*s = (struct __fs_station *) param;
+	struct __eb_device_module 	*m;
 
 	off_t	 writeable, remaining, old_cursor = 0, new_cursor = 0, new_cursor_read;
 	FILE 	*h;
@@ -4617,6 +4869,10 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t len, void 
 
 	// If the server is not enabled, return and ignore the packet
 	
+	m = eb_module_get_data_started_locked(s->fs_device, "FS");
+
+	if (!m) return;
+#if 0 /* Now modularized */
 	pthread_mutex_lock(&(s->fs_mutex));
 
 	if (!s->enabled)
@@ -4625,7 +4881,7 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t len, void 
 
 		return;
 	}
-
+#endif
 	bp = s->bulkports;
 
 	while (bp && bp->bulkport != p->p.port)
@@ -4633,7 +4889,8 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t len, void 
 
 	if (!bp)
 	{
-		pthread_mutex_unlock(&(s->fs_mutex));
+		eb_module_unlock(m);
+		//pthread_mutex_unlock(&(s->fs_mutex));
 
 		fs_debug_full (0, 1, s, 0, 0, "Dumped traffic arriving on unknown bulk port &%02X", p->p.port);
 		return; /* No idea what this traffic is */
@@ -4770,7 +5027,8 @@ void fsop_handle_bulk_traffic(struct __econet_packet_aun *p, uint16_t len, void 
 		raw_fsop_aun_send (&r, 2, s, bp->active->net, bp->active->stn);
 	}
 
-	pthread_mutex_unlock(&(s->fs_mutex));
+	eb_module_unlock(m);
+	//pthread_mutex_unlock(&(s->fs_mutex));
 }
 
 /* Garbage collect stale incoming bulk handles - This is called from the main loop in the bridge code */
@@ -4942,10 +5200,13 @@ void fsop_port99 (struct __fs_station *s, struct __econet_packet_aun *packet, ui
 
 	f = &fsop_param;
 
+#if 0 /* Don't check this now modularized - we're under the module lock, and we won't get here unless we are operating */
+
 	// If server disabled, return without doing anything
 	
 	if (!s->enabled)
 		return;
+#endif
 
 	if (datalen < 1) 
 	{
@@ -5046,6 +5307,858 @@ void fsop_port99 (struct __fs_station *s, struct __econet_packet_aun *packet, ui
 
 }
 
+/* Traffic handler for when the server is not running - produces error for users so they know */
+
+void FS_handle_traffic_shutdown (struct __econet_packet_aun *p, uint16_t len, void *param)
+{
+
+	struct __econet_packet_aun 	reply;
+	struct __fs_station 		*s = (struct __fs_station *) param;
+	char	errstr[] = "Fileserver shut down";
+	uint8_t	errlen = strlen(errstr);
+
+	reply.p.srcstn = s->stn;
+	reply.p.srcnet = s->net;
+	reply.p.dststn = p->p.srcstn;
+	reply.p.dstnet = p->p.srcnet;
+	reply.p.aun_ttype = ECONET_AUN_DATA;
+	reply.p.seq = 0x0000;
+	reply.p.padding = 0x00;
+	reply.p.port = p->p.data[0];
+	reply.p.ctrl = p->p.ctrl;
+	reply.p.data[0] = 0x00;
+	reply.p.data[1] = 0xff; /* Error */
+	strcpy(&(reply.p.data[2]), errstr);
+	reply.p.data[2+errlen] = 0x0D;
+
+	eb_enqueue_output (s->fs_device, &reply, 2+1+errlen, NULL);
+	
+}
+
+/* v2.2-dev Modularized internal traffic handler */
+/*
+ * This is a function which the main template thread calls
+ */
+
+void FS_module_traffic_processor (struct __eb_device *device, struct __eb_device_module *me, struct __econet_packet_aun *p, uint16_t len)
+{
+	struct __fs_station *s;
+	struct __eb_fileserver *fileserver = (struct __eb_fileserver *) me->module_ws;
+	struct __fs_active	*a;
+
+	s = (struct __fs_station *) fileserver->server;
+
+	a = fsop_stn_logged_in(s, p->p.srcnet, p->p.srcstn);
+
+	fs_debug_full (0, 4, s, 0, 0, "Processing traffic length %d from %d.%d", len, p->p.srcnet, p->p.srcstn);
+
+	switch (p->p.aun_ttype)
+	{
+   		case ECONET_AUN_NAK: // If there's an extant queue and we got a NAK matching its trigger sequence, dump the queue - the station has obviously stopped wanting our stuff
+		{
+			struct __fs_active_load_queue	*alq = NULL;
+
+			if (a)	alq = a->load_queue;
+
+			while (alq)
+			{
+				if (alq->ack_seq_trigger == p->p.seq) 
+				{
+					if (alq->queue_type == FS_ENQUEUE_LOAD)
+						fsop_close_interlock(s, alq->internal_handle, alq->mode);
+
+					FS_LIST_SPLICEFREE(a->load_queue, alq, "FS", "Freeing active load queue struct on NAK received");
+					break;
+				}
+				else
+					alq = alq->next;
+
+			}
+		}
+		break;
+
+		case ECONET_AUN_ACK:
+		{
+			fsop_bulk_dequeue(s, p->p.srcnet, p->p.srcstn, p->p.seq);
+		}
+		break;
+
+		case ECONET_AUN_BCAST:
+		case ECONET_AUN_DATA:
+			fsop_port99(s, p, len);
+		break;
+	
+	}
+
+	fsop_garbage_collect(s);
+}
+
+/*
+ * FS_module_stop_cleanup
+ *
+ * Custom - this has to run on the thread exit rather than during stop,
+ * in case someone does *SRVSTOP on the local server.
+ *
+ */
+
+uint8_t FS_module_stop_cleanup (void *device, struct __eb_device_module *m)
+{
+	struct __eb_device 	*d = (struct __eb_device *) device;
+	struct __eb_fileserver 	*ef = (struct __eb_fileserver *) m->module_ws;
+	struct __fs_station	*s = ef->server;
+	struct __fs_active	*a, *n;
+	struct __fs_disc 	*disc;
+	struct __fs_bulk_port	*bulk;
+
+	/* Put port back to the shutdown handler */
+
+	eb_port_deallocate(device,0x99);
+	eb_port_allocate(device,0x99,FS_handle_traffic_shutdown,s);
+
+	/* Drain queue */
+
+	FS_module_drainqueue(d, m);
+
+	a = s->actives;
+
+	while (a)
+	{
+		n = a->next;
+
+		fsop_bye_internal(a, 0, 0);
+
+		a = n;
+	}
+
+	if (s->actives) /* This should not have anything in it! */
+		fs_debug_full (0, 1, s, 0, 0, "Server was left with one or more active users after shutdown!");
+
+	if (s->files) /* This should not have anything in it after everyone has been logged off! */
+		fs_debug_full (0, 1, s, 0, 0, "Server was left with one or more open files after shutdown!");
+
+	/* Free any discs we found */
+
+	disc = s->discs;
+
+	while (disc)
+	{
+		struct __fs_disc *n;
+
+		n = disc->next;
+		eb_free (__FILE__, __LINE__, "FS", "Free disc struct", disc);
+		disc = n;
+	}
+
+	s->discs = NULL;
+
+	/* Next clean up the bulk ports */
+
+	bulk = s->bulkports;
+
+	while (bulk)
+	{
+		struct __fs_bulk_port *bn;
+
+		bn = bulk->next;
+
+		eb_port_deallocate(s->fs_device, bulk->bulkport);
+
+		fs_debug_full (0, 3, s, 0, 0, "FS", "Server freeing bulk port entry at %p on shutdown", bulk);
+
+		bulk = bn;
+
+	}
+
+	s->bulkports = NULL;
+
+	/* Unmap users and groups */
+
+	if (s->users)
+		munmap(s->users, 256 * s->total_users); 
+
+	if (s->groups)
+		munmap(s->groups, 10 * s->total_groups);
+
+	pthread_mutex_lock(&(s->fs_backup_mutex));
+	s->backup->die = 1; /* Tell the backup thread to die */
+	pthread_cond_signal(&(s->fs_backup_cond));
+	pthread_mutex_unlock(&(s->fs_backup_mutex));
+
+	fs_debug_full (0, 1, s, 0, 0, "Waiting for FS Backup thread to quit");
+
+	{
+		uint8_t	count = 0;
+
+		while (count < 10)
+		{
+			uint8_t	dead;
+
+			sleep(1);
+
+			pthread_mutex_lock(&(s->fs_backup_mutex));
+			dead = s->backup->i_have_died;
+			pthread_mutex_unlock(&(s->fs_backup_mutex));
+
+			if (dead)
+				break;
+
+			count++;
+		}
+
+		if (count == 10)
+			eb_debug (0, 1, "FS", "Local    %3d.%3d Backup thread failed to quit - unmapping config anyway...",
+					d->net, d->local.stn);
+		else
+			eb_debug (0, 1, "FS", "Local    %3d.%3d Backup thread exited",
+					d->net, d->local.stn);
+	}
+
+	if (s->backup)
+		munmap(s->backup, sizeof(struct __fs_backup));
+
+	s->users = NULL;
+	s->groups = NULL;
+	s->backup = NULL;
+
+#if 0 /* Causes core dumps; not sure why */
+	regfree(&(s->r_discname));
+	regfree(&(s->r_pathname));
+#endif
+
+	/* Free the config struct */
+
+	munmap(s->config, 256);
+	s->config = NULL;
+
+	m->module_started = 0; /* We do this unusually here (normally eb_module_stop() does it for us,
+				  but just in case this function is being run from within the FS itself, we do it here.
+				  (And that may happen if someone uses *SRVSTOP on the local server */
+
+	eb_debug (0, 1, "FS", "Local    %3d.%3d Server shut down",
+			d->net, d->local.stn);
+
+	return 0;
+
+}
+
+/*
+ * Modularized FS start function.
+ *
+ * Does not allocate port because we did it in init
+ *
+ * Customized function here, because we need to read all the config
+ * and stuff and start the backup thread.
+ */
+
+uint8_t FS_module_start (void *device, struct __eb_device_module *me)
+{
+	struct __eb_device *d = (struct __eb_device *) device; 
+	struct __eb_fileserver *fileserver = (struct __eb_fileserver *) me->module_ws;
+	struct __fs_station *server = fileserver->server;
+	DIR *dir;
+	char passwordfile[280], passwordfilecopy[320];
+	char backupfile[280];
+	char tapedir[280];
+	int length;
+	char regex[256];
+	struct dirent *entry;
+		
+	if (me->module_started) /* Already running! */ 
+	{ 
+		eb_module_debug (1, MODULE, d, "Attempt to start when already running"); 
+		return 1; /* Failure */ 
+	} 
+	
+	// If there is a file in this directory called "auto_inf" then we
+	// automatically turn on "-x" mode.  This should work transparently
+	// for any filesystem that isn't currently inf'd 'cos reads will
+	// get the xattr and writes will create a new inf file
+
+	char *autoinf=malloc(strlen(server->directory)+15);
+	strcpy(autoinf,server->directory);
+	strcat(autoinf,"/auto_inf");
+
+	if (access(autoinf, F_OK) == 0)
+	{
+		fs_debug_full (0, 1, server, 0, 0, "Automatically turned on -x mode because of %s", autoinf);
+		server->use_xattr = 0;
+	}
+
+	free(autoinf);
+
+	dir = opendir(server->directory);
+
+	if (!dir)
+		fs_debug_full (1, 1, server, 0, 0, "Unable to open root directory %s", server->directory);
+	else
+	{
+
+		FILE * cfgfile, *passwd, *backup;
+		uint8_t	setconfigdefaults = 0;
+		uint16_t configlen;
+
+		sprintf(passwordfile, "%s/Configuration", server->directory);
+		cfgfile = fopen(passwordfile, "r+");
+
+		if (!cfgfile) // Config file not present
+		{
+			uint8_t		blank[256];
+
+			memset (&blank, 0, 256);
+
+			if ((cfgfile = fopen(passwordfile, "w+")))
+				fwrite(&blank, 256, 1, cfgfile);
+			else fs_debug_full (0, 1, server, 0, 0, "Unable to write configuration file at %s - not initializing", passwordfile);
+
+			setconfigdefaults = 1;
+		}
+
+		fseek(cfgfile, 0, SEEK_END);
+		configlen = ftell(cfgfile);
+		rewind(cfgfile);
+
+		if (configlen != 256)
+			fs_debug_full (1, 0, server, 0, 0, "FS Configuration file %s is incorrect length!", passwordfile);
+
+	 	server->config = mmap(NULL, 256, PROT_READ | PROT_WRITE, MAP_SHARED, fileno(cfgfile), 0);
+
+		if (server->config == MAP_FAILED)
+			fs_debug_full (1, 0, server, 0, 0, "Cannot mmap() FS config file %s (%s)", passwordfile, strerror(errno));
+		
+		fs_debug_full (0, 2, server, 0, 0, "Configuration file mapped");
+
+		fclose(cfgfile);
+
+		if (setconfigdefaults)
+		{
+
+			// Set up some defaults in case we are writing a new file
+			server->config->fs_acorn_home = 0;
+			server->config->fs_sjfunc = 1;
+			server->config->fs_pwtenchar = 1;
+			server->config->fs_fnamelen = FS_DEFAULT_NAMELEN;
+			server->config->fs_mask_dir_wrr = 1;
+			
+			FS_CONF_DEFAULT_DIR_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R;
+			FS_CONF_DEFAULT_FILE_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R;
+		}
+
+		// Install some defaults if they need setting
+		
+		if (FS_CONF_DEFAULT_DIR_PERM(server) == 0x00) 
+			FS_CONF_DEFAULT_DIR_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R;
+
+		if (FS_CONF_DEFAULT_FILE_PERM(server) == 0x00)
+			FS_CONF_DEFAULT_FILE_PERM(server) = FS_PERM_OWN_W | FS_PERM_OWN_R | FS_PERM_OTH_R; // NB OTH_R added here for backward compatibility. If this is a server where this default was unconfigured, we configure it to match what PiFS v2.0 did
+
+		if (FS_CONFIG(server,fs_fnamelen) < 10 || FS_CONFIG(server,fs_fnamelen) > ECONET_ABS_MAX_FILENAME_LENGTH)
+			server->config->fs_fnamelen = 10;
+
+		// Filename regex compile moved here so we know how long the filenames are. We set this to maximum length because
+		// the normalize routine sifts out maximum length for each individual server and there is only one regex compiled
+		// because the scandir filter uses it, and that routine cannot take a server number as a parameter.
+
+		sprintf(regex, "^(%s{1,%d})", FSACORNREGEX, ECONET_ABS_MAX_FILENAME_LENGTH);
+
+		if (regcomp(&(server->r_pathname), regex, REG_EXTENDED) != 0)
+			fs_debug_full (1, 0, server, 0, 0, "Unable to compile regex for file and directory names.");
+
+		// Load / Create password file
+
+		sprintf(passwordfile, "%s/Passwords", server->directory);
+		sprintf(tapedir, "%s/%s", server->directory, FS_DIR_TAPES);
+		sprintf(backupfile, "%s/Backups", server->directory);
+	
+		passwd = fopen(passwordfile, "r+");
+		
+		if (!passwd)
+		{
+			struct __fs_user	u;
+
+			fs_debug_full (0, 1, server, 0, 0, "No password file - initializing %s with SYST", passwordfile);
+			memset (&u, 0, sizeof(u));
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-overflow="
+			sprintf (u.username, "%-10.10s", "SYST");
+			sprintf (u.password, "%-10.10s", "");
+			sprintf (u.fullname, "%-24.24s", "System User"); 
+			u.priv = FS_PRIV_SYSTEM;
+			u.priv2 = FS_PRIV2_BRIDGE; /* Automatically add bridge privileges to new SYST user */
+			u.bootopt = 0;
+			sprintf (u.home, "%-80.80s", "$");
+			sprintf (u.lib, "%-80.80s", "$.Library");
+#pragma GCC diagnostic pop
+			u.home_disc = 0;
+			u.year = u.month = u.day = u.hour = u.min = u.sec = 0; // Last login time
+			if ((passwd = fopen(passwordfile, "w+")))
+				fwrite(&(u), 256, 1, passwd);
+			else fs_debug_full (0, 1, server, 0, 0, "Unable to write password file at %s - not initializing", passwordfile);
+		}
+
+		if (passwd) // Successful file open somewhere along the line
+		{
+			fseek (passwd, 0, SEEK_END);
+			length = ftell(passwd); // Get file size
+			rewind(passwd);
+	
+			if ((length % 256) != 0)
+				fs_debug_full (0, 1, server, 0, 0, "Password file not a multiple of 256 bytes!");
+			else if ((length > (256 * ECONET_MAX_FS_USERS)))
+				fs_debug_full (0, 1, server, 0, 0, "Password file too long!");
+			else	
+			{
+				int discs_found = 0;
+
+				if ((length / 256) != ECONET_MAX_FS_USERS) // Old pw file that hasn't been padded
+				{
+					struct __fs_user u;
+					uint16_t	count = 0;
+
+					fseek(passwd, 0, SEEK_END);
+					memset(&u, 0, sizeof(u));
+					for (; count < (ECONET_MAX_FS_USERS - (length / 256)); count++)
+						fwrite(&u, 256, 1, passwd);
+				}
+
+				fseek(passwd, 0, SEEK_END);
+				length = ftell(passwd);
+				
+				fs_debug_full (0, 2, server, 0, 0, "Password file read - %d user(s)", (length / 256));
+				server->users = mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_SHARED, fileno(passwd), 0);
+				if (server->users == MAP_FAILED)
+					fs_debug_full (1, 0, server, 0, 0, "Cannot mmap() password file (%s)", strerror(errno));
+
+				server->total_users = (length / 256);
+				server->total_discs = 0;
+		
+				if (server->config->fs_pwtenchar == 0) // Shuffle full name field along 5 characters and blank out the 5 spaces
+				{
+
+					int u; // user count
+					struct tm *t; 
+					time_t	now;
+					char sys_str[700];
+
+					now = time(NULL);
+
+					t = localtime(&now);
+
+					snprintf (passwordfilecopy, 318, "%s.%04d%02d%02d:%02d%02d",
+						passwordfile,
+						t->tm_year+1900, t->tm_mon+1, t->tm_mday,
+						t->tm_hour, t->tm_min);
+
+					snprintf (sys_str, 699, "cp %s %s", passwordfile, passwordfilecopy);
+
+					system(sys_str);
+					
+					for (u = 0; u < server->total_users; u++)
+					{
+						char old_realname[30];
+						// Move real name 5 bytes further on (but our struct has been updated, so it's actually 5 bytes earlier than the struct suggests! And copy it, less 5 bytes
+
+						memcpy (old_realname, &(server->users[u].password[6]), 30);
+						memcpy (server->users[u].fullname, old_realname, 25);
+						memset (&(server->users[u].password[6]), 32, 5);
+
+					}
+
+					server->config->fs_pwtenchar = 1;
+
+					fs_debug_full (0, 1, server, 0, 0, "Updated password file for 10 character passwords, and backed up password file to %s", passwordfilecopy);
+				}
+
+				// Make MDFS password file
+
+				if (server->config->fs_sjfunc)
+					fsop_make_mdfs_pw_file(server); // Causing problems in the directory build
+
+				// Now load up the discs. These are named 0XXX, 1XXX ... FXXXX for discs 0-15
+				while ((entry = readdir(dir)) && discs_found < ECONET_MAX_FS_DISCS)
+				{
+
+					struct 	stat statbuf;
+					char	fullname[1024];
+
+					sprintf(fullname, "%s/%s", server->directory, entry->d_name);
+
+					if (((entry->d_name[0] >= '0' && entry->d_name[0] <= '9') || (entry->d_name[0] >= 'A' && entry->d_name[0] <= 'F')) && (entry->d_type == DT_DIR || (entry->d_type == DT_LNK && (stat(fullname, &statbuf) == 0) && (S_ISDIR(statbuf.st_mode)))) && (strlen((const char *) entry->d_name) <= 17)) // Found a disc. Length 17 = index character + 16 name; we ignore directories which are longer than that because the disc name will be too long
+					{
+						uint8_t index, count;
+						struct __fs_disc	*d, *p;
+						struct statvfs 		sv;
+
+						// readdir() doesn't guarantee ordering, so we need to do it ourselves
+
+						d = eb_malloc(__FILE__, __LINE__, "FS", "New disc structure", sizeof(struct __fs_disc));
+						
+						if (entry->d_name[0] > '9') 
+							index = (uint8_t) ((entry->d_name[0]) - ('A' - 10));
+						else
+							index = (uint8_t) (entry->d_name[0] - '0');
+	
+						d->index = index;
+						d->full_path = NULL; /* Reserved for later use */
+						d->device = NULL; /* System engine */
+
+						count = 0;
+
+						while (count < 16 && (entry->d_name[count+1] != 0))
+						{
+							d->name[count] = entry->d_name[1+count];	
+							count++;
+						}
+
+						d->name[count] = 0;
+					
+						if (statvfs(fullname, &sv) == 0)
+							d->fs_blocksize = sv.f_bsize;
+						else
+							fs_debug_full (1, 0, server, 0, 0, "Unable to statvfs() for disc %s (%d) - %s", d->name, d->index, strerror(errno));
+
+						if (entry->d_type == DT_LNK) /* Removable */
+							d->removable = 1;
+						else	d->removable = 0;
+
+						d->inuse = 0; /* Nothing open yet */
+
+						/* Put d into the list at the right place */
+
+						p = server->discs;
+
+						while (p && p->index < index)
+							p = p->next;
+
+						if (!server->discs)
+						{
+							d->next = d->prev = NULL;
+							server->discs = d;
+						}
+						else if (!p) /* Fell off end */
+						{
+							p = server->discs;
+							while (p && p->next)
+								p = p->next;
+							p->next = d;
+							d->prev = p;
+							d->next = NULL;
+						}
+						else
+						{
+							/* Splice in before this one */
+							 
+							if (p->prev) /* Not at head */
+							{
+								d->next = p;
+								d->prev = p->prev;
+								p->prev = d;
+								d->prev->next = d;
+							}
+							else /* p is head of queue */
+							{
+								server->discs = d;
+								d->prev = NULL;
+								d->next = p;
+								p->prev = d;
+							}
+						}
+
+						server->total_discs++;
+	
+					}
+				}
+
+				closedir(dir);
+		
+				if (server->total_discs > 0)
+				{
+					struct __fs_disc *d;
+
+					d = server->discs;
+
+					while (d)
+					{
+						fs_debug_full (0, 2, server, 0, 0, "Initialized disc name %s (%d, blocksize %d bytes)", d->name, d->index, d->fs_blocksize);
+						d = d->next;
+					}
+
+					// Load / Initialize groups file here - TODO
+					unsigned char groupfile[1024];
+					FILE *group;
+
+					sprintf(groupfile, "%s/Groups", server->directory);
+	
+					group = fopen(groupfile, "r+");
+
+					if (!group) // Doesn't exist - create it
+					{
+
+						struct __fs_group g;
+
+						memset (&g, 0, sizeof(g));
+
+						fs_debug_full (0, 1, server, 0, 0, "No group file at %s - initializing", groupfile);
+
+						if ((group = fopen(groupfile, "w+")))
+							fwrite(&g, sizeof(struct __fs_group), 256, group);
+
+						else fs_debug_full (0, 1, server, 0, 0, "Unable to write group file at %s - not initializing", groupfile);
+					}
+
+					if (group) // Got it somehow - created or it existed
+					{
+
+						int length; 
+
+						fseek (group, 0, SEEK_END);
+						length = ftell(group); // Get file size
+						rewind(group);
+
+						if (length != 2560)
+							fs_debug_full (0, 1, server, 0, 0, "Group file is wrong length / corrupt - not initializing");
+						else
+						{
+							server->groups = mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_SHARED, fileno(group), 0);
+							server->total_groups = length;
+						}
+
+						fclose(group);
+					}
+					else fs_debug_full (0, 1, server, 0, 0, "Server failed to initialize - cannot initialize or find Groups file!");
+
+					// (If there was still no group file here, fs_count won't increment and we don't initialize)
+				}
+				else fs_debug_full (0, 1, server, 0, 0, "Server failed to find any discs!");
+			}
+
+			fclose(passwd);
+	
+		}
+		
+		/* Tape library init */
+
+		server->tapedrive = 0; // Init to drive 0
+
+		backup = fopen(backupfile, "r+");
+
+		if (!backup)
+		{
+			struct __fs_backup b;
+
+			memset (&b, 0, sizeof(b));
+
+			b.jobs[0].partition = 0xff;
+
+			backup = fopen(backupfile, "w+");
+
+			if (!backup)
+				fs_debug_full (1, 0, server, 0, 0, "Unable to initialize backup configuration file");
+				
+			fwrite (&b, sizeof(b), 1, backup);
+
+			rewind(backup);
+		}
+
+	 	server->backup = mmap(NULL, sizeof(struct __fs_backup), PROT_READ | PROT_WRITE, MAP_SHARED, fileno(backup), 0);
+
+		if (server->backup == MAP_FAILED)
+			fs_debug_full (1, 0, server, 0, 0, "Cannot mmap() FS backup configuration file %s (%s)", backupfile, strerror(errno));
+
+		fclose(backup);
+
+		server->backup->die = server->backup->i_have_died = 0;
+
+		fs_debug_full (0, 2, server, 0, 0, "Backup configuration file mapped");
+		
+	}
+	
+	/* Initialize list of storage engines */
+
+	server->devices = NULL;
+
+	/* If told to, set bridge priv on SYST user */
+
+	if (fs_set_syst_bridgepriv)
+	{
+		int	userid;
+
+		if ((userid = fsop_get_uid(server, "SYST")) >= 0)
+			server->users[userid].priv2 |= FS_PRIV2_BRIDGE;
+	}
+
+	/* Now add bridge priv to those in our list */
+
+	if (server->total_users > 0)
+	{
+		uint16_t c;
+
+		for (c = 0; c < server->total_users; c++)
+		{
+			struct __fs_bridge_force	*bf;
+
+			bf = server->bridge_force;
+
+			while (bf)
+			{
+				if (!memcmp(bf->username, server->users[c].username, 10) && server->users[c].priv != FS_PRIV_INVALID)
+				{
+					server->users[c].priv2 |= FS_PRIV2_BRIDGE;
+					c = server->total_users;
+					break;
+				}
+				
+				bf = bf->next;
+			}
+		}
+	}
+
+	/* Create main thread */ 
+	
+	if (pthread_create(&(me->module_thread), NULL, FS_module_thread, d) != 0) /* Non-zero is failure */ 
+	{ 
+		eb_module_debug (1, MODULE, d, "Unable to start server - thread creation failed"); 
+		return 1; 
+	} 
+	
+	pthread_detach(me->module_thread); 
+	
+	/* Allocate port */
+
+	eb_port_deallocate(device,0x99);
+	eb_port_allocate(device,0x99,FS_module_handle_traffic,device);
+
+	/* start the backup thread */
+
+	if (pthread_create(&(server->fs_backup_thread), NULL, fsop_backup_thread, server) != 0)
+		eb_module_debug(1, MODULE, d, "Backup thread did not start - running FS anyway");
+
+	eb_module_debug (1, MODULE, d, "Server started"); 
+		
+	return 0; 
+		
+}	
+
+/*
+ * FS Module thread function
+ *
+ * We need our own, because it needs to clean up on exit, rather than it being done within the stop function.
+ *
+ */
+
+void * FS_module_thread (void *p) 
+{ 
+	struct __eb_device *d = (struct __eb_device *) p; 
+	
+	struct __eb_device_module *me; 
+	
+	me = eb_module_get_data(d, MODULE); 
+	
+	if (!me) /* No data */ 
+	{ 
+		eb_module_debug(1, MODULE, d, "Module thread cannot locate module data - exiting"); 
+		return NULL; 
+	} 
+	
+	pthread_mutex_lock(&(me->module_mutex)); 
+	
+	/* Lock and wait for traffic */ 
+	
+	while (!(me->module_exiting)) 
+	{ 
+		struct __eb_packetqueue *q, *qn; 
+		struct __econet_packet_aun *packet; 
+		
+		eb_module_debug(3, MODULE, d, "Working"); 
+		q = me->module_queue; 
+		
+		while (q) 
+		{ 
+			/* Traffic to process */ 
+			qn = q->n; 
+			packet = q->p; 
+			if (!packet) eb_module_debug (0, MODULE, d, "Module thread found NULL packet!"); 
+			FS_module_traffic_processor (d, me, packet, q->length); 
+			eb_module_free(MODULE, "Free packet structure after processing", packet); 
+			eb_module_free(MODULE, "Free packet queue structure after processing", q); 
+			q = qn; 
+		} 
+		me->module_queue = NULL; /* Queue now empty */ 
+		
+		if (!(me->module_exiting)) 
+		{ 
+			eb_module_debug(3, MODULE, d, "Sleeping"); 
+			
+			pthread_cond_wait(&(me->module_cond), &(me->module_mutex)); 
+		}
+		
+	} 
+	
+	eb_module_debug (2, MODULE, d, "Service thread exiting"); 
+	
+	FS_module_stop_cleanup(d, me); /* Unique to this - we want to do this when the thread exits on the FS, because
+				   if someone uses *SRVSTOP on the local server, it can't use eb_module_stop because it will
+				   be locked, so the cleanup has to happen when the thread exits instead */
+
+	me->module_has_exited = 1; 
+	
+	pthread_mutex_unlock(&(me->module_mutex)); 
+	
+	pthread_exit(NULL); 
+}
+
+/*
+ * FS Module Stop
+ *
+ * Unusually, this just calls the cleanup function - see the notes
+ * on the cleanup function...
+ */
+
+uint8_t FS_module_stop (void *device, struct __eb_device_module *m)
+{
+	struct __eb_device *d = (struct __eb_device *) device;
+
+	return 0; /* Because the bridge's eb_module_stop gets the thread to exit - and once it's done that, there's no cleanup to do here */
+	//return FS_module_stop_cleanup (d, m);
+}
+
+/* FS Module Exit
+ *
+ * Removes the port allocation, since we maintain it even when the 
+ * FS is stopped, so we can't use the tamplate function.
+ */
+
+uint8_t FS_module_exit (void *device, struct __eb_device_module *m)
+{
+
+	struct __eb_device * d = (struct __eb_device *) device;
+
+	/* When called, the FS will be shut down */
+
+	pthread_mutex_lock (&(m->module_mutex)); 
+	
+	if (m->module_started) 
+	{ 
+		pthread_mutex_unlock (&(m->module_mutex)); 
+		eb_module_debug (1, MODULE, d, "Server module exit called when server running!"); 
+		return 1; 
+	} 
+	
+	pthread_mutex_unlock (&(m->module_mutex)); 
+	
+	eb_port_deallocate (d, 0x99);
+
+	EB_PORT_CLR (d, reserved_ports, 0x99); 
+	
+	eb_module_deregister(d, m); 
+	
+	eb_module_debug (1, MODULE, d, "Server module deregistered"); 
+	
+	return 0; 
+
+}
+
+#if 0 /* Modularized */
 // Bridge V2 packet handler code
 
 /* This code has to detect bulk transfer ports.
@@ -5098,6 +6211,7 @@ void fsop_handle_traffic (struct __econet_packet_aun *p, uint16_t length, void *
 	return;
 
 }
+#endif
 
 // Used for *FAST - NB, doesn't rename the directory: the *FAST handler has to do that.
 
@@ -5318,6 +6432,7 @@ void fsop_setup(void)
 
 }
 
+#if 0 /* Modularized */
 /* 
  * fsop_run()
  *
@@ -5569,6 +6684,8 @@ void *fsop_thread(void *p)
 	pthread_exit(thread_return);
 }
 
+#endif /* Modularized */
+
 /*
  * fsop_register_machine()
  *
@@ -5615,7 +6732,8 @@ void * fsop_register_machine(struct __fs_machine_peek_reg *p)
 
 	pthread_mutex_unlock(&(p->s->fs_mpeek_mutex));
 
-	pthread_cond_signal(&(p->s->fs_condition));
+	// Now modularized pthread_cond_signal(&(p->s->fs_condition));
+	pthread_cond_signal(&(p->s->fs_mpeek_condition));
 
 	eb_free (__FILE__, __LINE__, "FS", "Freeing machine peek structure we just registered", p);
 
@@ -5729,3 +6847,6 @@ void fsop_update_quota (struct __fs_user *u, int32_t bytes)
 	return;
 
 }
+
+
+

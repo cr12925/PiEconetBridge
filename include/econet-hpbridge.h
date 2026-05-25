@@ -302,6 +302,8 @@ struct __eb_device_module * eb_module_get_data_started_internal (void *, unsigne
 #define eb_module_get_data_started(d,m) eb_module_get_data_started_internal(d,m,0)
 #define eb_module_get_data_started_locked(d,m) eb_module_get_data_started_internal(d,m,1)
 void eb_module_unlock(struct __eb_device_module *); /* Unlocks module mutex */
+uint8_t eb_module_is_started(struct __eb_device_module *); /* Returns 1 for started, otherwise 0 */
+#define eb_module_is_stopped(x) (!!!(eb_module_is_started(x)))
 
 /* EB module generic debug */
 
@@ -341,6 +343,7 @@ void eb_module_unlock(struct __eb_device_module *); /* Unlocks module mutex */
 		me->module_port = port; \
 		\
 		/* NB: j can be NULL when calling _init */ \
+		\
 		if (j && json_object_object_get_ex(j,"autostart",&jo) && json_object_is_type(jo,json_type_boolean)) \
 		{ \
 			if (json_object_get_boolean(jo)) autostart = 1; \
@@ -416,7 +419,7 @@ void eb_module_unlock(struct __eb_device_module *); /* Unlocks module mutex */
 		\
 		pthread_detach(me->module_thread); \
 		\
-		EB_PORT_SET(d, ports, port, traffichandlerfunc, d); /* Make port active */ \
+		eb_port_allocate(d, port, traffichandlerfunc, d); /* Make port active */ \
 		\
 		eb_module_debug (1, MODULE, d, "Server started"); \
 		\
@@ -461,7 +464,7 @@ void eb_module_unlock(struct __eb_device_module *); /* Unlocks module mutex */
 		} \
 		me->module_started = 0; /* Get the handler to stop - probably does nothing */ \
 		\
-		EB_PORT_CLR(d, ports, port); \
+		eb_port_deallocate(d, port); \
 		\
 		pthread_cancel (me->module_thread); /* Safe because it cannot be in critical section - this function is called under lock */ \
 		\
@@ -520,9 +523,9 @@ void eb_module_unlock(struct __eb_device_module *); /* Unlocks module mutex */
 				me->module_queue = new_q; \
 			else	q->n = new_q; /* Add to end */ \
 			\
-			eb_debug (0, 3, MODULE, "%3d.%3d from %3d.%3d Traffic received, length %d", \
-					p->p.dststn, p->p.dstnet, \
-					p->p.srcstn, p->p.srcnet, \
+			eb_debug (0, 3, MODULE, "Local    %3d.%3d from %3d.%3d Traffic received, length %d", \
+					p->p.dstnet, p->p.dststn, \
+					p->p.srcnet, p->p.srcstn, \
 					length); \
 			\
 		} \
@@ -745,12 +748,14 @@ struct __eb_printer { // Struct used to hold printer definitions on local emulat
 */
 
 struct __eb_fileserver { // Struct used to hold data defining a locally emulated fileserver
-	char 		*rootpath; // Full pathname to directory holding password file & directories for emulated disks
-	char		*tapehandler; // Full pathname to tape handler script
-	char		*tapecompletionhandler; // Full path to tape completion handler script (can be set by user to copy backups off elsewhere)
-	uint32_t	new_user_quota; // In Kilobytes
 	struct __fs_station	*server; // Pointer to __fs_station struct created on initialization - NULL if not initialized
+#if 0 /* Modularized */
+	uint32_t	new_user_quota; // In Kilobytes
+	char 		*rootpath; // Full pathname to directory holding password file & directories for emulated disks
+	char		*tapehandler; // Full pathname to tape handler script - Believed unused
+	char		*tapecompletionhandler; // Full path to tape completion handler script (can be set by user to copy backups off elsewhere) - Believed unused
 	pthread_t	fs_thread; // FS thread - attempt to stop core dumps when thread exits
+#endif
 	pthread_mutex_t	statsmutex; // Lock on the stats values - they are written to and read by different threads
 	uint64_t	b_in, b_out; // Traffic stats
 };
@@ -1009,6 +1014,8 @@ struct __eb_fast_client {
 #define EB_FAST_MENU_FSTOGGLEOPTIONS 0x0D 
 #define EB_FAST_MENU_FSPRINTERS 0x0E /* Display printers */
 #define EB_FAST_MENU_FSDISCS 0x0F /* Display disks */
+#define EB_FAST_MENU_MODULE_STOP 0x10 /* Stop a module (something in utilities/modules) */
+#define EB_FAST_MENU_MODULE_START 0x11 /* Start a module (something in utilities/modules) */
 
 /*
  * __eb_fast_menu_item
@@ -1083,6 +1090,10 @@ struct __eb_fast_menu_item	{
 		struct {
 			char 		*fm_heading_text;
 		} fm_heading;
+
+		struct {
+			char 		*fm_module_name;
+		} fm_module;
 	};
 
 	struct __eb_fast_menu_item	*next; /* Link to next option in this menu */
@@ -1342,9 +1353,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 #if 0 /* Modularized */
 			struct __eb_printer 	*printers;	
 			char			*print_handler; // Full path to printer handler script
-#endif
 			struct __eb_fileserver	fs; // Not a pointer, this one
-#if 0 /* Modularized */
 			struct __eb_ipgw	ip; // Not a pointer, this one
 #endif
 			uint32_t		seq; // AUN sequence number

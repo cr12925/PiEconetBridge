@@ -149,6 +149,11 @@ struct __fs_machine_peek_reg {
 			
 	//int (*scandir) (const char *, struct dirent ***, int (*) (const struct dirent *), int (*) (const struct dirent **, const struct dirent **));
 
+struct __fs_bridge_force {
+	char 		username[11];
+	struct __fs_bridge_force	*next, *prev;
+};
+
 /* __fs_station - instance information about a fileserver instance */
 
 struct __fs_station {
@@ -160,6 +165,7 @@ struct __fs_station {
         uint16_t 		total_users; // How many entries in users?
 	uint16_t		total_groups; // Number of entries in groups
 	uint32_t		seq;
+	uint32_t		new_user_quota; // In Kilobytes
         int 			total_discs;
 	struct __fs_config	*config; // Pointer to my config
 	struct __fs_disc	*discs; // Pointer to discs
@@ -170,18 +176,24 @@ struct __fs_station {
 	struct __fs_bulk_port	*bulkports; // Pointer to list of bulk ports
 	struct __fs_machine_peek_reg	*peeks; // List of pending machine peeks
 	struct __fs_backup	*backup; // Auto backup config
+	struct __fs_bridge_force	*bridge_force; // List of users who will have bridge privileges added at startup
 	fs_device		*devices; // Pointer to linked list of storage engines available on this server
 	pthread_mutex_t		fs_backup_mutex; // Locks the backup jobs list
 	pthread_cond_t		fs_backup_cond; // Used by the backup scheduler to be woken up to check the jobs list
 	pthread_t		fs_backup_thread; // the backup thread
 	uint8_t			bulkport_use[32]; // Bitmap - Need to move this to the local device in the bridge
+#if 0 /* Not required now modularized */
 	uint8_t			enabled; // Whether server enabled
+#endif
 	struct __eb_device	*fs_device; // Pointer to device housing this server in the main bridge 
+#if 0 /* Modularized */
 	pthread_mutex_t		fs_mutex; // Lock when this FS is working
-	pthread_mutex_t		fs_mpeek_mutex; // Lock we sit on waiting for machine peeks
 	pthread_cond_t		fs_condition; // Condition the FS waits on for traffic
 	pthread_t		fs_thread; // FS thread 
 	struct __eb_packetqueue	*fs_workqueue; // Packets to be processed by this FS
+#endif
+	pthread_mutex_t		fs_mpeek_mutex; // Lock we sit on waiting for machine peeks
+	pthread_cond_t		fs_mpeek_condition; // Condition the FS waits on for traffic
 	regex_t			r_pathname; // Pathname by filename length
 	regex_t			r_wildcard, r_discname, r_discwildcard; /* Regexes for filenames */
 	uint8_t			use_xattr; // Whether to get file attribs from xattr or .inf for this server
@@ -918,6 +930,7 @@ extern void * fsop_register_machine (struct __fs_machine_peek_reg *);
 /* Externs for the HPB */
 void fsop_setup(void);
 uint8_t fsop_is_enabled (struct __fs_station *);
+struct __fs_station * fsop_is_started (struct __eb_device *); // Modularized "is it stated" function
 struct __fs_station *fsop_initialize(struct __eb_device *, char *, char *, char *);
 int8_t fsop_run(struct __fs_station *);
 
@@ -1207,4 +1220,13 @@ uint8_t fsop_check_update_user_quota (struct __fs_user *, int32_t);
 int32_t fsop_diff_blocksize (uint32_t, struct __fs_disc *, int32_t bytes);
 void fsop_update_quota (struct __fs_user *, int32_t);
 #define FS_DEFAULT_NEW_USER_QUOTA 10485760
+
+/* Modularized FS prototypes */
+
+uint8_t FS_module_init_private (struct __eb_device *, struct __eb_device_module *, struct json_object *);
+void FS_module_traffic_processor (struct __eb_device *, struct __eb_device_module *, struct __econet_packet_aun *, uint16_t);
+uint8_t FS_module_stop (void *, struct __eb_device_module *);
+uint8_t FS_module_start (void *, struct __eb_device_module *);
+uint8_t FS_module_exit (void *, struct __eb_device_module *);
+void * FS_module_thread (void *);
 

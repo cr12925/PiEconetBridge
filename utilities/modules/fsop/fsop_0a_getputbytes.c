@@ -160,7 +160,7 @@ FSOP(0a)
         alq->chunk_size = f->active->chunk_size;  /* Copy from login process */
 	alq->is_32bit = is_32bit;
 
-	// usleep (500000); /* For RISC OS (and some beebs?) - Sometimes they don't have they're receiver port open fast enough and everything goes out of sync */
+	usleep (500000); /* For RISC OS (and some beebs?) - Sometimes they don't have they're receiver port open fast enough and everything goes out of sync */ /* Not required with module-fast? */
 
 	fsop_aun_send_noseq(&r, 2, f);
 

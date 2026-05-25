@@ -228,7 +228,7 @@ void * eb_teletext_server (void *i)
 	if (pthread_cond_init(&(m->module_cond), NULL) != 0)
 		eb_debug (1, 0, "TELETEXT", "Local    %3d.%3d Failed to initialize queue condition", d->net, d->local.stn);
 
-	EB_PORT_SET(d, ports, EB_PORT_TELETEXT_S_CMD, eb_port_teletext_handler, d);
+	eb_port_allocate(d, EB_PORT_TELETEXT_S_CMD, eb_port_teletext_handler, d);
 
 	pthread_mutex_lock (&(m->module_mutex));
 
@@ -502,7 +502,7 @@ uint8_t teletext_start(void *device, struct __eb_device_module *me)
 
 	tt->running = 1;
 
-	EB_PORT_SET(d, ports, EB_PORT_TELETEXT_S_CMD, eb_port_teletext_handler, d);
+	eb_port_allocate(d, EB_PORT_TELETEXT_S_CMD, eb_port_teletext_handler, d);
 
 	eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Server started", d->net, d->local.stn);
 
@@ -542,7 +542,7 @@ uint8_t teletext_stop (void *device, struct __eb_device_module *module)
 		free(tt->channels[c]);
 	}
 
-	EB_PORT_CLR(d, ports, EB_PORT_TELETEXT_S_CMD);
+	eb_port_deallocate(d, EB_PORT_TELETEXT_S_CMD);
 
 	return 0;
 }
@@ -629,7 +629,7 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 			{
 				unsigned char	verstring[64];
 
-				eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Request server version", d->net, d->local.stn);
+				eb_debug (0, 2, "TELETEXT", "Local    %3d.%3d Request server version", d->net, d->local.stn);
 				snprintf (verstring, 63, "Pi Econet HP Bridge Teletext Server %d.%02d%c",
 						(EB_VERSION & 0xf0) >> 4,
 						EB_VERSION & 0x0f,
@@ -644,7 +644,7 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 			{
 				struct __eb_teletext_queue 	*q, *prev;
 				uint16_t			index = 0;
-				eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d from %3d.%3d Request Channel %c page %c%c%c%s", d->net, d->local.stn, p->p.srcnet, p->p.srcstn, 
+				eb_debug (0, 2, "TELETEXT", "Local    %3d.%3d from %3d.%3d Request Channel %c page %c%c%c%s", d->net, d->local.stn, p->p.srcnet, p->p.srcstn, 
 						p->p.data[0],
 						p->p.data[1],
 						p->p.data[2],
@@ -718,7 +718,7 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 				}
 
 				if (p->p.ctrl == EB_TELETEXT_CTRL_CANCEL_PAGEREQ)
-					eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Cancel page request", d->net, d->local.stn);
+					eb_debug (0, 2, "TELETEXT", "Local    %3d.%3d Cancel page request", d->net, d->local.stn);
 				else
 					eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Log off", d->net, d->local.stn);
 
@@ -749,7 +749,7 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 			} break;
 		case EB_TELETEXT_CTRL_MAXUSERS:
 			{
-				eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Request max users", d->net, d->local.stn);
+				eb_debug (0, 2, "TELETEXT", "Local    %3d.%3d Request max users", d->net, d->local.stn);
 				reply->p.data[0] = 0x00;
 				reply->p.data[1] = 0xff; // 255 users per channel
 				eb_raw_send (d, reply, 2);
@@ -775,20 +775,20 @@ void eb_port_teletext_handler (struct __econet_packet_aun *p, uint16_t length, v
 
 				eb_raw_send (d, reply, 19);
 
-				eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Request date and time", d->net, d->local.stn);
+				eb_debug (0, 2, "TELETEXT", "Local    %3d.%3d Request date and time", d->net, d->local.stn);
 			} break;
 
 		case EB_TELETEXT_CTRL_PORTVAL_REQ:
 			{
 				/* Don't know what this is supposed to do... */
 
-				eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Port value request", d->net, d->local.stn);
+				eb_debug (0, 2, "TELETEXT", "Local    %3d.%3d Port value request", d->net, d->local.stn);
 
 			} break;
 
 		default:
 			{
-				eb_debug (0, 1, "TELETEXT", "Local    %3d.%3d Unknown request code %02X", d->net, d->local.stn, p->p.ctrl);
+				eb_debug (0, 2, "TELETEXT", "Local    %3d.%3d Unknown request code %02X", d->net, d->local.stn, p->p.ctrl);
 			} break;
 
 	}
