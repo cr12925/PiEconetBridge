@@ -5317,6 +5317,9 @@ void FS_handle_traffic_shutdown (struct __econet_packet_aun *p, uint16_t len, vo
 	char	errstr[] = "Fileserver shut down";
 	uint8_t	errlen = strlen(errstr);
 
+	if (p->p.aun_ttype != ECONET_AUN_DATA) /* Ignore */
+		return;
+
 	reply.p.srcstn = s->stn;
 	reply.p.srcnet = s->net;
 	reply.p.dststn = p->p.srcstn;
@@ -5409,6 +5412,52 @@ uint8_t FS_module_stop_cleanup (void *device, struct __eb_device_module *m)
 	struct __fs_active	*a, *n;
 	struct __fs_disc 	*disc;
 	struct __fs_bulk_port	*bulk;
+	uint8_t	count = 0;
+
+	if (s->backup)
+	{
+		/* Get rid of backup thread */
+	
+		pthread_mutex_lock(&(s->fs_backup_mutex));
+		s->backup->die = 1; /* Tell the backup thread to die */
+		pthread_mutex_unlock(&(s->fs_backup_mutex));
+		pthread_cond_signal(&(s->fs_backup_cond));
+		fs_debug_full (0, 1, s, 0, 0, "Waiting for FS Backup thread to quit");
+	
+		while (count < 10)
+		{
+			uint8_t	dead;
+	
+			usleep(100);
+	
+			pthread_mutex_lock(&(s->fs_backup_mutex));
+			dead = s->backup->i_have_died;
+			pthread_mutex_unlock(&(s->fs_backup_mutex));
+	
+			if (dead)
+				break;
+	
+			count++;
+		}
+	
+		if (count == 10)
+		{
+			eb_debug (0, 1, "FS", "Local    %3d.%3d Backup thread failed to quit - killing thread",
+					d->net, d->local.stn);
+			pthread_cancel(s->fs_backup_thread);
+		}
+		else
+			eb_debug (0, 1, "FS", "Local    %3d.%3d Backup thread exited",
+					d->net, d->local.stn);
+
+		if (munmap(s->backup, sizeof(struct __fs_backup)))
+			eb_debug (0, 1, "FS", "Local    %3d.%3d Error unmapping users file (%s)", d->net, d->local.stn, strerror(errno));
+
+		s->backup = NULL;
+	}
+	else	fs_debug_full(0, 1, s, 0, 0, "Mapped backup config was NULL?");
+
+
 
 	/* Put port back to the shutdown handler */
 
@@ -5474,60 +5523,27 @@ uint8_t FS_module_stop_cleanup (void *device, struct __eb_device_module *m)
 	/* Unmap users and groups */
 
 	if (s->users)
-		munmap(s->users, 256 * s->total_users); 
-
-	if (s->groups)
-		munmap(s->groups, 10 * s->total_groups);
-
-	pthread_mutex_lock(&(s->fs_backup_mutex));
-	s->backup->die = 1; /* Tell the backup thread to die */
-	pthread_cond_signal(&(s->fs_backup_cond));
-	pthread_mutex_unlock(&(s->fs_backup_mutex));
-
-	fs_debug_full (0, 1, s, 0, 0, "Waiting for FS Backup thread to quit");
-
 	{
-		uint8_t	count = 0;
-
-		while (count < 10)
-		{
-			uint8_t	dead;
-
-			sleep(1);
-
-			pthread_mutex_lock(&(s->fs_backup_mutex));
-			dead = s->backup->i_have_died;
-			pthread_mutex_unlock(&(s->fs_backup_mutex));
-
-			if (dead)
-				break;
-
-			count++;
-		}
-
-		if (count == 10)
-			eb_debug (0, 1, "FS", "Local    %3d.%3d Backup thread failed to quit - unmapping config anyway...",
-					d->net, d->local.stn);
-		else
-			eb_debug (0, 1, "FS", "Local    %3d.%3d Backup thread exited",
-					d->net, d->local.stn);
+		if (munmap(s->users, 256 * s->total_users))
+			eb_debug (0, 1, "FS", "Local    %3d.%3d Error unmapping users file (%s)", d->net, d->local.stn, strerror(errno));
 	}
 
-	if (s->backup)
-		munmap(s->backup, sizeof(struct __fs_backup));
+	if (s->groups)
+	{
+		if (munmap(s->groups, 10 * s->total_groups))
+			eb_debug (0, 1, "FS", "Local    %3d.%3d Error unmapping groups file (%s)", d->net, d->local.stn, strerror(errno));
+	}
 
 	s->users = NULL;
 	s->groups = NULL;
-	s->backup = NULL;
 
-#if 0 /* Causes core dumps; not sure why */
-	regfree(&(s->r_discname));
-	regfree(&(s->r_pathname));
-#endif
+	// regfree(&(s->r_discname)); /* This is set in init, not start */
+	regfree(&(s->r_pathname)); /* Whereas this one is set in start */
 
 	/* Free the config struct */
 
-	munmap(s->config, 256);
+	if (munmap(s->config, 256))
+		eb_debug (0, 1, "FS", "Local    %3d.%3d Error unmapping config file (%s)", d->net, d->local.stn, strerror(errno));
 	s->config = NULL;
 
 	m->module_started = 0; /* We do this unusually here (normally eb_module_stop() does it for us,
@@ -5964,6 +5980,7 @@ uint8_t FS_module_start (void *device, struct __eb_device_module *me)
 
 		if (server->backup == MAP_FAILED)
 			fs_debug_full (1, 0, server, 0, 0, "Cannot mmap() FS backup configuration file %s (%s)", backupfile, strerror(errno));
+		// else	fs_debug_full (0, 1, server, 0, 0, "server->backup mmap()ed to %p", server->backup);
 
 		fclose(backup);
 
@@ -6001,9 +6018,10 @@ uint8_t FS_module_start (void *device, struct __eb_device_module *me)
 
 			while (bf)
 			{
-				if (!memcmp(bf->username, server->users[c].username, 10) && server->users[c].priv != FS_PRIV_INVALID)
+				if (!memcmp(bf->username, server->users[c].username, 10) && server->users[c].priv != FS_PRIV_INVALID && ((server->users[c].priv2 & FS_PRIV2_BRIDGE) == 0))
 				{
 					server->users[c].priv2 |= FS_PRIV2_BRIDGE;
+					fs_debug_full (0, 1, server, 0, 0, "Added bridge privilege to user '%s'", bf->username);
 					c = server->total_users;
 					break;
 				}
@@ -6083,6 +6101,7 @@ void * FS_module_thread (void *p)
 			eb_module_free(MODULE, "Free packet queue structure after processing", q); 
 			q = qn; 
 		} 
+
 		me->module_queue = NULL; /* Queue now empty */ 
 		
 		if (!(me->module_exiting)) 
