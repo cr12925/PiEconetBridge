@@ -159,8 +159,8 @@ struct __fs_bridge_force {
 struct __fs_station {
         unsigned char 		net; // Network number of this server
         unsigned char 		stn; // Station number of this server
-        unsigned char 		directory[256]; // Root directory
 	unsigned char		*tapehandler, *tapecompletionhandler; // Paths to tape handler script and user-supplied tape completion handler
+        unsigned char 		directory[256]; // Root directory
 	uint8_t			tapedrive; // Currently selected tape drive number
         uint16_t 		total_users; // How many entries in users?
 	uint16_t		total_groups; // Number of entries in groups

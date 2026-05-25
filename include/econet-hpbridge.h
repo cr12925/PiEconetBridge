@@ -421,7 +421,7 @@ uint8_t eb_module_is_started(struct __eb_device_module *); /* Returns 1 for star
 		\
 		eb_port_allocate(d, port, traffichandlerfunc, d); /* Make port active */ \
 		\
-		eb_module_debug (1, MODULE, d, "Server started"); \
+		eb_module_debug (2, MODULE, d, "Server started"); \
 		\
 		return 0; \
 		\

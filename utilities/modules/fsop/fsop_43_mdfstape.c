@@ -857,7 +857,7 @@ void * fsop_backup_thread (void * p)
 
 	s = (struct __fs_station *) p;
 
-	fs_debug_full (0, 1, s, 0, 0, "Tape backup scheduler started");
+	fs_debug_full (0, 2, s, 0, 0, "Tape backup scheduler started");
 
 	pthread_mutex_lock(&(s->fs_backup_mutex));
 

@@ -3344,6 +3344,7 @@ uint8_t FS_module_init_private (struct __eb_device *device, struct __eb_device_m
 	char regex[512];
 	char tapehandler[280];
 	char tapecompletionhandler[280];
+	uint16_t len_tmp;
 
 	/* Set out findserver name */
 
@@ -3388,37 +3389,37 @@ uint8_t FS_module_init_private (struct __eb_device *device, struct __eb_device_m
 
 	server->tapehandler = server->tapecompletionhandler = NULL;
 
-#if 0 /* Debug */
-
 	/* Tape handler */
 
 	if (j && json_object_object_get_ex(j, "tape-handler", &jtmp) && json_object_is_type(jtmp, json_type_string))
 		strncpy(tapehandler, json_object_get_string(jtmp), 275);
 	else	strncpy(tapehandler, FS_DEFAULT_TAPE_HANDLER, 275);
 
-	fprintf (stderr, "\n\n*** tapehandler = '%s', length %d ***\n\n", tapehandler, strlen(tapehandler));
+	len_tmp = strlen(tapehandler);
 
-	server->tapehandler = eb_malloc(__FILE__, __LINE__, "FS", "Tape completion handler string", strlen(tapehandler) + 1);
-	if (!server->tapehandler)
+	ebf->server->tapehandler = eb_malloc(__FILE__, __LINE__, "FS", "Tape completion handler string", len_tmp + 1);
+
+	if (!ebf->server->tapehandler)
 		eb_debug (1, 0, "FS", "Cannot initialize - no memory for tape handler string");
-	strncpy(server->tapehandler, tapehandler, 274);
 
-	fprintf (stderr, "\n\n*** tapehandler = '%s' (%d), server->tapehandler = '%s' (%d) ***\n\n",
-			tapehandler, strlen(tapehandler),
-			server->tapehandler, strlen(server->tapehandler));
+	strcpy(ebf->server->tapehandler, tapehandler);
 
 	/* Tape completion handler - initialized to NULL above if we don't set it here */
 
 	if (j && json_object_object_get_ex(j, "tape-completion-handler", &jtmp) && json_object_is_type(jtmp, json_type_string))
 	{
 		strncpy(tapecompletionhandler, json_object_get_string(jtmp), 275);
-		server->tapecompletionhandler = eb_malloc(__FILE__, __LINE__, "FS", "Tape completion handler string", strlen(tapecompletionhandler) + 1);
+
+		len_tmp = strlen(tapecompletionhandler);
+
+		server->tapecompletionhandler = eb_malloc(__FILE__, __LINE__, "FS", "Tape completion handler string", len_tmp + 1);
+
 		if (!server->tapecompletionhandler)
 			eb_debug (1, 0, "FS", "Cannot initialize - no memory for tape completion handler string");
-		strncpy(server->tapecompletionhandler, tapecompletionhandler, 274);
+
+		strcpy(server->tapecompletionhandler, tapecompletionhandler);
 	}
 
-#endif	
 	/* Default user quota */
 
 	server->new_user_quota = FS_DEFAULT_NEW_USER_QUOTA;
@@ -3426,8 +3427,8 @@ uint8_t FS_module_init_private (struct __eb_device *device, struct __eb_device_m
 	if (j && json_object_object_get_ex(j, "default-quota", &jtmp) && json_object_is_type(jtmp, json_type_int))
 		server->new_user_quota = json_object_get_int(jtmp);
 
-	// fprintf (stderr, "\n\n*** server stn = %d.%d, dir = %s, tapehandler = %s, tapecompletionhandler = %s, quota = %d ***\n\n", server->net, server->stn, server->directory, server->tapehandler, server->tapecompletionhandler, server->new_user_quota);
 	sprintf(regex, "^(%s{1,16})", FSREGEX);
+	//fprintf (stderr, "\n\n*** server stn = %d.%d, dir = %s, tapehandler = %s, tapecompletionhandler = %s, quota = %d, regex = %s ***\n\n", server->net, server->stn, server->directory, server->tapehandler, server->tapecompletionhandler, server->new_user_quota, regex);
 
 	if (regcomp(&(server->r_discname), regex, REG_EXTENDED) != 0)
 		fs_debug (1, 0, "Unable to compile regex for disc names.");
@@ -6135,8 +6136,6 @@ void * FS_module_thread (void *p)
 
 uint8_t FS_module_stop (void *device, struct __eb_device_module *m)
 {
-	struct __eb_device *d = (struct __eb_device *) device;
-
 	return 0; /* Because the bridge's eb_module_stop gets the thread to exit - and once it's done that, there's no cleanup to do here */
 	//return FS_module_stop_cleanup (d, m);
 }
