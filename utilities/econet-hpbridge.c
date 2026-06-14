@@ -610,6 +610,12 @@ struct __eb_pool_host *eb_find_make_pool_host (struct __eb_device *source,
 	struct __eb_pool_host	*host;
 	uint8_t			new_net, new_stn; // Address to put in new host entry
 
+	char			devtype[10];
+
+	if (source->type == EB_DEF_TRUNK)
+		strcpy(devtype, "trunk");
+	else	strcpy(devtype, "wire");
+
 	*err = 255; // Default
 	
 	if (source->type == EB_DEF_TRUNK)
@@ -683,7 +689,7 @@ struct __eb_pool_host *eb_find_make_pool_host (struct __eb_device *source,
 
 	if (!host)
 	{
-		eb_debug (1, 0, "POOL", "Failed malloc for new pool host structure for %s %d address %d.%d", (source->type == EB_DEF_TRUNK ? "trunk" : "wire"), (source->type == EB_DEF_TRUNK ? source->trunk.local_port : source->net), s_net, s_stn);
+		eb_debug (1, 0, "POOL", "Failed malloc for new pool host structure for %s %d address %d.%d", devtype, (source->type == EB_DEF_TRUNK ? source->trunk.local_port : source->net), s_net, s_stn);
 	}
 
 	host->is_static = is_static;
@@ -691,7 +697,7 @@ struct __eb_pool_host *eb_find_make_pool_host (struct __eb_device *source,
 	host->b_in = host->b_out = 0;
 
 	if (pthread_mutex_init(&(host->statsmutex), NULL) == -1)
-		eb_debug (1, 0, "POOL", "Failed to initialize pool host stats mutex for %s %d address %d.%d", (source->type == EB_DEF_TRUNK ? "trunk" : "wire"), (source->type == EB_DEF_TRUNK ? source->trunk.local_port : source->net), s_net, s_stn);
+		eb_debug (1, 0, "POOL", "Failed to initialize pool host stats mutex for %s %d address %d.%d", devtype, (source->type == EB_DEF_TRUNK ? source->trunk.local_port : source->net), s_net, s_stn);
 	
 	host->source = source;
 
@@ -743,6 +749,8 @@ static void *eb_pool_garbage_collector(void *ignored)
 	struct __eb_pool_host	*h;
 	struct timeval		now;
 
+	char		devtype[10];
+
 	eb_thread_ready();
 
 	while (1)
@@ -789,10 +797,14 @@ static void *eb_pool_garbage_collector(void *ignored)
 
 						eb_clr_single_wire_host (h->net, h->stn);
 
+						if (h->source->type == EB_DEF_TRUNK)
+							strcpy(devtype, "trunk");
+						else	strcpy(devtype, "wire");
+
 						eb_debug (0, 4, "POOL", "Freeing idle pool host %d.%d (source address %d.%d on %s %d) at %p",
 							h->net, h->stn,
 							h->s_net, h->s_stn,
-							(h->source->type == EB_DEF_TRUNK ? "trunk" : "wire"),
+							devtype,
 							(h->source->type == EB_DEF_TRUNK ? h->source->trunk.local_port : h->source->net),
 							h);
 
@@ -1321,7 +1333,15 @@ struct __eb_aun_exposure * eb_is_exposed (uint8_t net, uint8_t stn, uint8_t is_a
 		}
 		
 		if (result)
-			eb_debug (0, 4, "EXPOSE", "%-8s %3d.%3d Found %s AUN exposure at %p", "", net, stn, (eb_is_exposure_active(result) ? "active" : "inactive"), result);
+		{
+			char	__active[10];
+
+			if (eb_is_exposure_active(result))
+				strcpy(__active, "active");
+			else	strcpy(__active, "inactive");
+
+			eb_debug (0, 4, "EXPOSE", "%-8s %3d.%3d Found %s AUN exposure at %p", "", net, stn, __active, result);
+		}
 		else	eb_debug (0, 4, "EXPOSE", "%-8s %3d.%3d No AUN exposure found", "", net, stn);
 	}
 
@@ -1928,7 +1948,13 @@ void eb_bridge_update (struct __eb_device *trigger, uint8_t ctrl)
 	
 	if (trigger && trigger->all_nets_pooled && !EB_CONFIG_POOL_RESET_FWD)
 	{
-		eb_debug (0, 2, "BRIDGE", "%-8s %-7d Bridge %s not forwarded (all nets pooled)", eb_type_str(trigger->type), (trigger->type == EB_DEF_TRUNK ? trigger->trunk.local_port : trigger->net), (ctrl == BRIDGE_RESET) ? "reset" : "update");
+		char	__update_type[10];
+
+		if (ctrl == BRIDGE_RESET)
+			strcpy(__update_type, "reset");
+		else	strcpy(__update_type, "update");
+
+		eb_debug (0, 2, "BRIDGE", "%-8s %-7d Bridge %s not forwarded (all nets pooled)", eb_type_str(trigger->type), (trigger->type == EB_DEF_TRUNK ? trigger->trunk.local_port : trigger->net), __update_type);
 		if (ctrl == BRIDGE_RESET)
 		{
 			eb_debug (0, 2, "BRIDGE", "%-8s %-7d Triggering bridge updates", eb_type_str(trigger->type), (trigger->type == EB_DEF_TRUNK ? trigger->trunk.local_port : trigger->net));
@@ -2011,6 +2037,7 @@ void eb_bridge_reset (struct __eb_device *trigger)
 	struct __eb_device	*dev;
 	uint8_t	pipe_stations[8192]; // Flag currently active pipes and reactivate them on the station reset
 	uint16_t	pipe_counter;
+	char	__trigger_type[10];
 
 	if (trigger)
 		snprintf (info, 19, "net %d", trigger->net);
@@ -2018,7 +2045,13 @@ void eb_bridge_reset (struct __eb_device *trigger)
 		strcpy (info, "internal");
 
 	if (!EB_CONFIG_NOBRIDGEANNOUNCEDEBUG)
-		eb_debug (0, 2, "BRIDGE", "%-8s         Bridge reset from %s", (trigger ? eb_type_str(trigger->type) : "Internal"), info);
+	{
+		if (trigger)
+			strcpy(__trigger_type, eb_type_str(trigger->type));
+		else	strcpy(__trigger_type, "Internal");
+
+		eb_debug (0, 2, "BRIDGE", "%-8s         Bridge reset from %s", __trigger_type, info);
+	}
 
 	// Put our networks structure back to the start
 
@@ -2072,7 +2105,7 @@ void eb_bridge_reset (struct __eb_device *trigger)
 
 	pthread_mutex_unlock (&networks_update);
 
-	eb_debug (0, 2, "BRIDGE", "%-8s         Networks list reset", (trigger ? eb_type_str(trigger->type) : "Internal"));
+	eb_debug (0, 2, "BRIDGE", "%-8s         Networks list reset", __trigger_type);
 
 	// Reset station map to defaults on each wire net as well
 	// Re-uses dev
@@ -2093,7 +2126,7 @@ void eb_bridge_reset (struct __eb_device *trigger)
 				dev->wire.stations[pipe_counter] |= pipe_stations[pipe_counter];
 
 			ioctl (dev->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(dev->wire.stations));
-			eb_debug (0, 2, "BRIDGE", "%-8s         Station set reset on wire network %d", (trigger ? eb_type_str(trigger->type) : "Internal"), dev->net);
+			eb_debug (0, 2, "BRIDGE", "%-8s         Station set reset on wire network %d", __trigger_type, dev->net);
 
 			dev->wire.stations_update_rq = 1;
 
@@ -2377,8 +2410,13 @@ uint8_t eb_trace_handler (struct __eb_device *source, struct __econet_packet_aun
 			{
 
 				struct __eb_pool_host *h;
+				char	__hop_type[20];
 
-				eb_debug (0, 2, "TRACE", "%-8s %3d.%3d Received trace request for known net %d, hop %d - %s (%s)", eb_type_str(source->type), p->p.srcnet, p->p.srcstn, net, hop + 1, reply_diags, final ? "last hop" : "intermediate hop");
+				if (final)
+					strcpy(__hop_type, "last");
+				else	strcpy(__hop_type, "intermediate");
+
+				eb_debug (0, 2, "TRACE", "%-8s %3d.%3d Received trace request for known net %d, hop %d - %s (%s hop)", eb_type_str(source->type), p->p.srcnet, p->p.srcstn, net, hop + 1, reply_diags, __hop_type);
 
 				reply->p.port = ECONET_TRACE_PORT;
 				reply->p.ctrl = 0x83;
@@ -2543,12 +2581,18 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 
 					if (networks[in_adv] && networks[in_adv] != source)
 					{
+						char	__trans_type[5];
+
+						if (in_adv != old_in_adv)
+							strcpy(__trans_type, "un");
+						else	strcpy(__trans_type, "");
+
 						if (networks[in_adv]->type == EB_DEF_WIRE)
 							eb_debug (0, 2, "BRIDGE", "%-8s %3d     Ignored incoming bridge update for net %d: already known on wire net %d", eb_type_str(source->type), source->net, in_adv, networks[in_adv]->net);
 						else if (networks[in_adv]->type == EB_DEF_TRUNK)
-							eb_debug (0, 2, "BRIDGE", "%-8s         Ignored incoming bridge update for net %d (%s): already known on trunk to %s:%d", eb_type_str(source->type), in_adv, (in_adv != old_in_adv ? "translated" : "untranslated"), networks[in_adv]->trunk.hostname, networks[in_adv]->trunk.remote_port);
+							eb_debug (0, 2, "BRIDGE", "%-8s         Ignored incoming bridge update for net %d (%stranslated): already known on trunk to %s:%d", eb_type_str(source->type), in_adv, __trans_type, networks[in_adv]->trunk.hostname, networks[in_adv]->trunk.remote_port);
 						else 
-							eb_debug (0, 2, "BRIDGE", "%-8s         Ignored incoming bridge update for net %d (%s): already known on %s net %d", eb_type_str(source->type), in_adv, (in_adv != old_in_adv ? "translated" : "untranslated"), eb_type_str(networks[in_adv]->type), networks[in_adv]->net);
+							eb_debug (0, 2, "BRIDGE", "%-8s         Ignored incoming bridge update for net %d (%stranslated): already known on %s net %d", eb_type_str(source->type), in_adv, __trans_type, eb_type_str(networks[in_adv]->type), networks[in_adv]->net);
 
 						strcat (net_string, "I"); // Ignored
 					}
@@ -2577,12 +2621,23 @@ void eb_broadcast_handler (struct __eb_device *source, struct __econet_packet_au
 	
 			if (!EB_CONFIG_NOBRIDGEANNOUNCEDEBUG)
 			{
+				char	__traffic_type[10];
+				char	__nets_text[20];
+
+				if (p->p.ctrl == BRIDGE_RESET)
+					strcpy (__traffic_type, "reset");
+				else	strcpy (__traffic_type, "update");
+
+				if (strlen(debug_string) == 0)
+					strcpy (__nets_text, "no networks");
+				else	strcpy (__nets_text, "nets");
+
 				if (source->type == EB_DEF_WIRE)
-					eb_debug (0, 2, "BRIDGE", "Wire     %3d     Received bridge %s with %s%s%s", source->net, (p->p.ctrl == BRIDGE_RESET ? "reset" : "update"), (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string, 
+					eb_debug (0, 2, "BRIDGE", "Wire     %3d     Received bridge %s with %s%s%s", source->net, __traffic_type, __nets_text, debug_string, 
 							(netlist_changed ? "" : " (Not forwarded - net list unchanged)"));
 				else
 				{
-					eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Received bridge %s from %s:%d with %s%s%s", source->trunk.local_port, (p->p.ctrl == BRIDGE_RESET ? "reset" : "update"), source->trunk.hostname ? source->trunk.hostname : "(Not connected)", source->trunk.hostname ? source->trunk.remote_port : 0, (strlen(debug_string) == 0 ? "no networks" : "nets"), debug_string,
+					eb_debug (0, 2, "BRIDGE", "Trunk    %5d   Received bridge %s from %s:%d with %s%s%s", source->trunk.local_port, __traffic_type, source->trunk.hostname ? source->trunk.hostname : "(Not connected)", source->trunk.hostname ? source->trunk.remote_port : 0, __nets_text, debug_string,
 							(netlist_changed ? "" : " (Not forwarded - net list unchanged)"));
 				}
 			}
@@ -5448,7 +5503,11 @@ static void * eb_device_despatcher (void * device)
 
 						// Make the Sequence Number match if this was an immediate reply we were expecting
 						if (	(packet.p.aun_ttype == ECONET_AUN_IMMREP)
-						&&	(packet.p.srcnet == d->wire.last_imm_dest_net)
+                                               &&      (
+                                                                (d->wire.last_imm_dest_net == 0 && packet.p.srcnet == d->net)
+                                                           ||   packet.p.srcnet == d->wire.last_imm_dest_net
+                                                        )
+
 						&&	(packet.p.srcstn == d->wire.last_imm_dest_stn)
 						)
 						{

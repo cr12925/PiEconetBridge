@@ -5380,6 +5380,8 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 
 	char path[1024];
 
+	char __relative_to[20];
+
 	unsigned short filenameposition;
 		
 	struct path p;
@@ -5409,10 +5411,16 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 
 	fs_copy_to_cr(path, (data+filenameposition), 1023);
 
+	if (relative_to == active[server][active_id].root)
+		strcpy (__relative_to, "Root");
+	else if (relative_to == active[server][active_id].lib)
+		strcpy (__relative_to, "Library");
+	else	strcpy (__relative_to, "Current");
+
 	if (command != 4)
-		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d", "", net, stn, path, relative_to == active[server][active_id].root ? "Root" : relative_to == active[server][active_id].lib ? "Library" : "Current", command);
+		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d", "", net, stn, path, __relative_to);
 	else
-		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d, attribute &%02X", "", net, stn, path, relative_to == active[server][active_id].root ? "Root" : relative_to == active[server][active_id].lib ? "Library" : "Current", command, (*(data + 6)));
+		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d, attribute &%02X", "", net, stn, path, __relative_to, command, (*(data + 6)));
 	
 	if (!fs_normalize_path(server, active_id, path, relative_to, &p) || p.ftype == FS_FTYPE_NOTFOUND)
 		fs_error(server, reply_port, net, stn, 0xD6, "Not found");
@@ -5510,7 +5518,7 @@ void fs_set_object_info(int server, unsigned short reply_port, unsigned char net
 			// No default needed - we caught it above
 		}
 
-		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d, writing to path %s, owner %04X, perm %02X, load %08X, exec %08X, homeof %04X", "", net, stn, path, relative_to == active[server][active_id].root ? "Root" : relative_to == active[server][active_id].lib ? "Library" : "Current", command, p.unixpath, attr.owner, attr.perm, attr.load, attr.exec, attr.homeof);
+		fs_debug (0, 2, "%12sfrom %3d.%3d Set Object Info %s relative to %s, command %d, writing to path %s, owner %04X, perm %02X, load %08X, exec %08X, homeof %04X", "", net, stn, path, __relative_to, command, p.unixpath, attr.owner, attr.perm, attr.load, attr.exec, attr.homeof);
 		fs_write_xattr(p.unixpath, attr.owner, attr.perm, attr.load, attr.exec, attr.homeof, server);
 
 		// If we get here, we need to send the reply
@@ -5783,6 +5791,8 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 	unsigned char create_only;
 	char filename[1024];
 
+	char __operation[20];
+
 	struct __econet_packet_udp r;
 
 	create_only = (*(data+1) == 0x1d ? 1 : 0); // Function 29 just creates a file of the requisite length - no data transfer phase.
@@ -5798,7 +5808,11 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 	
 	length = (*(data+13)) + ((*(data+14)) << 8) + ((*(data+15)) << 16);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d %s %s %08lx %08lx %06lx", "", net, stn, (create_only ? "CREATE" : "SAVE"), filename, load, exec, length);
+	if (create_only)
+		strcpy(__operation, "CREATE");
+	else	strcpy(__operation, "SAVE");
+
+	fs_debug (0, 1, "%12sfrom %3d.%3d %s %s %08lx %08lx %06lx", "", net, stn, __operation, filename, load, exec, length);
 
 	if (create_only || (incoming_port = fs_find_bulk_port(server)))
 	{
@@ -5925,7 +5939,7 @@ void fs_save(int server, unsigned short reply_port, unsigned char net, unsigned 
 				}
 				else
 		  		{
-					fs_debug (0, 2, "%12sfrom %3d.%3d %s %s ftype=%02X, parent_perm=%02X, my_perm=%02X, parent_owner=%04X, uid=%04X", "", net, stn, (create_only ? "CREATE" : "SAVE"), filename, p.ftype, p.parent_perm, p.my_perm, p.parent_owner, active[server][active_id].userid);
+					fs_debug (0, 2, "%12sfrom %3d.%3d %s %s ftype=%02X, parent_perm=%02X, my_perm=%02X, parent_owner=%04X, uid=%04X", "", net, stn, __operation, filename, p.ftype, p.parent_perm, p.my_perm, p.parent_owner, active[server][active_id].userid);
 				        fs_error(server, reply_port, net, stn, 0xBD, "Insufficient access");
 			 	}
 
@@ -6232,7 +6246,15 @@ short fs_open_interlock(int server, unsigned char *path, unsigned short mode, un
 	{
 		if (fs_files[server][count].handle == NULL) // Empty descriptor
 		{
-			fs_files[server][count].handle = fopen(path, (mode == 1 ? "r" : (mode == 2 ? "r+" : "w+"))); // These correspond to OPENIN, OPENUP and OPENOUT. OPENUP can only be used if the file exists, so this line fails if it doesn't. Whereas w+ == OPENOUT, which can create a file.
+			char	__mode[5];
+
+			if (mode == 1)
+				strcpy(__mode, "r");
+			else if (mode == 2)
+				strcpy(__mode, "r+");
+			else	strcpy(__mode, "w+");
+
+			fs_files[server][count].handle = fopen(path, __mode); // These correspond to OPENIN, OPENUP and OPENOUT. OPENUP can only be used if the file exists, so this line fails if it doesn't. Whereas w+ == OPENOUT, which can create a file.
 
 			if (!fs_files[server][count].handle)
 				return -1; // Failure
@@ -8117,6 +8139,8 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 
 	uint32_t	sequence; // Used to track the seq number sent to the load enqueuer
 
+	char	__operation[10];
+
 	fs_copy_to_cr(command, data+5, 256);
 
 	if (loadas) // End the command at first space if there is one - BBC Bs seem to send the whole command line
@@ -8130,7 +8154,11 @@ void fs_load(int server, unsigned short reply_port, unsigned char net, unsigned 
 		}
 	}
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d %s %s", "", net, stn, (loadas ? "RUN" : "LOAD"), command);
+	if (loadas)
+		strcpy(__operation, "RUN");
+	else	strcpy(__operation, "LOAD");
+
+	fs_debug (0, 1, "%12sfrom %3d.%3d %s %s", "", net, stn, __operation, command);
 
 	//if (!fs_normalize_path(server, active_id, command, active[server][active_id].current, &p) &&
 	if (!(result = fs_normalize_path(server, active_id, command, relative_to, &p)) && !loadas) // Try and find the file first, but don't barf here if we are trying to *RUN it.
@@ -8277,10 +8305,16 @@ void fs_getbyte(int server, unsigned char reply_port, unsigned char net, unsigne
 		unsigned char result;
 		struct stat statbuf;
 
+		char	__ok_wrong[10];
+
 		h = fs_files[server][active[server][active_id].fhandles[handle].handle].handle;
 
+		if (fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl))
+			strcpy (__ok_wrong, "OK");
+		else	strcpy (__ok_wrong, "WRONG");
+
 		fs_debug (0, 2, "%12sfrom %3d.%3d Get byte on channel %02x, cursor %04lX, ctrl seq is %s (stored: %02X, received: %02X)", "", net, stn, handle, active[server][active_id].fhandles[handle].cursor,
-			fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl) ? "OK" : "WRONG", active[server][active_id].fhandles[handle].sequence, ctrl);
+			__ok_wrong, active[server][active_id].fhandles[handle].sequence, ctrl);
 
 		if (active[server][active_id].fhandles[handle].is_dir) // Directory handle
 		{
@@ -8370,6 +8404,8 @@ void fs_putbyte(int server, unsigned char reply_port, unsigned char net, unsigne
 
 			unsigned char buffer[2];
 
+			char	__ok_wrong[10];
+
 			buffer[0] = b;
 
 			// Put the pointer back where we were
@@ -8383,8 +8419,12 @@ void fs_putbyte(int server, unsigned char reply_port, unsigned char net, unsigne
 
 			active[server][active_id].fhandles[handle].cursor_old = ftell(h);
 
+			if (fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl))
+				strcpy (__ok_wrong, "OK");
+			else	strcpy (__ok_wrong, "WRONG");
+
 			fs_debug (0, 2, "%12sfrom %3d.%3d Put byte %02X on channel %02x, cursor %06lX ctrl seq is %s (stored: %02X, received: %02X)", "", net, stn, b, handle, active[server][active_id].fhandles[handle].cursor,
-				fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl) ? "OK" : "WRONG", (active[server][active_id].fhandles[handle].sequence), ctrl);
+				__ok_wrong, (active[server][active_id].fhandles[handle].sequence), ctrl);
 
 			if (fwrite(buffer, 1, 1, h) != 1)
 			{
@@ -8516,7 +8556,13 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 		case 0: // Set pointer
 		{
 
-			fs_debug (0, 2, "%12sfrom %3d.%3d Set file pointer on channel %02X to %06lX, current extent %06lX%s", "", net, stn, handle, value, extent, (value > extent) ? " which is beyond EOF" : "");
+			char	__beyond[40];
+
+			if (value > extent)
+				strcpy (__beyond, " which is beyond EOF");
+			else	strcpy (__beyond, "");
+
+			fs_debug (0, 2, "%12sfrom %3d.%3d Set file pointer on channel %02X to %06lX, current extent %06lX%s", "", net, stn, handle, value, extent, __beyond);
 
 			if ((value > extent) && active[server][active_id].fhandles[handle].mode == 1) // Don't extend if read only!
 			{
@@ -8564,7 +8610,13 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 		break;
 		case 1: // Set file extent
 		{
-			fs_debug (0, 2, "%12sfrom %3d.%3d Set file extent on channel %02X to %06lX, current extent %06lX%s", "", net, stn, handle, value, extent, (value > extent) ? " so adding bytes to end of file" : "");
+			char	__adding[128];
+
+			if (value > extent)
+				strcpy (__adding, " so adding bytes to end of file");
+			else	strcpy (__adding, "");
+
+			fs_debug (0, 2, "%12sfrom %3d.%3d Set file extent on channel %02X to %06lX, current extent %06lX%s", "", net, stn, handle, value, extent, __adding);
 
 			if (active[server][active_id].fhandles[handle].mode == 1) // Read only - refuse!
 			{
@@ -8601,7 +8653,11 @@ void fs_set_random_access_info(int server, unsigned char reply_port, unsigned ch
 			if (value < extent)
 			{
 */
-				fs_debug (0, 3, "%12sfrom%3d.%3d   - %s file accordingly", "", net, stn, ((value < extent) ? "truncating" : "extending"));
+				if (value < extent)
+					strcpy (__adding, "truncating");
+				else	strcpy (__adding, "extending");
+
+				fs_debug (0, 3, "%12sfrom%3d.%3d   - %s file accordingly", "", net, stn, __adding);
 				if (ftruncate(fileno(f), value)) // Error if non-zero
 				{
 					fs_error(server, reply_port, net, stn, 0xFF, "FS Error setting extent");
@@ -8639,13 +8695,25 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 	struct __econet_packet_udp r;
 
+	char	__pointer_use[50];
+	char	__ok_wrong[10];
+	char	__eof_reached[20];
+
 	txport = *(data+2);
 	offsetstatus = *(data+6);
 	bytes = (((*(data+7))) + ((*(data+8)) << 8) + (*(data+9) << 16));
 	offset = (((*(data+10))) + ((*(data+11)) << 8) + (*(data+12) << 16));
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX (%s) by user %04x on handle %02x, ctrl seq is %s (stored: %02X, received: %02X), data burst port &%02X", "", net, stn, bytes, offset, (offsetstatus ? "ignored - using current ptr" : "being used"), active[server][active_id].userid, handle,
-		fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl) ? "OK" : "WRONG", active[server][active_id].fhandles[handle].sequence, ctrl, txport);
+	if (offsetstatus)
+		strcpy (__pointer_use, "ignored - using current ptr");
+	else	strcpy (__pointer_use, "being used");
+
+	if (fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl))
+		strcpy (__ok_wrong, "OK");
+	else	strcpy (__ok_wrong, "WRONG");
+
+	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() %04lX from offset %04lX (%s) by user %04x on handle %02x, ctrl seq is %s (stored: %02X, received: %02X), data burst port &%02X", "", net, stn, bytes, offset, __pointer_use, active[server][active_id].userid, handle,
+		__ok_wrong, active[server][active_id].fhandles[handle].sequence, ctrl, txport);
 
 	if (active[server][active_id].fhandles[handle].handle == -1) // Invalid handle
 	{
@@ -8688,7 +8756,11 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	else
 		eofreached = 0;
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() offset %06lX, file length %06lX, beyond EOF %s", "", net, stn, offset, length, (eofreached ? "Yes" : "No"));
+	if (eofreached)
+		strcpy (__eof_reached, "Yes");
+	else	strcpy (__eof_reached, "No");
+
+	fs_debug (0, 2, "%12sfrom %3d.%3d fs_getbytes() offset %06lX, file length %06lX, beyond EOF %s", "", net, stn, offset, length, __eof_reached);
 
 	fseek(fs_files[server][internal_handle].handle, offset, SEEK_SET);
 	active[server][active_id].fhandles[handle].cursor_old = offset; // Store old cursor
@@ -8839,6 +8911,8 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	unsigned char day, monthyear;
 	time_t now;
 
+	char	__ok_wrong[20];
+
 	now = time(NULL);
 	t = *localtime(&now);
 
@@ -8871,10 +8945,14 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	if (offsetstatus) // write to current position
 		offset = active[server][active_id].fhandles[handle].cursor;
 
+	if (fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl))
+		strcpy (__ok_wrong, "OK");
+	else	strcpy (__ok_wrong, "WRONG (Ignored)");
+
 	fs_debug (0, 2, "%12sfrom %3d.%3d fs_putbytes() %06lX at offset %06lX by user %04X on handle %02d, ctrl seq is %s (stored: %02X, received: %02X)",
 			"", net, stn,
 			bytes, offset, active[server][active_id].userid, handle,
-			fs_check_seq(active[server][active_id].fhandles[handle].sequence, ctrl) ? "OK" : "WRONG (Ignored)", 
+			__ok_wrong,
 			active[server][active_id].fhandles[handle].sequence, ctrl);
 
 	if (offset > length) // Beyond EOF
@@ -9065,6 +9143,8 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 	struct path p;
 	//struct path_entry *e;
 	struct __econet_packet_udp reply;
+	char	__readonly[10];
+	char	__existingfile[10];
 
 	count = 7;
 	while (*(data+count) == ' ' && count < datalen)
@@ -9089,7 +9169,15 @@ void fs_open(int server, unsigned char reply_port, unsigned char net, unsigned c
 		return;
 	}
 
-	fs_debug (0, 2, "%12sfrom %3d.%3d Open %s readonly %s, must exist? %s", "", net, stn, filename, (readonly ? "yes" : "no"), (existingfile ? "yes" : "no"));
+	if (readonly)
+		strcpy (__readonly, "yes");
+	else	strcpy (__readonly, "no");
+
+	if (existingfile)
+		strcpy (__existingfile, "yes");
+	else	strcpy (__existingfile, "no");
+
+	fs_debug (0, 2, "%12sfrom %3d.%3d Open %s readonly %s, must exist? %s", "", net, stn, filename, __readonly, __existingfile);
 
 	// If the file must exist, then we can use wildcards; else no wildcards
 	// BUT we should be able to open a file for writing with wildcards in the path except the tail end
@@ -9365,6 +9453,7 @@ void fs_select_printer(int server, unsigned char reply_port, unsigned int active
 
 	int printerindex = 0xff;
 	struct __econet_packet_udp reply;
+	char	__debug[20];
 
 	reply.p.ptype = ECONET_AUN_DATA;
 	reply.p.port = reply_port;
@@ -9373,7 +9462,11 @@ void fs_select_printer(int server, unsigned char reply_port, unsigned int active
 
 	printerindex = get_printer(fs_stations[server].net, fs_stations[server].stn, pname);
 
-	fs_debug (0, 1, "%12sfrom %3d.%3d Select printer %s - %s", "", net, stn, pname, (printerindex == -1) ? "UNKNOWN" : "Succeeded");
+	if (printerindex == -1)
+		strcpy (__debug, "UNKNOWN");
+	else	strcpy (__debug, "Succeeded");
+
+	fs_debug (0, 1, "%12sfrom %3d.%3d Select printer %s - %s", "", net, stn, pname, __debug);
 
 	if (printerindex == -1) // Failed
 		fs_error(server, reply_port, net, stn, 0xFF, "Unknown printer");
@@ -9447,6 +9540,8 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 	{
 		int writeable, remaining, old_cursor, new_cursor, new_cursor_read;
 
+		char	__errorstr[30];
+
 		// We can deal with this data
 	
 		remaining = fs_bulk_ports[server][port].length - fs_bulk_ports[server][port].received; // How much more are we expecting?
@@ -9471,8 +9566,13 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 	
 		fs_debug (0, 2, "%12sfrom %3d.%3d Bulk transfer in on port %02X data length &%04X, expected total length &%04lX, writeable &%04X", "", net, stn, port, datalen, fs_bulk_ports[server][port].length, writeable
 				);
+
+		if (new_cursor == new_cursor_read)
+			strcpy (__errorstr, "CORRECT");
+		else	strcpy (__errorstr, " *** ERROR ***");
+
 		if (fs_bulk_ports[server][port].user_handle != 0) // Produce additional debug
-			fs_debug (0, 2, "%12sfrom %3d.%3d Bulk trasfer on port %02X old cursor = %06X, new cursor in FS = %06X, new cursor from OS = %06X - %s", "", net, stn, port, old_cursor, new_cursor, new_cursor_read, (new_cursor == new_cursor_read) ? "CORRECT" : " *** ERROR ***");
+			fs_debug (0, 2, "%12sfrom %3d.%3d Bulk trasfer on port %02X old cursor = %06X, new cursor in FS = %06X, new cursor from OS = %06X - %s", "", net, stn, port, old_cursor, new_cursor, new_cursor_read, __errorstr);
 
 		fs_bulk_ports[server][port].last_receive = (unsigned long long) time(NULL);
 
@@ -9542,6 +9642,8 @@ void handle_fs_bulk_traffic(int server, unsigned char net, unsigned char stn, un
 				r.p.data[17] = 0x80;
 				// And the 'junk'
 				r.p.data[18] = 0x20; r.p.data[19] = 0xA9; r.p.data[20] = 0x24;
+
+				usleep(50000);
 
 				fs_aun_send (&r, server, 21, net, stn);
 				// OLD fs_aun_send (&r, server, 5, net, stn);
@@ -10324,6 +10426,7 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 					unsigned char operator; // The + or - on the command line
 					FILE *config;
 					char configfile[300];
+					char __on_off[10];
 
 					// temp use of length - will point to the operator character
 
@@ -10338,7 +10441,11 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						length--;
 					}
 
-					fs_debug (0, 1, "%12sfrom %3d.%3d NET CONFIG: %s -> %s", "", net, stn, configitem, (operator == '+' ? "ON" : "OFF"));
+					if (operator == '+')
+						strcpy (__on_off, "ON");
+					else	strcpy (__on_off, "OFF");
+
+					fs_debug (0, 1, "%12sfrom %3d.%3d NET CONFIG: %s -> %s", "", net, stn, configitem, __on_off);
 
 					if (!strcasecmp("ACORNHOME", configitem))
 						fs_config[server].fs_acorn_home = (operator == '+' ? 1 : 0);
@@ -11527,7 +11634,14 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						case 5: // Read system message channel
 						case 6: // Set system message channel (deliberate fall through)
 						{
-							fs_debug (0, 2, "%12sfrom %3d.%3d SJ %s system message channel", "", net, stn, (rw_op == 5 ? "Read" : "Set"));
+							char __mode[10];
+
+							if (rw_op == 5)
+								strcpy (__mode, "Read");
+							else	strcpy (__mode, "Set");
+
+							fs_debug (0, 2, "%12sfrom %3d.%3d SJ %s system message channel", "", net, stn, __mode);
+
 							if (rw_op == 5)
 							{
 								reply.p.data[2] = 1; // Always 1 (Parallel)
@@ -11572,7 +11686,13 @@ void handle_fs_traffic (int server, unsigned char net, unsigned char stn, unsign
 						case 10: // Write default printer
 						{
 
-							fs_debug (0, 2, "%12sfrom %3d.%3d SJ %s system default printer", "", net, stn, (rw_op == 9 ? "Read" : "Set"));
+							char __mode[10];
+
+							if (rw_op == 9)
+								strcpy (__mode, "Read");
+							else	strcpy (__mode, "Set");
+
+							fs_debug (0, 2, "%12sfrom %3d.%3d SJ %s system default printer", "", net, stn, __mode);
 							if (rw_op == 9) reply.p.data[reply_length++] = 1; // Always 1...
 							// We always just accept the set command
 						}
