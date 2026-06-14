@@ -1984,7 +1984,7 @@ static void * eb_bridge_update_watcher (void *device)
 		if (!sender_net) // No bridge sender net available!
 		{
 			/* Go around again */
-			eb_debug (0,2, "BRIDGE", "%-8s %7d Unable to find sender net. Not sending bridge update.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.local_port);
+			eb_debug (0,2, "BRIDGE", "%-8s %3d     Unable to find sender net. Not sending bridge update.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.local_port);
 			continue;
 		}
 
@@ -2162,7 +2162,7 @@ static void * eb_bridge_reset_watcher (void *device)
 		if (!sender_net) // No bridge sender net available!
 		{
 			/* Go around again */
-			eb_debug (0,2, "BRIDGE", "%-8s %7d Unable to find sender net. Not sending bridge reset.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.local_port);
+			eb_debug (0,2, "BRIDGE", "%-8s %3d     Unable to find sender net. Not sending bridge reset.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.local_port);
 			continue;
 		}
 
@@ -6286,6 +6286,7 @@ static void * eb_device_despatcher (void * device)
 			// Do station setup
 	
 			ioctl(d->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(d->wire.stations));	
+
 			ioctl(d->wire.socket, ECONETGPIO_IOC_READMODE); // Rest just in case...
 
 			ioctl(d->wire.socket, ECONETGPIO_IOC_EXTRALOGS, EB_CONFIG_EXTRALOGS);
@@ -6294,7 +6295,8 @@ static void * eb_device_despatcher (void * device)
 
 			sprintf (hardwareclass, "%1d", (kernvers & 0xff));
 
-			eb_debug (0, 1, "DESPATCH", "%-8s %3d     Pi hardware is %s class; bridge hardware is version %d", eb_type_str(d->type), d->net, hardwareclass, (kernvers & 0xff00) >> 8);
+			if (kernvers != 0xffff)
+				eb_debug (0, 1, "DESPATCH", "%-8s %3d     Pi hardware is %s class; bridge hardware is version %d", eb_type_str(d->type), d->net, hardwareclass, (kernvers & 0xff00) >> 8);
 					
 			if (pthread_create(&d->bridge_update_thread, NULL, eb_bridge_update_watcher, d))
 				eb_debug (1, 0, "DESPATCH", "%-8s %3d     Cannot start bridge updater on this device.", "Wire", d->net);
@@ -6747,6 +6749,7 @@ static void * eb_device_despatcher (void * device)
 			pthread_mutex_lock (&(d->wire.stations_lock));
 			if (d->wire.stations_update_rq)
 				ioctl (d->wire.socket, ECONETGPIO_IOC_SET_STATIONS, &(d->wire.stations));
+
 			d->wire.stations_update_rq = 0;
 			pthread_mutex_unlock (&(d->wire.stations_lock));
 			pthread_cond_signal (&(d->qwake));
@@ -9625,6 +9628,8 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 				eb_debug (1, 0, "JSON", "No station number in divert number %d in %s net %d", jcount, (otype == 1) ? "virtual" : "econet", net);
 
 			stn = json_object_get_int(jstation_number);
+
+			eb_set_single_wire_host(net, stn); /* This used to be in the devinits we have commented out... */
 
 			json_object_object_get_ex(jstation, "printers", &jprinters);
 #if 0 /* IPGW modularized */
