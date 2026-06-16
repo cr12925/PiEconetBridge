@@ -464,7 +464,9 @@ void * eb_malloc (char *file, int line, char *module, char *purpose, size_t size
 		eb_debug (0, 2, "MEM MGT", "%-8s         %s:%d seeking malloc(%d) for purpose %s", module, file, line, size, purpose);
 		*/
 
-	r = calloc(1, size);
+	/* TO DO - THIS EXTRA 12 IS TO WORK AROUND A SHORT ALLOCATION SOMEWHERE FS-RELATED - WE NEED TO FIND THAT AND ELIMINATE IT. */
+
+	r = calloc(1, size + 12);
 	//r = malloc(size);
 
 	/* res = posix_memalign(&r, 256, size); */
