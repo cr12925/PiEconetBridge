@@ -8889,10 +8889,21 @@ void fs_getbytes(int server, unsigned char reply_port, unsigned char net, unsign
 
 		// Now goes on a load queue
 		//fs_aun_send(&r, server, 6, net, stn);
-		fs_load_enqueue(server, &(comp), 6, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES, 0); // Final close gets not listening sometimes - let's see if a delay helps. 
+		if (bytes > 0)
+		{
+			fs_load_enqueue(server, &(comp), 6, net, stn, internal_handle, 1, seq, FS_ENQUEUE_GETBYTES, 0); // Final close gets not listening sometimes - let's see if a delay helps. 
+			// Then trigger the whole thing to start
+			fs_aun_send_noseq(&r, server, 2, net, stn); 
+		}
+		else
+		{
+			/* Send command ack */
+			fs_aun_send_noseq(&r, server, 2, net, stn); 
+			usleep(5000);
+			/* Then termination */ 
+			fs_aun_send(&comp, server, 6, net, stn);
+		}
 
-		// Then trigger the whole thing to start
-		fs_aun_send_noseq(&r, server, 2, net, stn); 
 	}
 	
 }
@@ -9020,17 +9031,13 @@ void fs_putbytes(int server, unsigned char reply_port, unsigned char net, unsign
 	{	
 		/* Wrong!
 		 * fs_close_interlock(server, fs_bulk_ports[server][incoming_port].handle, 3); */
-		fs_bulk_ports[server][incoming_port].handle = -1; // Make the port available again
 		r.p.port = reply_port;
 		r.p.ctrl = ctrl;
 		r.p.ptype = ECONET_AUN_DATA;
-		r.p.data[0] = r.p.data[1] = 0;
-		// WRONG - Why are we returning fixed permissions here?
-		r.p.data[2] = FS_PERM_OWN_R | FS_PERM_OWN_W;
-		r.p.data[3] = day;
-		r.p.data[4] = monthyear;
-
-		fs_aun_send (&r, server, 5, net, stn);
+		memset(&(r.p.data), 0, 7);
+		r.p.data[2] = incoming_port;
+		fs_aun_send (&r, server, 7, net, stn);
+		fs_bulk_ports[server][incoming_port].handle = -1; // Make the port available again
 	}
 
 }
