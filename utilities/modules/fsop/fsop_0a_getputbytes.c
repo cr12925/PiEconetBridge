@@ -304,13 +304,19 @@ FSOP(0b)
 
 	if (bytes == 0) // No data expected
 	{
-		r.p.ctrl = FSOP_CTRL;
-		r.p.data[2] = FS_PERM_OWN_R | FS_PERM_OWN_W;
-		r.p.data[3] = day;
-		r.p.data[4] = monthyear;
+                incoming_port = fsop_find_bulk_port(f->server);
+                memset(&(r.p.data), 0, 8);
+                r.p.port = FSOP_REPLY_PORT;
+                r.p.ctrl = FSOP_CTRL;
+                r.p.data[2] = incoming_port;
+                r.p.data[3] = (FS_CONFIG(f->server,fs_bigchunks) ? FS_MAX_BULK_SIZE : 0x500) & 0xff; // Max trf size
+                r.p.data[4] = ((FS_CONFIG(f->server,fs_bigchunks) ? FS_MAX_BULK_SIZE : 0x500) & 0xff00) >> 8; // High byte of max trf
+                fsop_aun_send (&r, 5, f); /* Send acknowledge */
+                r.p.data[3] = r.p.data[4] = 0x00;
+                usleep(5000); /* Wait for Beeb to listen */
+                fsop_aun_send (&r, 7 + is_32bit, f); /* Send close - no data transfer */
+                eb_port_deallocate(f->server->fs_device, incoming_port);
 
-		// usleep (500000); /* For RISC OS (and some beebs?) */
-		fsop_aun_send (&r, 5, f);
 	}
 	else if ((incoming_port = fsop_find_bulk_port(f->server))) // Data expected - set up a bulk port
 	{
