@@ -618,12 +618,21 @@ uint8_t	fsd_test_harness (struct __fs_station *s, char *drivername, char *parame
 
 	if (fsd_cdir(mount, "HARNESS", &fsd_errno))
 	{
-		fs_debug_full(0, 1, s, 0, 0, "HARNESS: Failed to make test directory! (fsd_error = %d (%s))", fsd_errno, fsd_strerror(fsd_errno));
+		fs_debug_full(0, 1, s, 0, 0, "HARNESS: Failed to make test directory! (fsd_error = %d (%s))", fsd_errno, strerror(fsd_errno));
 		ret = 1;
 	}
 	else
+	{
 		fs_debug_full(0, 1, s, 0, 0, "HARNESS: Successfully made test dir ('HARNESS') in root dir");
 
+		/* More tests here */
+
+		if (fsd_unlink (mount, "HARNESS", &fsd_errno))
+		{
+			fs_debug_full(0, 1, s, 0, 0, "HARNESS: Failed to unlink HARNESS directory (fsd_error = %d (%s))", fsd_errno, strerror(fsd_errno));
+		}
+	}
+	
 	/* Then unmount it */
 
 	if (fsd_umount(device, mount))

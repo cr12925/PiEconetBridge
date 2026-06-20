@@ -1114,8 +1114,8 @@ int fsd_SYS_cdir (fs_device_mount *m, const char *path, int *fs_errno)
 
 	if (!access(syspath, R_OK)) /* Exists */
 	{
-		*fs_errno = FSD_EXISTS;
-		return 1;
+		*fs_errno = EEXIST;
+		return FSD_SYSERR;
 	}
 
 	if (mkdir(syspath, 0770))
@@ -1154,8 +1154,8 @@ int fsd_SYS_unlink (fs_device_mount *m, const char *path, int *fs_errno)
 			path); /* Pathname we want */
 
 	if (fs_isdir(syspath))
-		ret = unlink((const char *) syspath);
-	else	ret = rmdir((const char *) syspath);
+		ret = rmdir((const char *) syspath);
+	else	ret = unlink((const char *) syspath);
 
 	*fs_errno = errno;
 
