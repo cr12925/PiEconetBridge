@@ -68,7 +68,7 @@ struct objattr {
 	uint32_t sysid; /* System ID - populated by the device driver getattr functions */
 	uint8_t ftype;
 	uint32_t length;
-	char	ownername[11]; /* Text owner name */
+	char	ownername[11]; /* Text owner name  - this is filled in by the FSD wrapper; the drivers do not have to find it */
 };
 
 #include "econet-gpio-consumer.h"

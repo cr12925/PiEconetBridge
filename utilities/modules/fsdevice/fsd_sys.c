@@ -63,6 +63,7 @@ struct fsd_SYS_submount {
 
 struct fsd_SYS_mount {
 	fs_device	*device; /* Must be first element - the driver subsystem does a cast to dig this out */
+	struct __fs_station	*server; /* Must be second element for the same reason - the stub struct wants it here */
 	struct fsd_SYS_instance	*instance; /* Instance on which this mount has been created */
 	struct fsd_SYS_disc	*disc; /* Disc being mounted */
 	uint8_t			fs_disc; /* FS Disc index containing this mount */
@@ -408,80 +409,6 @@ fs_device_mount * fsd_SYS_mount (struct __fs_station *station, fs_device_instanc
 		strncpy (discpath_param, new_path, 127);
 	}
 
-#if 0 /* Don't do this now first parameter is a filesystem path */	
-	/* See if we know the disc name? */
-
-	if (discname_param[0] == ':') /* Mount by number */
-	{
-		if (strlen(discname_param) > 1)
-		{
-			char	discnum = discname_param[1];
-			uint8_t	index = 0;
-
-			if (discnum >= '0' && discnum <= '9')
-				index = discnum - '0';
-			else if (discnum >= 'A' && discnum <= 'F')
-				index = discnum - 'A' + 10;
-			else
-			{
-				fsd_debug_fmt (1, "Bad disc number '%c'", discnum);
-				*err = FSD_MOUNTERR_BAD_DISC_NUMBER;
-				return NULL;
-			}
-
-			/* Search for disc number */
-
-			d = instance->discs;
-
-			while (d)
-			{
-				if (d->index == index)
-					break;
-
-				d = d->next;
-			}
-
-			if (!d) /* Not found */
-			{
-				fsd_debug_fmt (1, "Unknown disc number %1X", index);
-				*err = FSD_MOUNTERR_UNKNOWN_DISC;
-				return NULL;
-			}
-
-			/* Fall through to mount below */
-
-		}
-		else
-		{
-			fsd_debug (1, "Bad disc name");
-			*err = FSD_MOUNTERR_BAD_DISC_NUMBER;
-			return NULL;
-		}
-	}
-	else /* Mount by name */
-	{
-		struct fsd_SYS_disc *d;
-
-		d = instance->discs;
-
-		while (d)
-		{
-			if (!strcasecmp(d->name, discname_param)) /* Is it this disc? */
-				break;
-			
-			d = d->next;
-		}
-
-		if (!d)
-		{
-			fsd_debug (1, "Unknown disc");
-			*err = FSD_MOUNTERR_UNKNOWN_DISC;
-			return NULL;
-		}
-	
-	}
-#endif
-
 	/* Search our extant discs to see if we already have this one */
 
 	d = instance->discs;
@@ -555,6 +482,7 @@ fs_device_mount * fsd_SYS_mount (struct __fs_station *station, fs_device_instanc
 	/* Initialize it */
 
 	m->device = instance->device;
+	m->server = station;
 	m->instance = instance;
 	m->disc = d;
 	m->readers = 0; /* Readers & writers on the mount */

@@ -126,6 +126,7 @@ typedef void fs_device_mount;
 
 struct __fs_device_mount_stub {
 	fs_device	*device;
+	struct __fs_station	*server;
 	/* Private drivers may have other things here */
 };
 

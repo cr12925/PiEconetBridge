@@ -460,9 +460,15 @@ int fsd_get_dir_ents (fs_device_mount *mount, char *dir, char *wildcard_needle, 
 {
 
 	fs_device *device; 
+	struct __fs_station *f;
+	fs_device_dir_entry *l;
 
 	if (!mount) return FSD_BADMOUNT;
-	else device = ((struct __fs_device_mount_stub *) mount)->device;
+	else 
+	{
+		device = ((struct __fs_device_mount_stub *) mount)->device;
+		f = ((struct __fs_device_mount_stub *) mount)->server;
+	}
 
 	if (device && device->device_funcs->get_dir_ents)
 	{
@@ -472,10 +478,18 @@ int fsd_get_dir_ents (fs_device_mount *mount, char *dir, char *wildcard_needle, 
 
 		/* Now sift for wildcards */
 
+		/* Now put in user names on what's left */
+
+		l = *ents;
+
+		while (l)
+		{
+			strncpy(l->attr.ownername, f->users[l->attr.owner].username, 10);
+			l = l->next;
+		}
+
 		/* Then sort out permissions - see fs.c:get_wildcard_entries */
 		
-		/* Then fill in the file's textual ownership info */
-
 		return ret;
 	}
 
@@ -578,7 +592,7 @@ uint8_t	fsd_test_harness (struct __fs_station *s, char *drivername, char *parame
 	if (dirents < 0)
 		fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_get_dir_ents for $ returned error %d (%s)", fsd_errno, fsd_strerror(fsd_errno));
 	else
-		fs_debug_full(0, 1, s, 0, 0, "HARNESS: Root directory of mount reported to have %d entries", dirents);
+		fs_debug_full(0, 1, s, 0, 0, "HARNESS: Root directory of mount reported to have %d entries, max length %d", dirents, max_fname_len);
 
 	if (dirents >= 0)
 	{
@@ -588,7 +602,7 @@ uint8_t	fsd_test_harness (struct __fs_station *s, char *drivername, char *parame
 
 		while (d)
 		{
-			fs_debug_full(0, 10, s, 0, 0, "HARNESS: -- %s (perm: %02X, acorn_perm: %02X, load: %08X, exec: %08X, length = %08X, owner: %04X (%s), sysid: %08X, type = %1d)", d->name, d->attr.perm, d->attr.acorn_perm, d->attr.load, d->attr.length, d->attr.exec, d->attr.owner, d->attr.ownername, d->attr.sysid, d->attr.ftype);
+			fs_debug_full(0, 1, s, 0, 0, "HARNESS: -- %s (perm: %02X, acorn_perm: %02X, load: %08X, exec: %08X, length = %08X, owner: %04X (%s), sysid: %08X, type = %1d)", d->name, d->attr.perm, d->attr.acorn_perm, d->attr.load, d->attr.exec, d->attr.length, d->attr.owner, d->attr.ownername, d->attr.sysid, d->attr.ftype);
 			d = d->next;
 		}
 		
