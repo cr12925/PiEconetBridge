@@ -68,6 +68,7 @@ struct fsd_SYS_mount {
 	struct fsd_SYS_disc	*disc; /* Disc being mounted */
 	uint8_t			fs_disc; /* FS Disc index containing this mount */
 	uint8_t		readers, writers; /* Count, so that we can cope with > 1 mount if interlock is ok */
+	int			flags; /* Mount flags */
 	struct fsd_SYS_submount *submounts; /* Linked list of submounts */
 	struct fsd_SYS_mount *next, *prev; /* links */
 };
@@ -462,7 +463,7 @@ fs_device_mount * fsd_SYS_mount (struct __fs_station *station, fs_device_instanc
 
 	/* Make sure it's mountable */
 
-	if (d->writers) /* Can't mount if something else has it read/write */
+	if (d->writers) /* Can't mount if something else has it read/write - we allow a single writer to a disc if there are already readers*/
 	{
 		fsd_debug (1, "Cannot mount - already mounted read/write elsewhere");
 		*err = FSD_MOUNTERR_ALREADY_MOUNTED;
@@ -487,6 +488,7 @@ fs_device_mount * fsd_SYS_mount (struct __fs_station *station, fs_device_instanc
 	m->disc = d;
 	m->readers = 0; /* Readers & writers on the mount */
 	m->writers = 0;
+	m->flags = flags; /* So we know what kind of mount it was */
 	m->submounts = NULL; /* No submounts yet */
 	m->fs_disc = fs_disc; /* FS Disc number. Stored here so we can put it in struct path_entry on get_dirents */
 
@@ -512,6 +514,12 @@ int fsd_SYS_umount (fs_device_mount *m)
 	if (mount->readers != 0 || mount->writers != 0 || mount->submounts) /* Busy */
 		return FSD_BUSY;
 
+	/* Decrement the count on the underlying disc */
+
+	if (mount->flags & FSD_MOUNTFLAG_READONLY)
+		mount->disc->readers--;
+	else	mount->disc->writers--;
+	
 	/* So should be safe to unmount */
 
 	FS_LIST_SPLICEFREE(mount->instance->mounts, mount, "FS", FSDEVICE " freeing mount struct");
@@ -1104,8 +1112,11 @@ int fsd_SYS_cdir (fs_device_mount *m, const char *path, int *fs_errno)
 			mount->disc->path, /* Full underlying filesystem path to this disc */
 			path); /* Pathname we want */
 
-	if (access(syspath, R_OK)) /* Exists */
-		return FSD_EXISTS;
+	if (!access(syspath, R_OK)) /* Exists */
+	{
+		*fs_errno = FSD_EXISTS;
+		return 1;
+	}
 
 	if (mkdir(syspath, 0770))
 	{
