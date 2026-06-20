@@ -31,6 +31,7 @@
  * 18 - Write FS configuration info (base directory is never writeable)
  * 19 - Shut down fileserver
  * 20 - Force logoff a user by name or ID
+ * 21 - Run test harness on filesystem device driver
  *
  */
 
@@ -289,6 +290,77 @@ FSOP(60)
 
                 } break;
 
+		/* Run test harness on an FS device driver */
+		case 0x15:
+		{
+			/* Packet data contains two 0x0D terminated strings.
+			 * First is the driver name (e.g. "SYS"), and the
+			 * second are the parameters to pass it for a mount.
+			 */
+
+			uint8_t 	*drivername, *parameters, *tmp;
+			uint8_t		res;
+
+			drivername = f->data+6;
+
+			while (*drivername == ' ' && drivername < (f->data + f->datalen))
+				drivername++;
+
+			if (drivername == (f->data + f->datalen))
+			{
+				fsop_error(f, 0xFF, "Bad driver name");
+				return;
+			}
+
+			tmp = drivername;
+
+			while (*tmp != 0x0D && tmp < (f->data + f->datalen))
+				tmp++;
+
+			if (tmp == (f->data + f->datalen))
+			{
+				fsop_error(f, 0xFF, "Bad driver name");
+				return;
+			}
+
+			*tmp = 0x00;
+
+			tmp++; /* Skip over 0x0d */
+
+			parameters = tmp;
+
+			while (*parameters == ' ' && parameters < (f->data + f->datalen))
+				parameters++;
+
+			if (parameters == (f->data + f->datalen))
+			{
+				fsop_error(f, 0xFF, "Bad parameters for test harness");
+				return;
+			}
+
+			tmp = parameters;
+
+			while (*tmp != 0x0D && tmp < (f->data + f->datalen))
+				tmp++;
+
+			if (tmp == (f->data + f->datalen))
+			{
+				fsop_error (f, 0xFF, "Bad parameters for test harness");
+				return;
+			}
+
+			*tmp = 0x00;
+
+			fs_debug_full(0, 1, f->server, f->net, f->stn, "PiFS running FS driver test harness on driver '%s' with parameters '%s'", drivername, parameters);
+
+			res = fsd_test_harness(f->server, drivername, parameters);
+
+			if (!res)
+				fsop_reply_ok(f);
+			else	fsop_error (f, 0xFF, "Test harness failed");
+
+
+		} break;
                 /* Catch undefined operations */
 
                 default:

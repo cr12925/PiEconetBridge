@@ -152,13 +152,13 @@ void eb_module_deregister (void *d_in, struct __eb_device_module *m)
 	struct __eb_device_module *p, *pprev = NULL;
 	struct __eb_device *	d = (struct __eb_device *) d_in;
 
-	eb_debug (0, 2, "MODULE", "      %3d.%3d Atetmpting to deregister module %s", m->module_name);
-
 	if (d->type != EB_DEF_LOCAL)
 	{
 		eb_debug (0, 1, "MODULE", "      %3d.X   Attempt to deregister a module from device not of type local", d->net);
 		return;
 	}
+
+	eb_debug (0, 2, "MODULE", "      %3d.%3d Atetmpting to deregister module %s", d->net, d->local.stn, m->module_name);
 
 	pthread_mutex_lock (&(d->local.modules_mutex));
 

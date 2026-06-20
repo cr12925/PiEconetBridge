@@ -20,7 +20,7 @@ unix2beeb:	unix2beeb.c
 econet-hpbridge:	pre-build
 	@$(MAKE) real-hpb-build
 	
-real-hpb-build: Makefile $(fsop_objects) $(econet_hpb_objects) $(econet_hpb_modules) $(fsdevice_objects)
+real-hpb-build: Makefile $(fsop_objects) $(econet_hpb_objects) $(econet_hpb_modules) $(fsdevice_objects) 
 	if [ -f .noexplain ]; then cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) $(econet_hpb_modules) $(fsop_objects) $(fsdevice_objects) $(libs); else cc $(CFLAGS) -o econet-hpbridge $(econet_hpb_objects) $(econet_hpb_modules) $(fsop_objects) $(fsdevice_objects) $(libs) -lexplain; fi
 	-chgrp econet econet-hpbridge
 	#-sudo setcap CAP_NET_RAW=ep ${CURDIR}/econet-hpbridge
@@ -42,6 +42,9 @@ fast-test.o: Makefile econet-hpbridge-fast.c ../include/econet-gpio-consumer.h .
 
 fast-test: Makefile fast-test.o
 	cc $(CFLAGS) fast-test.o -o fast-test -lpthread
+
+fslisttest: fslisttest.c ../include/fs.h
+	cc $(CFLAGS) fslisttest.c -o fslisttest 
 
 econet-monitor: econet-monitor.o
 

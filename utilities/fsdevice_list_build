@@ -15,14 +15,16 @@ do
 	if [ $? -eq 0 ] # String found
 	then
 		newstr=`echo $str | /usr/bin/cut -d"(" -f2 | /usr/bin/cut -d ")" -f1`
+		func=`echo ${newstr} | /usr/bin/cut -d"," -f1`
+		id=`echo ${newstr} | /usr/bin/cut -d"," -f2`
 
-		echo "extern fs_device *${newstr} (void);" >> ../include/fsdevice_list.h	
+		echo "extern fs_device *${func} (void);" >> ../include/fsdevice_list.h	
 	fi
 
 done
 
 cat >> ../include/fsdevice_list.h << EOF
-static struct { fs_device * (*register_function) (void); } fs_device_driver_list[] =
+static struct { fs_device * (*register_function) (void); char *drivername; } fs_device_driver_list[] =
 	{
 EOF
 
@@ -34,7 +36,9 @@ do
 	then
 		newstr=`echo $str | /usr/bin/cut -d"(" -f2 | /usr/bin/cut -d ")" -f1`
 
-		echo "	{ ${newstr} }," >> ../include/fsdevice_list.h	
+		func=`echo ${newstr} | /usr/bin/cut -d"," -f1`
+		id=`echo ${newstr} | /usr/bin/cut -d"," -f2`
+		echo "	{ ${func}, ${id} }," >> ../include/fsdevice_list.h	
 	fi
 
 done

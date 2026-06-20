@@ -52,11 +52,16 @@ int fsop_scandir_regex(const struct dirent *, struct fsop_data *);
 //#define FS_PARSE_DEBUG 1
 uint8_t fs_parse_cmd (char *, char *, unsigned short, char **);
 
+/* Master list of fs_devices */
+
+fs_device	*fs_devices;
+
 /* 
  * List of FSOps in our new list form
  */
 
 struct fsop_list fsops[255]; 
+struct __fs_device_driver_list *fs_driver_list = NULL;
 
 extern void eb_debug_fmt (uint8_t, uint8_t, char *, char *);
 
@@ -1906,12 +1911,12 @@ int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, ch
 			new_p->next = NULL;
 			if (p == NULL)
 			{
-				new_p->parent = NULL;
+				new_p->prev = NULL;
 				*head = new_p;
 			}
 			else
 			{
-				new_p->parent = p;
+				new_p->prev = p;
 				p->next = new_p;
 			}
 	
@@ -1941,10 +1946,10 @@ int fs_get_wildcard_entries (struct fsop_data *f, int userid, char *haystack, ch
 			if (stat(new_p->unixpath, &statbuf) != 0) // Error
 			{
 				fs_debug (0, 2, "Unable to stat %s", new_p->unixpath);
-				if (new_p->parent)
+				if (new_p->prev)
 				{
-					new_p->parent->next = NULL;
-					*tail = new_p->parent;
+					new_p->prev->next = NULL;
+					*tail = new_p->prev;
 				}
 				else	
 					*head = *tail = NULL;
@@ -3345,6 +3350,7 @@ uint8_t FS_module_init_private (struct __eb_device *device, struct __eb_device_m
 	char tapehandler[280];
 	char tapecompletionhandler[280];
 	uint16_t len_tmp;
+	uint16_t counter;
 
 	/* Set out findserver name */
 
@@ -3386,6 +3392,97 @@ uint8_t FS_module_init_private (struct __eb_device *device, struct __eb_device_m
 		fs_debug (0, 1, "Bad directory name %s", ebf->server->directory);
 		return 1;
 	}
+
+	/* Initialize storage drivers */
+
+	server->devices = NULL;
+
+	/* Initialize SYS, and anything else in the list in our drivers key */
+
+	counter = 0;
+
+	if (j && json_object_object_get_ex(j, "drivers", &jtmp) && json_object_is_type(jtmp, json_type_array))
+	{
+		struct json_object *driver;
+		char	device_list[512];
+		fs_device_local	*l;
+
+		len_tmp = json_object_array_length(jtmp);
+
+		while (counter < len_tmp)
+		{
+			if ((driver = json_object_array_get_idx(jtmp, counter)))
+			{
+				struct json_object *driver_name;
+
+				if (json_object_object_get_ex(driver, "driver-name", &driver_name) && json_object_is_type(driver_name, json_type_string))
+				{
+					struct __fs_device_driver_list *fsd_list;
+					fs_device *fsd = NULL;
+					fs_device_local *local;
+
+					char	driver_code[25];
+
+					fsd_list = fs_driver_list;
+					strncpy (driver_code, json_object_get_string(driver_name), 24);
+					// fs_debug_full (0, 0, ebf->server, 0, 0, "Attempting to initialize driver named %s", driver_code);
+
+					while (fsd_list)
+					{
+						if (!strncasecmp(driver_code, fsd_list->driver->device_name, 24))
+							break;
+						else	fsd_list = fsd_list->next;
+					}
+
+					if (fsd_list)
+						fsd = fsd_list->driver;
+
+					if (fsd)
+					{
+						fs_device_instance *	instance;
+
+						instance = (fsd->device_funcs->fs_init) (ebf->server, driver);
+
+						if (!instance) /* Failure */
+							fs_debug_full (1, 0, ebf->server, 0, 0, "Failed to initialize %s storage driver", fsd->device_name);
+
+						FS_LIST_MAKENEW(fs_device_local, ebf->server->devices, 1, local, "FSDEVICE", "New local device struct");
+
+						local->device = fsd;
+						local->instance = instance;
+
+					}
+					else
+						fs_debug_full (1, 0, ebf->server, 0, 0, "Config requires initialization of %s driver, but driver not registered", driver_code);
+
+				}
+				else
+					fs_debug_full (1, 0, ebf->server, 0, 0, "No 'driver-name' key found in drivers[] array, entry %d", counter+1);
+			}
+
+			counter++;
+		}
+
+		strcpy (device_list, "");
+
+		l = ebf->server->devices;
+
+		while (l)
+		{
+			strcat (device_list, l->device->device_name);
+			if (l->next)
+				strcat (device_list, ", ");
+			l = l->next;
+		}
+
+		if (!ebf->server->devices)
+			fs_debug_full (0, 0, ebf->server, 0, 0, "No drivers initialized");
+		else
+			fs_debug_full (0, 0, ebf->server, 0, 0, "Initialized the following drivers: %s", device_list);
+
+	}
+	else
+		fs_debug_full (1, 0, ebf->server, 0, 0, "No storage drivers to initialize!");
 
 	server->tapehandler = server->tapecompletionhandler = NULL;
 
@@ -3499,8 +3596,9 @@ uint8_t FS_module_init_private (struct __eb_device *device, struct __eb_device_m
                 return 1;
         }
 
+	EB_PORT_SET (device, reserved_ports, 0x99, NULL, NULL); 
 	//eb_port_allocate(device,0x99,FS_module_handle_traffic,device);
-	eb_port_allocate(device,0x99,FS_handle_traffic_shutdown,server); /* This handler needs the server pointer, not a device pointer */
+	//eb_port_allocate(device,0x99,FS_handle_traffic_shutdown,server); /* This handler needs the server pointer, not a device pointer */
 
 	return 0;
 
@@ -3984,10 +4082,6 @@ struct __fs_station * fsop_initialize(struct __eb_device *device, char *director
 		
 	}
 	
-	/* Initialize list of storage engines */
-
-	server->devices = NULL;
-
 	/* If told to, set bridge priv on SYST user */
 
 	if (fs_set_syst_bridgepriv)
@@ -5443,9 +5537,8 @@ uint8_t FS_module_stop_cleanup (void *device, struct __eb_device_module *m)
 	
 		if (count == 10)
 		{
-			eb_debug (0, 1, "FS", "Local    %3d.%3d Backup thread failed to quit - killing thread",
+			eb_debug (0, 1, "FS", "Local    %3d.%3d Backup thread failed to quit",
 					d->net, d->local.stn);
-			pthread_cancel(s->fs_backup_thread);
 		}
 		else
 			eb_debug (0, 1, "FS", "Local    %3d.%3d Backup thread exited",
@@ -5463,7 +5556,7 @@ uint8_t FS_module_stop_cleanup (void *device, struct __eb_device_module *m)
 	/* Put port back to the shutdown handler */
 
 	eb_port_deallocate(device,0x99);
-	eb_port_allocate(device,0x99,FS_handle_traffic_shutdown,s);
+	//eb_port_allocate(device,0x99,FS_handle_traffic_shutdown,s);
 
 	/* Drain queue */
 
@@ -5539,6 +5632,9 @@ uint8_t FS_module_stop_cleanup (void *device, struct __eb_device_module *m)
 	s->groups = NULL;
 
 	// regfree(&(s->r_discname)); /* This is set in init, not start */
+	
+	/* JOB - This needs freeing, but it causes core dumps - Find out why */
+
 	regfree(&(s->r_pathname)); /* Whereas this one is set in start */
 
 	/* Free the config struct */
@@ -5604,7 +5700,7 @@ uint8_t FS_module_start (void *device, struct __eb_device_module *me)
 	free(autoinf);
 
 	dir = opendir(server->directory);
-
+	
 	if (!dir)
 		fs_debug_full (1, 1, server, 0, 0, "Unable to open root directory %s", server->directory);
 	else
@@ -5790,6 +5886,12 @@ uint8_t FS_module_start (void *device, struct __eb_device_module *me)
 
 				if (server->config->fs_sjfunc)
 					fsop_make_mdfs_pw_file(server); // Causing problems in the directory build
+
+	/* TODO
+	 *
+	 * This will get replaced by an init() on each fileserver drvier
+	 * including SYS
+	 */
 
 				// Now load up the discs. These are named 0XXX, 1XXX ... FXXXX for discs 0-15
 				while ((entry = readdir(dir)) && discs_found < ECONET_MAX_FS_DISCS)
@@ -5991,10 +6093,6 @@ uint8_t FS_module_start (void *device, struct __eb_device_module *me)
 		
 	}
 	
-	/* Initialize list of storage engines */
-
-	server->devices = NULL;
-
 	/* If told to, set bridge priv on SYST user */
 
 	if (fs_set_syst_bridgepriv)
@@ -6044,13 +6142,15 @@ uint8_t FS_module_start (void *device, struct __eb_device_module *me)
 	
 	/* Allocate port */
 
-	eb_port_deallocate(device,0x99);
+	//eb_port_deallocate(device,0x99);
 	eb_port_allocate(device,0x99,FS_module_handle_traffic,device);
 
 	/* start the backup thread */
 
 	if (pthread_create(&(server->fs_backup_thread), NULL, fsop_backup_thread, server) != 0)
 		eb_module_debug(1, MODULE, d, "Backup thread did not start - running FS anyway");
+
+	pthread_detach(server->fs_backup_thread);
 
 	eb_module_debug (1, MODULE, d, "Server started"); 
 		
@@ -6150,6 +6250,8 @@ uint8_t FS_module_exit (void *device, struct __eb_device_module *m)
 {
 
 	struct __eb_device * d = (struct __eb_device *) device;
+	struct __eb_fileserver *fileserver = (struct __eb_fileserver *) m->module_ws;
+	struct __fs_station *server = fileserver->server;
 
 	/* When called, the FS will be shut down */
 
@@ -6162,12 +6264,23 @@ uint8_t FS_module_exit (void *device, struct __eb_device_module *m)
 		return 1; 
 	} 
 	
+	/* Free the device structs */
+
+	while (server->devices)
+	{
+		fs_device_local	*l = server->devices;
+		fsd_release(l->device, l->instance);
+		FS_LIST_SPLICEFREE(server->devices,l, "FS", "Freeing device instance on FS");
+	}
+
 	pthread_mutex_unlock (&(m->module_mutex)); 
 	
 	eb_port_deallocate (d, 0x99);
 
 	EB_PORT_CLR (d, reserved_ports, 0x99); 
 	
+	/* Uninitialize the server drivers */
+
 	eb_module_deregister(d, m); 
 	
 	eb_module_debug (1, MODULE, d, "Server module deregistered"); 
@@ -6412,6 +6525,7 @@ void fsop_setup(void)
 	FSOP_OSCLI(DISKMASK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 5);
 	FSOP_OSCLI(ENABLE,(FSOP_00_LOGGEDIN), 0, 2, 2);
 	FSOP_OSCLI(FSCONFIG,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 1, 2, 4);
+	FSOP_OSCLI(FSDTEST,(FSOP_00_LOGGEDIN | FSOP_00_BRIDGE), 2, 10, 4);
 	FSOP_OSCLI(INFO,(FSOP_00_LOGGEDIN), 1, 1, 1); /* Has to cope with stupid *i. from M128 */
 	FSOP_OSCLI(LIB,(FSOP_00_LOGGEDIN), 0, 1, 3);
 	FSOP_OSCLI(LINK,(FSOP_00_LOGGEDIN | FSOP_00_SYSTEM), 2, 2, 4);

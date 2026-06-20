@@ -19,6 +19,17 @@
 
 #include <sys/statvfs.h>
 
+/* Some debug and malloc shortcuts */
+
+#define fsd_malloc(desc,size)	eb_malloc(__FILE__, __LINE__, "FSDEVICE", FSDEVICE ": " desc, size)
+#define fsd_free(desc,ptr)	eb_free(__FILE__, __LINE__, "FSDEVICE", FSDEVICE ": " desc, ptr)
+#define fsd_debug(level, fmt)	eb_debug (0, level, "FSDEVICE", "FS               " FSDEVICE ": " fmt)
+#define fsd_debug_fmt(level, fmt, ...)	eb_debug (0, level, "FSDEVICE", FSDEVICE ": " fmt, __VA_ARGS__)
+
+/* Prototypes */
+
+struct fs_device_funcs;
+
 /*
  * Each device is required to provide a 'register' function which
  * returns an
@@ -36,6 +47,16 @@
  *
  */
 
+/* disc name entry for disc discovery */
+
+struct __fsd_disc_entry {
+	char	name[17];
+	uint16_t	index;
+	struct __fsd_disc_entry *next;
+};
+
+typedef struct __fsd_disc_entry fs_device_disc;
+
 /* __fs_device_proto
  *
  * Return from register function. Anything register() puts in *next will be overwritten by the bridge
@@ -44,11 +65,12 @@
 struct __fs_device_proto {
 	char 			*device_name; /* Short name - e.g. 'ADFS' used in the *MOUNT command to identify driver */
 	char			*device_description; /* Text description e.g. 'ADFS floppy image device' */
-	void 			*device_funcs; /* Pointer to __fs_device_funcs, ready populated for this device - must cast to (struct __fs_device_funcs *) */
+	struct fs_device_funcs	*device_funcs; /* Pointer to __fs_device_funcs, ready populated for this device - must cast to (struct __fs_device_funcs *) */
 	struct __fs_device_proto	*next;
 };
 
 typedef struct __fs_device_proto fs_device;
+
 /*
  * Each device must also provide an __init() function which is 
  * called by the FS before it tries to mount any devices. This
@@ -70,6 +92,22 @@ typedef struct __fs_device_proto fs_device;
 
 typedef void fs_device_instance;
 
+/* __fs_device_local
+ *
+ * List of FS devices initialized on a FS. 
+ *
+ * List pointed to by server->devices
+ */
+
+struct __fs_device_local {
+	fs_device	*device;
+	fs_device_instance	*instance; /* On this server */
+	struct __fs_device_local *next, *prev;
+};
+
+typedef struct __fs_device_local fs_device_local;
+
+
 /* fs_device_mount is the return value from the device's mount function
  * and must uniquely identify a device. It is passed back to the
  * FS device driver with each call in order to identify which
@@ -80,6 +118,16 @@ typedef void fs_device_instance;
  */
 
 typedef void fs_device_mount;
+
+/* mount stub - used by the driver subsystem to cast & dig out the 
+ * device. First element in any private fs_device_mount must be
+ * fs_device *
+ */
+
+struct __fs_device_mount_stub {
+	fs_device	*device;
+	/* Private drivers may have other things here */
+};
 
 /* fs_device_handle is the return value from a successful open. 
  * It is a pointer to a struct which is then passed back to the driver
@@ -95,44 +143,140 @@ typedef void fs_device_mount;
 
 typedef void fs_device_handle;
 
+struct __fs_device_handle_stub {
+	fs_device	*device;
+	fs_device_mount	*mount;
+	/* Individual devices will have other stuff too. This is here to
+	 * enable the driver subsystem to cast a handle & find out the
+	 * device & mount
+	 */
+};
+	
+/* Acorn directory entry */
+
+struct __fs_device_dir_entry {
+	char	name[ECONET_ABS_MAX_FILENAME_LENGTH+1];
+	struct objattr	attr;
+	fs_device_mount	*mount; /* non-NULL if this is a mount point */
+	struct __fs_device_dir_entry *next, *prev; /* prev is unused, but it's there so we can use FS_LIST_MAKENEW / FS_LIST_SPLICEFREE */
+};
+
+typedef struct __fs_device_dir_entry fs_device_dir_entry;
+
 /* FS Mountable device prototypes */
 
-typedef struct {
+struct fs_device_funcs {
 	struct json_object * (*dev_report_schema) (void); /* Function the bridge will call when it wants the device to provide its JSON config schema, to include in the JSON schema to enable the web config system to work. Not presently implemented. CAN be NULL if no parameters */
-	fs_device_instance * (*fs_init) (void *, struct json_object *); /* Init on particular fileserver station identified by first parameter; second parameter is pointer to json_object containing config parameters within this FS, from econet-hpbridge.json. First parameter is a struct __fs_station * cast to void * because the __fs_station struct is defined after this file is included. */
-	int (*dev_unregister) (fs_device *); /* Unregister device driver. Device must verify that it is not in use! */
+	fs_device_instance * (*fs_init) (struct __fs_station *, struct json_object *); /* Init on particular fileserver station identified by first parameter; second parameter is pointer to json_object containing config parameters within this FS, from econet-hpbridge.json. First parameter is a struct __fs_station * cast to void * because the __fs_station struct is defined after this file is included. */
+	int (*dev_unregister) (void); /* Unregister device driver. Device must verify that it is not in use! */
 	int (*fs_release) (fs_device_instance *); /* Opposite of fs_init() - deregisters from a particular fileserver */
 
 	/* Disc lifecycle */
-	fs_device_mount * (*mount) (void *station, fs_device_instance *device, char *params, uint32_t flags); /* station is the FS station mounting the device, device is the registered device, params is everything after '*FSMOUNT <disc no.> <driver_name>' on the mount command line */
+	fs_device_mount * (*mount) (struct __fs_station *station, fs_device_instance *device, char *params, uint32_t flags, uint8_t fs_disc, int *); /* station is the FS station mounting the device, device is the registered device, params is everything after '*FSMOUNT <disc no.> <driver_name>' on the mount command line */
 	int (*umount) (fs_device_mount *mnt); /* Umount - caused by *FSUMOUNT <disc no.>, which the FS uses to look up whether whether the disc is removable, and if so finds the fs_device_mount struct and passes it. Return is 0 for success, anything else for failure. If successful, the FS will take the disc out of the active disc lists. */
-	char * (*get_discname) (fs_device_mount *mnt); /* Retrieve 16-character disc name */
+
+	/* Disc ops */
+
+	/* Return list of discs known to this driver */
+	int (*get_discs) (fs_device_instance *, fs_device_disc **); /* malloc & return all the disc names known to this driver at fs_disc_entry, and return number returned */
+
+	/* Get disc name of mounted disc */
+	char * (*get_discname) (fs_device_mount *); /* Retrieve 16-character disc name */
+
+	/* Get block size of disc */
+	int16_t (*get_disc_blocksize) (fs_device_mount *);
 
 	/* File handle operations */
-	int (*open) (fs_device_mount *mount, const char *path, int flags, fs_device_handle **handle_out);
-	int (*close) (fs_device_handle *handle);
-	ssize_t (*read) (fs_device_handle *handle, void *buf, size_t len);
-	ssize_t (*write) (fs_device_handle *handle, const void *buf, size_t len);
-	off_t (*seek) (fs_device_handle *handle, off_t offset, int whence);
-	off_t (*tell) (fs_device_handle *handle);
+	int (*open) (fs_device_mount *mount, const char *path, int flags, fs_device_handle **handle_out, int *fs_errno);
+	int (*close) (fs_device_handle *handle, int *fs_errno);
+	ssize_t (*read) (fs_device_handle *handle, void *buf, size_t len, int *fs_errno);
+	ssize_t (*write) (fs_device_handle *handle, const void *buf, size_t len, int *fs_errno);
+	int (*seek) (fs_device_handle *handle, off_t offset, int whence, int *fs_errno);
+	off_t (*tell) (fs_device_handle *handle, int *fs_errno);
+	int (*truncate) (fs_device_handle *, size_t new_size, int *fs_errno); /* Truncate / expand */
 
-	/* Metadata */
-	int (*getattr) (fs_device_mount *mount, const char *path, void **attr); /* Final parameter is struct objattr ** cast to void ** because struct objattr is defined after this file is included */
-	int (*setattr) (fs_device_mount *mount, const char *path, void *attr); /* Final parameter is struct objattr * cast to void * because struct objattr is defined after this file is included */
-	uint32_t (*getsysid) (fs_device_mount *mount, const char *path); /* Obtain system file ID. In the system driver, this is the inode number. This is actually a 24-bit number in 32-bit storage */
+	/* File/dir-level */
+	int (*cdir) (fs_device_mount *mount, const char *path, int *fs_errno); /* Create dir */
+	int (*unlink) (fs_device_mount *mount, const char *path, int *fs_errno); /* unlink / delete */
+	int (*getattr) (fs_device_mount *mount, const char *path, struct objattr *attr); /* Final parameter is struct objattr * cast to void * because struct objattr is defined after this file is included */
+	int (*setattr) (fs_device_mount *mount, const char *path, struct objattr *attr); /* Final parameter is struct objattr * cast to void * because struct objattr is defined after this file is included */
 
-	/* Directory */
-	int (*normalize_wildcard) (fs_device_mount *mount, unsigned char *path_from_device_root, void *result, unsigned short wildcard); /* Param 2 is ASCII path from root of this FS device (NOT from top level; devices may in the future be mounted other than at a disc mount point, and is in ACORN format; void * result is struct path * cast to void * because struct path is defined after this file is included. wildcard = 0 means turn off wildcard search - must find precise match */
+	/* Directory operations */
+	int (*get_dir_ents) (fs_device_mount *, char *, fs_device_dir_entry **, uint8_t *, int *fs_errno); /* Get directory index, with all attributes - the result is put in like getdirent, and there's a utility function in fsdevice.c which will free a linked list of those items */
 
-	/* Disc-level */
-	int (*statvfs) (fs_device_mount *mount, struct statvfs *stat); /* Populate a statvfs structure for the virtual disc */
-	int (*create) (fs_device_mount *mount, const char *path, size_t alloc); /* Create file; set attributes with setattr if successful */
-	int (*truncate) (fs_device_mount *mount, const char *path, size_t new_size); /* Truncate / expand */
-	int (*unlink) (fs_device_mount *mount, const char *path); /* unlink / delete */
-	
-} __fs_device_funcs;
+};
 
+/* 
+ * Externs for utilities functions & main harness for device drivers
+ */
 
-#define FSDEVICE_REGISTER(p) void __p(void) {  }; /* Dummy define - the string is picked up by the fsdevice_list.h builder */
+struct fsd_param {
+	uint16_t fsdp_start;
+	uint16_t fsdp_end;
+};
 
+/* Utilitty prototypes */
+
+extern uint16_t fsd_parse_params (char *, struct fsd_param *, uint16_t);
+extern void fsd_param_extract (char *, struct fsd_param *, uint8_t, char *, uint8_t, uint16_t);
+extern void fsd_free_disc_ents (fs_device_disc *);
+extern fs_device * fsd_find_driver (struct __fs_station *, char *);
+extern fs_device_instance * fsd_find_instance (struct __fs_station *, char *);
+extern fs_device_local * fsd_find_local (struct __fs_station *, char *);
+
+/* Main device driver wrapper prototypes */
+
+struct json_object * fsd_dev_report_schema (fs_device *);
+fs_device_instance * fsd_init (fs_device *, struct __fs_station *, struct json_object *);
+int fsd_unregister (fs_device *);
+int fsd_release (fs_device *, fs_device_instance *);
+fs_device_mount *fsd_mount (fs_device *, struct __fs_station *, fs_device_instance *, char *, uint32_t, uint8_t, int *);
+int fsd_umount (fs_device *device, fs_device_mount *);
+int fsd_get_discs (fs_device *, fs_device_instance *, fs_device_disc **);
+char *fsd_get_discname (fs_device *, fs_device_mount *);
+int16_t fsd_get_disc_blocksize (fs_device *, fs_device_mount *);
+int fsd_open (fs_device_mount *, const char *, int flags, fs_device_handle **, int *);
+int fsd_close (fs_device_handle *, int *);
+ssize_t fsd_read (fs_device_handle *, void *, size_t, int *);
+ssize_t fsd_write (fs_device_handle *, const void *, size_t, int *);
+int fsd_seek (fs_device_handle *, off_t, int, int *);
+off_t fsd_tell (fs_device_handle *, int *);
+int fsd_truncate (fs_device_handle *, size_t, int *);
+int fsd_cdir (fs_device_mount *, const char *, int *);
+int fsd_unlink (fs_device_mount *, const char *, int *);
+int fsd_getattr (fs_device_mount *, const char *, struct objattr *);
+int fsd_setattr (fs_device_mount *, const char *, struct objattr *);
+int fsd_get_dir_ents (fs_device_mount *, char *, char *, fs_device_dir_entry **, uint8_t *, int *);
+void fsd_free_dir_ents (fs_device_dir_entry *);
+
+/* Execute test harness */
+uint8_t fsd_test_harness (struct __fs_station *, char *, char *);
+
+/* Convert FSD error to string */
+char *fsd_strerror(int);
+
+#define FSDEVICE_REGISTER(p,s) void __p(void) {  }; /* Dummy define - the string is picked up by the fsdevice_list.h builder */
+
+/* Some flags defines for use on mount */
+#define FSD_MOUNTFLAG_READONLY (1)
+
+/* Some return values */
+
+#define FSD_SUCCESS		0
+#define FSD_SYSERR		-1 /* See errno - system call returned error */
+#define FSD_NOMEM		-2 /* Memory allocation error */
+#define FSD_BADPARAMS		-3 /* Bad parameters */
+#define FSD_MOUNTERR_UNKNOWN_DISC	-4 /* Disc name / number unknown to driver */
+#define FSD_MOUNTERR_BAD_DISC_NUMBER	-5 /* Bad disc number requested for mount */
+#define FSD_MOUNTERR_ALREADY_MOUNTED	-6 /* Already mounted read/write elsewhere */
+#define FSD_BUSY		-7	/* Mount / instance / whatever is busy - cannot do as asked */
+#define FSD_UMOUNTERR_INVALID	-8	/* Invalid mount */
+#define FSD_BADMOUNT		-9 	/* Bad mount (NULL) passed to function */
+#define FSD_MISSINGFUNC		-10	/* A function is set to NULL in the driver's function map, probably when it shouldn't be */
+#define FSD_NOTDIRECTORY	-11	/* Request to search a path which was not a directory */
+#define FSD_SCANDIR_FAILURE	-12	/* scandir() or equivalent failed in some way */
+#define FSD_SCANDIR_REGEX_FAILURE	-13	/* regcomp() in the scandir() or equivalent of a drvier failure */
+#define FSD_BADHANDLE		-14	/* Bad handle passed to driver */
+#define FSD_NODISC		-15	/* Disc you attempted to mount is not available */
+#define FSD_EXISTS		-16	/* You tried to do something on a file/dir which exists */
 #endif

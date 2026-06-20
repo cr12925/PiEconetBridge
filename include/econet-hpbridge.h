@@ -77,8 +77,6 @@
 
 #include "econet-gpio-consumer.h"
 
-#include "fsdevice.h"
-
 #define DEVINIT_DEBUG(_fmt, ...) if (dumpconfig) eb_debug (0, 0, "CONFIG", "%-16s " _fmt, "Core", __VA_ARGS__)
 
 // Server version number advertised
@@ -1869,11 +1867,4 @@ void eb_broadcast_handler (struct __eb_device *, struct __econet_packet_aun *, u
 /* Default tape handler - requires for FS device init */
 
 #define FS_DEFAULT_TAPE_HANDLER "/etc/econet-gpio/tapes.sh"
-
-/* Disc device driver list */
-
-extern fs_device	*fs_devices;
-
-#define fsd_malloc(d,s) eb_malloc(__FILE__, __LINE__, DRIVERNAME, d, s)
-#define fsd_free(d,p) eb_free(__FILE__, __LINE__, DRIVERNAME, d, p)
 

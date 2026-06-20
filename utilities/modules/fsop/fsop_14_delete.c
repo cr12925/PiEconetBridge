@@ -102,7 +102,7 @@ int fsop_delete_internal (struct fsop_data *f, unsigned char *path, uint8_t rela
 		}
 		else
 		if (
-				((e->ftype == FS_FTYPE_FILE) && unlink((const char *) e->unixpath)) ||
+			((e->ftype == FS_FTYPE_FILE) && unlink((const char *) e->unixpath)) ||
 			((e->ftype == FS_FTYPE_DIR) && rmdir((const char *) e->unixpath))
 			) // Failed
 			{       

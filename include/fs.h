@@ -46,10 +46,44 @@
 	#define __NO_LIBEXPLAIN
 #endif
 
+// Do NOT change this. Some format string lengths and array lengths are still hard coded.  (And some of the
+// arrays are of length 81 to take a null byte as well. So to make this fully flexible, a number of arrays
+// need to be altered, and some format strings need to be built with sprintf so that the right length
+// can be incorporated before that (second) format string can be used... sort of a work in progress!
+// This has to be above the fsdevice.h. include
+
+#define ECONET_ABS_MAX_FILENAME_LENGTH 80
+
+/* Object attributes definition - Moved here because it's used in fsdevice.h */
+
+struct objattr {
+        unsigned short perm; /* PiFS format permissions */
+	uint8_t acorn_perm; /* Acorn/MDFS format permissions */
+        unsigned short owner;
+        unsigned long load, exec;
+        unsigned short homeof;
+	/* The following are not yet used - they are to facilitate FS drivers */
+        unsigned char day, monthyear, hour, min, sec; // Modified date / time
+        unsigned char c_day, c_monthyear, c_hour, c_min, c_sec;
+	uint32_t sysid; /* System ID - populated by the device driver getattr functions */
+	uint8_t ftype;
+	uint32_t length;
+	char	ownername[11]; /* Text owner name */
+};
+
 #include "econet-gpio-consumer.h"
-#include "fsdevice.h"
 #include "econet-hpbridge.h"
 #include "econet-fs-hpbridge-common.h"
+#include "fsdevice.h"
+
+/* FS Master driver list */
+
+struct __fs_device_driver_list {
+	fs_device *driver;
+	struct __fs_device_driver_list *next, *prev;
+};
+
+extern struct __fs_device_driver_list *fs_driver_list;
 
 /*
  * Pi Econet Bridge FS include header
@@ -71,11 +105,6 @@
 #define FS_MAX_OPEN_FILES 33 // Really 32 because we don't use entry 0 - maximum per user
 
 #define ECONET_MAX_FILENAME_LENGTH (f->server->config->fs_fnamelen)
-// Do NOT change this. Some format string lengths and array lengths are still hard coded.  (And some of the
-// arrays are of length 81 to take a null byte as well. So to make this fully flexible, a number of arrays
-// need to be altered, and some format strings need to be built with sprintf so that the right length
-// can be incorporated before that (second) format string can be used... sort of a work in progress!
-#define ECONET_ABS_MAX_FILENAME_LENGTH 80
 #define ECONET_MAX_PATH_ENTRIES 30
 #define ECONET_MAX_PATH_LENGTH ((ECONET_MAX_PATH_ENTRIES * (ECONET_ABS_MAX_FILENAME_LENGTH + 1)) + 1)
 
@@ -128,14 +157,6 @@
 
 /* Various important struct definitions */
 
-/* Object attributes definition - Moved here because it's used in fsdevice.h */
-
-struct objattr {
-        unsigned short perm;
-        unsigned short owner;
-        unsigned long load, exec;
-        unsigned short homeof;
-};
 
 /* Structure to be passed to the machine registration thread */
 
@@ -177,7 +198,8 @@ struct __fs_station {
 	struct __fs_machine_peek_reg	*peeks; // List of pending machine peeks
 	struct __fs_backup	*backup; // Auto backup config
 	struct __fs_bridge_force	*bridge_force; // List of users who will have bridge privileges added at startup
-	fs_device		*devices; // Pointer to linked list of storage engines available on this server
+	fs_device_local		*devices; // Pointer to linked list of storage engines available on this server
+	fs_device_instance	*device_instances; // Linked list of instantiated drivers on this server
 	pthread_mutex_t		fs_backup_mutex; // Locks the backup jobs list
 	pthread_cond_t		fs_backup_cond; // Used by the backup scheduler to be woken up to check the jobs list
 	pthread_t		fs_backup_thread; // the backup thread
@@ -222,10 +244,47 @@ struct __fs_config {
         uint8_t pad[239]; // Spare spare in the config
 };
 
+/* __fs_submount_entry
+ *
+ * Represents a mountpoint on a given disc. 
+ * Gives the path of the mountpoint.
+ * These are linked from the *depth_entries in __fs_submount.
+ * Thus for a disc with mounts as follows, the hierarchy will be as shown:
+ *
+ * $ [mount point is inside __fs_disc]
+ * |
+ * |-MOUNT1 [*mountpoint1]
+ * |-...
+ * |-FOLDER
+ *   |
+ *   |-MOUNT2 [*mountpoint2]
+ *
+ * __fs_submount depth 0 will have a *depth_entries pointer to __fs_submount_entry with path "MOUNT1" pointing to *mountpoint1
+ * __fs_submount depth 0 will have a next-> pointer to another __fs_submount, with depth 1, and that will have a *depth_entries pointer to __fs_submount_entry with path "FOLDER.MOUNT2", with a mount pointer to *mountpoint2
+ */
+
+struct __fs_submount_entry {
+	char			path_from_root[1024]; /* Case insensitive, but no wildcards */
+	fs_device_mount		*mount;
+	struct __fs_submount_entry	*next, *prev; /* Further mounts at this depth */
+};
+
+/* __fs_submount - list of submounts on a disc with fsd mount points.
+ * This linked list is by *level* (0 being folders in $ on the disc), and then each
+ * has a separate linked list of __fs_submount_entry for each entry at that level.
+ * This is used by the FS to determine, efficiently, which mount a given file
+ * that is requested is on.
+ */
+
+struct __fs_submount {
+	uint8_t			depth; /* 0 being $, 1 being $.XXX, etc. */
+	struct __fs_submount_entry	*depth_entries; /* Linked list of mounts on directories at this depth */
+	struct __fs_submount	*next, *prev;
+};
+
 /* __fs_discs - disc information for a particular server */
 
 struct __fs_disc {
-	unsigned char 		name[17];
 	uint8_t			index; /* Disc number - ready for new structure */
 	uint8_t			removable; /* 0 = fixed disc; 1 = removable - can be unmounted if free */
 	uint8_t			readonly; /* 0 = R/W, 1 = RO */
@@ -235,8 +294,10 @@ struct __fs_disc {
 	char *			full_path; /* Full path to root directory. If this pointer is null, root directory is {fs_root}/{index}{name} */
 	fs_device		*device; /* Which disc storage engine this is. NULL is ordinary system; Others are user-supplied systems (e.g. floppy disc readers) */
 	fs_device_mount		*mount; /* Mount point on device, if device is not null */
+	struct __fs_submount	*submounts; /* NULL means none */
 	struct __fs_disc	*next, *prev;
 	struct __fs_station	*server; /* Upward reference */
+	unsigned char 		name[17];
 };
 
 /* __fs_file - open file information for a particular server */
@@ -245,10 +306,11 @@ struct __fs_file {
         unsigned char 	name[1024]; /* *think* this will be path from / for system devices, and path below mount for other devices */
 	union {
         	FILE 		*handle; /* Handle for files on system devices */
-		void		*handle_device; /* Handle for non-system device drivers */
+		void		*fsd_handle; /* Handle for non-system device drivers - but 'handle' will get retired soon enough */
 	};
-	fs_device	*device; /* == NULL for system driver, or points to FS device driver */
-	fs_device_mount	*mount; /* mount pointer provided by FS device driver if device != NULL */
+	fs_device	*fsd_device; /* points to FS device driver that provides th e mount this file is on */
+	fs_device_mount	*fsd_mount; /* mount pointer provided by FS device driver if device != NULL */
+	unsigned char	fsd_path[1024]; /* Path from top of mount point */
 	uint8_t		is_tape, tape_drive;
 	struct __fs_disc *disc; /* Disc number where this file is located  - not implemented 20240524. For quotas. */
 	uint16_t	owner; /* User ID of owner - not implemented 20240524. For quotas. */
@@ -299,12 +361,13 @@ struct path_entry {
         unsigned short homeof;
         unsigned long load, exec, length, internal;
         unsigned char unixpath[1024], unixfname[ECONET_ABS_MAX_FILENAME_LENGTH+1], acornname[ECONET_ABS_MAX_FILENAME_LENGTH+1]; // unixfname / acornname were 15, but now 81 to handle max 80 character filenames
+	unsigned char mount_path[1024]; /* Acorn-format path from the root of the mount point containing this file */
         unsigned char day, monthyear, hour, min, sec; // Modified date / time
         unsigned char c_day, c_monthyear, c_hour, c_min, c_sec;
 	short disc; /* Host disc number */
 	fs_device	*device; /* Device this file is on ; NULL = system files driver (native) */
 	fs_device_mount	*mount; /* Mount point within device */
-        struct path_entry *next, *parent;
+        struct path_entry *next, *prev;
 };
 
 #define FS_PATH_ERR_NODIR 0x01 // Path searched for had a directory that did not exist
@@ -339,6 +402,7 @@ struct path {
         unsigned char unixpath[1024]; // Full unix path from / in the filesystem (done because Econet is case insensitive)
         unsigned char acornfullpath[1024]; // Full acorn path within this server, including disc name
         unsigned char unixfname[ECONET_ABS_MAX_FILENAME_LENGTH+5]; // As stored on disc, in case different case to what was requested // Was 15 before long fnames
+	unsigned char mount_path[1024]; /* Acorn-format path from the root of the mount point containing this file */
         unsigned char day; // day of month last written
         unsigned char monthyear; // Top 4 bits years since 1981; bottom four are month (Not very y2k...)
         unsigned char hour, min, sec; // Hours mins sec of modification time
@@ -988,6 +1052,12 @@ extern float timediffstart(void);
 
 /* Some linked list manipulation macros */
 
+/* Some defines for bits of the following macros */
+#define FS_LIST_ASCENDING	1
+#define FS_LIST_DESCENDING	0
+#define FS_LIST_AT_HEAD		1
+#define FS_LIST_AT_TAIL		0
+
 /* Create new struct of type t, put it on l, put it on the head (1) or tail (0) of the queue of such structs at l, and put the pointer (or null) in p,
  * use module & descr as parameters to eb_malloc()
  */
@@ -1041,6 +1111,65 @@ extern float timediffstart(void);
 	\
 	eb_free (__FILE__, __LINE__, module, descr, p); \
 }
+
+/* Make new entry in order - two variants: one for strings, one for numbers */
+
+#define FS_LIST_ORDERED_MAKENEW_TEMPL(t,comparison_left,ascending,comparison_right,l,p,module,descr) \
+{ \
+	t	*where = l; \
+	uint8_t	found = 0; \
+\
+	while (!found && where) \
+	{ \
+		if ( (ascending && (comparison_left > comparison_right)) || (!ascending && (comparison_left < comparison_right)) )\
+			found = 1; \
+		else \
+			where = where->next; \
+	} \
+	\
+	if (!found) /* List empty, or everything is before new key, put on tail */ \
+	{ \
+		FS_LIST_MAKENEW(t,l,FS_LIST_AT_TAIL,p,module,descr); \
+	} \
+	else \
+	{ \
+		/* Something's in the list, and where will point to the entry we want to insert _before_ */ \
+		if (where == l) /* If we want to insert before first entry - insert on head */ \
+		{ \
+			FS_LIST_MAKENEW(t,l,FS_LIST_AT_HEAD,p,module,descr); \
+		} \
+		else /* Insert before the one we're on */ \
+		{ \
+			t	*infrontof = where, *after = where->prev; \
+			\
+			if (!after) /* Should NOT happen! */ \
+				{ fs_debug (0, 0, "FS_LIST_ORDERED_MAKENEW_TEMPL failed: Attempt to insert before " #t " which hasd prev=NULL!"); p = NULL; } \
+			else \
+			{ \
+				fs_debug (0, 4, "FS_LIST_ORDERED_MAKENEW_TEMPL using after->next (%p) as list head for insertion splice - debug for list head will be misleading", after->next); \
+				FS_LIST_MAKENEW(t,after->next,FS_LIST_AT_HEAD,p,module,descr); \
+				fs_debug (0, 4, "FS_LIST_ORDERED_MAKENEW_TEMPL fixing up (infrontof) %p->prev to %p and (new) %p->prev to %p", infrontof, p, p, after); \
+				infrontof->prev = p; /* Fixup */ \
+				p->prev = after; \
+			} \
+		} \
+	} \
+} 
+
+/* Eg. for ordered increasing
+ * FS_LIST_MAKENEW_ORDERED_INT (struct __fs_whatever,index_number,5,1,server->whatever,new_whatever_struct_pointer,"FS","New Whatever");
+ * And for reverse order:
+ * FS_LIST_MAKENEW_ORDERED_INT (struct __fs_whatever,index_number,5,0,server->whatever,new_whatever_struct_pointer,"FS","New Whatever");
+ * Similarly for strings but key_type 
+ */
+
+#define FS_LIST_ORDERED_MAKENEW_INT(t,key_field,ascending,key_new,l,p,module,descr) \
+		FS_LIST_ORDERED_MAKENEW_TEMPL(t,where->key_field,ascending,key_new,l,p,module,descr) \
+		if (p) p->key_field = key_new;
+
+#define FS_LIST_ORDERED_MAKENEW_STRING(t,key_field,field_size,ascending,key_new,l,p,module,descr) \
+		FS_LIST_ORDERED_MAKENEW_TEMPL(t,strcasecmp(where->key_field, key_new),ascending,0,l,p,module,descr) \
+		if (p) strncpy(p->key_field, key_new, field_size-1);
 
 // Utility macros to write into reply data
 
@@ -1166,6 +1295,7 @@ FSOP_00_EXTERN(DISCMASK);
 FSOP_00_EXTERN(DISKMASK);
 FSOP_00_EXTERN(ENABLE);
 FSOP_00_EXTERN(FSCONFIG);
+FSOP_00_EXTERN(FSDTEST);
 FSOP_00_EXTERN(INFO);
 FSOP_00_EXTERN(LIB);
 FSOP_00_EXTERN(LINK);
@@ -1229,4 +1359,10 @@ uint8_t FS_module_stop (void *, struct __eb_device_module *);
 uint8_t FS_module_start (void *, struct __eb_device_module *);
 uint8_t FS_module_exit (void *, struct __eb_device_module *);
 void * FS_module_thread (void *);
+
+/* Some normalizer prototypes */
+
+int fs_alphacasesort (const struct dirent **, const struct dirent **);
+void fs_free_scandir_list (struct dirent ***, int);
+void fs_wildcard_to_regex (char *, char *, uint8_t);
 

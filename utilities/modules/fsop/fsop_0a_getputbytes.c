@@ -138,31 +138,47 @@ FSOP(0a)
 
 	r.p.ctrl = FSOP_CTRL;
 
-        FS_LIST_MAKENEW(struct __fs_active_load_queue,f->active->load_queue,1,alq,"FS","Create new active load queue structure for GetBytes operation");
+	if (bytes > 0)
+	{
+        	FS_LIST_MAKENEW(struct __fs_active_load_queue,f->active->load_queue,1,alq,"FS","Create new active load queue structure for GetBytes operation");
+	
+        	/* Populate active load queue trigger data */
+	
+        	alq->queue_type = FS_ENQUEUE_GETBYTES;
+        	alq->internal_handle = internal_handle;
+        	alq->user_handle = handle; /* There isn't one */
+        	alq->mode = f->active->fhandles[handle].mode; 
+        	alq->ctrl = f->ctrl; /* So that the close packet can echo it */
+        	alq->client_dataport = txport;
+        	alq->client_finalackport = FSOP_REPLY_PORT;
+        	alq->ack_seq_trigger = r.p.seq;
+        	alq->last_ack_rx = time(NULL); /* now */
+        	alq->start_ptr = offset;
+        	alq->send_bytes = bytes;
+        	alq->sent_bytes = 0; /* Initialize */
+        	alq->cursor = offset; /* Initialize */
+        	alq->valid_bytes = 0; /* Initialize */
+        	alq->pasteof = eofreached; /* Initialize */
+        	alq->chunk_size = f->active->chunk_size;  /* Copy from login process */
+		alq->is_32bit = is_32bit;
+	}
 
-        /* Populate active load queue trigger data */
-
-        alq->queue_type = FS_ENQUEUE_GETBYTES;
-        alq->internal_handle = internal_handle;
-        alq->user_handle = handle; /* There isn't one */
-        alq->mode = f->active->fhandles[handle].mode; 
-        alq->ctrl = f->ctrl; /* So that the close packet can echo it */
-        alq->client_dataport = txport;
-        alq->client_finalackport = FSOP_REPLY_PORT;
-        alq->ack_seq_trigger = r.p.seq;
-        alq->last_ack_rx = time(NULL); /* now */
-        alq->start_ptr = offset;
-        alq->send_bytes = bytes;
-        alq->sent_bytes = 0; /* Initialize */
-        alq->cursor = offset; /* Initialize */
-        alq->valid_bytes = 0; /* Initialize */
-        alq->pasteof = eofreached; /* Initialize */
-        alq->chunk_size = f->active->chunk_size;  /* Copy from login process */
-	alq->is_32bit = is_32bit;
-
-	usleep (500000); /* For RISC OS (and some beebs?) - Sometimes they don't have they're receiver port open fast enough and everything goes out of sync */ /* Not required with module-fast? */
+	usleep (50000); /* For RISC OS (and some beebs?) - Sometimes they don't have they're receiver port open fast enough and everything goes out of sync */ /* Not required with module-fast? */
 
 	fsop_aun_send_noseq(&r, 2, f);
+
+	if (bytes == 0) /* Just send termination */
+	{
+		r.p.port = FSOP_REPLY_PORT;
+
+		usleep(5000);
+
+		r.p.data[2] = f->active->fhandles[handle].pasteof;
+		r.p.data[3] = r.p.data[4] = r.p.data[5] = r.p.data[6] = 0;
+		r.p.seq = eb_get_local_seq(f->server->fs_device);
+		fsop_aun_send(&r, 7 + is_32bit, f);
+
+	}
 
 	return;
 
@@ -304,13 +320,18 @@ FSOP(0b)
 
 	if (bytes == 0) // No data expected
 	{
+		incoming_port = fsop_find_bulk_port(f->server);
+		memset(&(r.p.data), 0, 8);
+		r.p.port = FSOP_REPLY_PORT;
 		r.p.ctrl = FSOP_CTRL;
-		r.p.data[2] = FS_PERM_OWN_R | FS_PERM_OWN_W;
-		r.p.data[3] = day;
-		r.p.data[4] = monthyear;
-
-		// usleep (500000); /* For RISC OS (and some beebs?) */
-		fsop_aun_send (&r, 5, f);
+		r.p.data[2] = incoming_port;
+		r.p.data[3] = (FS_CONFIG(f->server,fs_bigchunks) ? FS_MAX_BULK_SIZE : 0x500) & 0xff; // Max trf size
+		r.p.data[4] = ((FS_CONFIG(f->server,fs_bigchunks) ? FS_MAX_BULK_SIZE : 0x500) & 0xff00) >> 8; // High byte of max trf
+		fsop_aun_send (&r, 5, f); /* Send acknowledge */
+		r.p.data[3] = r.p.data[4] = 0x00;
+		usleep(5000); /* Wait for Beeb to listen */
+		fsop_aun_send (&r, 7 + is_32bit, f); /* Send close - no data transfer */
+		eb_port_deallocate(f->server->fs_device, incoming_port);
 	}
 	else if ((incoming_port = fsop_find_bulk_port(f->server))) // Data expected - set up a bulk port
 	{

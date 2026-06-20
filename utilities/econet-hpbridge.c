@@ -45,10 +45,6 @@ extern uint8_t fs_set_syst_bridgepriv;
 
 uint8_t		eb_mfr = 0x00, eb_mtype = 0x00;
 
-/* Disc device drivers */
-
-fs_device	*fs_devices = NULL;
-
 /* Test thread return */
 
 void *thread_return = NULL;
@@ -1984,7 +1980,7 @@ static void * eb_bridge_update_watcher (void *device)
 		if (!sender_net) // No bridge sender net available!
 		{
 			/* Go around again */
-			eb_debug (0,2, "BRIDGE", "%-8s %7d Unable to find sender net. Not sending bridge update.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.local_port);
+			eb_debug (0,2, "BRIDGE", "%-8s %3d     Unable to find sender net. Not sending bridge update.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.local_port);
 			continue;
 		}
 
@@ -2162,7 +2158,7 @@ static void * eb_bridge_reset_watcher (void *device)
 		if (!sender_net) // No bridge sender net available!
 		{
 			/* Go around again */
-			eb_debug (0,2, "BRIDGE", "%-8s %7d Unable to find sender net. Not sending bridge reset.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.local_port);
+			eb_debug (0,2, "BRIDGE", "%-8s %3d     Unable to find sender net. Not sending bridge reset.", eb_type_str(me->type), (me->type == EB_DEF_WIRE) ? me->net : me->trunk.local_port);
 			continue;
 		}
 
@@ -9626,6 +9622,8 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 			stn = json_object_get_int(jstation_number);
 
+			eb_set_single_wire_host (net, stn); /* This used to be in the devinits we have commented out below */
+
 			json_object_object_get_ex(jstation, "printers", &jprinters);
 #if 0 /* IPGW modularized */
 			json_object_object_get_ex(jstation, "ipservers", &jips);
@@ -13461,6 +13459,7 @@ int main (int argc, char **argv)
 	struct rlimit	max_fds;
 	char 	config_path[256];
 	char	jsonconfig_path[256], jsonconfigout_path[256];
+	uint8_t	fsdevice_count;
 #ifdef EB_JSONCONFIG
 	struct	json_object	*json_config;
 	struct 	stat		config_stat, json_stat;
@@ -13831,6 +13830,47 @@ int main (int argc, char **argv)
 			eb_debug (1, 0, "JSON", "Cannot read %s as JSON", jsonconfig_path);
 	}
 
+	/* Register bridge-wide FS drivers 
+	 * Gets done here before we read the JSON
+	 * config otherwise the FSes don't start because
+	 * the SYS driver isn't registered.
+	 */
+
+	fsdevice_count = 0;
+
+	while (fs_device_driver_list[fsdevice_count].register_function)
+	{
+		fs_device *	device;
+		struct __fs_device_driver_list *l;
+
+		if (!(device = (fs_device_driver_list[fsdevice_count].register_function) () ))
+			eb_debug (1, 0, "MAIN", "Core            FS Device driver initialization failed (%d)", fsdevice_count);
+
+		/* Insert into list */
+
+		FS_LIST_MAKENEW(struct __fs_device_driver_list, fs_driver_list, 0, l, "FS", "New master device driver entry");
+
+		l->driver = device;
+
+		eb_debug (0, 1, "MAIN", "Core             Initialized %s", fs_device_driver_list[fsdevice_count].drivername);
+
+		fsdevice_count++;
+	}
+
+	eb_debug (0, 1, "MAIN", "Core             Initialized %d fileserver drivers", fsdevice_count);
+
+	{
+		struct __fs_device_driver_list	 *d;
+
+		d = fs_driver_list;
+
+		while (d)
+		{
+			eb_debug (0, 1, "MAIN", "Core             %s driver registered (%s)", fs_driver_list->driver->device_name,
+					fs_driver_list->driver->device_description);
+			d = d->next;
+		}
+	}
 	if (!eb_parse_json_config(json_config))
 	{
 		eb_debug (1, 0, "JSON", "Parsing JSON config failed");
@@ -14364,10 +14404,11 @@ int main (int argc, char **argv)
 		}
 
 	}
-	
+
 	/* Start the engines, captain! */
 
 	eb_debug (0, 1, "MAIN", "Core             Bridge to engine room: Start main engines...");
+
 
 	p = devices;
 
