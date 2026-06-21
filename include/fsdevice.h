@@ -92,6 +92,15 @@ typedef struct __fs_device_proto fs_device;
 
 typedef void fs_device_instance;
 
+/* Stub used to extract device pointer from an instance */
+
+struct __fs_device_instance_stub {
+	fs_device	*device; /* FSD Device this instance is on */
+	struct __fs_station	*server; /* Fileserver this instance is on */
+};
+
+typedef struct __fs_device_instance_stub fs_device_instance_stub;
+
 /* __fs_device_local
  *
  * List of FS devices initialized on a FS. 
@@ -121,14 +130,20 @@ typedef void fs_device_mount;
 
 /* mount stub - used by the driver subsystem to cast & dig out the 
  * device. First element in any private fs_device_mount must be
- * fs_device *
+ * fs_device *. These elements MUST appear in this order with
+ * these types in the device's internal fs_device_mount structure
+ * so that the main driver broker can extract them
  */
 
 struct __fs_device_mount_stub {
 	fs_device	*device;
 	struct __fs_station	*server;
+	fs_device_instance	*instance;
+	uint8_t		readonly;
 	/* Private drivers may have other things here */
 };
+
+typedef struct __fs_device_mount_stub fs_device_mount_stub;
 
 /* fs_device_handle is the return value from a successful open. 
  * It is a pointer to a struct which is then passed back to the driver
@@ -153,6 +168,8 @@ struct __fs_device_handle_stub {
 	 */
 };
 	
+typedef struct __fs_device_handle_stub fs_device_handle_stub;
+
 /* Acorn directory entry */
 
 struct __fs_device_dir_entry {
@@ -173,10 +190,18 @@ struct fs_device_funcs {
 	int (*fs_release) (fs_device_instance *); /* Opposite of fs_init() - deregisters from a particular fileserver */
 
 	/* Disc lifecycle */
-	fs_device_mount * (*mount) (struct __fs_station *station, fs_device_instance *device, char *params, uint32_t flags, uint8_t fs_disc, int *); /* station is the FS station mounting the device, device is the registered device, params is everything after '*FSMOUNT <disc no.> <driver_name>' on the mount command line */
+	fs_device_mount * (*mount) (fs_device_instance *device, char *params, uint32_t flags, uint8_t fs_disc, int *); /* station is the FS station mounting the device, device is the registered device, params is everything after '*FSMOUNT <disc no.> <driver_name>' on the mount command line */
 	int (*umount) (fs_device_mount *mnt); /* Umount - caused by *FSUMOUNT <disc no.>, which the FS uses to look up whether whether the disc is removable, and if so finds the fs_device_mount struct and passes it. Return is 0 for success, anything else for failure. If successful, the FS will take the disc out of the active disc lists. */
 
 	/* Disc ops */
+
+	/* Register a disc */
+
+	int (*register_disc) (fs_device_instance *, char *, char *, uint32_t); /* Register a disc with name of first char * parameter, and necessary params in second char *, on the instance identified */
+
+	/* Unregister a disc */
+
+	int (*unregister_disc) (fs_device_instance *, char *); /* Unregister a disc if it is no longer in use */
 
 	/* Return list of discs known to this driver */
 	int (*get_discs) (fs_device_instance *, fs_device_disc **); /* malloc & return all the disc names known to this driver at fs_disc_entry, and return number returned */
@@ -229,25 +254,27 @@ extern fs_device_local * fsd_find_local (struct __fs_station *, char *);
 
 struct json_object * fsd_dev_report_schema (fs_device *);
 fs_device_instance * fsd_init (fs_device *, struct __fs_station *, struct json_object *);
-int fsd_unregister (fs_device *);
-int fsd_release (fs_device *, fs_device_instance *);
-fs_device_mount *fsd_mount (fs_device *, struct __fs_station *, fs_device_instance *, char *, uint32_t, uint8_t, int *);
-int fsd_umount (fs_device *device, fs_device_mount *);
-int fsd_get_discs (fs_device *, fs_device_instance *, fs_device_disc **);
+int fsd_unregister (fs_device *); /* Return value is an FSD error */
+int fsd_release (fs_device *, fs_device_instance *); /* Return value is an FSD error */
+fs_device_mount *fsd_mount (fs_device_instance *, char *, uint32_t, uint8_t, int *); /* Final int * is an FSD error */
+int fsd_umount (fs_device_mount *); /* Return value is an FSD error */
+int fsd_register_disc (fs_device_instance *, char *, char *, uint32_t); /* Return value is an FSD Error */
+int fsd_unregister_disc (fs_device_instance *, char *); /* Return value is an FSD Error */
+int fsd_get_discs (fs_device *, fs_device_instance *, fs_device_disc **); /* Return value is an FSD Error */
 char *fsd_get_discname (fs_device *, fs_device_mount *);
-int16_t fsd_get_disc_blocksize (fs_device *, fs_device_mount *);
-int fsd_open (fs_device_mount *, const char *, int flags, fs_device_handle **, int *);
-int fsd_close (fs_device_handle *, int *);
-ssize_t fsd_read (fs_device_handle *, void *, size_t, int *);
-ssize_t fsd_write (fs_device_handle *, const void *, size_t, int *);
-int fsd_seek (fs_device_handle *, off_t, int, int *);
-off_t fsd_tell (fs_device_handle *, int *);
-int fsd_truncate (fs_device_handle *, size_t, int *);
-int fsd_cdir (fs_device_mount *, const char *, int *);
-int fsd_unlink (fs_device_mount *, const char *, int *);
-int fsd_getattr (fs_device_mount *, const char *, struct objattr *);
-int fsd_setattr (fs_device_mount *, const char *, struct objattr *);
-int fsd_get_dir_ents (fs_device_mount *, char *, char *, fs_device_dir_entry **, uint8_t *, int *);
+int16_t fsd_get_disc_blocksize (fs_device *, fs_device_mount *); /* If return is 0, there was an error */
+int fsd_open (fs_device_mount *, const char *, int flags, fs_device_handle **, int *); /* Return value is an FSD Error; the last int * is system errno */
+int fsd_close (fs_device_handle *, int *); /* Ditto open */
+ssize_t fsd_read (fs_device_handle *, void *, size_t, int *); /* Return value is equivalent of system read() OR FSD Error, final int* is system errno */
+ssize_t fsd_write (fs_device_handle *, const void *, size_t, int *); /* Ditto read */
+int fsd_seek (fs_device_handle *, off_t, int, int *); /* Ditto read */
+off_t fsd_tell (fs_device_handle *, int *); /* Ditto read */
+int fsd_truncate (fs_device_handle *, size_t, int *); /* Ditto read */
+int fsd_cdir (fs_device_mount *, const char *, int *); /* DItto read */
+int fsd_unlink (fs_device_mount *, const char *, int *); /* Ditto read */
+int fsd_getattr (fs_device_mount *, const char *, struct objattr *); /* Return value is FSD Error */
+int fsd_setattr (fs_device_mount *, const char *, struct objattr *); /* Return value is FSD Error */
+int fsd_get_dir_ents (fs_device_mount *, char *, char *, fs_device_dir_entry **, uint8_t *, int *); /* Ditto read */
 void fsd_free_dir_ents (fs_device_dir_entry *);
 
 /* Execute test harness */
@@ -260,6 +287,10 @@ char *fsd_strerror(int);
 
 /* Some flags defines for use on mount */
 #define FSD_MOUNTFLAG_READONLY (1)
+
+/* And for registering discs */
+#define FSD_DISCFLAG_NONE	(0)
+#define FSD_DISCFLAG_CANEXIST (1)
 
 /* Some return values */
 
@@ -279,5 +310,7 @@ char *fsd_strerror(int);
 #define FSD_SCANDIR_REGEX_FAILURE	-13	/* regcomp() in the scandir() or equivalent of a drvier failure */
 #define FSD_BADHANDLE		-14	/* Bad handle passed to driver */
 #define FSD_NODISC		-15	/* Disc you attempted to mount is not available */
-#define FSD_EXISTS		-16	/* You tried to do something on a file/dir which exists */
+#define FSD_EXISTS		-16	/* You tried to do something on a file/dir which exists, or register a disc which already exists */
+#define FSD_EXHAUSTED		-17 	/* Out of resources */
+#define FSD_READONLY		-18	/* Whatever you tried to do, it was a write operation on something read only (e.g. a disc, a mount) */
 #endif

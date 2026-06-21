@@ -43,6 +43,7 @@ struct fsd_SYS_disc {
 	struct fsd_SYS_instance	*instance; /* Parent instance */
 	struct fsd_SYS_disc	*next, *prev;
 	uint32_t	readers, writers; /* Interlocks */
+	uint8_t		readonly; /* Whether read only */
 	char 	name[16]; /* Name of disc */
 	char	path[128]; /* Full pathname to disc, from root of system filesystem */
 };
@@ -65,6 +66,7 @@ struct fsd_SYS_mount {
 	fs_device	*device; /* Must be first element - the driver subsystem does a cast to dig this out */
 	struct __fs_station	*server; /* Must be second element for the same reason - the stub struct wants it here */
 	struct fsd_SYS_instance	*instance; /* Instance on which this mount has been created */
+	uint8_t		readonly; /* Mount is read only */
 	struct fsd_SYS_disc	*disc; /* Disc being mounted */
 	uint8_t			fs_disc; /* FS Disc index containing this mount */
 	uint8_t		readers, writers; /* Count, so that we can cope with > 1 mount if interlock is ok */
@@ -76,8 +78,8 @@ struct fsd_SYS_mount {
 /* Instance of our driver on a particular FS */
 
 struct fsd_SYS_instance {
-	struct __fs_station *fs_parent; /* Parent fileserver */
 	fs_device	*device; /* Parent device pointer */
+	struct __fs_station *fs_parent; /* Parent fileserver */
 	char directory[128]; /* Server root dir, where we found our "discs" */
 	uint8_t	use_inf; /* Use :inf files for perms etc. */
 	struct fsd_SYS_disc	*discs; /* First disc */
@@ -110,8 +112,9 @@ struct json_object * fsd_SYS_report_schema (void);
 fs_device_instance * fsd_SYS_init (struct __fs_station *, struct json_object *);
 int fsd_SYS_release (fs_device_instance *);
 int fsd_SYS_unregister (void);
-fs_device_mount * fsd_SYS_mount (struct __fs_station *, fs_device_instance *, char *, uint32_t, uint8_t, int *);
+fs_device_mount * fsd_SYS_mount (fs_device_instance *, char *, uint32_t, uint8_t, int *);
 int fsd_SYS_umount (fs_device_mount *);
+int fsd_SYS_register_disc(fs_device_instance *, char *, char *, uint32_t);
 char * fsd_SYS_getdiscname (fs_device_mount *);
 int fsd_SYS_open (fs_device_mount *, const char *, int, fs_device_handle **, int *);
 int fsd_SYS_close (fs_device_handle *, int *);
@@ -357,7 +360,7 @@ int fsd_SYS_unregister (void)
  * or NULL for failure.
  */
 
-fs_device_mount * fsd_SYS_mount (struct __fs_station *station, fs_device_instance *i, char *params, uint32_t flags, uint8_t fs_disc, int *err)
+fs_device_mount * fsd_SYS_mount (fs_device_instance *i, char *params, uint32_t flags, uint8_t fs_disc, int *err)
 {
 
 	struct fsd_SYS_instance * instance = (struct fsd_SYS_instance *) i;
@@ -366,27 +369,30 @@ fs_device_mount * fsd_SYS_mount (struct __fs_station *station, fs_device_instanc
 	uint8_t	ro = !!(flags & FSD_MOUNTFLAG_READONLY);
 	struct fsd_param p[20];
 	uint8_t	param_count = 0;
-	char discpath_param[128];
 	char discname[17];
-	char rostring[2];
+	char rostring[3];
+
+	if (!i)
+	{
+		*err = FSD_BADPARAMS;
+		return NULL;
+	}
 
 	param_count = fsd_parse_params(params, p, 0);
 	
-	/* Required parameters are (i) new disc name, (ii) disc path (and if it doesn't have the '/' prefix, we treat it as within the FS home dir and then (iii) [optional] "RO" for read only */
+	/* Required parameters are (i) existing registered disc name, (ii) [optional] "RO" for read only */
 
-	if (param_count > 3 || param_count < 2)
+	if (param_count > 2 || param_count < 1)
 	{
 		fsd_debug (1, "Bad parameters");
 		*err = FSD_BADPARAMS;
 		return NULL;
 	}
 
-	fsd_param_extract(params, p, 0, discpath_param, 127, 0);
-
-	fsd_param_extract(params, p, 1, discname, 16, 0);
+	fsd_param_extract(params, p, 0, discname, 16, 0);
 	fs_toupper(discname);
 
-	if (param_count == 3)
+	if (param_count == 2)
 	{
 		fsd_param_extract(params, p, 2, rostring, 2, 0);
 		if (!strcasecmp(rostring, "RO"))
@@ -399,61 +405,17 @@ fs_device_mount * fsd_SYS_mount (struct __fs_station *station, fs_device_instanc
 		}
 	}
 
-	/* Complete the path if it's only partial */
-
-	if (discpath_param[0] != '/')
-	{
-		char new_path[280];
-
-		snprintf (new_path, 279, "%s/%s", instance->directory, discpath_param);
-
-		strncpy (discpath_param, new_path, 127);
-	}
-
-	/* Search our extant discs to see if we already have this one */
-
 	d = instance->discs;
 
 	while (d)
 	{
-		if (!strcmp(discpath_param, d->path))
+		if (!strcmp(discname, d->name))
 			break;
 
 		d = d->next;
 	}
 
-	if (!d) /* Not a known disc - create one */
-	{
-		struct statvfs	  sv;
-
-		if (fsd_SYS_max_discno == 255) /* Run out of discs! */
-		{
-			fsd_debug_fmt (1, "Attempt to mount %s failed - out of disc numbers!", discpath_param);
-			return NULL;
-		}
-
-		FS_LIST_MAKENEW(struct fsd_SYS_disc, instance->discs, 1, d, "FS", FSDEVICE " New disc struct");
-		d->instance = instance;
-		strncpy(d->name, discname, 16);
-		strncpy(d->path, discpath_param, 127);
-		d->readers = d->writers = 0;
-		d->index = fsd_SYS_max_discno++;
-
-		/* Get blocksize */
-
-		if (statvfs(d->path, &sv) == 0)
-			d->blocksize = sv.f_bsize;
-		else
-		{
-			fsd_debug_fmt (1, "Unable to statvfs() for disc %s (%s) - %s", d->name, d->path, strerror(errno));
-			*err = FSD_MOUNTERR_UNKNOWN_DISC;
-			return NULL;
-		}
-	}
-
-	/* By here, d contains a pointer to one of our discs */
-
-	/* But just in case */
+	/* Did we find the disc? */
 
 	if (!d)
 	{
@@ -461,6 +423,11 @@ fs_device_mount * fsd_SYS_mount (struct __fs_station *station, fs_device_instanc
 		return NULL;
 	}
 
+	/* See if the disc is writable if we want to write */
+
+	if (d->readonly)
+		ro = 1; /* Force readonly if disc is readonly */
+	
 	/* Make sure it's mountable */
 
 	if (d->writers) /* Can't mount if something else has it read/write - we allow a single writer to a disc if there are already readers*/
@@ -483,9 +450,10 @@ fs_device_mount * fsd_SYS_mount (struct __fs_station *station, fs_device_instanc
 	/* Initialize it */
 
 	m->device = instance->device;
-	m->server = station;
+	m->server = instance->fs_parent;
 	m->instance = instance;
 	m->disc = d;
+	m->readonly = ro;
 	m->readers = 0; /* Readers & writers on the mount */
 	m->writers = 0;
 	m->flags = flags; /* So we know what kind of mount it was */
@@ -516,7 +484,7 @@ int fsd_SYS_umount (fs_device_mount *m)
 
 	/* Decrement the count on the underlying disc */
 
-	if (mount->flags & FSD_MOUNTFLAG_READONLY)
+	if (mount->readonly)
 		mount->disc->readers--;
 	else	mount->disc->writers--;
 	
@@ -526,6 +494,145 @@ int fsd_SYS_umount (fs_device_mount *m)
 
 	return 0;
 
+}
+
+/* Register a disc name 
+ * Returns an fsd_error
+ */
+
+int fsd_SYS_register_disc(fs_device_instance *i, char *disc, char *params, uint32_t flags)
+{
+	struct fsd_param p[20];
+	char discpath_param[128];
+	char rostring[3];
+	uint8_t	ro = 0;
+	char discname[17];
+	struct fsd_SYS_disc *d;
+	struct fsd_SYS_instance *instance;
+	int param_count;
+
+	if (!i)
+		return FSD_BADPARAMS;
+
+	instance = (struct fsd_SYS_instance *) i;
+
+	param_count = fsd_parse_params(params, p, 0);
+	
+	/* Required parameters are (i) disc path (and if it doesn't have the '/' prefix, we treat it as within the FS home dir and then (ii) [optional] "RO" for read only */
+
+	if (param_count > 2 || param_count < 1)
+	{
+		fsd_debug (1, "Bad parameters");
+		return FSD_BADPARAMS;
+	}
+
+	fsd_param_extract(params, p, 0, discpath_param, 127, 0);
+
+	if (param_count == 2)
+	{
+		fsd_param_extract(params, p, 1, rostring, 2, 0);
+		if (!strncasecmp(rostring, "RO", 2))
+			ro = 1;
+	}
+
+	strncpy(discname, disc, 16);
+	discname[16] = '\0'; /* Terminate just in case */
+
+	fs_toupper(discname);
+
+	/* Search our extant discs to see if we already have this one */
+
+	d = instance->discs;
+
+	while (d)
+	{
+		if (!strcmp(discpath_param, d->path))
+			break;
+
+		d = d->next;
+	}
+
+	if (d && !(flags & FSD_DISCFLAG_CANEXIST)) /* Barf if we have found a disc and it cannot already exist */
+	{
+		return FSD_EXISTS;
+	}
+
+	if (!d) /* Not a known disc - create one */
+	{
+		struct statvfs	  sv;
+
+		if (fsd_SYS_max_discno == 255) /* Run out of discs! */
+		{
+			fsd_debug_fmt (1, "Attempt to mount %s failed - out of disc numbers!", discpath_param);
+			return FSD_EXHAUSTED;
+		}
+
+		FS_LIST_MAKENEW(struct fsd_SYS_disc, instance->discs, 1, d, "FS", FSDEVICE " New disc struct");
+		d->instance = instance;
+		strncpy(d->name, discname, 16);
+		strncpy(d->path, discpath_param, 127);
+		d->readers = d->writers = 0;
+		d->index = fsd_SYS_max_discno++;
+		d->readonly = ro;
+
+		/* Get blocksize */
+
+		if (statvfs(d->path, &sv) == 0)
+			d->blocksize = sv.f_bsize;
+		else
+		{
+			fsd_debug_fmt (1, "Unable to statvfs() for disc %s (%s) - %s", d->name, d->path, strerror(errno));
+			return FSD_MOUNTERR_UNKNOWN_DISC;
+		}
+	}
+
+	/* By here, d contains a pointer to one of our discs */
+
+	/* But just in case */
+
+	if (!d)
+		return FSD_NODISC;
+
+	return 0; /* Success */
+}
+
+int fsd_SYS_unregister_disc (fs_device_instance *i, char *name)
+{
+
+	char discname[17];
+	struct fsd_SYS_disc *d;
+	struct fsd_SYS_instance *instance;
+
+	if (!i)
+		return FSD_BADPARAMS;
+
+	instance = (struct fsd_SYS_instance *) i;
+
+	d = instance->discs; 
+
+	strncpy (discname, name, 16);
+	discname[16] = '\0';
+
+	/* Find the disc */
+
+	while (d)
+	{
+		if (!strncasecmp(discname, d->name, 16))
+			break;
+		d = d->next;
+	}
+
+	if (!d)
+		return FSD_NODISC;
+
+	if (d->writers != 0 || d->readers != 0)
+		return FSD_BUSY;
+
+	/* Disc is not busy - splice it out */
+
+	FS_LIST_SPLICEFREE(instance->discs, d, "FSDEVICE", "Free up a disc");
+
+	return FSD_SUCCESS;
 }
 
 /* Return pointer to disc name of mounted disc
@@ -1335,6 +1442,8 @@ static struct fs_device_funcs fsd_SYS_funcs = {
 	.fs_release = fsd_SYS_release,
 	.mount = fsd_SYS_mount,
 	.umount = fsd_SYS_umount,
+	.register_disc = fsd_SYS_register_disc,
+	.unregister_disc = fsd_SYS_unregister_disc,
 	.get_discname = fsd_SYS_getdiscname,
 	.get_discs = fsd_SYS_getdiscs,
 	.get_disc_blocksize = fsd_SYS_getdiscblocksize,
@@ -1349,8 +1458,7 @@ static struct fs_device_funcs fsd_SYS_funcs = {
 	.get_dir_ents = fsd_SYS_get_dir_ents,
 	.truncate = fsd_SYS_truncate,
 	.cdir = fsd_SYS_cdir,
-	.unlink = fsd_SYS_unlink,
-	.get_discs = fsd_SYS_getdiscs
+	.unlink = fsd_SYS_unlink
 
 };
 

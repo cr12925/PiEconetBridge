@@ -196,10 +196,21 @@ int fsd_release (fs_device *device, fs_device_instance *instance)
 
 /* mount on an instance */
 
-fs_device_mount * fsd_mount (fs_device *device, struct __fs_station *fs, fs_device_instance *instance, char *params, uint32_t flags, uint8_t fs_disc, int *fs_error)
+fs_device_mount * fsd_mount (fs_device_instance *instance, char *params, uint32_t flags, uint8_t fs_disc, int *fs_error)
 {
+	fs_device 	*device;
+	fs_device_instance_stub	*i = (fs_device_instance_stub *) instance;
+
+	if (!i)
+	{
+		*fs_error = FSD_BADPARAMS;
+		return NULL;
+	}
+
+	device = i->device;
+
 	if (device && device->device_funcs->mount)
-		return (device->device_funcs->mount) (fs, instance, params, flags, fs_disc, fs_error);
+		return (device->device_funcs->mount) (instance, params, flags, fs_disc, fs_error);
 	else
 	{
 		*fs_error = FSD_MISSINGFUNC;
@@ -209,12 +220,70 @@ fs_device_mount * fsd_mount (fs_device *device, struct __fs_station *fs, fs_devi
 
 /* umount */
 
-int fsd_umount (fs_device *device, fs_device_mount *mount)
+int fsd_umount (fs_device_mount *m)
 {
+
+	fs_device 	*device;
+	fs_device_mount_stub	*mount = (fs_device_mount_stub *) m;
+
+	if (!mount)
+		return FSD_BADPARAMS;
+
+	device = mount->device;
+
 	if (device && device->device_funcs->umount)
-		return (device->device_funcs->umount) (mount);
+		return (device->device_funcs->umount) (m);
 	else
 		return FSD_MISSINGFUNC;
+}
+
+/* Register / create (e.g. in case of ramdisk) a disc in the instance 
+ *
+ * instance = instance pointer within an FS
+ * discname = name of new disc - will error if disc already exists
+ * params = text parameters - e.g. for SYS it's the pathname to the top level dir holding the files
+ * flags = bitwise flags - see FSD_DISCFLAG_*. Includes FSD_DISCFLAG_CANEXIST - which means if the
+ * disc name already exists and points to same parameter data, then it's not an error. Otherwise
+ * it is.
+ */
+
+int fsd_register_disc (fs_device_instance *instance, char *discname, char *params, uint32_t flags)
+{
+	fs_device	*device;
+	fs_device_instance_stub	*i = (fs_device_instance_stub *) instance;
+
+	if (!instance)
+		return FSD_BADPARAMS;
+
+	device = (fs_device *) i->device;
+
+	if (!device)
+		return FSD_BADPARAMS;
+
+	if (device->device_funcs->register_disc)
+		return (device->device_funcs->register_disc) (instance, discname, params, flags);
+	else	return FSD_MISSINGFUNC;
+}
+
+/* Unregister a disc - the driver function MUST return FSD_BUSY if the disc is in use (mounted */
+
+int fsd_unregister_disc (fs_device_instance *instance, char *discname)
+{
+
+	fs_device	*device;
+	fs_device_instance_stub	*i = (fs_device_instance_stub *) instance;
+
+	if (!instance)
+		return FSD_BADPARAMS;
+
+	device = (fs_device *) i->device;
+
+	if (!device)
+		return FSD_BADPARAMS;
+
+	if (device->device_funcs->unregister_disc)
+		return (device->device_funcs->unregister_disc) (instance, discname);
+	else	return FSD_MISSINGFUNC;
 }
 
 /* Return list of discs *
@@ -266,13 +335,21 @@ int fsd_open(fs_device_mount *mount, const char *path, int flags, fs_device_hand
 {
 
 	fs_device *device; 
+	fs_device_mount_stub *m_stub;
 
 	if (!mount) return FSD_BADMOUNT;
-	else device = (fs_device *) ((struct __fs_device_mount_stub *) mount)->device;
+
+	m_stub = (fs_device_mount_stub *) mount;
+
+	device = (fs_device *) m_stub->device;
+	
+	if (m_stub->readonly && (flags & 0x02)) /* Some form of open for write - either OPENUP/OPENOUT, but mount is read only */
+		return FSD_READONLY;
 
 	if (device && device->device_funcs->open)
 		return (device->device_funcs->open) (mount, path, flags, handle_out, fs_errno);
-	else	return FSD_MISSINGFUNC;
+	else	
+		return FSD_MISSINGFUNC;
 }
 
 /* Close *handle on *mount within *device. Result = 0 means success, otherwise error.
@@ -321,11 +398,18 @@ ssize_t fsd_read (fs_device_handle *handle, void *buf, size_t len, int *fs_errno
 
 ssize_t fsd_write (fs_device_handle *handle, const void *buf, size_t len, int *fs_errno)
 {
-	struct __fs_device_handle_stub *hs = (struct __fs_device_handle_stub *) handle;
+	fs_device_handle_stub *hs = (fs_device_handle_stub *) handle;
+	fs_device_mount_stub *mount;
 	fs_device *	device = NULL;
 
-	if (hs)
-		device = hs->device;
+	if (!hs)
+		return FSD_BADHANDLE;
+
+	device = hs->device;
+	mount = (fs_device_mount_stub *) hs->mount;
+
+	if (mount->readonly)
+		return FSD_READONLY;
 
 	if (device && device->device_funcs->write)
 		return (device->device_funcs->write) (handle, buf, len, fs_errno);
@@ -386,9 +470,15 @@ int fsd_cdir (fs_device_mount *mount, const char *path, int *fs_errno)
 {
 
 	fs_device *device; 
+	fs_device_mount_stub *m_stub;
 
 	if (!mount) return FSD_BADMOUNT;
-	else device = ((struct __fs_device_mount_stub *) mount)->device;
+
+	m_stub = (fs_device_mount_stub *) mount;
+	device = m_stub->device;
+
+	if (m_stub->readonly)
+		return FSD_READONLY;
 
 	if (device && device->device_funcs->cdir)
 		return (device->device_funcs->cdir) (mount, path, fs_errno);
@@ -401,9 +491,15 @@ int fsd_unlink (fs_device_mount *mount, const char *path, int *fs_errno)
 {
 
 	fs_device *device; 
+	fs_device_mount_stub *m_stub;
 
 	if (!mount) return FSD_BADMOUNT;
-	else device = ((struct __fs_device_mount_stub *) mount)->device;
+
+	m_stub = (fs_device_mount_stub *) mount;
+	device = m_stub->device;
+
+	if (m_stub->readonly)
+		return FSD_READONLY;
 
 	if (device && device->device_funcs->unlink)
 		return (device->device_funcs->unlink) (mount, path, fs_errno);
@@ -429,9 +525,15 @@ int fsd_getattr (fs_device_mount *mount, const char *path, struct objattr *attr)
 int fsd_setattr (fs_device_mount *mount, const char *path, struct objattr *attr)
 {
 	fs_device *device; 
+	fs_device_mount_stub *stub;
 
 	if (!mount) return FSD_BADMOUNT;
 	else device = ((struct __fs_device_mount_stub *) mount)->device;
+
+	stub = (fs_device_mount_stub *) mount;
+
+	if (stub->readonly)
+		return FSD_READONLY;
 
 	if (device && device->device_funcs->setattr)
 		return (device->device_funcs->setattr) (mount, path, attr);
@@ -532,6 +634,8 @@ char * fsd_strerror(int err)
 		case -14: return "Bad handle"; break;
 		case -15: return "Disc not available"; break;
 		case -16: return "Object exists"; break;
+		case -17: return "Out of resources"; break;
+		case -18: return "Read only"; break;
 		default: return "Unknown error"; break;
 	}
 }
@@ -540,11 +644,12 @@ uint8_t	fsd_test_harness (struct __fs_station *s, char *drivername, char *parame
 {
 	fs_device_instance	*instance;
 	fs_device_mount		*mount;
+	fs_device_mount_stub	*m_stub;
 	fs_device_local		*local;
 	fs_device		*device;
 	fs_device_dir_entry	*direntries;
 
-	int			ret = 0, dirents, fsd_errno;
+	int			ret = 0, dirents, fsd_errno, err;
 	uint8_t			max_fname_len;
 
 
@@ -567,9 +672,23 @@ uint8_t	fsd_test_harness (struct __fs_station *s, char *drivername, char *parame
 
 	fs_debug_full (0, 1, s, 0, 0, "HARNESS: Instance of %s found at %p (local) on device %s at %p", drivername, instance, device->device_name, device);
 
+	/* Attempt to register a test disc with our parameters */
+
+	if ((fsd_errno = fsd_register_disc(instance, "HARNESS", parameters, FSD_DISCFLAG_NONE)))
+	{
+		fs_debug_full(0, 1, s, 0, 0, "HARNESS: Failed to register test disc - error %d (%s)", fsd_errno, fsd_strerror(fsd_errno));
+		return 1;
+	}
+
+	fs_debug_full (0, 1, s, 0, 0, "HARNESS: Registered disc called 'HARNESS'");
+
+	/* So by now we have regsitered a disc with the name "HARNESS" */
+
+	/* HERE */
+
 	/* Then attempt to mount something */
 
-	mount = fsd_mount(device, s, instance, parameters, 0, 0, &fsd_errno);
+	mount = fsd_mount(instance, "HARNESS", 0, 0, &fsd_errno);
 
 	if (!mount || fsd_errno)
 	{
@@ -577,7 +696,11 @@ uint8_t	fsd_test_harness (struct __fs_station *s, char *drivername, char *parame
 		return 1;
 	}
 
+	m_stub = (fs_device_mount_stub *) mount;
+
 	fs_debug_full (0, 1, s, 0, 0, "HARNESS: Mount for '%s:%s' obtained at %p", drivername, parameters, mount);
+	if (m_stub->readonly)
+		fs_debug_full (0, 1, s, 0, 0, "HARNESS: Mount is read only");
 
 	fs_debug_full (0, 1, s, 0, 0, "HARNESS: Discname reported as '%s' with blocksize %d",
 			fsd_get_discname(device, mount),
@@ -616,16 +739,26 @@ uint8_t	fsd_test_harness (struct __fs_station *s, char *drivername, char *parame
 
 	/* Try and make our test directory */
 
-	if (fsd_cdir(mount, "HARNESS", &fsd_errno))
+	if ((err = fsd_cdir(mount, "HARNESS", &fsd_errno)))
 	{
-		fs_debug_full(0, 1, s, 0, 0, "HARNESS: Failed to make test directory! (fsd_error = %d (%s))", fsd_errno, strerror(fsd_errno));
+		fs_debug_full(0, 1, s, 0, 0, "HARNESS: Failed to make test directory! (fsd_error = %d (%s))", err, fsd_strerror(err));
 		ret = 1;
 	}
 	else
 	{
 		fs_debug_full(0, 1, s, 0, 0, "HARNESS: Successfully made test dir ('HARNESS') in root dir");
 
-		/* More tests here */
+		/* Now try and create the dir again - it should fail */
+
+		if (!fsd_cdir(mount, "HARNESS", &fsd_errno))
+		{
+			fs_debug_full(0, 1, s, 0, 0, "HARNESS: Second attempt to make test directory succeeded and it shouldn't!");
+			ret = 1;
+		}
+		else
+		{
+			/* Continue tests */
+		}
 
 		if (fsd_unlink (mount, "HARNESS", &fsd_errno))
 		{
@@ -635,13 +768,21 @@ uint8_t	fsd_test_harness (struct __fs_station *s, char *drivername, char *parame
 	
 	/* Then unmount it */
 
-	if (fsd_umount(device, mount))
+	if (fsd_umount(mount))
 	{
 		fs_debug_full (0, 1, s, 0, 0, "HARNESS: un-mount %s:%s failed", drivername, parameters);
 		ret = 1;
 	}
 	else
 		fs_debug_full (0, 1, s, 0, 0, "HARNESS: unmounted %s:%s", drivername, parameters);
+
+	/* And unregister the "disc" */
+
+	if ((err = fsd_unregister_disc(instance, "HARNESS")))
+		fs_debug_full (0, 1, s, 0, 0, "HARNESS: Failed to unregister test disc (error %d (%s))", err, fsd_strerror(err));
+	else	fs_debug_full (0, 1, s, 0, 0, "HARNESS: Successful unregister of test disc");
+
+	fs_debug_full (0, 1, s, 0, 0, "HARNESS: Exiting");
 
 	return ret; /* Success */
 }
