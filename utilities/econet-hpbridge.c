@@ -5086,7 +5086,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 	}
 	else
 	{
-		length = recvfrom (sock, &(incoming.p.aun_ttype), sizeof(struct __econet_packet_aun), 0, 
+		length = recvfrom (sock, &(incoming.p.aun_ttype), sizeof(struct __econet_packet_aun) - 4, 0, 
 			(struct sockaddr_in *) &addr,
 			&addrlen);
 		length += 4; // Top up to extended AUN so that rest of routine is working with 12 byte header
