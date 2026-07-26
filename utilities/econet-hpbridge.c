@@ -5080,7 +5080,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 	}
 	else
 	{
-		length = recvfrom (sock, &(incoming.p.aun_ttype), sizeof(struct __econet_packet_aun), 0, 
+		length = recvfrom (sock, &(incoming.p.aun_ttype), sizeof(struct __econet_packet_aun) - 4, 0, 
 			(struct sockaddr_in *) &addr,
 			&addrlen);
 		length += 4; // Top up to extended AUN so that rest of routine is working with 12 byte header
@@ -5225,7 +5225,7 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 		{
 			/* Not dumped, so process it */
 
-			eb_dump_packet (source_device, EB_PKT_DUMP_POST_I, &incoming, length - 12); // (Drop the header length)
+			eb_dump_packet (source_device, EB_PKT_DUMP_PRE_I, &incoming, length - 12); // (Drop the header length)
 
 			/* Update last traffic received time so that dynamic stations don't time out */
 
@@ -5342,6 +5342,8 @@ void eb_aun_receiver (int sock, uint8_t is_gateway, uint8_t is_broadcast_listene
 			ack.p.aun_ttype	= ECONET_AUN_ACK;
 			ack.p.port	= incoming.p.port;
 			ack.p.ctrl	= incoming.p.ctrl;
+
+			eb_dump_packet (source_device, EB_PKT_DUMP_POST_I, &incoming, length - 12); // (Drop the header length)
 
 			// Because this is going on an input queue, we need to malloc it
 

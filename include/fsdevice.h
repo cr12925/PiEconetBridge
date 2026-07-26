@@ -189,6 +189,10 @@ struct fs_device_funcs {
 	int (*dev_unregister) (void); /* Unregister device driver. Device must verify that it is not in use! */
 	int (*fs_release) (fs_device_instance *); /* Opposite of fs_init() - deregisters from a particular fileserver */
 
+	/* CLI hook */
+
+	int (*cli) (fs_device_instance *, char *); /* Passes the device-specific part of *FSDCMD <driver> <dev-specific> to the driver - allows implementation of own commands */
+
 	/* Disc lifecycle */
 	fs_device_mount * (*mount) (fs_device_instance *device, char *params, uint32_t flags, uint8_t fs_disc, int *); /* station is the FS station mounting the device, device is the registered device, params is everything after '*FSMOUNT <disc no.> <driver_name>' on the mount command line */
 	int (*umount) (fs_device_mount *mnt); /* Umount - caused by *FSUMOUNT <disc no.>, which the FS uses to look up whether whether the disc is removable, and if so finds the fs_device_mount struct and passes it. Return is 0 for success, anything else for failure. If successful, the FS will take the disc out of the active disc lists. */
@@ -254,6 +258,7 @@ extern fs_device_local * fsd_find_local (struct __fs_station *, char *);
 
 struct json_object * fsd_dev_report_schema (fs_device *);
 fs_device_instance * fsd_init (fs_device *, struct __fs_station *, struct json_object *);
+int fsd_cli (fs_device_instance *, char *); 
 int fsd_unregister (fs_device *); /* Return value is an FSD error */
 int fsd_release (fs_device *, fs_device_instance *); /* Return value is an FSD error */
 fs_device_mount *fsd_mount (fs_device_instance *, char *, uint32_t, uint8_t, int *); /* Final int * is an FSD error */
@@ -264,6 +269,9 @@ int fsd_get_discs (fs_device *, fs_device_instance *, fs_device_disc **); /* Ret
 char *fsd_get_discname (fs_device *, fs_device_mount *);
 int16_t fsd_get_disc_blocksize (fs_device *, fs_device_mount *); /* If return is 0, there was an error */
 int fsd_open (fs_device_mount *, const char *, int flags, fs_device_handle **, int *); /* Return value is an FSD Error; the last int * is system errno */
+#define FSD_OPENIN 1
+#define FSD_OPENOUT 2
+#define FSD_OPENUP 3
 int fsd_close (fs_device_handle *, int *); /* Ditto open */
 ssize_t fsd_read (fs_device_handle *, void *, size_t, int *); /* Return value is equivalent of system read() OR FSD Error, final int* is system errno */
 ssize_t fsd_write (fs_device_handle *, const void *, size_t, int *); /* Ditto read */
@@ -313,4 +321,5 @@ char *fsd_strerror(int);
 #define FSD_EXISTS		-16	/* You tried to do something on a file/dir which exists, or register a disc which already exists */
 #define FSD_EXHAUSTED		-17 	/* Out of resources */
 #define FSD_READONLY		-18	/* Whatever you tried to do, it was a write operation on something read only (e.g. a disc, a mount) */
+#define FSD_CLI_UNKNOWN		-19	/* CLI did not know the command offered */
 #endif

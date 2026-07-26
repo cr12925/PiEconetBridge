@@ -18,6 +18,7 @@
 
 #include "econet-hpbridge.h"
 #include "fs.h"
+#include <sys/random.h>
 
 #define FSDEVICE "FSDEVICE" /* For free/malloc/debug */
 
@@ -156,6 +157,19 @@ fs_device_instance * fsd_find_instance (struct __fs_station *f, char *driver_nam
 
 	return NULL; /* Not found */
 
+}
+
+/* cli wrapper */
+
+int fsd_cli (fs_device_instance *i, char *cmd)
+{
+	fs_device_instance_stub	*i_stub = (fs_device_instance_stub *) i;
+
+	fs_device *device = i_stub->device;
+
+	if (device && device->device_funcs->cli)
+		return (device->device_funcs->cli) (i, cmd);
+	else	return FSD_MISSINGFUNC;
 }
 
 /* dev_report_schema wrapper */
@@ -652,8 +666,17 @@ uint8_t	fsd_test_harness (struct __fs_station *s, char *drivername, char *parame
 	int			ret = 0, dirents, fsd_errno, err;
 	uint8_t			max_fname_len;
 
+#define FSDTH_RANDSIZE 1009 /* Prime near 1024 */
+
+	uint8_t			randdata[FSDTH_RANDSIZE];
+	uint16_t		randfilesize;
 
 	fs_debug_full (0, 1, s, 0, 0, "HARNESS: Called with parameters %s, %s", drivername, parameters);
+
+	/* Populate randdata */
+
+	getrandom (randdata, FSDTH_RANDSIZE, 0);
+	randfilesize = randdata[0] + (randdata[1] << 8);
 
 	/* First, obtain the instance of this driver on this server */
 
@@ -683,8 +706,6 @@ uint8_t	fsd_test_harness (struct __fs_station *s, char *drivername, char *parame
 	fs_debug_full (0, 1, s, 0, 0, "HARNESS: Registered disc called 'HARNESS'");
 
 	/* So by now we have regsitered a disc with the name "HARNESS" */
-
-	/* HERE */
 
 	/* Then attempt to mount something */
 
@@ -758,6 +779,78 @@ uint8_t	fsd_test_harness (struct __fs_station *s, char *drivername, char *parame
 		else
 		{
 			/* Continue tests */
+
+			fs_device_handle	*handle;
+			int		fsderr, err;
+
+			fsderr = fsd_open(mount, "NOTPRES", FSD_OPENIN, &handle, &err);
+
+			if (fsderr) /* Should fail */
+			{
+				uint16_t	to_write;
+
+				fs_debug_full(0, 1, s, 0, 0, "HARNESS: Correctly failed to openin non-existent file");
+
+				to_write = randfilesize;
+
+				fsderr = fsd_open(mount, "HARNESS.TESTFILE", FSD_OPENUP, &handle, &err);
+
+				if (fsderr)
+				{
+					fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_open on test file failed! (OPENUP)");
+					ret = 1;
+				}
+				else
+				{
+					/* Write some test data */
+
+					while (to_write)
+					{
+						uint16_t chunk, written;
+
+						chunk = (to_write > FSDTH_RANDSIZE) ? FSDTH_RANDSIZE : to_write;
+
+						written = fsd_write (handle, randdata, chunk, &err);
+
+						if (written < 0)
+						{
+							fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_write() to test file for chunk size %d failed: %d (%s) (errno %d (%s))",
+									chunk, written, fsd_strerror(written), err, strerror(err));
+							ret = 1;
+							break;
+						}
+						else	to_write -= written;
+
+					}
+
+					if (!ret) /* Success */
+					{
+						/* Read and pointer tests here */
+					}
+
+					if ((fsderr = fsd_close(handle, &err)))
+					{
+						fs_debug_full (0, 1, s, 0, 0, "HARNESS: fsd_close on test file failed: %d (%s)", fsderr, fsd_strerror(fsderr));
+						ret = 1;
+					}
+
+					/* Unlink test file */
+
+					if ((fsderr = fsd_unlink(mount, "HARNESS.TESTFILE", &err)))
+					{
+						fs_debug_full (0, 1, s, 0, 0, "HARNESS: fsd_unlink on test file failed: %d (%s)", fsderr, fsd_strerror(fsderr));
+						ret = 1;
+					}
+
+				}
+			}
+			else
+			{
+				fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_open(OPENIN) succeeded on non-existent file - incorrect");
+				ret = 1;
+			}
+
+
 		}
 
 		if (fsd_unlink (mount, "HARNESS", &fsd_errno))

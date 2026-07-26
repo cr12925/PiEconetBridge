@@ -355,6 +355,13 @@ int fsd_SYS_unregister (void)
 	return 0;
 }
 
+/* CLI */
+
+int fsd_SYS_cli (fs_device_instance *i, char *cmd)
+{
+	return FSD_CLI_UNKNOWN; /* We don't presently implemnent anything */
+}
+
 /*
  * Mount an existing disc and return a mount struct for it,
  * or NULL for failure.
@@ -717,7 +724,7 @@ int fsd_SYS_open (fs_device_mount *m, const char *path, int flags, fs_device_han
 int fsd_SYS_close (fs_device_handle *h, int *fs_errno)
 {
 
-	struct fsd_SYS_handle *handle = (struct fsd_SYS_handle *) handle;
+	struct fsd_SYS_handle *handle = (struct fsd_SYS_handle *) h;
 
 	/* We don't ask any questions here, we just
 	 * trust we're being given a FILE* to close and
@@ -1440,6 +1447,7 @@ static struct fs_device_funcs fsd_SYS_funcs = {
 	.fs_init = fsd_SYS_init,
 	.dev_unregister = fsd_SYS_unregister,
 	.fs_release = fsd_SYS_release,
+	.cli = fsd_SYS_cli,
 	.mount = fsd_SYS_mount,
 	.umount = fsd_SYS_umount,
 	.register_disc = fsd_SYS_register_disc,

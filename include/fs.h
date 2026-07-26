@@ -1035,10 +1035,10 @@ extern float timediffstart(void);
 
 // the ] as second character is a special location for that character - it loses its
 // special meaning as 'end of character class' so you can match on it.
-#define FSACORNREGEX    "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
+#define FSACORNREGEX    "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;[\\?/\x60\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 /* These are unix filename regexes. Take out * and # now
-#define FSREGEX    "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
-#define FSDOTREGEX "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;\\.[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
+#define FSREGEX    "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;:[\\?/\x60\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
+#define FSDOTREGEX "[]\\(\\)\\'\\*\\#A-Za-z0-9\\+_\x81-\xfe;\\.[\x60/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 */
 #define FSREGEX    "[]\\(\\)\\'A-Za-z0-9\\+_\x81-\xfe;:[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
 #define FSDOTREGEX "[]\\(\\)\\'A-Za-z0-9\\+_\x81-\xfe;\\.[\\?/\\£\\!\\@\\%\\\\\\^\\{\\}\\+\\~\\,\\=\\<\\>\\|\\-]"
@@ -1296,6 +1296,7 @@ FSOP_00_EXTERN(DISKMASK);
 FSOP_00_EXTERN(ENABLE);
 FSOP_00_EXTERN(FSCONFIG);
 FSOP_00_EXTERN(FSDTEST);
+FSOP_00_EXTERN(FSDCMD);
 FSOP_00_EXTERN(INFO);
 FSOP_00_EXTERN(LIB);
 FSOP_00_EXTERN(LINK);
