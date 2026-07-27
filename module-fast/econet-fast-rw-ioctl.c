@@ -308,7 +308,19 @@ long econet_ioctl (struct file *gp, unsigned int cmd, unsigned long arg)
 		 */
 
 		case ECONETGPIO_IOC_GETAUNSTATE:
-			return (econet_get_aunstate());
+			{
+				uint8_t	aunstate, chipstate;
+				uint16_t ptr;
+
+				aunstate = econet_get_aunstate();
+				chipstate = econet_get_chipstate();
+
+				if (chipstate == EM_WRITE && econet_data->txp)
+					ptr = econet_data->txp->ptr;
+				else	ptr = econet_data->rxp->ptr;
+
+				return (ptr << 16) | (chipstate << 8) | (aunstate);
+			}
 			break;
 
 		/*
