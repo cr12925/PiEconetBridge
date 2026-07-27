@@ -118,8 +118,8 @@ int fsd_SYS_register_disc(fs_device_instance *, char *, char *, uint32_t);
 char * fsd_SYS_getdiscname (fs_device_mount *);
 int fsd_SYS_open (fs_device_mount *, const char *, int, fs_device_handle **, int *);
 int fsd_SYS_close (fs_device_handle *, int *);
-int fsd_SYS_read (fs_device_handle *, void *, size_t, int *);
-int fsd_SYS_write (fs_device_handle *, const void *, size_t, int *);
+ssize_t fsd_SYS_read (fs_device_handle *, void *, size_t, int *);
+ssize_t fsd_SYS_write (fs_device_handle *, const void *, size_t, int *);
 int fsd_SYS_seek (fs_device_handle *, off_t, int, int *);
 off_t fsd_SYS_tell (fs_device_handle *, int *);
 int fsd_SYS_getattr (fs_device_mount *, const char *, struct objattr *);
@@ -759,7 +759,7 @@ int fsd_SYS_close (fs_device_handle *h, int *fs_errno)
  *
  */
 
-int fsd_SYS_read (fs_device_handle *h, void *buf, size_t len, int *fs_errno)
+ssize_t fsd_SYS_read (fs_device_handle *h, void *buf, size_t len, int *fs_errno)
 {
 	int ret;
 	struct fsd_SYS_handle *handle = (struct fsd_SYS_handle *) h;
@@ -780,7 +780,7 @@ int fsd_SYS_read (fs_device_handle *h, void *buf, size_t len, int *fs_errno)
  * Does just what fwrite() does
  */
 
-int fsd_SYS_write (fs_device_handle *h, const void *buf, size_t len, int *fs_errno)
+ssize_t fsd_SYS_write (fs_device_handle *h, const void *buf, size_t len, int *fs_errno)
 {
 	int ret;
 	struct fsd_SYS_handle *handle = (struct fsd_SYS_handle *) h;
