@@ -1331,6 +1331,7 @@ struct __eb_device { // Structure holding information about a "physical" device 
 			uint8_t		resilience; // 0 = off, 1 = on
 			uint8_t		twobytemode; // 0 = off, 1 = on
 			uint16_t	perceived_clock; // Perceived clock speed in kHz
+			uint8_t		state_update_frequency; // Seconds between AUN & chip state debug reports (for debugging purposes)
 
 			// Pool nat config
 			uint8_t			use_pool[255];

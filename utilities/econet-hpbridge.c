@@ -6203,6 +6203,8 @@ static void * eb_device_despatcher (void * device)
 	struct __eb_imm_clear 		*imm_sleeper; // Control structure for imm_clear sleeper thread to reset ADLC if no immediate arrives
 	struct __eb_device_module	*m_ip = NULL; // IP Gateway module data
 	struct __eb_ipgw		*m_ip_ws = NULL;
+	struct timespec		last_kernel_state_report; /* For wire devices */
+
 
 	// Initializes and starts a device.
 	
@@ -6341,7 +6343,7 @@ static void * eb_device_despatcher (void * device)
 			if (d->wire.twobytemode)
 				ioctl(d->wire.socket, ECONETGPIO_IOC_TWOBYTEMODE, d->wire.twobytemode);
 
-			eb_debug (0, 2, "DESPATCH", "%-8s %3d     Econet device %s opened successfully (fd %d), two byte mode %s", "Wire", d->net, (EB_CONFIG_LOCAL ? "/dev/null" : d->wire.device), d->wire.socket, d->wire.twobytemode ? "ON" : "off");	
+			eb_debug (0, 2, "DESPATCH", "%-8s %3d     Econet device %s opened successfully (fd %d), two byte mode %s, state updates at %ds", "Wire", d->net, (EB_CONFIG_LOCAL ? "/dev/null" : d->wire.device), d->wire.socket, d->wire.twobytemode ? "ON" : "off", d->wire.state_update_frequency);	
 
 		} break;
 
@@ -6663,10 +6665,13 @@ static void * eb_device_despatcher (void * device)
 	d->out = NULL;
 	d->in = NULL;
 
+	/* Initialize last kernel state report in case we're a wire */
+
+	clock_gettime(CLOCK_REALTIME, &last_kernel_state_report);
+
 	while (1)
 	{
 		
-
 		if (d->type == EB_DEF_PIPE || d->type == EB_DEF_LOCAL)
 			eb_debug (0, 4, "DESPATCH", "%-8s %3d.%3d Despatcher thread loop start - new_output = %d, wire_output_pending = %d", eb_type_str(d->type), d->net, (d->type == EB_DEF_PIPE ? d->pipe.stn : d->local.stn), new_output, wire_output_pending);
 		else if (d->type == EB_DEF_TRUNK)
@@ -6687,9 +6692,9 @@ static void * eb_device_despatcher (void * device)
 
 			pthread_mutex_lock (&(d->qmutex_in)); // Lock prior to condwait
 
-			if ((aun_output_pending || wire_output_pending) && !(d->in && d->in->tx == 0))
+			if ((d->wire.state_update_frequency) || ((aun_output_pending || wire_output_pending) && !(d->in && d->in->tx == 0)))
 			{
-				struct timespec		cond_time;
+				struct timespec		cond_time, time_now;
 				unsigned int		delay;
 	
 				delay = EB_CONFIG_WIRE_RETX;
@@ -6698,6 +6703,9 @@ static void * eb_device_despatcher (void * device)
 				
 				clock_gettime(CLOCK_REALTIME, &cond_time);
 	
+				if (d->wire.state_update_frequency * 1000 < delay)
+					delay = (d->wire.state_update_frequency - (cond_time.tv_sec - last_kernel_state_report.tv_sec)) * 1000; /* The entry in wire struct is in seconds */
+
 				if (cond_time.tv_nsec > (1000000000 - (delay * 1000000)))
 					cond_time.tv_sec++;
 	
@@ -6711,6 +6719,26 @@ static void * eb_device_despatcher (void * device)
 					eb_debug (0, 4, "DESPATCH", "%-8s %3d     Despatcher thread timed condwait %d ms", eb_type_str(d->type), d->net, delay);
 				
 				pthread_cond_timedwait(&(d->qwake), &(d->qmutex_in), &cond_time);
+
+				/* Do we need to do a state update report? */
+
+				clock_gettime(CLOCK_REALTIME, &time_now);
+
+				if (time_now.tv_sec >= (last_kernel_state_report.tv_sec + d->wire.state_update_frequency))
+				{
+					uint32_t	res, ptr;
+					uint8_t		chipstate;
+
+					res = ioctl(d->wire.socket, ECONETGPIO_IOC_GETAUNSTATE);				
+					ptr = (res & 0xFFFF0000) >> 16;
+					chipstate = (res & 0x0000FF00) >> 8;
+					res &= 0xFF;
+
+					eb_debug (0, 1, "DESPATCH", "%-8s %3d     Econet hardware in Chip state 0x%02X, AUN state 0x%02X at pointer 0x%04X", eb_type_str(d->type), d->net, chipstate, res, ptr);
+
+					clock_gettime(CLOCK_REALTIME, &last_kernel_state_report);
+				}
+
 			}
 			else if (!(d->in && d->in->tx == 0)) // No new traffic
 			{
@@ -8161,7 +8189,7 @@ static void * eb_device_despatcher (void * device)
 										if (EB_DEBUG_LEVEL < 4 && (err == ECONET_TX_NECOUTEZPAS))
 											eb_debug (0, 2, "DESPATCH", "Wire     %3d.%3d from %3d.%3d P:&%02X C:&%02X Not listening for packet length 0x%04X seq 0x%08X", tx.p.dstnet, tx.p.dststn, tx.p.srcnet, tx.p.srcstn, tx.p.port, tx.p.ctrl, p->length, tx.p.seq);
 										else
-											eb_debug (0, 4, "DESPATCH", "%-8s %3d     Attempt to transmit packet to %d.%d from %d.%d at %p FAILED with error 0x%02X (%s) - attempt %d - errors %d (not listening %d/%d), kernel tx ptr = 0x%02X, aun_state = 0x%02X", eb_type_str(d->type), d->net, tx.p.dstnet, tx.p.dststn, tx.p.srcnet, tx.p.srcstn, p, err, econet_strtxerr(err), p->tx, p->errors, p->notlistening, EB_CONFIG_WIRE_MAX_NOTLISTENING, (aunstate >> 16), aunstate & 0xff);
+											eb_debug (0, 4, "DESPATCH", "%-8s %3d     Attempt to transmit packet to %d.%d from %d.%d at %p FAILED with error 0x%02X (%s) - attempt %d - errors %d (not listening %d/%d), kernel tx ptr = 0x%02X, chip_state = 0x%02X, aun_state = 0x%02X", eb_type_str(d->type), d->net, tx.p.dstnet, tx.p.dststn, tx.p.srcnet, tx.p.srcstn, p, err, econet_strtxerr(err), p->tx, p->errors, p->notlistening, EB_CONFIG_WIRE_MAX_NOTLISTENING, (aunstate >> 16), (aunstate & 0xff) >> 8, aunstate & 0xff);
 
 										wire_output_pending++;
 
@@ -8191,7 +8219,7 @@ static void * eb_device_despatcher (void * device)
 
 									aunstate = ioctl(d->wire.socket, ECONETGPIO_IOC_GETAUNSTATE);
 
-									eb_debug (0, 4, "DESPATCH", "%-8s %3d     Attempt to transmit packet to %d.%d from %d.%d at %p FAILED with error 0x%02X (%s) - attempt %d - kernel tx ptr = 0x%02X, aun_state = 0x%02X", eb_type_str(d->type), d->net, tx.p.dstnet, tx.p.dststn, tx.p.srcnet, tx.p.srcstn, p, err, econet_strtxerr(err), p->tx, (aunstate >> 16), aunstate & 0xff);
+									eb_debug (0, 4, "DESPATCH", "%-8s %3d     Attempt to transmit packet to %d.%d from %d.%d at %p FAILED with error 0x%02X (%s) - attempt %d - kernel tx ptr = 0x%02X, chip_state = 0x%02X, aun_state = 0x%02X", eb_type_str(d->type), d->net, tx.p.dstnet, tx.p.dststn, tx.p.srcnet, tx.p.srcstn, p, err, econet_strtxerr(err), p->tx, (aunstate >> 16), (aunstate & 0xff00) >> 8, aunstate & 0xff);
 									p->errors++;	
 									wire_output_pending++;
 
@@ -9551,6 +9579,16 @@ void eb_create_json_virtuals_econets(struct json_object *o, uint8_t otype)
 
 		if (json_object_object_get_ex(o, "two-byte-mode", &jfw)) // jfw being used temporarily
 			networks[net]->wire.twobytemode = (json_object_get_boolean(jfw) ? 1 : 0);
+
+		if (json_object_object_get_ex(o, "state-update", &jfw)) // jfw being used temporarily
+		{
+			/* AUN & chip state update report frequency - for debugging of module-fast when it stalls */
+			uint8_t	freq;
+			freq = json_object_get_int(jfw);
+
+			if (freq)
+				networks[net]->wire.state_update_frequency = freq;
+		}
 
 		if (json_object_object_get_ex(o, "net-clock", &jnetclock))
 		{

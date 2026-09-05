@@ -322,4 +322,5 @@ char *fsd_strerror(int);
 #define FSD_EXHAUSTED		-17 	/* Out of resources */
 #define FSD_READONLY		-18	/* Whatever you tried to do, it was a write operation on something read only (e.g. a disc, a mount) */
 #define FSD_CLI_UNKNOWN		-19	/* CLI did not know the command offered */
+#define FSD_PTR_CHECK_FAIL	-20	/* Internal test routine's pointer check failed to match */
 #endif

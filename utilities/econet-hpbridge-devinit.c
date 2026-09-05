@@ -75,6 +75,8 @@ uint8_t	eb_device_init_wire (uint8_t net, char * device, struct __eb_fw_chain *f
 
 	p->wire.perceived_clock = 0; /* Uninitialized */
 
+	p->wire.state_update_frequency = 0; /* No updates */
+
 	p->wire.pool = NULL;
 	memset(&(p->wire.use_pool), 0, sizeof(p->wire.use_pool));
 

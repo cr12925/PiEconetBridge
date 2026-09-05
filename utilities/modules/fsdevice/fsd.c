@@ -650,8 +650,30 @@ char * fsd_strerror(int err)
 		case -16: return "Object exists"; break;
 		case -17: return "Out of resources"; break;
 		case -18: return "Read only"; break;
+		case -19: return "Unknown FSD CLI command"; break;
+		case -20: return "Pointer check failure"; break;
 		default: return "Unknown error"; break;
 	}
+}
+
+int fsd_test_harness_ptr_check (fs_device_handle *h, uint32_t desired_ptr, int *err, struct __fs_station *s)
+{
+	off_t	ptr;
+
+	ptr = fsd_tell (h, err);
+
+	if (ptr < 0)
+		return ptr;
+
+	if (desired_ptr != ptr)
+	{
+		fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_ptr_check() to test ptr = %d failed: %d (%s) (errno %d (%s))",
+			desired_ptr, ptr, fsd_strerror(ptr), *err, strerror(*err));
+		return FSD_PTR_CHECK_FAIL;
+	}
+
+	return FSD_SUCCESS;
+
 }
 
 uint8_t	fsd_test_harness (struct __fs_station *s, char *drivername, char *parameters)
@@ -825,8 +847,215 @@ uint8_t	fsd_test_harness (struct __fs_station *s, char *drivername, char *parame
 
 					if (!ret) /* Success */
 					{
+						int fsderror;
+
 						/* Read and pointer tests here */
+
+						/* First, see if the ptr = randfilesize */
+
+						if ((fsderror = fsd_test_harness_ptr_check(handle, randfilesize, &err, s)))
+							ret = 1;
+						else
+						{
+							/* Set ptr to 0 and check tell matches that too */
+
+							if ((fsderror = fsd_seek(handle, 0, SEEK_SET, &err)))
+							{
+								fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_seek(0) failed: %d (%s) (errno %d (%s))",
+									fsderror, fsd_strerror(fsderror), err, strerror(err));
+								ret = 1;
+							}
+							else if ((fsderror = fsd_test_harness_ptr_check(handle, 0, &err, s)))
+								ret = 1;
+							else
+							{
+								uint32_t	r;
+
+								getrandom ((void *) &r, sizeof(r), 0);
+
+								r = r % randfilesize;
+
+								/* Move to random position and check pointer */
+
+								if ((fsderror = fsd_seek(handle, r, SEEK_SET, &err)))
+								{
+									fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_seek(%d) failed: %d (%s) (errno %d (%s))",
+										r, fsderror, fsd_strerror(fsderror), err, strerror(err));
+									ret = 1;
+								}
+								else
+								{
+									uint32_t	randwritelen, randwritepos;
+
+									getrandom ((void *) &randwritelen, sizeof(randwritelen), 0);
+
+									randwritelen = randwritelen % (randfilesize / 4);
+									randwritepos = randfilesize / 2;
+
+									/* Now write a random amount of monotonically increasing bytes (wrapping after 255 obvs) at the mid-way point, check they are there, and check pointer accuracy before and after */
+									if ((fsderror = fsd_seek(handle, randwritepos, SEEK_SET, &err)))
+									{
+										fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_seek(%d) (pre-random write) failed: %d (%s) (errno %d (%s))",
+											randwritepos, fsderror, fsd_strerror(fsderror), err, strerror(err));
+										ret = 1;
+									}
+									else
+									{
+										uint32_t	writecounter = 0;
+
+										while (writecounter < randwritelen)
+										{
+											uint8_t 	data = 0;
+
+											if ((fsderror = fsd_write(handle, &data, 1, &err)))
+											{
+												fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_write(%d) at pos %s (random write) failed: %d (%s) (errno %d (%s))",
+													data, randwritepos + writecounter, fsderror, fsd_strerror(fsderror), err, strerror(err));
+												ret = 1;
+												break;
+											}
+
+											writecounter++;
+											data++;
+										}
+
+										if (!ret)
+										{
+											if ((fsderror = fsd_test_harness_ptr_check(handle, randwritepos + writecounter, &err, s)))
+												ret = 1;
+
+											if (!ret)
+											{
+												uint32_t	checkpos;
+
+												/* Now check what is there is what we wrote */
+
+												/* Start 10 bytes before randwritepos and check against our original random data */
+
+												checkpos = randwritepos - 10;
+
+												while (!ret && (checkpos < (randwritepos + randwritelen)))
+												{
+													uint8_t	expected_byte, read_byte;
+
+													if (checkpos >= randwritepos && checkpos < (randwritepos + randwritelen))
+														expected_byte = (checkpos - randwritepos) % 256;
+													else /* Should be our original random data */
+														expected_byte = randdata[checkpos % FSDTH_RANDSIZE];
+
+													if ((fsderror = fsd_read(handle, &read_byte, 1, &err)))
+													{
+														fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_read() at pos %d expected %d (check random data write) failed: %d (%s) (errno %d (%s))",
+															checkpos, expected_byte, fsderror, fsd_strerror(fsderror), err, strerror(err));
+														ret = 1;
+													}
+													else
+													{
+														if (expected_byte != read_byte)
+														{
+															fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_read() at pos %s expected %d but read %d (check random data write))",
+																checkpos, expected_byte, read_byte);
+															ret = 1;
+														}
+														else
+														{
+															checkpos++;	
+														}
+													}
+												}
+
+												if (!ret) /* Above successful - check pointer */
+												{
+													if ((fsderror = fsd_test_harness_ptr_check(handle, randwritepos + checkpos - 10, &err, s)))
+														ret = 1;
+												}
+
+												if (!ret)
+												{
+													/* seek to randfilesize - 10 and then read 20 bytes */
+													if ((fsderror = fsd_seek(handle, randfilesize - 10, SEEK_SET, &err)))
+													{
+														fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_seek(%d) failed: %d (%s) (errno %d (%s))",
+														randfilesize - 10, fsderror, fsd_strerror(fsderror), err, strerror(err));
+														ret = 1;
+													}
+												}
+
+												if (!ret)
+												{
+													/* Read 20 bytes and check EOF set */
+													uint8_t		read_data[20];
+
+													if ((fsderror = fsd_read(handle, read_data, 20, &err)))
+													{
+														fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_read() at pos %d (read 20 bytes at filesize-10) failed: %d (%s) (errno %d (%s))",
+															randfilesize-10, fsderror, fsd_strerror(fsderror), err, strerror(err));
+														ret = 1;
+
+													}
+												}
+
+												if (!ret && fsderror != 10)
+												{
+													fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_read() at pos %d (read 20 bytes at filesize-10) read %d bytes instead of 10",
+														randfilesize-10, fsderror);
+													ret = 1;
+												}
+
+
+												if (!ret)
+												{
+													struct objattr mine, mine_write;
+													uint8_t *region = (void *) &mine_write, *region_read = (void *) &mine;
+
+													if ((fsderror = fsd_getattr(mount, "HARNESS.TESTFILE", &mine)))
+													{
+														fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_get_attr() failed: fsderrno = %d (%s)",
+															fsderror, fsd_strerror(fsderror));
+														ret = 1;
+													}
+
+													memcpy (&mine_write, &mine, sizeof(struct objattr));
+
+													for (uint8_t counter = 0; counter < (sizeof(struct objattr) - sizeof(mine.ownername)); counter++)
+														*(region + counter) = *(region + counter) ^ 0xff; /* Just turn everything upside down */
+
+													if (!ret && ((fsderror = fsd_setattr(mount, "HARNESS.TESTFILE", &mine_write))))
+													{
+														fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_set_attr() failed: fsderrno = %d (%s)",
+															fsderror, fsd_strerror(fsderror));
+														ret = 1;
+													}
+
+													/* Now read them back and see if they match */
+
+													if (!ret && ((fsderror = fsd_getattr(mount, "HARNESS.TESTFILE", &mine))))
+													{
+														fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_get_attr() (read check) failed: fsderrno = %d (%s)",
+															fsderror, fsd_strerror(fsderror));
+														ret = 1;
+													}
+
+													if (!ret) /* See if they match */
+													{
+														for (uint8_t counter = 0; counter < (sizeof(struct objattr) - sizeof(mine.ownername)); counter++)
+															if (*(region + counter) != *(region_read + counter)) 
+															{
+																fs_debug_full(0, 1, s, 0, 0, "HARNESS: fsd_get_attr() attributes read back did not match: fsderrno = %d (%s)",
+																	fsderror, fsd_strerror(fsderror));
+																ret = 1;
+															}
+													}
+												}
+											}
+										}
+									}
+								}
+							}
+						}
 					}
+
+					/* We're done - close up & unlink */
 
 					if ((fsderr = fsd_close(handle, &err)))
 					{
