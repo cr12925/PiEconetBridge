@@ -1121,6 +1121,48 @@ uint8_t	fsd_test_harness (struct __fs_station *s, char *drivername, char *parame
 
 														if (!ret)
 															fs_debug_full(0, 1, s, 0, 0, "HARNESS: getattr (second) comparison succeeded");
+
+														if (!ret && ((fsderror = fsd_truncate(handle, 1024, &err)) < 0))
+														{
+															ret = 1;
+															fs_debug_full(0, 1, s, 0, 0, "HARNESS: truncate(1024) failed: %d (%s), errno %d (%s)",
+																	fsderror, fsd_strerror(fsderror), err, strerror(err));
+														}
+
+														if (!ret)
+														{
+															fs_debug_full(0, 1, s, 0, 0, "HARNESS: final truncate(1024) succeeded");
+
+															if ((fsderror = fsd_seek(handle, 0, SEEK_END, &err)))
+															{
+																ret = 1;
+																fs_debug_full(0, 1, s, 0, 0, "HARNESS: final seek() failed: %d (%s), errno %d (%s)",
+																		fsderror, fsd_strerror(fsderror), err, strerror(err));
+															}
+															else
+																fs_debug_full(0, 1, s, 0, 0, "HARNESS: final seek() succeeded");
+
+															if (!ret && (fsderror = fsd_tell(handle, &err)) < 0)
+															{
+																ret = 1;
+																fs_debug_full(0, 1, s, 0, 0, "HARNESS: tell() failed: %d (%s), errno %d (%s)",
+																		fsderror, fsd_strerror(fsderror), err, strerror(err));
+															}
+
+															if (!ret)
+															{
+																fs_debug_full(0, 1, s, 0, 0, "HARNESS: final tell succeeded");
+
+																if (fsderror != 1024)
+																{
+																	fs_debug_full(0, 1, s, 0, 0, "HARNESS: final tell returned incorrect value: expected 1024, got %d", fsderror);
+																	ret = 1;
+																}
+															}
+
+
+														}
+
 													}
 												}
 											}
