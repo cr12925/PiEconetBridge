@@ -670,17 +670,21 @@ int fsd_SYS_open (fs_device_mount *m, const char *path, int flags, fs_device_han
 {
 	FILE *	opened_fh;
 	char	syspath[1024];
+	char	pathcopy[512];
 	struct fsd_SYS_mount *mount = (struct fsd_SYS_mount *) m;
 	struct fsd_SYS_handle *handle = NULL;
 
 	if (!mount)
 		return FSD_BADMOUNT;
 
-	fsd_SYS_path_acorn_to_unix((char *) path);
+	if (strlen(path) > 510) return FSD_BADMOUNT;
+
+	memcpy(pathcopy, path, strlen(path)+1);
+	fsd_SYS_path_acorn_to_unix((char *) pathcopy);
 
 	snprintf (syspath, 1023, "%s/%s", 
 			mount->disc->path, /* Full underlying filesystem path to this disc */
-			path); /* Pathname we want */
+			pathcopy); /* Pathname we want */
 
 	if (flags == 1) /* Just read */
 		opened_fh = fopen(syspath, "r");
@@ -694,6 +698,9 @@ int fsd_SYS_open (fs_device_mount *m, const char *path, int flags, fs_device_han
 
 	*r_handle = NULL;
 
+	if (!opened_fh)
+		return FSD_SYSERR;
+
 	handle = fsd_malloc("New handle struct", sizeof(struct fsd_SYS_handle));
 
 	/* Signal correct return state */
@@ -702,7 +709,7 @@ int fsd_SYS_open (fs_device_mount *m, const char *path, int flags, fs_device_han
 	{
 		handle->handle = opened_fh;
 		handle->flags = flags;
-		handle->device = (fs_device *) mount->instance;
+		handle->device = (fs_device *) mount->instance->device;
 		handle->mount = mount;
 
 		if (flags & 0x02) mount->writers++;
@@ -711,7 +718,7 @@ int fsd_SYS_open (fs_device_mount *m, const char *path, int flags, fs_device_han
 		*r_handle = handle;
 		return 0;
 	}
-	else	return 1;
+	else	return FSD_NOMEM;
 
 }
 
@@ -788,7 +795,7 @@ ssize_t fsd_SYS_write (fs_device_handle *h, const void *buf, size_t len, int *fs
 	if (!handle)
 		return FSD_BADHANDLE;
 
-	ret = fwrite(buf, len, 1, handle->handle);
+	ret = fwrite(buf, 1, len, handle->handle);
 
 	*fs_errno = errno;
 
@@ -927,17 +934,20 @@ int fsd_SYS_read_inf (struct __fs_station *s, char *syspath, struct objattr *r, 
 int fsd_SYS_getattr (fs_device_mount *m, const char *path, struct objattr *r)
 {
 	char	syspath[1024];
+	char	pathcopy[512];
 	//struct objattr *r = (struct objattr *) a;
 	struct fsd_SYS_mount *mount = (struct fsd_SYS_mount *) m;
 
-	if (!mount)
+	if (!mount || strlen(path) > 510)
 		return FSD_BADMOUNT;
 
-	fsd_SYS_path_acorn_to_unix((char *) path);
+	memcpy (pathcopy, path, strlen(path)+1);
+
+	fsd_SYS_path_acorn_to_unix((char *) pathcopy);
 
 	snprintf (syspath, 1023, "%s/%s", 
 			mount->disc->path, /* Full underlying filesystem path to this disc */
-			path); /* Pathname we want */
+			pathcopy); /* Pathname we want */
 
 	return fsd_SYS_getattr_unix (mount, syspath, r);
 }
@@ -1085,18 +1095,22 @@ int fsd_SYS_setattr (fs_device_mount *m, const char *path, struct objattr *attr)
 
 	//struct objattr * attr = (struct objattr *) a;
 	char	syspath[1024];
+	char	pathcopy[512];
+
 	struct fsd_SYS_mount *mount = (struct fsd_SYS_mount *) m;
 
-	if (!mount)
+	if (!mount || strlen(path) > 510)
 		return FSD_BADMOUNT;
 
-	fsd_SYS_path_acorn_to_unix((char *) path);
+	memcpy (pathcopy, path, strlen(path)+1);
 
-	snprintf (syspath, 1023, "%200s/%800s", 
+	fsd_SYS_path_acorn_to_unix((char *) pathcopy);
+
+	snprintf (syspath, 1023, "%s/%s", 
 			mount->disc->path, /* Full underlying filesystem path to this disc */
-			path); /* Pathname we want */
+			pathcopy); /* Pathname we want */
 
-	return fsd_SYS_setattr_unix (mount, (char *) path, attr);
+	return fsd_SYS_setattr_unix (mount, (char *) syspath, attr);
 }
 
 /* setattr operating on the Unix underlying FS */
@@ -1257,15 +1271,18 @@ int fsd_SYS_unlink (fs_device_mount *m, const char *path, int *fs_errno)
 	struct fsd_SYS_mount *mount = (struct fsd_SYS_mount *) m;
 	int ret;
 	char syspath[1024];
+	char pathcopy[512];
 
-	if (!mount)
+	if (!mount || strlen(path) > 510)
 		return FSD_BADMOUNT;
 
-	fsd_SYS_path_acorn_to_unix((char *) path);
+	memcpy (pathcopy, path, strlen(path)+1);
+
+	fsd_SYS_path_acorn_to_unix((char *) pathcopy);
 
 	snprintf (syspath, 1023, "%s/%s", 
 			mount->disc->path, /* Full underlying filesystem path to this disc */
-			path); /* Pathname we want */
+			pathcopy); /* Pathname we want */
 
 	if (fs_isdir(syspath))
 		ret = rmdir((const char *) syspath);
