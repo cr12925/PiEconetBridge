@@ -415,7 +415,7 @@ ssize_t econet_writefd(struct file *flip, const char *buffer, size_t len, loff_t
 	else /* Timeout and condition not true */
 	{
 		spin_lock(&econet_irq_spin);
-		printk (KERN_INFO "econet-fast: writefd() wait timeout expired in AUN state 0x%02X\n", econet_get_aunstate());
+		printk (KERN_INFO "econet-fast: writefd() wait timeout expired in AUN state 0x%02X, chip state 0x%02X, tx ptr = 0x%04X\n", econet_get_aunstate(), econet_get_chipstate(), econet_data->txp ? econet_data->txp->ptr : 0);
 
 		/* Free the pbuf if it's valid */
 		if (econet_data->txp)

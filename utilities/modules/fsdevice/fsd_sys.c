@@ -686,11 +686,11 @@ int fsd_SYS_open (fs_device_mount *m, const char *path, int flags, fs_device_han
 			mount->disc->path, /* Full underlying filesystem path to this disc */
 			pathcopy); /* Pathname we want */
 
-	if (flags == 1) /* Just read */
+	if (flags == FSD_OPENIN) /* Just read */
 		opened_fh = fopen(syspath, "r");
-	else if (flags == 2) /* Update */
-		opened_fh = fopen(syspath, "r+");
-	else	opened_fh = fopen(syspath, "w+"); /* Overwrite */
+	else if (flags == FSD_OPENOUT) /* truncate and write */
+		opened_fh = fopen(syspath, "w+");
+	else	opened_fh = fopen(syspath, "r+"); /* Update */
 
 	/* Copy errno & handle */
 
