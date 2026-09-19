@@ -480,7 +480,7 @@ u8 econet_workqueue_aun_statemachine(struct __econet_packet *p)
 		{
 			econet_set_aunstate(EA_IDLE);
 			econet_set_tx_status(ECONET_TX_HANDSHAKEFAIL);
-			if (econet_data->extralogs)
+			//if (econet_data->extralogs)
 				printk (KERN_INFO "econet-fast: Resetting state machine after idle on writing data / waiting for final ACK\n");
 			return EWAS_DATA_WRITE;
 		}

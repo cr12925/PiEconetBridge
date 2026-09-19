@@ -393,6 +393,7 @@ void econet_set_read_mode(void)
 	econet_write_cr(ECONET_GPIO_CR1, C1_READ | ECONET_GPIO_C1_RX_DISC);
 
 	atomic_set(&(econet_data->fastpath_enabled), 1);
+	atomic64_set(&(econet_data->flagfill_entrytime), 0);
 
 	last_data_rcvd = 0; // Last time we received data off the wire. Detect stuck in read mode when we want to write
 
@@ -667,6 +668,7 @@ inline void econet_flagfill(void)
 
 	/* Wonder if just doing it twice will help the fact that sometimes we don't manage to flag fill properly and leave the line idle? No, it didn't. */
 
+	econet_set_flagfill_entrytime();
 }
 
 MODULE_LICENSE("GPL");

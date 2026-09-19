@@ -164,6 +164,9 @@ void econet_flagfill(void);
 
 #define econet_aunstate_stale() ((ktime_get_ns() - econet_data->aun_last_statechange) > 3000000000)
 
+#define econet_set_flagfill_entrytime() atomic64_set(&(econet_data->flagfill_entrytime), ktime_get_ns())
+#define econet_flagfill_stale() ((ktime_get_ns() - atomic64_read(&(econet_data->flagfill_entrytime))) > 2000000000)
+
 #define econet_set_tx_status(x) { \
         atomic_set(&(econet_data->tx_status), (x)); \
 	econet_data->tx_status_valid = 1; }

@@ -396,6 +396,7 @@ struct __econet_data {
 	u64 aun_last_writefd;
 	u64 aun_last_statechange;
 	atomic64_t	last_aun_rx_complete;
+	atomic64_t	flagfill_entrytime;
 
 	/* Raw Econet stuff */
 	short last_tx_user_error;

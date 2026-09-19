@@ -53,6 +53,7 @@ void dump_pkt_data(unsigned char *, int, unsigned long);
 
 int econet_fd;
 int dumpmode_brief = 0;
+uint8_t data_limit = 0;
 
 uint32_t	ack_expected;
 
@@ -64,7 +65,7 @@ void dump_pkt_data(unsigned char *a, int len, unsigned long start_index)
 	int count;
 
 	count = 0;
-	while (count < len)
+	while (count < len && (data_limit == 0 || (count < data_limit)))
 	{
 		char dbgstr[200];
 		char tmpstr[200];
@@ -190,6 +191,7 @@ Usage: %s [options] \n\
 Options:\n\
 \n\
 \t-b\tDo brief packet dumps\n\
+\t-l n\tMax data bytes to dump\n\
 \t-h\tPrint this help message\n\
 \t-t\tAdd timestamps to packets\n\
 \n\
@@ -912,27 +914,30 @@ void econet_newdump(struct __econet_packet *p)
 
 		if (counter != 0 && timestamps) printf ("    "); /* Pad the timestamp area of the line */
 
-		if (((counter - data_base) % 8) == 0)
+		if ((((counter - data_base) % 8) == 0) && (data_limit == 0 || counter < data_limit))
 			printf ("%08X:", counter);
 
 		internal = 0; 
 
-		while ((internal+counter < pkt.ptr) && (internal < 8))
+		while ((internal+counter < pkt.ptr) && (internal < 8) && (data_limit == 0 || (internal+counter) < data_limit))
 			printf ("  %02X", pkt.data[counter+(internal++)]);
 
-		while (internal++ < 8)
+		if (data_limit == 0 || (internal + counter) < data_limit)
 		{
-			/* Fill space */
+			while (internal++ < 8)
+			{
+				/* Fill space */
+				printf ("    ");
+			}
+	
+			/* Now print character verions */
+	
 			printf ("    ");
 		}
 
-		/* Now print character verions */
-
-		printf ("    ");
-
 		internal = 0;
 
-		while ((internal+counter < pkt.ptr) && (internal < 8))
+		while ((internal+counter < pkt.ptr) && (internal < 8) && (data_limit == 0 || (internal+counter) < data_limit))
 		{
 			uint8_t	c;
 
@@ -943,7 +948,7 @@ void econet_newdump(struct __econet_packet *p)
 			internal++;
 		}
 
-		printf ("\n");
+		if (data_limit == 0 || (counter < data_limit)) printf ("\n");
 
 		counter += 8;
 	}
@@ -1067,7 +1072,7 @@ void main(int argc, char **argv)
 
 	clock_gettime(CLOCK_MONOTONIC, &start);
 
-	while ((opt = getopt(argc, argv, "bht")) != -1)
+	while ((opt = getopt(argc, argv, "bhtl:")) != -1)
 	{
 		switch (opt) {
 			case 'b': /* Brief Dump mode */
@@ -1077,6 +1082,8 @@ void main(int argc, char **argv)
 				econet_usage(argv[0]); break;
 			case 't':
 				timestamps = 1; break;
+			case 'l':
+				data_limit = atoi(optarg); break;
 		}
 	}
 
