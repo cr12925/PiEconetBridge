@@ -291,7 +291,7 @@ uint8_t fsd_test_harness (struct __fs_station *, char *, char *);
 /* Convert FSD error to string */
 char *fsd_strerror(int);
 
-#define FSDEVICE_REGISTER(p,s) void __p(void) {  }; /* Dummy define - the string is picked up by the fsdevice_list.h builder */
+#define FSDEVICE_REGISTER(p,s) static void __attribute__((unused)) __p(void) {  }; /* Dummy define - the string is picked up by the fsdevice_list.h builder */
 
 /* Some flags defines for use on mount */
 #define FSD_MOUNTFLAG_READONLY (1)
