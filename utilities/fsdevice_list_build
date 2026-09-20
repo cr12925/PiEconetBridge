@@ -11,7 +11,7 @@ EOF
 
 for a in modules/fsdevice/*.c
 do
-	str=`grep FSDEVICE_REGISTER ${a}`
+	str=`grep '^FSDEVICE_REGISTER' ${a}`
 
 	if [ $? -eq 0 ] # String found
 	then
@@ -31,7 +31,7 @@ EOF
 
 for a in modules/fsdevice/*.c
 do
-	str=`grep ^FSDEVICE_REGISTER ${a}`
+	str=`grep '^FSDEVICE_REGISTER' ${a}`
 
 	if [ $? -eq 0 ] # String found
 	then
